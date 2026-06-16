@@ -1,4 +1,4 @@
-package org.opensearch.migrations.reindexer.dlq;
+package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -21,7 +21,7 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
- * DLQ sink backed by S3. Buffers gzipped NDJSON records in memory and uploads
+ * failed document stream sink backed by S3. Buffers gzipped NDJSON records in memory and uploads
  * completed objects to S3 on {@link #flush()} and {@link #close()}.
  *
  * <p>For testing, an {@link S3Uploader} can be injected instead of a real
@@ -29,7 +29,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  *
  * <p>S3 key layout:
  * <pre>
- *   s3://&lt;bucket&gt;/&lt;prefix&gt;session=&lt;sessionId&gt;/index=&lt;targetIndex&gt;/worker=&lt;workerId&gt;/dlq-&lt;ts&gt;-&lt;seq&gt;.ndjson.gz
+ *   s3://&lt;bucket&gt;/&lt;prefix&gt;session=&lt;sessionId&gt;/index=&lt;targetIndex&gt;/worker=&lt;workerId&gt;/failed-document-stream-&lt;ts&gt;-&lt;seq&gt;.ndjson.gz
  * </pre>
  *
  * <p>Records are buffered per target index and one S3 object is uploaded per index on
@@ -40,7 +40,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * <p><b>Memory bounding:</b> to avoid unbounded heap growth when a single shard produces a
  * very large number of terminal failures, each index buffer is rotated to a fresh S3 object
  * once its accumulated <em>uncompressed</em> size crosses {@code maxBufferBytes} (default
- * {@value #DEFAULT_MAX_BUFFER_BYTES} bytes). Rotation uploads inline during {@link #write(DlqRecord)},
+ * {@value #DEFAULT_MAX_BUFFER_BYTES} bytes). Rotation uploads inline during {@link #write(FailedDocumentStreamRecord)},
  * so in-memory buffering stays bounded by roughly {@code maxBufferBytes} per active index
  * regardless of how many records fail. The per-shard {@link #flush()} still uploads whatever
  * remains below the threshold, preserving the durability-before-complete contract. If a
@@ -48,7 +48,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * fails — the work item is not marked complete and a successor reprocesses the partition.
  */
 @Slf4j
-public class S3DlqSink implements DlqSink {
+public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
         DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
@@ -99,7 +99,7 @@ public class S3DlqSink implements DlqSink {
     private boolean closed;
 
     @Builder
-    public S3DlqSink(
+    public S3FailedDocumentStreamSink(
         String bucket,
         String prefix,
         String sessionId,
@@ -125,22 +125,22 @@ public class S3DlqSink implements DlqSink {
     }
 
     @Override
-    public Mono<Void> write(DlqRecord dlqRecord) {
+    public Mono<Void> write(FailedDocumentStreamRecord failedDocumentStreamRecord) {
         // Buffer mutation under the lock; capture a buffer to rotate if the cap is crossed.
         String rotateIndex = null;
         IndexBuffer rotateBuffer = null;
         synchronized (lock) {
             if (closed) {
-                return Mono.error(new IllegalStateException("S3DlqSink is closed"));
+                return Mono.error(new IllegalStateException("S3FailedDocumentStreamSink is closed"));
             }
             try {
-                var index = sanitizeIndex(dlqRecord.getTargetIndex());
+                var index = sanitizeIndex(failedDocumentStreamRecord.getTargetIndex());
                 var indexBuffer = buffers.get(index);
                 if (indexBuffer == null) {
                     indexBuffer = new IndexBuffer();
                     buffers.put(index, indexBuffer);
                 }
-                byte[] json = MAPPER.writeValueAsBytes(dlqRecord);
+                byte[] json = MAPPER.writeValueAsBytes(failedDocumentStreamRecord);
                 indexBuffer.gzipOut.write(json);
                 indexBuffer.gzipOut.write('\n');
                 indexBuffer.uncompressedBytes += (long) json.length + 1;
@@ -215,10 +215,10 @@ public class S3DlqSink implements DlqSink {
         try {
             uploader.upload(s3Uri, data, region);
         } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Failed to upload DLQ object {}").addArgument(s3Uri).log();
+            log.atError().setCause(e).setMessage("Failed to upload failed document stream object {}").addArgument(s3Uri).log();
             throw e;
         }
-        log.atInfo().setMessage("DLQ upload complete: {} ({} bytes)")
+        log.atInfo().setMessage("failed document stream upload complete: {} ({} bytes)")
             .addArgument(s3Uri).addArgument(data.length).log();
     }
 
@@ -246,7 +246,7 @@ public class S3DlqSink implements DlqSink {
         var timestamp = TIMESTAMP_FORMAT.format(Instant.now());
         var seq = sequenceCounter.getAndIncrement();
         return prefix + "session=" + sessionId + "/index=" + index + "/worker=" + workerId
-            + "/dlq-" + timestamp + "-" + seq + ".ndjson.gz";
+            + "/failed-document-stream-" + timestamp + "-" + seq + ".ndjson.gz";
     }
 
     /**

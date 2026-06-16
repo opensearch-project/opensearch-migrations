@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
-import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -15,28 +15,28 @@ import static org.mockito.Mockito.when;
 class DocumentMigrationBootstrapFlushTest {
 
     @Test
-    void flushDlqForBatch_nullSinkIsANoOp() {
-        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushDlqForBatch(null));
+    void flushFailedDocumentStreamForBatch_nullSinkIsANoOp() {
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(null));
     }
 
     @Test
-    void flushDlqForBatch_successReturnsNormally() {
-        var sink = mock(DlqSink.class);
+    void flushFailedDocumentStreamForBatch_successReturnsNormally() {
+        var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.empty());
-        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushDlqForBatch(sink));
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink));
     }
 
     @Test
-    void flushDlqForBatch_failurePropagatesSoProgressIsNotCommitted() {
+    void flushFailedDocumentStreamForBatch_failurePropagatesSoProgressIsNotCommitted() {
         // The exception must propagate (not be swallowed): the pipeline onNext lets it reach
         // the error consumer, so the progress cursor is NOT advanced for this batch and the
         // work item is never marked complete — a successor reprocesses and re-emits.
         var cause = new RuntimeException("S3 5xx");
-        var sink = mock(DlqSink.class);
+        var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.error(cause));
 
         var thrown = assertThrows(RuntimeException.class,
-            () -> DocumentMigrationBootstrap.flushDlqForBatch(sink));
+            () -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink));
         assertThat(thrown, is(cause));
     }
 }

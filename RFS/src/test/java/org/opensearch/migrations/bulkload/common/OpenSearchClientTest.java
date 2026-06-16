@@ -165,7 +165,7 @@ class OpenSearchClientTest {
 
         // Use retryable failures (es_rejected_execution_exception): we want this test
         // to drive the bulk retry loop. NON_RETRYABLE error types (e.g.
-        // version_conflict_engine_exception) would be sent to the DLQ on the first
+        // version_conflict_engine_exception) would be sent to the failed document stream on the first
         // attempt and never retried — see BulkDocErrorTypes.NON_RETRYABLE.
         var bothDocsFail = bulkItemResponse(
             true,

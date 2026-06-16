@@ -137,7 +137,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 .map(item -> {
                     BulkOperationSpec op = OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class);
                     // Re-attach the original source by id. If the transformer changed the id or
-                    // synthesized a new document, no original exists; leave it null and the DLQ
+                    // synthesized a new document, no original exists; leave it null and the failed document stream
                     // will fall back to the transformed document body.
                     String id = documentIdOf(op);
                     Map<String, Object> original = id != null ? originalById.get(id) : null;

@@ -279,9 +279,9 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             # Symmetric with the RFS bulk-load pod (see documentBulkLoad.ts) so
-            # `console backfill dlq …` and `_augment_status_with_dlq` resolve the
+            # `console backfill failed-document-stream …` and `_augment_status_with_failed_document_stream` resolve the
             # SAME bucket/region the RFS writes to. Required for the workflow
-            # status count to equal the persisted DLQ contents.
+            # status count to equal the persisted failed document stream contents.
             - name: MIGRATIONS_DEFAULT_S3_BUCKET
               valueFrom:
                 configMapKeyRef:

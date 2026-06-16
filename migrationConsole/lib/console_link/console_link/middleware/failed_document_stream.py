@@ -1,6 +1,6 @@
-"""Workflow-facing operations for the RFS Reindex-from-Snapshot DLQ.
+"""Workflow-facing operations for the RFS Reindex-from-Snapshot failed document stream.
 
-The DLQ is an append-only set of NDJSON.gz objects in S3, written by RFS workers
+The failed document stream is an append-only set of NDJSON.gz objects in S3, written by RFS workers
 when terminal document failures occur. Records for a given
 backfill session live under ``s3://<bucket>/<prefix>/session=<session_id>/`` —
 new runs use a new ``session_id``, so prior-run records are never mixed in.
@@ -8,12 +8,12 @@ new runs use a new ``session_id``, so prior-run records are never mixed in.
 Location/session are conveyed to the console via these sources, in priority order:
 
 1. **CLI / env override** — for explicit operator control:
-   * ``RFS_DLQ_S3_BUCKET`` — explicit bucket override
-   * ``RFS_DLQ_S3_PREFIX`` — key prefix above ``session=``
-   * ``RFS_DLQ_SESSION_ID`` — pinned session id
-   * ``RFS_DLQ_S3_REGION`` — region for the bucket
+   * ``RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET`` — explicit bucket override
+   * ``RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX`` — key prefix above ``session=``
+   * ``RFS_FAILED_DOCUMENT_STREAM_SESSION_ID`` — pinned session id
+   * ``RFS_FAILED_DOCUMENT_STREAM_S3_REGION`` — region for the bucket
 
-2. **Kubernetes ConfigMap** (``rfs-dlq-current-session``) — the bulk-load
+2. **Kubernetes ConfigMap** (``rfs-failed-document-stream-current-session``) — the bulk-load
    workflow patches this ConfigMap with the current ``{{workflow.uid}}``
    before launching RFS. The console reads it via the Kubernetes API on
    demand, so it always sees the latest run's session with no refresh delay.
@@ -23,7 +23,7 @@ Location/session are conveyed to the console via these sources, in priority orde
    ``migrations-default-<account>-<stage>-<region>`` bucket.
 
 This module is intentionally a thin wrapper around the S3 listing/get APIs so a
-customer can also inspect the DLQ with the aws CLI if they prefer.
+customer can also inspect the failed document stream with the aws CLI if they prefer.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class DlqConfig:
+class FailedDocumentStreamConfig:
     bucket: str
     prefix: str          # always trailing-slash-terminated
     session_id: str
@@ -57,17 +57,17 @@ class DlqConfig:
         return f"s3://{self.bucket}/{self.session_prefix}"
 
 
-class DlqNotConfigured(RuntimeError):
+class FailedDocumentStreamNotConfigured(RuntimeError):
     """Raised when no session id / bucket is available from any source."""
 
 
-DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session"
+FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME = "rfs-failed-document-stream-current-session"
 
 _configmap_cache: Optional[dict] = None
 
 
 def _read_configmap(key: str) -> Optional[str]:
-    """Read a key from the rfs-dlq-current-session ConfigMap via the Kubernetes API."""
+    """Read a key from the rfs-failed-document-stream-current-session ConfigMap via the Kubernetes API."""
     global _configmap_cache
     if _configmap_cache is None:
         _configmap_cache = _fetch_configmap_data()
@@ -86,23 +86,23 @@ def _fetch_configmap_data() -> dict:
         v1 = client.CoreV1Api()
         from console_link.workflow.models.utils import get_current_namespace
         ns = get_current_namespace()
-        cm = v1.read_namespaced_config_map(name=DLQ_SESSION_CONFIGMAP_NAME, namespace=ns)
+        cm = v1.read_namespaced_config_map(name=FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, namespace=ns)
         return cm.data or {}
     except ImportError:
         logger.debug("kubernetes client not available; ConfigMap lookup skipped")
         return {}
     except ApiException as e:
         if e.status == 404:
-            logger.debug("ConfigMap %s not found (no bulk-load run yet)", DLQ_SESSION_CONFIGMAP_NAME)
+            logger.debug("ConfigMap %s not found (no bulk-load run yet)", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME)
         else:
-            logger.warning("Failed to read ConfigMap %s: %s", DLQ_SESSION_CONFIGMAP_NAME, e)
+            logger.warning("Failed to read ConfigMap %s: %s", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, e)
         return {}
     except Exception as e:
-        logger.warning("Failed to read ConfigMap %s: %s", DLQ_SESSION_CONFIGMAP_NAME, e)
+        logger.warning("Failed to read ConfigMap %s: %s", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, e)
         return {}
 
 
-def load_config(session_override: Optional[str] = None) -> DlqConfig:
+def load_config(session_override: Optional[str] = None) -> FailedDocumentStreamConfig:
     global _configmap_cache
     _configmap_cache = None
     # Bucket resolution: explicit override → ConfigMap → deployment
@@ -110,22 +110,22 @@ def load_config(session_override: Optional[str] = None) -> DlqConfig:
     # inspection to a non-default bucket (e.g., investigating a historical
     # run that wrote elsewhere).
     bucket = (
-        os.environ.get("RFS_DLQ_S3_BUCKET") or
+        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET") or
         _read_configmap("bucket") or
         os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET") or
         os.environ.get("BUCKET_NAME")
     )
     if not bucket:
-        raise DlqNotConfigured(
-            "No DLQ bucket is configured. Run a bulk-load workflow first (which "
-            "creates the rfs-dlq-current-session ConfigMap), or set RFS_DLQ_S3_BUCKET / "
+        raise FailedDocumentStreamNotConfigured(
+            "No failed document stream bucket is configured. Run a bulk-load workflow first (which "
+            "creates the rfs-failed-document-stream-current-session ConfigMap), or set RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET / "
             "MIGRATIONS_DEFAULT_S3_BUCKET / BUCKET_NAME in the console env."
         )
     # Prefix resolution: env override → ConfigMap → safe default.
     prefix = (
-        os.environ.get("RFS_DLQ_S3_PREFIX") or
+        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX") or
         _read_configmap("prefix") or
-        "rfs-dlq/"
+        "rfs-failed-document-stream/"
     )
     if not prefix.endswith("/"):
         prefix = prefix + "/"
@@ -134,31 +134,31 @@ def load_config(session_override: Optional[str] = None) -> DlqConfig:
     # the bulk-load workflow most recently patched in.
     session = (
         session_override or
-        os.environ.get("RFS_DLQ_SESSION_ID") or
+        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_SESSION_ID") or
         _read_configmap("session_id")
     )
     if not session:
-        raise DlqNotConfigured(
-            "No DLQ session id is available. Run a bulk-load workflow first "
-            "(which patches the rfs-dlq-current-session ConfigMap with the workflow UID), "
+        raise FailedDocumentStreamNotConfigured(
+            "No failed document stream session id is available. Run a bulk-load workflow first "
+            "(which patches the rfs-failed-document-stream-current-session ConfigMap with the workflow UID), "
             "or pass --session <id> to target a specific historical run."
         )
-    region = os.environ.get("RFS_DLQ_S3_REGION") or _read_configmap("region")
-    return DlqConfig(bucket=bucket, prefix=prefix, session_id=session, region=region)
+    region = os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_REGION") or _read_configmap("region")
+    return FailedDocumentStreamConfig(bucket=bucket, prefix=prefix, session_id=session, region=region)
 
 
-def _s3_client(cfg: DlqConfig):
+def _s3_client(cfg: FailedDocumentStreamConfig):
     if cfg.region:
         return boto3.client("s3", region_name=cfg.region)
     return boto3.client("s3")
 
 
-def location(cfg: DlqConfig) -> str:
-    """Return the customer-visible S3 URI for the current session's DLQ."""
+def location(cfg: FailedDocumentStreamConfig) -> str:
+    """Return the customer-visible S3 URI for the current session's failed document stream."""
     return cfg.location_uri
 
 
-def _iter_objects(cfg: DlqConfig, client=None) -> Iterator[dict]:
+def _iter_objects(cfg: FailedDocumentStreamConfig, client=None) -> Iterator[dict]:
     client = client or _s3_client(cfg)
     paginator = client.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=cfg.bucket, Prefix=cfg.session_prefix):
@@ -166,7 +166,7 @@ def _iter_objects(cfg: DlqConfig, client=None) -> Iterator[dict]:
             yield obj
 
 
-def _read_all_records(cfg: DlqConfig, client=None) -> List[dict]:
+def _read_all_records(cfg: FailedDocumentStreamConfig, client=None) -> List[dict]:
     """Read and JSON-parse every NDJSON record across all session objects (no sort/dedup/limit).
 
     Skips non-gzip objects and malformed lines with a warning so a single bad object can't
@@ -179,7 +179,7 @@ def _read_all_records(cfg: DlqConfig, client=None) -> List[dict]:
         try:
             decoded = gzip.GzipFile(fileobj=io.BytesIO(body)).read().decode("utf-8")
         except OSError as e:
-            logger.warning("Skipping non-gzip DLQ object %s: %s", obj["Key"], e)
+            logger.warning("Skipping non-gzip failed document stream object %s: %s", obj["Key"], e)
             continue
         for line in decoded.splitlines():
             line = line.strip()
@@ -188,7 +188,7 @@ def _read_all_records(cfg: DlqConfig, client=None) -> List[dict]:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError as e:
-                logger.warning("Skipping malformed DLQ record in %s: %s", obj["Key"], e)
+                logger.warning("Skipping malformed failed document stream record in %s: %s", obj["Key"], e)
     return records
 
 
@@ -210,7 +210,7 @@ def _dedup_key(record: dict):
 def dedupe_records(records: List[dict]) -> List[dict]:
     """Collapse duplicate failures for the same document into a single record.
 
-    The DLQ is at-least-once: a worker crash or a failed flush makes a successor reprocess the
+    The failed document stream is at-least-once: a worker crash or a failed flush makes a successor reprocess the
     partition and re-emit the same terminal failures, so the same ``(targetIndex, documentId)``
     can appear in multiple objects. We keep the latest record per document (by timestamp).
     Records without a documentId can't be correlated and are all retained.
@@ -228,11 +228,11 @@ def dedupe_records(records: List[dict]) -> List[dict]:
     return list(by_doc.values()) + without_id
 
 
-def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
+def list_records(cfg: FailedDocumentStreamConfig, limit: Optional[int] = None) -> List[dict]:
     """Stream de-duplicated NDJSON records from all session objects in stable order.
 
     Records are de-duplicated by (targetIndex, documentId) — see ``dedupe_records`` — because the
-    DLQ is at-least-once. Stable order = (timestamp asc, documentId asc); records without a
+    failed document stream is at-least-once. Stable order = (timestamp asc, documentId asc); records without a
     timestamp sort to the end. ``limit`` caps the returned list — useful in CLI contexts.
     """
     records = dedupe_records(_read_all_records(cfg))
@@ -242,18 +242,18 @@ def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
     return records
 
 
-def count(cfg: DlqConfig) -> int:
-    """Count distinct failed documents in this session's DLQ.
+def count(cfg: FailedDocumentStreamConfig) -> int:
+    """Count distinct failed documents in this session's failed document stream.
 
-    De-duplicates by (targetIndex, documentId) so re-emitted failures (the DLQ is at-least-once)
-    are counted once rather than inflating the total. For very large DLQs we read object bodies —
+    De-duplicates by (targetIndex, documentId) so re-emitted failures (the failed document stream is at-least-once)
+    are counted once rather than inflating the total. For very large failed document streams we read object bodies —
     workflows typically expect a small number of failures, so this favors accuracy over a cheap
     object/line-count approximation.
     """
     return len(dedupe_records(_read_all_records(cfg)))
 
 
-def delete_session(cfg: DlqConfig) -> int:
+def delete_session(cfg: FailedDocumentStreamConfig) -> int:
     """Delete every object under the current session prefix. Returns count deleted."""
     client = _s3_client(cfg)
     deleted = 0
@@ -270,11 +270,11 @@ def delete_session(cfg: DlqConfig) -> int:
     return deleted
 
 
-def safe_count(cfg: DlqConfig) -> Optional[int]:
+def safe_count(cfg: FailedDocumentStreamConfig) -> Optional[int]:
     """Like ``count`` but swallows S3 errors so a status command never breaks
-    on a misconfigured DLQ. Returns ``None`` if the count is unavailable."""
+    on a misconfigured failed document stream. Returns ``None`` if the count is unavailable."""
     try:
         return count(cfg)
     except (BotoCoreError, ClientError) as e:
-        logger.warning("Failed to count DLQ records: %s", e)
+        logger.warning("Failed to count failed document stream records: %s", e)
         return None

@@ -1,7 +1,7 @@
-package org.opensearch.migrations.reindexer.dlq;
+package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 /**
- * How a failed bulk item ended up in the DLQ.
+ * How a failed bulk item ended up in the failed document stream.
  *
  * <p>Mirrors the three-bucket model used by {@code OpenSearchClient.executeBulkWithRetry}:
  * allowed exceptions are treated as success and never written here; everything else lands

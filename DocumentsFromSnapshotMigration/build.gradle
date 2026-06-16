@@ -28,7 +28,7 @@ dependencies {
     implementation libs.slf4j.api
     implementation libs.log4j.slf4j2.impl
 
-    // For DLQ S3 sink (see RfsMigrateDocuments#buildDlqSink)
+    // For failed document stream S3 sink (see RfsMigrateDocuments#buildFailedDocumentStreamSink)
     implementation libs.aws.s3
     implementation libs.aws.sdk.core
 

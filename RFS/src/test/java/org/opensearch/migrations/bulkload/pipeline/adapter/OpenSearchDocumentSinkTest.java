@@ -159,7 +159,7 @@ class OpenSearchDocumentSinkTest {
     @Test
     void writeBatch_transformerModifiesDocs_preservesOriginalSourceOnOps() {
         // The transformed body is what's sent, but each op must retain the original
-        // (pre-transformation) source so a DLQ record can report the source document.
+        // (pre-transformation) source so a failed document stream record can report the source document.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
         when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
@@ -187,7 +187,7 @@ class OpenSearchDocumentSinkTest {
     void writeBatch_transformerChangesId_leavesOriginalSourceNull() {
         // When the transformer changes the document id, the transformed op can no longer
         // be correlated back to a source document, so originalSource stays null and the
-        // DLQ will fall back to the transformed body.
+        // failed document stream will fall back to the transformed body.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
         when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);

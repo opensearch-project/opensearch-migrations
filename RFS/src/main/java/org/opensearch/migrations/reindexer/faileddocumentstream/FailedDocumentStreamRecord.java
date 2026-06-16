@@ -1,11 +1,11 @@
-package org.opensearch.migrations.reindexer.dlq;
+package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Builder;
 import lombok.Value;
 
 /**
- * One terminal document failure persisted to the DLQ.
+ * One terminal document failure persisted to the failed document stream.
  *
  * <p>v1 intentionally carries the full per-item OpenSearch response object verbatim
  * in {@link #responseItem} so we don't lose information before we know which fields
@@ -14,7 +14,7 @@ import lombok.Value;
  */
 @Value
 @Builder
-public class DlqRecord {
+public class FailedDocumentStreamRecord {
     /** Identifier of the RFS run (workflow UID / session id). Drives the S3 prefix. */
     String sessionId;
     /** Worker process identifier (pod name on EKS). */

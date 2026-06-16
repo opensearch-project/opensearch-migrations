@@ -17,7 +17,7 @@ except (AttributeError, ValueError):
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
 import console_link.middleware.backfill as backfill_
-import console_link.middleware.dlq as dlq_
+import console_link.middleware.failed_document_stream as failed_document_stream_
 import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
@@ -634,78 +634,78 @@ def status_backfill_cmd(ctx, deep_check):
                 status=StepStateWithPause.PENDING,
                 percentage_completed=0.0,
             ).model_dump(mode="json")
-        _augment_status_with_dlq(payload)
+        _augment_status_with_failed_document_stream(payload)
         click.echo(json.dumps(payload))
         return
     exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
-    # Append DLQ summary so operators see failed-document inventory without a second command.
+    # Append failed document stream summary so operators see failed-document inventory without a second command.
     try:
-        cfg = dlq_.load_config()
-        c = dlq_.safe_count(cfg)
-        click.echo(f"DLQ location: {cfg.location_uri}")
+        cfg = failed_document_stream_.load_config()
+        c = failed_document_stream_.safe_count(cfg)
+        click.echo(f"failed document stream location: {cfg.location_uri}")
         click.echo(f"Failed document count: {c if c is not None else 'unavailable'}")
-    except dlq_.DlqNotConfigured:
-        # DLQ is optional; only surface when configured.
+    except failed_document_stream_.FailedDocumentStreamNotConfigured:
+        # failed document stream is optional; only surface when configured.
         pass
 
 
-def _augment_status_with_dlq(payload: dict) -> None:
+def _augment_status_with_failed_document_stream(payload: dict) -> None:
     try:
-        cfg = dlq_.load_config()
-    except dlq_.DlqNotConfigured:
+        cfg = failed_document_stream_.load_config()
+    except failed_document_stream_.FailedDocumentStreamNotConfigured:
         return
-    payload["dlq_location"] = cfg.location_uri
-    payload["failed_document_count"] = dlq_.safe_count(cfg)
+    payload["failed_document_stream_location"] = cfg.location_uri
+    payload["failed_document_count"] = failed_document_stream_.safe_count(cfg)
 
 
-# ##################### DLQ (Reindex-from-Snapshot Dead Letter Queue) ###################
+# ##################### failed document stream (Reindex-from-Snapshot Failed Document Stream) ###################
 
 
-@click.group(name="dlq", help="Inspect or manage RFS terminal-failure DLQ records.")
-def dlq_group():
-    """All actions related to the durable RFS DLQ for the current session."""
+@click.group(name="failed-document-stream", help="Inspect or manage RFS terminal-failure failed document stream records.")
+def failed_document_stream_group():
+    """All actions related to the durable RFS failed document stream for the current session."""
 
 
-@dlq_group.command(name="location", help="Print the S3 URI of the DLQ for the current session.")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
-def backfill_dlq_location_cmd(session):
+@failed_document_stream_group.command(name="location", help="Print the S3 URI of the failed document stream for the current session.")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
+def backfill_failed_document_stream_location_cmd(session):
     try:
-        cfg = dlq_.load_config(session_override=session)
-    except dlq_.DlqNotConfigured as e:
+        cfg = failed_document_stream_.load_config(session_override=session)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
     click.echo(cfg.location_uri)
 
 
-@dlq_group.command(name="count",
-                   help="Count distinct failed documents in the current session's DLQ "
-                        "(de-duplicated by index + document id, since the DLQ is at-least-once).")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
-def backfill_dlq_count_cmd(session):
+@failed_document_stream_group.command(name="count",
+                   help="Count distinct failed documents in the current session's failed document stream "
+                        "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
+def backfill_failed_document_stream_count_cmd(session):
     try:
-        cfg = dlq_.load_config(session_override=session)
-    except dlq_.DlqNotConfigured as e:
+        cfg = failed_document_stream_.load_config(session_override=session)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
-    click.echo(str(dlq_.count(cfg)))
+    click.echo(str(failed_document_stream_.count(cfg)))
 
 
-@dlq_group.command(name="list", help="List failed document records in stable order.")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
+@failed_document_stream_group.command(name="list", help="List failed document records in stable order.")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
 @click.option('--limit', default=100, show_default=True, type=int, help='Maximum records to print.')
 @click.pass_obj
-def backfill_dlq_list_cmd(ctx, session, limit):
+def backfill_failed_document_stream_list_cmd(ctx, session, limit):
     try:
-        cfg = dlq_.load_config(session_override=session)
-    except dlq_.DlqNotConfigured as e:
+        cfg = failed_document_stream_.load_config(session_override=session)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
-    records = dlq_.list_records(cfg, limit=limit)
+    records = failed_document_stream_.list_records(cfg, limit=limit)
     if ctx.json:
         click.echo(json.dumps(records))
         return
     if not records:
-        click.echo("(no DLQ records for this session)")
+        click.echo("(no failed document stream records for this session)")
         return
     for r in records:
         click.echo(f"{r.get('timestamp', '-')}\t{r.get('targetIndex', '-')}\t"
@@ -714,14 +714,14 @@ def backfill_dlq_list_cmd(ctx, session, limit):
 
 
 @backfill_group.command(name="reset",
-                        help="Delete backfill metadata for this session. By default DLQ records are kept.")
-@click.option('--include-dlq', is_flag=True, default=False,
-              help='Also delete the durable DLQ for this session. Irreversible.')
+                        help="Delete backfill metadata for this session. By default failed document stream records are kept.")
+@click.option('--include-failed-document-stream', is_flag=True, default=False,
+              help='Also delete the durable failed document stream for this session. Irreversible.')
 @click.option('--yes', is_flag=True, default=False, help='Skip the confirmation prompt.')
 @click.pass_obj
-def reset_backfill_cmd(ctx, include_dlq, yes):
+def reset_backfill_cmd(ctx, include_failed_document_stream, yes):
     # The existing 'stop' command already archives backfill working state; 'reset' wraps
-    # that and (optionally) also deletes the DLQ records for this run.
+    # that and (optionally) also deletes the failed document stream records for this run.
     click.echo("Archiving the working state of the backfill operation...")
     exitcode, message = backfill_.archive(ctx.env.backfill)
     if isinstance(message, WorkingIndexDoesntExist):
@@ -735,20 +735,20 @@ def reset_backfill_cmd(ctx, include_dlq, yes):
             raise click.ClickException(message)
         click.echo(f"Backfill working state archived to: {message}")
 
-    if not include_dlq:
-        click.echo("DLQ records preserved. Re-run with --include-dlq to delete them.")
+    if not include_failed_document_stream:
+        click.echo("failed document stream records preserved. Re-run with --include-failed-document-stream to delete them.")
         return
 
     try:
-        cfg = dlq_.load_config()
-    except dlq_.DlqNotConfigured as e:
-        click.echo(f"DLQ not configured; nothing to delete ({e})")
+        cfg = failed_document_stream_.load_config()
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        click.echo(f"failed document stream not configured; nothing to delete ({e})")
         return
     if not yes:
-        click.confirm(f"About to delete ALL DLQ objects under {cfg.location_uri}. Proceed?",
+        click.confirm(f"About to delete ALL failed document stream objects under {cfg.location_uri}. Proceed?",
                       abort=True)
-    deleted = dlq_.delete_session(cfg)
-    click.echo(f"Deleted {deleted} DLQ object(s) under {cfg.location_uri}")
+    deleted = failed_document_stream_.delete_session(cfg)
+    click.echo(f"Deleted {deleted} failed document stream object(s) under {cfg.location_uri}")
 
 
 # ##################### REPLAY ###################
@@ -1095,7 +1095,7 @@ def show(inputfile, outputfile):
 cli.add_command(cluster_group)
 cli.add_command(completion)
 cli.add_command(kafka_group)
-cli.add_command(dlq_group)
+cli.add_command(failed_document_stream_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)

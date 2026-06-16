@@ -32,9 +32,9 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.parsing.BulkResponseParser.ItemFailure;
 import org.opensearch.migrations.parsing.BulkResponseParser.ItemPartition;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
-import org.opensearch.migrations.reindexer.dlq.DlqRecord;
-import org.opensearch.migrations.reindexer.dlq.DlqSink;
-import org.opensearch.migrations.reindexer.dlq.FailureClass;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,17 +73,17 @@ public abstract class OpenSearchClient {
     private final Version version;
     private final CompressionMode compressionMode;
 
-    // DLQ context — null when no DLQ is configured. The bootstrap in RfsMigrateDocuments
-    // calls setDlqContext(...) to install an S3DlqSink when a bucket is provided.
-    // volatile: emitDlqRecord runs on concurrent bulk-write threads (batchConcurrency defaults
-    // to 10) while setDlqContext/setDlqWorkItem are written from the pipeline thread, so these
+    // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
+    // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
+    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
+    // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
     // need safe publication across threads.
-    private volatile DlqSink dlqSink;
-    private volatile String dlqSessionId = "unknown-session";
-    private volatile String dlqWorkerId = "unknown-worker";
+    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
+    private volatile String failedDocumentStreamSessionId = "unknown-session";
+    private volatile String failedDocumentStreamWorkerId = "unknown-worker";
     // Canonical work-item id (index + shard + checkpoint) for the work item currently being
-    // processed. Updated per work item via setDlqWorkItem; null until the first work item starts.
-    private volatile String dlqWorkItemId;
+    // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
+    private volatile String failedDocumentStreamWorkItemId;
 
     protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
         this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
@@ -97,30 +97,30 @@ public abstract class OpenSearchClient {
     }
 
     /**
-     * Install the DLQ sink and identifiers used to tag records. Called by the bootstrap
+     * Install the failed document stream sink and identifiers used to tag records. Called by the bootstrap
      * once the session/worker identifiers are known. Safe to call before any bulk
      * requests are issued.
      */
-    public void setDlqContext(DlqSink dlqSink, String sessionId, String workerId) {
-        this.dlqSink = dlqSink;
-        this.dlqSessionId = sessionId;
-        this.dlqWorkerId = workerId;
+    public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
+        this.failedDocumentStreamSink = failedDocumentStreamSink;
+        this.failedDocumentStreamSessionId = sessionId;
+        this.failedDocumentStreamWorkerId = workerId;
     }
 
     /**
-     * Update the work-coordination work item id stamped on subsequent DLQ records. The target
+     * Update the work-coordination work item id stamped on subsequent failed document stream records. The target
      * client is long-lived and processes many work items over its lifetime, so the bootstrap
      * calls this at the start of each work item. The id is the canonical
      * {@code IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()} form
-     * ({@code base64url(index)__shard__startingDocId}), so a DLQ record round-trips back to the
+     * ({@code base64url(index)__shard__startingDocId}), so a failed document stream record round-trips back to the
      * exact work item that produced it.
      */
-    public void setDlqWorkItem(String workItemId) {
-        this.dlqWorkItemId = workItemId;
+    public void setFailedDocumentStreamWorkItem(String workItemId) {
+        this.failedDocumentStreamWorkItemId = workItemId;
     }
 
-    public DlqSink getDlqSink() {
-        return dlqSink;
+    public FailedDocumentStreamSink getFailedDocumentStreamSink() {
+        return failedDocumentStreamSink;
     }
 
     public Version getClusterVersion() {
@@ -622,7 +622,7 @@ public abstract class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!pendingOps.isEmpty()) {
-                emitRetryExhaustedToDlq(indexName, pendingOps, error, allowlist);
+                emitRetryExhaustedToFailedDocumentStream(indexName, pendingOps, error, allowlist);
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     pendingOps::size,
@@ -659,12 +659,12 @@ public abstract class OpenSearchClient {
     
     /**
      * Partitions the bulk response into success / non-retryable / retryable buckets,
-     * emits one DLQ record per non-retryable failure, and compacts {@code pendingDocs}
+     * emits one failed document stream record per non-retryable failure, and compacts {@code pendingDocs}
      * in place so it contains only the items that should be retried.
      *
      * <p>Behavior change vs. the previous BitSet-based compactor: items whose error
      * type is in {@link org.opensearch.migrations.BulkDocErrorTypes#NON_RETRYABLE}
-     * are written to the DLQ immediately and removed from {@code pendingDocs} so the
+     * are written to the failed document stream immediately and removed from {@code pendingDocs} so the
      * retry loop does not keep hammering them.
      *
      * @return number of documents removed because they succeeded (or were allowlisted)
@@ -681,12 +681,12 @@ public abstract class OpenSearchClient {
             return 0;
         }
 
-        // Snapshot the ops we're about to drop so we can emit DLQ records before mutating.
+        // Snapshot the ops we're about to drop so we can emit failed document stream records before mutating.
         for (ItemFailure failure : partition.getNonRetryableFailures()) {
             BulkOperationSpec op = failure.getPosition() < pendingDocs.size()
                 ? pendingDocs.get(failure.getPosition())
                 : null;
-            emitDlqRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
+            emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
         }
 
         // Keep only retryable failures in pendingDocs, in original order.
@@ -705,7 +705,7 @@ public abstract class OpenSearchClient {
     }
 
     /**
-     * Emit one DLQ record per item still in {@code pendingOps} after all retries were
+     * Emit one failed document stream record per item still in {@code pendingOps} after all retries were
      * exhausted. Best-effort correlation with per-item response details from the last
      * failing response (carried on {@link OperationFailed}); falls back to null
      * responseItem when the error is not an {@code OperationFailed} (e.g. a network
@@ -715,9 +715,9 @@ public abstract class OpenSearchClient {
      * allowlisted items are routed to {@code successPositions} and intentionally NOT
      * added to {@code perPosition}, so a position-shifted lookup can never attach an
      * allowlisted item's {@code failureType} or documentId to a real retryable failure's
-     * DLQ record.
+     * failed document stream record.
      */
-    private void emitRetryExhaustedToDlq(
+    private void emitRetryExhaustedToFailedDocumentStream(
         String indexName,
         ArrayList<BulkOperationSpec> pendingOps,
         Throwable error,
@@ -751,12 +751,12 @@ public abstract class OpenSearchClient {
         for (int i = 0; i < pendingOps.size(); i++) {
             BulkOperationSpec op = pendingOps.get(i);
             ItemFailure failure = perPosition.get(i);
-            emitDlqRecord(indexName, op, failure, FailureClass.RETRYABLE_EXHAUSTED);
+            emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.RETRYABLE_EXHAUSTED);
         }
     }
 
-    void emitDlqRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
-        if (dlqSink == null) {
+    void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
+        if (failedDocumentStreamSink == null) {
             return;
         }
         try {
@@ -765,7 +765,7 @@ public abstract class OpenSearchClient {
                 : extractDocumentId(op);
             JsonNode requestItem = op != null ? OBJECT_MAPPER.valueToTree(op) : null;
             // Persist the original source-index document rather than the transformed one.
-            // The transformed body is what was actually sent, but the DLQ is meant to let
+            // The transformed body is what was actually sent, but the failed document stream is meant to let
             // operators inspect/replay the source document, so swap it in when available.
             if (requestItem instanceof ObjectNode && op != null && op.getOriginalSource() != null) {
                 ((ObjectNode) requestItem).set("document", OBJECT_MAPPER.valueToTree(op.getOriginalSource()));
@@ -773,10 +773,10 @@ public abstract class OpenSearchClient {
             JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
-            DlqRecord dlqRecord = DlqRecord.builder()
-                .sessionId(dlqSessionId)
-                .workerId(dlqWorkerId)
-                .workItemId(dlqWorkItemId)
+            FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
+                .sessionId(failedDocumentStreamSessionId)
+                .workerId(failedDocumentStreamWorkerId)
+                .workItemId(failedDocumentStreamWorkItemId)
                 .targetIndex(indexName)
                 .documentId(docId)
                 .failureType(failureType)
@@ -785,17 +785,17 @@ public abstract class OpenSearchClient {
                 .requestItem(requestItem)
                 .responseItem(responseItem)
                 .build();
-            dlqSink.write(dlqRecord).subscribe(
+            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
-                    .setMessage("Failed to buffer DLQ record for index {}: {}")
+                    .setMessage("Failed to buffer failed document stream record for index {}: {}")
                     .addArgument(indexName)
                     .addArgument(err.getMessage())
                     .log()
             );
         } catch (Exception e) {
             log.atError().setCause(e)
-                .setMessage("Unexpected error while emitting DLQ record for index {}").addArgument(indexName).log();
+                .setMessage("Unexpected error while emitting failed document stream record for index {}").addArgument(indexName).log();
         }
     }
 

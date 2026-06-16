@@ -10,9 +10,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
-import org.opensearch.migrations.reindexer.dlq.DlqRecord;
-import org.opensearch.migrations.reindexer.dlq.DlqSink;
-import org.opensearch.migrations.reindexer.dlq.FailureClass;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,15 +35,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Covers the package-private DLQ helpers on {@link OpenSearchClient}:
- * {@link OpenSearchClient#emitDlqRecord} and
- * {@link OpenSearchClient#extractDocumentId}. The end-to-end DLQ flow has
- * separate coverage in {@link RfsDlqIntegrationTest}; these tests focus on
+ * Covers the package-private failed document stream helpers on {@link OpenSearchClient}:
+ * {@link OpenSearchClient#emitFailedDocumentStreamRecord} and
+ * {@link OpenSearchClient#extractDocumentId}. The end-to-end failed document stream flow has
+ * separate coverage in {@link RfsFailedDocumentStreamIntegrationTest}; these tests focus on
  * the branchy edge cases (null op, null failure, allowlist fallback, malformed
  * responseItemJson) that are awkward to drive through the integration path.
  */
 @ExtendWith(MockitoExtension.class)
-class OpenSearchClientDlqHelpersTest {
+class OpenSearchClientFailedDocumentStreamHelpersTest {
 
     @Mock(strictness = Strictness.LENIENT)
     RestClient restClient;
@@ -55,7 +55,7 @@ class OpenSearchClientDlqHelpersTest {
     FailedRequestsLogger failedRequestLogger;
 
     @Mock
-    DlqSink dlqSink;
+    FailedDocumentStreamSink failedDocumentStreamSink;
 
     OpenSearchClient client;
 
@@ -73,27 +73,27 @@ class OpenSearchClientDlqHelpersTest {
             .build();
     }
 
-    // ---- emitDlqRecord ---------------------------------------------------
+    // ---- emitFailedDocumentStreamRecord ---------------------------------------------------
 
     @Test
-    void emitDlqRecord_noSinkConfigured_isNoOp() {
-        // dlqSink not installed via setDlqContext — the helper must short-circuit.
-        client.emitDlqRecord("idx", indexOpWithId("d-1"), null, FailureClass.NON_RETRYABLE);
-        verify(dlqSink, never()).write(any());
+    void emitFailedDocumentStreamRecord_noSinkConfigured_isNoOp() {
+        // failedDocumentStreamSink not installed via setFailedDocumentStreamContext — the helper must short-circuit.
+        client.emitFailedDocumentStreamRecord("idx", indexOpWithId("d-1"), null, FailureClass.NON_RETRYABLE);
+        verify(failedDocumentStreamSink, never()).write(any());
     }
 
     @Test
-    void emitDlqRecord_passesIdSessionWorkerAndIndexThrough() {
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "sess-A", "worker-1");
-        client.setDlqWorkItem("bXktaW5kZXg__0__1250");
+    void emitFailedDocumentStreamRecord_passesIdSessionWorkerAndIndexThrough() {
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "sess-A", "worker-1");
+        client.setFailedDocumentStreamWorkItem("bXktaW5kZXg__0__1250");
         var op = indexOpWithId("doc-42");
         var failure = new BulkResponseParser.ItemFailure(0, "doc-42", "boom", "{\"raw\":\"json\"}");
 
-        client.emitDlqRecord("movies", op, failure, FailureClass.NON_RETRYABLE);
+        client.emitFailedDocumentStreamRecord("movies", op, failure, FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         var r = rec.getValue();
         assertThat(r.getSessionId(), equalTo("sess-A"));
         assertThat(r.getWorkerId(), equalTo("worker-1"));
@@ -108,12 +108,12 @@ class OpenSearchClientDlqHelpersTest {
     }
 
     @Test
-    void emitDlqRecord_usesOriginalSourceForDocumentBody() {
+    void emitFailedDocumentStreamRecord_usesOriginalSourceForDocumentBody() {
         // When the op carries an originalSource (the pre-transformation, source-index
-        // document), the DLQ record's requestItem must reflect that original body rather
+        // document), the failed document stream record's requestItem must reflect that original body rather
         // than the transformed document that was actually sent.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = IndexOp.builder()
             .operation(IndexOperationMeta.builder().id("doc-7").build())
             .document(java.util.Map.of("field", "transformed"))
@@ -121,79 +121,79 @@ class OpenSearchClientDlqHelpersTest {
             .build();
         var failure = new BulkResponseParser.ItemFailure(0, "doc-7", "err", "{}");
 
-        client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
+        client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         var requestItem = rec.getValue().getRequestItem();
         assertThat(requestItem.get("document").get("field").asText(), equalTo("original"));
     }
 
     @Test
-    void emitDlqRecord_withoutOriginalSource_keepsSentDocumentBody() {
+    void emitFailedDocumentStreamRecord_withoutOriginalSource_keepsSentDocumentBody() {
         // No originalSource (e.g. transformer synthesized a new doc with no source
         // counterpart): fall back to the document that was actually sent.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = IndexOp.builder()
             .operation(IndexOperationMeta.builder().id("doc-8").build())
             .document(java.util.Map.of("field", "sent"))
             .build();
         var failure = new BulkResponseParser.ItemFailure(0, "doc-8", "err", "{}");
 
-        client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
+        client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         var requestItem = rec.getValue().getRequestItem();
         assertThat(requestItem.get("document").get("field").asText(), equalTo("sent"));
     }
 
     @Test
-    void emitDlqRecord_workItemIdNullUntilSet() {
-        // Before any work item is started (setDlqWorkItem not yet called), the record's
+    void emitFailedDocumentStreamRecord_workItemIdNullUntilSet() {
+        // Before any work item is started (setFailedDocumentStreamWorkItem not yet called), the record's
         // workItemId is null rather than an empty/garbage string.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
 
-        client.emitDlqRecord("idx", indexOpWithId("d-1"),
+        client.emitFailedDocumentStreamRecord("idx", indexOpWithId("d-1"),
             new BulkResponseParser.ItemFailure(0, "d-1", "err", "{}"), FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         assertThat(rec.getValue().getWorkItemId(), nullValue());
     }
 
     @Test
-    void emitDlqRecord_failureWithoutDocId_fallsBackToOpId() {
+    void emitFailedDocumentStreamRecord_failureWithoutDocId_fallsBackToOpId() {
         // When the bulk-response item didn't carry an "_id" (e.g. malformed
         // response), the helper should fall back to the document id encoded
-        // on the op we sent. That way the DLQ record still has *some* handle
+        // on the op we sent. That way the failed document stream record still has *some* handle
         // back to the original document.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = indexOpWithId("from-op");
         var failure = new BulkResponseParser.ItemFailure(0, null, "err", "{}");
 
-        client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
+        client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         assertThat(rec.getValue().getDocumentId(), equalTo("from-op"));
     }
 
     @Test
-    void emitDlqRecord_nullFailure_stillEmitsRecord() {
+    void emitFailedDocumentStreamRecord_nullFailure_stillEmitsRecord() {
         // The retry-exhausted path can call us with failure=null when the
         // last response didn't include a matching item for this position.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = indexOpWithId("doc-1");
 
-        client.emitDlqRecord("idx", op, null, FailureClass.RETRYABLE_EXHAUSTED);
+        client.emitFailedDocumentStreamRecord("idx", op, null, FailureClass.RETRYABLE_EXHAUSTED);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         var r = rec.getValue();
         assertThat(r.getDocumentId(), equalTo("doc-1"));
         assertThat(r.getFailureType(), nullValue());
@@ -202,52 +202,52 @@ class OpenSearchClientDlqHelpersTest {
     }
 
     @Test
-    void emitDlqRecord_nullOp_stillEmitsRecord() {
+    void emitFailedDocumentStreamRecord_nullOp_stillEmitsRecord() {
         // If the op fell off pendingDocs (compactPendingDocs can pass null),
-        // the helper still emits a DLQ entry with what info we have.
-        when(dlqSink.write(any())).thenReturn(Mono.empty());
-        client.setDlqContext(dlqSink, "s", "w");
+        // the helper still emits a failed document stream entry with what info we have.
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var failure = new BulkResponseParser.ItemFailure(0, "doc-only", "err", "{}");
 
-        client.emitDlqRecord("idx", null, failure, FailureClass.NON_RETRYABLE);
+        client.emitFailedDocumentStreamRecord("idx", null, failure, FailureClass.NON_RETRYABLE);
 
-        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
-        verify(dlqSink).write(rec.capture());
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
         var r = rec.getValue();
         assertThat(r.getDocumentId(), equalTo("doc-only"));
         assertThat(r.getRequestItem(), nullValue());
     }
 
     @Test
-    void emitDlqRecord_malformedResponseItemJson_doesNotPropagate() {
+    void emitFailedDocumentStreamRecord_malformedResponseItemJson_doesNotPropagate() {
         // OBJECT_MAPPER.readTree on bad JSON throws — the helper must swallow
         // it and keep going (so the bulk path isn't taken down by a
-        // best-effort DLQ side-effect).
-        client.setDlqContext(dlqSink, "s", "w");
+        // best-effort failed document stream side-effect).
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = indexOpWithId("doc-1");
         var failure = new BulkResponseParser.ItemFailure(
             0, "doc-1", "err", "this is not json at all");
 
         // The helper should NOT propagate the JsonProcessingException.
         assertDoesNotThrow(() ->
-            client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE));
+            client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE));
         // It also shouldn't write a record when JSON construction failed.
-        verify(dlqSink, never()).write(any());
+        verify(failedDocumentStreamSink, never()).write(any());
     }
 
     @Test
-    void emitDlqRecord_sinkWriteErrorIsSwallowed() {
+    void emitFailedDocumentStreamRecord_sinkWriteErrorIsSwallowed() {
         // The sink may fail (S3 down, etc.). The helper subscribes to the Mono
         // and logs the error rather than blowing up the bulk path.
-        when(dlqSink.write(any())).thenReturn(
+        when(failedDocumentStreamSink.write(any())).thenReturn(
             Mono.error(new RuntimeException("S3 5xx")));
-        client.setDlqContext(dlqSink, "s", "w");
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = indexOpWithId("doc-1");
         var failure = new BulkResponseParser.ItemFailure(0, "doc-1", "err", "{}");
 
         // Must not throw despite the upstream Mono error.
         assertDoesNotThrow(() ->
-            client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE));
+            client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE));
     }
 
     // ---- extractDocumentId ----------------------------------------------

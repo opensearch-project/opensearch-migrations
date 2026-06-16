@@ -20,7 +20,7 @@ import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -138,8 +138,8 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    // Package-private for end-to-end testing of the per-batch DLQ flush gating (see
-    // DocumentMigrationBootstrapDlqE2ETest); the public entry point is migrateOneShard.
+    // Package-private for end-to-end testing of the per-batch failed document stream flush gating (see
+    // DocumentMigrationBootstrapFailedDocumentStreamE2ETest); the public entry point is migrateOneShard.
     CompletionStatus runPartitionMigration(
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
@@ -148,9 +148,9 @@ public class DocumentMigrationBootstrap {
         var wi = workItem.getWorkItem();
         log.info("Pipeline acquired work item: {}", wi);
 
-        // Stamp DLQ records emitted while processing this shard with its canonical work-item id
+        // Stamp failed document stream records emitted while processing this shard with its canonical work-item id
         // (index + shard + checkpoint) so each terminal failure traces back to the work item.
-        targetClient.setDlqWorkItem(wi.toString());
+        targetClient.setFailedDocumentStreamWorkItem(wi.toString());
 
         if (workItemTimeProvider != null) {
             workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
@@ -189,10 +189,10 @@ public class DocumentMigrationBootstrap {
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
                     // Persist this batch's terminal failures to S3 BEFORE advancing the progress
                     // watermark, so the coordinator checkpoint never moves past a failure that
-                    // isn't durably in the DLQ (at-least-once for DLQ drops). A flush failure
+                    // isn't durably in the failed document stream (at-least-once for failed document stream drops). A flush failure
                     // throws here; the LambdaSubscriber routes it to the error consumer below, so
                     // the work item is not completed and a successor reprocesses and re-emits.
-                    flushDlqForBatch(targetClient.getDlqSink());
+                    flushFailedDocumentStreamForBatch(targetClient.getFailedDocumentStreamSink());
                     cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                 },
                 error -> {
@@ -245,17 +245,17 @@ public class DocumentMigrationBootstrap {
     }
 
     /**
-     * Flush the DLQ buffer for a just-completed batch so its terminal failures are durable in S3
+     * Flush the failed document stream buffer for a just-completed batch so its terminal failures are durable in S3
      * before that batch's progress is committed to the work coordinator. Throwing (on flush
      * failure or the 5-minute timeout) aborts the partition migration so the work item is not
      * marked complete — a successor then reprocesses from the last durable cursor and re-emits,
-     * giving an at-least-once guarantee for DLQ entries. No-op when the DLQ is disabled.
+     * giving an at-least-once guarantee for failed document stream entries. No-op when the failed document stream is disabled.
      */
-    static void flushDlqForBatch(DlqSink dlqSink) {
-        if (dlqSink == null) {
+    static void flushFailedDocumentStreamForBatch(FailedDocumentStreamSink failedDocumentStreamSink) {
+        if (failedDocumentStreamSink == null) {
             return;
         }
-        dlqSink.flush().block(Duration.ofMinutes(5));
+        failedDocumentStreamSink.flush().block(Duration.ofMinutes(5));
     }
 
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(

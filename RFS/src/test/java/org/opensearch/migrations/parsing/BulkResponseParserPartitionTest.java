@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.hasSize;
 
 /**
  * Covers {@link BulkResponseParser#partitionItems} — the three-way classification
- * (success / non-retryable / retryable) introduced for the durable RFS DLQ
+ * (success / non-retryable / retryable) introduced for the durable RFS failed document stream
  * (issue #2975).
  */
 class BulkResponseParserPartitionTest {
@@ -129,7 +129,7 @@ class BulkResponseParserPartitionTest {
         assertThat(f.getPosition(), equalTo(0));
         assertThat(f.getErrorType(), equalTo("malformed_response_item"));
         assertThat(f.getDocumentId(), equalTo(null));
-        // Even malformed items carry their raw JSON so the DLQ can capture them.
+        // Even malformed items carry their raw JSON so the failed document stream can capture them.
         assertThat(f.getResponseItemJson(), equalTo("{}"));
     }
 

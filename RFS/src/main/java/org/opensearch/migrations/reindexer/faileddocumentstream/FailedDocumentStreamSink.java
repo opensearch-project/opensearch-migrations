@@ -1,4 +1,4 @@
-package org.opensearch.migrations.reindexer.dlq;
+package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 import reactor.core.publisher.Mono;
 
@@ -7,7 +7,7 @@ import reactor.core.publisher.Mono;
  *
  * <p>Contract:
  * <ul>
- *   <li>{@link #write(DlqRecord)} may buffer; the returned {@link Mono} completes when
+ *   <li>{@link #write(FailedDocumentStreamRecord)} may buffer; the returned {@link Mono} completes when
  *       the record is durably accepted by the underlying store (post-flush).</li>
  *   <li>{@link #flush()} blocks-equivalent in Reactor terms: completes once all
  *       previously-written records are durable. Must be awaited before the RFS work
@@ -18,18 +18,18 @@ import reactor.core.publisher.Mono;
  * </ul>
  *
  * <p>Implementations are responsible for whatever buffering / batching / rotation
- * policy they need. The default {@link S3DlqSink} rotates one S3 object per
+ * policy they need. The default {@link S3FailedDocumentStreamSink} rotates one S3 object per
  * OpenSearch bulk failure batch.
  */
-public interface DlqSink extends AutoCloseable {
+public interface FailedDocumentStreamSink extends AutoCloseable {
 
     /** Buffer a record. Returned Mono completes only after flush durability. */
-    Mono<Void> write(DlqRecord dlqRecord);
+    Mono<Void> write(FailedDocumentStreamRecord failedDocumentStreamRecord);
 
     /** Force all buffered records durable. Safe to call repeatedly. */
     Mono<Void> flush();
 
-    /** Customer-visible pointer to the DLQ location for the current session. */
+    /** Customer-visible pointer to the failed document stream location for the current session. */
     String getLocation();
 
     @Override

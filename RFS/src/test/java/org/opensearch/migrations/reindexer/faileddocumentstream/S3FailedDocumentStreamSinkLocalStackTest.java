@@ -1,4 +1,4 @@
-package org.opensearch.migrations.reindexer.dlq;
+package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 import java.io.ByteArrayInputStream;
 import java.time.Instant;
@@ -34,16 +34,16 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 
 /**
- * Real-S3 round-trip for {@link S3DlqSink} against LocalStack: exercises the actual
- * {@link S3DlqSink#s3ClientUploader} → AWS SDK {@code PutObject} path (URI parsing, byte body,
+ * Real-S3 round-trip for {@link S3FailedDocumentStreamSink} against LocalStack: exercises the actual
+ * {@link S3FailedDocumentStreamSink#s3ClientUploader} → AWS SDK {@code PutObject} path (URI parsing, byte body,
  * content-type) and reads the objects back to confirm key layout and gzipped NDJSON content —
- * none of which the in-process uploader in {@code S3DlqSinkTest} covers.
+ * none of which the in-process uploader in {@code S3FailedDocumentStreamSinkTest} covers.
  */
 @Tag("isolatedTest")
 @Testcontainers
-class S3DlqSinkLocalStackTest {
+class S3FailedDocumentStreamSinkLocalStackTest {
 
-    private static final String BUCKET = "rfs-dlq-localstack-test";
+    private static final String BUCKET = "rfs-failed-document-stream-localstack-test";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Container
@@ -75,13 +75,13 @@ class S3DlqSinkLocalStackTest {
 
     @Test
     void writesRealGzippedObjectsPerIndexWithExpectedKeyLayoutAndContent() throws Exception {
-        var sink = S3DlqSink.builder()
+        var sink = S3FailedDocumentStreamSink.builder()
             .bucket(BUCKET)
-            .prefix("rfs-dlq/")
+            .prefix("rfs-failed-document-stream/")
             .sessionId("sess-LS")
             .workerId("worker-1")
             .region(LOCAL_STACK.getRegion())
-            .uploader(S3DlqSink.s3ClientUploader(s3))   // the REAL uploader, not an in-process stub
+            .uploader(S3FailedDocumentStreamSink.s3ClientUploader(s3))   // the REAL uploader, not an in-process stub
             .build();
 
         sink.write(record("movies", "m-1")).block();
@@ -89,7 +89,7 @@ class S3DlqSinkLocalStackTest {
         sink.flush().block();
         sink.close();
 
-        var sessionPrefix = "rfs-dlq/session=sess-LS/";
+        var sessionPrefix = "rfs-failed-document-stream/session=sess-LS/";
         var objects = s3.listObjectsV2(ListObjectsV2Request.builder()
                 .bucket(BUCKET).prefix(sessionPrefix).build())
             .join().contents();
@@ -101,7 +101,7 @@ class S3DlqSinkLocalStackTest {
         var booksKey = onlyKeyContaining(keys, "/index=books/");
         for (var key : List.of(moviesKey, booksKey)) {
             assertThat(key, containsString(sessionPrefix));
-            assertThat(key, containsString("/worker=worker-1/dlq-"));
+            assertThat(key, containsString("/worker=worker-1/failed-document-stream-"));
             assertThat(key, containsString(".ndjson.gz"));
         }
 
@@ -141,12 +141,12 @@ class S3DlqSinkLocalStackTest {
         return out;
     }
 
-    private static DlqRecord record(String index, String docId) {
+    private static FailedDocumentStreamRecord record(String index, String docId) {
         ObjectNode req = MAPPER.createObjectNode();
         req.put("op", "index").put("_id", docId);
         ObjectNode resp = MAPPER.createObjectNode();
         resp.putObject("index").put("_id", docId).put("status", 400);
-        return DlqRecord.builder()
+        return FailedDocumentStreamRecord.builder()
             .sessionId("sess-LS").workerId("worker-1").targetIndex(index).documentId(docId)
             .failureType("mapper_parsing_exception").failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())

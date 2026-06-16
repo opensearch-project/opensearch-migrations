@@ -21,7 +21,7 @@ import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
-import org.opensearch.migrations.reindexer.dlq.S3DlqSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,11 +55,11 @@ import static org.mockito.Mockito.withSettings;
  *
  * <p>Drives the real {@code OpenSearchClient.executeBulkWithRetry} loop with a mock
  * RestClient that returns a hand-crafted sequence of bulk responses, and a real
- * {@link S3DlqSink} backed by a mock {@code S3AsyncClient} that captures NDJSON.gz
+ * {@link S3FailedDocumentStreamSink} backed by a mock {@code S3AsyncClient} that captures NDJSON.gz
  * uploads. Then reads the captured S3 objects back.
  *
  * <p>Sub-criterion → assertion mapping for
- * {@link #forcesFailures_andDlqMatches_andSessionsAreIsolated()}:
+ * {@link #forcesFailures_andFailedDocumentStreamMatches_andSessionsAreIsolated()}:
  *
  * <ol>
  *   <li><b>Successful documents still migrate.</b> Per-attempt bulk-request bodies
@@ -67,11 +67,11 @@ import static org.mockito.Mockito.withSettings;
  *       {@code ok-1} (and {@code ok-2}), and subsequent retry attempts contain
  *       <i>only</i> {@code throttled} — positive proof that ok-1's success ack
  *       was honored and the doc was not re-sent.</li>
- *   <li><b>Failed documents are persisted to the DLQ.</b> The captured S3 bytes
+ *   <li><b>Failed documents are persisted to the failed document stream.</b> The captured S3 bytes
  *       are decoded and asserted to contain {@code bad-map} (NON_RETRYABLE) and
  *       {@code throttled} (RETRYABLE_EXHAUSTED) with the correct
  *       {@code failureClass} / {@code failureType}.</li>
- *   <li><b>Reported failure count matches DLQ contents.</b>
+ *   <li><b>Reported failure count matches failed document stream contents.</b>
  *       {@code assertThat(sessionARecords, hasSize(reportedTerminalFailures))}
  *       where {@code reportedTerminalFailures = 2} is the number of forced
  *       terminal failures — i.e. record count == failure count, no double-count
@@ -84,7 +84,7 @@ import static org.mockito.Mockito.withSettings;
  * </ol>
  */
 @ExtendWith(MockitoExtension.class)
-class RfsDlqIntegrationTest {
+class RfsFailedDocumentStreamIntegrationTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -95,7 +95,7 @@ class RfsDlqIntegrationTest {
     ConnectionContext connectionContext;
 
     @Test
-    void forcesFailures_andDlqMatches_andSessionsAreIsolated() throws Exception {
+    void forcesFailures_andFailedDocumentStreamMatches_andSessionsAreIsolated() throws Exception {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
 
@@ -125,9 +125,9 @@ class RfsDlqIntegrationTest {
         // Capture every S3 PutObject so we can reconstruct what was persisted.
         var s3Captured = new S3Capture();
 
-        var dlqSinkA = S3DlqSink.builder()
+        var failedDocumentStreamSinkA = S3FailedDocumentStreamSink.builder()
             .bucket("rfs-bucket")
-            .prefix("rfs-dlq/")
+            .prefix("rfs-failed-document-stream/")
             .sessionId("session-A")
             .workerId("worker-1")
             .region("us-east-1")
@@ -138,7 +138,7 @@ class RfsDlqIntegrationTest {
         var failedRequestsLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
-        openSearchClient.setDlqContext(dlqSinkA, "session-A", "worker-1");
+        openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSinkA, "session-A", "worker-1");
         // Speed up the test: 2 retries, 1 ms backoff — enough to exhaust retries on "throttled".
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
 
@@ -159,8 +159,8 @@ class RfsDlqIntegrationTest {
         ).block());
 
         // Mirror the workflow's lease-completion contract: flush before "completing" the work.
-        dlqSinkA.flush().block();
-        dlqSinkA.close();
+        failedDocumentStreamSinkA.flush().block();
+        failedDocumentStreamSinkA.close();
 
         // ─── Sub-criterion 1: successful documents still migrate ────────────────────
         // Positive proof: capture every bulk request body and verify that
@@ -168,7 +168,7 @@ class RfsDlqIntegrationTest {
         //   - subsequent retry attempts sent only "throttled".
         // i.e., the cluster's success ack for ok-1 was honored and the doc was NOT
         // re-sent on retry — together with the negative assertion below that ok-1
-        // never lands in the DLQ, that's end-to-end "successful docs migrate".
+        // never lands in the failed document stream, that's end-to-end "successful docs migrate".
         ArgumentCaptor<byte[]> bodyCaptor = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, atLeast(2)).postAsyncBytes(any(), bodyCaptor.capture(), any(), any());
         var capturedBodies = bodyCaptor.getAllValues();
@@ -183,21 +183,21 @@ class RfsDlqIntegrationTest {
         }
 
         // ─── Assertions for session A ───────────────────────────────────────────────
-        var sessionAObjects = s3Captured.objectsUnder("rfs-dlq/session=session-A/");
-        assertThat("DLQ wrote at least one object for session A", sessionAObjects.size(),
+        var sessionAObjects = s3Captured.objectsUnder("rfs-failed-document-stream/session=session-A/");
+        assertThat("failed document stream wrote at least one object for session A", sessionAObjects.size(),
             greaterThanOrEqualTo(1));
 
         var sessionARecords = sessionAObjects.stream()
             .flatMap(o -> decode(o.bytes).stream())
             .toList();
 
-        // Successful and allowlisted docs are NOT in the DLQ.
-        var dlqDocIds = sessionARecords.stream().map(r -> r.path("documentId").asText()).toList();
-        assertThat(dlqDocIds, not(contains("ok-1")));
-        assertThat(dlqDocIds, not(contains("ok-2")));
+        // Successful and allowlisted docs are NOT in the failed document stream.
+        var failedDocumentStreamDocIds = sessionARecords.stream().map(r -> r.path("documentId").asText()).toList();
+        assertThat(failedDocumentStreamDocIds, not(contains("ok-1")));
+        assertThat(failedDocumentStreamDocIds, not(contains("ok-2")));
 
-        // Terminal failures ARE in the DLQ, exactly once each.
-        assertThat(dlqDocIds, containsInAnyOrder("bad-map", "throttled"));
+        // Terminal failures ARE in the failed document stream, exactly once each.
+        assertThat(failedDocumentStreamDocIds, containsInAnyOrder("bad-map", "throttled"));
 
         // Each failure carries the right classification.
         var byId = recordsById(sessionARecords);
@@ -214,12 +214,12 @@ class RfsDlqIntegrationTest {
             assertThat(rec.path("timestamp").asText(), not(equalTo("")));
         }
 
-        // Reported failure count matches DLQ contents: we forced exactly 2 terminal failures.
+        // Reported failure count matches failed document stream contents: we forced exactly 2 terminal failures.
         int reportedTerminalFailures = 2;
         assertThat(sessionARecords, hasSize(reportedTerminalFailures));
 
         // The customer-visible location matches the prefix we expect.
-        assertThat(dlqSinkA.getLocation(), equalTo("s3://rfs-bucket/rfs-dlq/session=session-A/"));
+        assertThat(failedDocumentStreamSinkA.getLocation(), equalTo("s3://rfs-bucket/rfs-failed-document-stream/session=session-A/"));
 
         // ─── Session B: rerun with a new session id ─────────────────────────────────
         // Reset the response queue: a different doc fails this time so we can prove
@@ -231,15 +231,15 @@ class RfsDlqIntegrationTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "", null, sessionBResponse)));
 
-        var dlqSinkB = S3DlqSink.builder()
+        var failedDocumentStreamSinkB = S3FailedDocumentStreamSink.builder()
             .bucket("rfs-bucket")
-            .prefix("rfs-dlq/")
+            .prefix("rfs-failed-document-stream/")
             .sessionId("session-B")
             .workerId("worker-1")
             .region("us-east-1")
             .uploader(s3Captured.captureUploader())
             .build();
-        openSearchClient.setDlqContext(dlqSinkB, "session-B", "worker-1");
+        openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSinkB, "session-B", "worker-1");
 
         openSearchClient.sendBulkRequest(
             "movies",
@@ -248,11 +248,11 @@ class RfsDlqIntegrationTest {
             false,
             DocumentExceptionAllowlist.empty()
         ).block();
-        dlqSinkB.flush().block();
-        dlqSinkB.close();
+        failedDocumentStreamSinkB.flush().block();
+        failedDocumentStreamSinkB.close();
 
         // Session A's prefix still contains only the original two records — no bleed.
-        var sessionAAfter = s3Captured.objectsUnder("rfs-dlq/session=session-A/").stream()
+        var sessionAAfter = s3Captured.objectsUnder("rfs-failed-document-stream/session=session-A/").stream()
             .flatMap(o -> decode(o.bytes).stream())
             .toList();
         assertThat(sessionAAfter, hasSize(reportedTerminalFailures));
@@ -260,7 +260,7 @@ class RfsDlqIntegrationTest {
             containsInAnyOrder("bad-map", "throttled"));
 
         // Session B's prefix has exactly its one new failure.
-        var sessionBRecords = s3Captured.objectsUnder("rfs-dlq/session=session-B/").stream()
+        var sessionBRecords = s3Captured.objectsUnder("rfs-failed-document-stream/session=session-B/").stream()
             .flatMap(o -> decode(o.bytes).stream())
             .toList();
         assertThat(sessionBRecords, hasSize(1));
@@ -277,7 +277,7 @@ class RfsDlqIntegrationTest {
 
     /**
      * Regression test for the acceptance criterion that allowlisted exception
-     * types are excluded from DLQ records and failure counts, specifically in
+     * types are excluded from failed document stream records and failure counts, specifically in
      * the retry-exhaust path.
      *
      * <p>Constructs a worst-case position-misalignment scenario: a single
@@ -286,12 +286,12 @@ class RfsDlqIntegrationTest {
      * is dropped by {@code compactPendingDocs}, so the post-compaction
      * {@code pendingOps} has one item at index 0 — which corresponds to
      * response position 1, not 0. A naive position lookup in
-     * {@code emitRetryExhaustedToDlq} would mis-attribute the allowlisted
+     * {@code emitRetryExhaustedToFailedDocumentStream} would mis-attribute the allowlisted
      * item's {@code failureType} to the surviving retryable doc; this test
      * asserts that doesn't happen.
      */
     @Test
-    void allowlistedExceptionsAreNeverWrittenToDlq_evenOnRetryExhaust() throws Exception {
+    void allowlistedExceptionsAreNeverWrittenToFailedDocumentStream_evenOnRetryExhaust() throws Exception {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
 
@@ -307,9 +307,9 @@ class RfsDlqIntegrationTest {
             .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
 
         var s3Captured = new S3Capture();
-        var dlqSink = S3DlqSink.builder()
+        var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
             .bucket("rfs-bucket")
-            .prefix("rfs-dlq/")
+            .prefix("rfs-failed-document-stream/")
             .sessionId("session-exhaust")
             .workerId("worker-1")
             .region("us-east-1")
@@ -320,9 +320,9 @@ class RfsDlqIntegrationTest {
         var failedRequestsLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
-        openSearchClient.setDlqContext(dlqSink, "session-exhaust", "worker-1");
+        openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-exhaust", "worker-1");
         // 0 retries: any error from attempt 1 exhausts immediately, taking the
-        // doOnError → emitRetryExhaustedToDlq path with the original response
+        // doOnError → emitRetryExhaustedToFailedDocumentStream path with the original response
         // (which still contains the allowlisted item at position 0).
         doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
 
@@ -333,23 +333,23 @@ class RfsDlqIntegrationTest {
             false,
             allowlist
         ).block());
-        dlqSink.flush().block();
-        dlqSink.close();
+        failedDocumentStreamSink.flush().block();
+        failedDocumentStreamSink.close();
 
-        var records = s3Captured.objectsUnder("rfs-dlq/session=session-exhaust/").stream()
+        var records = s3Captured.objectsUnder("rfs-failed-document-stream/session=session-exhaust/").stream()
             .flatMap(o -> decode(o.bytes).stream())
             .toList();
 
         // Failure count: exactly one record (the retryable doc). The allowlisted
         // doc must not contribute to the count.
-        assertThat("Only the retryable doc should be in the DLQ", records, hasSize(1));
+        assertThat("Only the retryable doc should be in the failed document stream", records, hasSize(1));
 
         var rec = records.get(0);
         assertThat(rec.path("documentId").asText(), equalTo("throttled-1"));
         assertThat(rec.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
 
         // Critical assertion: no allowlisted exception type appears anywhere in
-        // the DLQ records — neither as the docId of an allowlisted item nor as
+        // the failed document stream records — neither as the docId of an allowlisted item nor as
         // the failureType attached to a real failure (the position-shift bug).
         for (var r : records) {
             assertThat(r.path("documentId").asText(), not(equalTo("dup-1")));
@@ -451,7 +451,7 @@ class RfsDlqIntegrationTest {
     private static class S3Capture {
         private final List<CapturedObject> objects = new ArrayList<>();
 
-        S3DlqSink.S3Uploader captureUploader() {
+        S3FailedDocumentStreamSink.S3Uploader captureUploader() {
             return (s3Uri, data, region) -> {
                 // Extract the key from s3://bucket/key
                 var key = s3Uri.replaceFirst("s3://[^/]+/", "");

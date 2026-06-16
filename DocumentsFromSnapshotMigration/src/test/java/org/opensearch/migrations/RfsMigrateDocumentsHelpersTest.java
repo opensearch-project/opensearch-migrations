@@ -7,7 +7,7 @@ import java.time.Instant;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 
 import com.beust.jcommander.ParameterException;
@@ -30,7 +30,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Covers the DLQ / coordinator helper methods on {@link RfsMigrateDocuments}.
+ * Covers the failed document stream / coordinator helper methods on {@link RfsMigrateDocuments}.
  * The helpers are package-private specifically so tests in this package can
  * exercise them without spinning up an actual cluster.
  */
@@ -41,7 +41,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void resolveSessionId_prefersExplicitCliFlag() {
         var args = new RfsMigrateDocuments.Args();
-        args.dlqArgs.dlqSessionId = "explicit-session";
+        args.failedDocumentStreamArgs.failedDocumentStreamSessionId = "explicit-session";
         // Even if ARGO_WORKFLOW_UID happens to be set in the env, the explicit
         // CLI flag must win.
         assertThat(RfsMigrateDocuments.resolveSessionId(args, "ignored-worker"),
@@ -51,7 +51,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void resolveSessionId_blankCliFlagFallsThrough() {
         var args = new RfsMigrateDocuments.Args();
-        args.dlqArgs.dlqSessionId = "   ";  // blank — should be skipped
+        args.failedDocumentStreamArgs.failedDocumentStreamSessionId = "   ";  // blank — should be skipped
         // If ARGO_WORKFLOW_UID isn't set in this environment we land on the
         // worker-id fallback. (CI doesn't set it.)
         if (System.getenv("ARGO_WORKFLOW_UID") == null) {
@@ -71,42 +71,42 @@ class RfsMigrateDocumentsHelpersTest {
         }
     }
 
-    // ---- buildDlqSink -----------------------------------------------------
+    // ---- buildFailedDocumentStreamSink -----------------------------------------------------
 
     @Test
-    void buildDlqSink_returnsNullWhenNoBucketConfigured() {
+    void buildFailedDocumentStreamSink_returnsNullWhenNoBucketConfigured() {
         var args = new RfsMigrateDocuments.Args();
-        // Don't set --dlq-s3-bucket. If the env doesn't supply a default bucket
-        // either, the sink should be null (DLQ disabled).
+        // Don't set --failed-document-stream-s3-bucket. If the env doesn't supply a default bucket
+        // either, the sink should be null (failed document stream disabled).
         if (System.getenv("MIGRATIONS_DEFAULT_S3_BUCKET") == null) {
-            assertThat(RfsMigrateDocuments.buildDlqSink(args, "w", "sess"), nullValue());
+            assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "sess"), nullValue());
         }
     }
 
     @Test
-    void buildDlqSink_buildsSinkWithExplicitBucketAndRegion() {
+    void buildFailedDocumentStreamSink_buildsSinkWithExplicitBucketAndRegion() {
         var args = new RfsMigrateDocuments.Args();
-        args.dlqArgs.dlqS3Bucket = "my-dlq-bucket";
-        args.dlqArgs.dlqS3Region = "us-east-1";
-        args.dlqArgs.dlqS3Prefix = "rfs-dlq/";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "my-failed-document-stream-bucket";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Region = "us-east-1";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Prefix = "rfs-failed-document-stream/";
 
-        var sink = RfsMigrateDocuments.buildDlqSink(args, "worker-1", "sess-A");
+        var sink = RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "worker-1", "sess-A");
 
         assertThat(sink, notNullValue());
-        // S3DlqSink#getLocation embeds bucket, prefix, and session id — using it
+        // S3FailedDocumentStreamSink#getLocation embeds bucket, prefix, and session id — using it
         // as a single read-back avoids reflection on the sink's private fields.
         assertThat(sink.getLocation(),
-            equalTo("s3://my-dlq-bucket/rfs-dlq/session=sess-A/"));
+            equalTo("s3://my-failed-document-stream-bucket/rfs-failed-document-stream/session=sess-A/"));
     }
 
     @Test
-    void buildDlqSink_fallsBackToS3RegionWhenDlqRegionUnset() {
+    void buildFailedDocumentStreamSink_fallsBackToS3RegionWhenFailedDocumentStreamRegionUnset() {
         var args = new RfsMigrateDocuments.Args();
-        args.dlqArgs.dlqS3Bucket = "b";
-        args.s3Region = "eu-west-2";   // dlqS3Region intentionally left null
-        args.dlqArgs.dlqS3Prefix = "p/";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "b";
+        args.s3Region = "eu-west-2";   // failedDocumentStreamS3Region intentionally left null
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Prefix = "p/";
 
-        var sink = RfsMigrateDocuments.buildDlqSink(args, "w", "s");
+        var sink = RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s");
         // Just confirming it builds without throwing — region resolution
         // happens internally and a missing region would throw.
         assertThat(sink, notNullValue());
@@ -114,47 +114,47 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void buildDlqSink_throwsWhenBucketSetButNoRegionAnywhere() {
+    void buildFailedDocumentStreamSink_throwsWhenBucketSetButNoRegionAnywhere() {
         var args = new RfsMigrateDocuments.Args();
-        args.dlqArgs.dlqS3Bucket = "b";
-        // Neither dlqS3Region nor s3Region is set.
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "b";
+        // Neither failedDocumentStreamS3Region nor s3Region is set.
         assertThrows(ParameterException.class,
-            () -> RfsMigrateDocuments.buildDlqSink(args, "w", "s"));
+            () -> RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"));
     }
 
-    // ---- flushDlqBeforeComplete ------------------------------------------
+    // ---- flushFailedDocumentStreamBeforeComplete ------------------------------------------
 
     @Test
-    void flushDlqBeforeComplete_nullSinkAllowsMarkComplete() {
-        assertThat(RfsMigrateDocuments.flushDlqBeforeComplete(null, "item-1"), is(true));
+    void flushFailedDocumentStreamBeforeComplete_nullSinkAllowsMarkComplete() {
+        assertThat(RfsMigrateDocuments.flushFailedDocumentStreamBeforeComplete(null, "item-1"), is(true));
     }
 
     @Test
-    void flushDlqBeforeComplete_successfulFlushAllowsMarkComplete() {
-        var sink = mock(DlqSink.class);
+    void flushFailedDocumentStreamBeforeComplete_successfulFlushAllowsMarkComplete() {
+        var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.empty());
-        assertThat(RfsMigrateDocuments.flushDlqBeforeComplete(sink, "item-1"), is(true));
+        assertThat(RfsMigrateDocuments.flushFailedDocumentStreamBeforeComplete(sink, "item-1"), is(true));
     }
 
     @Test
-    void flushDlqBeforeComplete_failedFlushBlocksMarkComplete() {
-        var sink = mock(DlqSink.class);
+    void flushFailedDocumentStreamBeforeComplete_failedFlushBlocksMarkComplete() {
+        var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.error(new RuntimeException("S3 PutObject failed")));
         // We do NOT mark the work item complete; the lease should expire so a
-        // successor can re-emit any unflushed DLQ records.
-        assertThat(RfsMigrateDocuments.flushDlqBeforeComplete(sink, "item-1"), is(false));
+        // successor can re-emit any unflushed failed document stream records.
+        assertThat(RfsMigrateDocuments.flushFailedDocumentStreamBeforeComplete(sink, "item-1"), is(false));
     }
 
     @Test
-    void flushDlqBeforeComplete_timeoutBlocksMarkComplete() {
-        var sink = mock(DlqSink.class);
+    void flushFailedDocumentStreamBeforeComplete_timeoutBlocksMarkComplete() {
+        var sink = mock(FailedDocumentStreamSink.class);
         // A Mono that never completes simulates an S3 stall — should be timed
         // out by the helper's 5-minute block().  Use a small reactor delay so
         // we don't actually wait minutes in the test: the contract still holds
         // since the helper catches Exception.
         Mono<Void> stalled = Mono.<Void>never().timeout(Duration.ofMillis(50));
         when(sink.flush()).thenReturn(stalled);
-        assertThat(RfsMigrateDocuments.flushDlqBeforeComplete(sink, "item-1"), is(false));
+        assertThat(RfsMigrateDocuments.flushFailedDocumentStreamBeforeComplete(sink, "item-1"), is(false));
     }
 
     // ---- isCoordinatorWorkAlreadyDone ------------------------------------

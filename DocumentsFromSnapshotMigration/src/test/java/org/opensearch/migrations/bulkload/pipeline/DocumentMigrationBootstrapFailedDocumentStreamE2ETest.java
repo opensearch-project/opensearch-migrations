@@ -21,7 +21,7 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
-import org.opensearch.migrations.reindexer.dlq.S3DlqSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
@@ -39,23 +39,23 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * End-to-end coverage of the per-batch DLQ flush gating in
+ * End-to-end coverage of the per-batch failed document stream flush gating in
  * {@link DocumentMigrationBootstrap#runPartitionMigration}: a real
  * {@link DocumentMigrationPipeline} drives a synthetic document source through a real
  * {@link OpenSearchClient} (backed by a mock {@code RestClient} that fails one document),
- * with a real {@link S3DlqSink} whose S3 upload outcome we control.
+ * with a real {@link S3FailedDocumentStreamSink} whose S3 upload outcome we control.
  *
- * <p>Contract under test (at-least-once for DLQ drops): the progress cursor — which becomes
+ * <p>Contract under test (at-least-once for failed document stream drops): the progress cursor — which becomes
  * the work-coordination checkpoint — must only advance after the batch's terminal failures
  * are durably persisted. If the per-batch flush fails, the work item must NOT be marked
  * complete (here: {@code runPartitionMigration} throws and the cursor never advances), so a
  * successor reprocesses and re-emits.
  */
-class DocumentMigrationBootstrapDlqE2ETest {
+class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
 
     private static final String INDEX = "movies";
 
-    /** Bulk response with a single non-retryable failure → exactly one DLQ record produced. */
+    /** Bulk response with a single non-retryable failure → exactly one failed document stream record produced. */
     private static OpenSearchClient clientThatFailsOneDoc() {
         var restClient = mock(RestClient.class);
         var connectionContext = mock(ConnectionContext.class);
@@ -102,15 +102,15 @@ class DocumentMigrationBootstrapDlqE2ETest {
     @Test
     void perBatchFlushFailureAbortsWorkItemAndDoesNotAdvanceProgress() {
         var client = clientThatFailsOneDoc();
-        // Real sink whose S3 upload throws — the per-batch flush of the (one) buffered DLQ
+        // Real sink whose S3 upload throws — the per-batch flush of the (one) buffered failed document stream
         // record therefore fails.
-        var dlqSink = S3DlqSink.builder()
-            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+        var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
+            .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
             .uploader((uri, data, region) -> {
                 throw new IOException("S3 unavailable");
             })
             .build();
-        client.setDlqContext(dlqSink, "s", "w");
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var h = harness(client);
 
         var thrown = assertThrows(RfsException.class,
@@ -123,19 +123,19 @@ class DocumentMigrationBootstrapDlqE2ETest {
     }
 
     @Test
-    void perBatchFlushSuccessCommitsProgressAndPersistsDlq() {
+    void perBatchFlushSuccessCommitsProgressAndPersistsFailedDocumentStream() {
         var client = clientThatFailsOneDoc();
         var uploaded = new CopyOnWriteArrayList<String>();
-        var dlqSink = S3DlqSink.builder()
-            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+        var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
+            .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
             .uploader((uri, data, region) -> uploaded.add(uri))
             .build();
-        client.setDlqContext(dlqSink, "s", "w");
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var h = harness(client);
 
         var status = h.bootstrap().runPartitionMigration(workItem(), h.pipelineConfig(), h.context());
 
-        // Work item completed, progress advanced to the one processed doc, and the DLQ record
+        // Work item completed, progress advanced to the one processed doc, and the failed document stream record
         // was durably uploaded by the per-batch flush.
         assertThat(status, is(CompletionStatus.WORK_COMPLETED));
         assertThat(h.cursorRef().get().getProgressCheckpointNum(), equalTo(1L));
@@ -143,8 +143,8 @@ class DocumentMigrationBootstrapDlqE2ETest {
     }
 
     @Test
-    void noDlqConfigured_completesNormally() {
-        // Sanity: with no DLQ sink installed (getDlqSink() == null), the per-batch flush is a
+    void noFailedDocumentStreamConfigured_completesNormally() {
+        // Sanity: with no failed document stream sink installed (getFailedDocumentStreamSink() == null), the per-batch flush is a
         // no-op and the shard completes as before.
         var client = clientThatFailsOneDoc();
         var h = harness(client);

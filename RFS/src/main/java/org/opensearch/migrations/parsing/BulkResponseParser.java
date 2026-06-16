@@ -252,14 +252,14 @@ public class BulkResponseParser {
      * <ul>
      *   <li>{@code successPositions}: succeeded or allowlisted — drop from pending.</li>
      *   <li>{@code nonRetryableFailures}: failed with a type in
-     *       {@link BulkDocErrorTypes#NON_RETRYABLE} (and not allowlisted) — emit to DLQ
+     *       {@link BulkDocErrorTypes#NON_RETRYABLE} (and not allowlisted) — emit to failed document stream
      *       immediately and drop from pending so we don't keep retrying them.</li>
      *   <li>{@code retryableFailures}: any other failure — keep in pending for retry.
-     *       If retries are exhausted, callers should emit these to the DLQ with
+     *       If retries are exhausted, callers should emit these to the failed document stream with
      *       {@code FailureClass.RETRYABLE_EXHAUSTED}.</li>
      * </ul>
      *
-     * <p>Each failure carries the raw per-item response JSON so the DLQ record can
+     * <p>Each failure carries the raw per-item response JSON so the failed document stream record can
      * include the cluster's full error object verbatim.
      *
      * @return parsed partition, or {@code null} if the response could not be parsed
@@ -359,7 +359,7 @@ public class BulkResponseParser {
         }
     }
 
-    /** One failed bulk item with enough context to be written to a DLQ. */
+    /** One failed bulk item with enough context to be written to a failed document stream. */
     @Value
     public static class ItemFailure {
         int position;

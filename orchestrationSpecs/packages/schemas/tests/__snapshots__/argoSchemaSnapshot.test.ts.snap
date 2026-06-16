@@ -1736,15 +1736,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "dlqS3Prefix": {
+                    "failedDocumentStreamS3Prefix": {
                       "type": "string",
-                      "default": "rfs-dlq/"
+                      "default": "rfs-failed-document-stream/"
                     },
-                    "dlqS3Bucket": {
+                    "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
+                      "description": "S3 bucket for the failed document stream. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for failed document stream records."
                     },
-                    "dlqMaxBufferBytes": {
+                    "failedDocumentStreamMaxBufferBytes": {
                       "type": "number",
                       "default": 67108864
                     },
@@ -4175,19 +4175,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "changeRestriction": "impossible"
                       },
-                      "dlqS3Prefix": {
+                      "failedDocumentStreamS3Prefix": {
                         "type": "string",
-                        "default": "rfs-dlq/",
-                        "description": "S3 key prefix for the dead-letter queue (DLQ) where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-dlq/'."
+                        "default": "rfs-failed-document-stream/",
+                        "description": "S3 key prefix for the failed document stream where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-failed-document-stream/'."
                       },
-                      "dlqS3Bucket": {
+                      "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
+                        "description": "S3 bucket for the failed document stream. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for failed document stream records."
                       },
-                      "dlqMaxBufferBytes": {
+                      "failedDocumentStreamMaxBufferBytes": {
                         "type": "number",
                         "default": 67108864,
-                        "description": "Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
+                        "description": "Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
                       },
                       "positionGapStopword": {
                         "type": "string",

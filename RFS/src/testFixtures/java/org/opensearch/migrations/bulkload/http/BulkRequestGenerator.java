@@ -64,7 +64,7 @@ public class BulkRequestGenerator {
     /**
      * Failure entry that the bulk-retry classifier treats as RETRYABLE (i.e., not in
      * {@code BulkDocErrorTypes.NON_RETRYABLE}). Use this when a test wants to drive
-     * the retry loop rather than send the doc straight to the DLQ on first attempt.
+     * the retry loop rather than send the doc straight to the failed document stream on first attempt.
      */
     public static BulkItemResponseEntry itemEntryRetryableFailure(String itemId) {
         return BulkItemResponseEntry.builder().raw(

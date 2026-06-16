@@ -67,8 +67,8 @@ function makeParamsDict(
     sourceEndpoint?: BaseExpression<string>
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
-    const dlqParams = expr.makeDict({
-        dlqSessionId: workflowUid
+    const failedDocumentStreamParams = expr.makeDict({
+        failedDocumentStreamSessionId: workflowUid
     });
     const base = expr.mergeDicts(
         expr.mergeDicts(
@@ -87,7 +87,7 @@ function makeParamsDict(
                     luceneDir: "/tmp",
                     cleanLocalDirs: true
                 }),
-                dlqParams
+                failedDocumentStreamParams
             ),
             makeRepoParamDict(
                 expr.omit(repoConfig, "s3RoleArn"),
@@ -101,16 +101,16 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-const DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session";
+const FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME = "rfs-failed-document-stream-current-session";
 
-function makeDlqSessionConfigMap(sessionId: BaseExpression<string>, dlqS3Prefix: BaseExpression<string>) {
+function makeFailedDocumentStreamSessionConfigMap(sessionId: BaseExpression<string>, failedDocumentStreamS3Prefix: BaseExpression<string>) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
-        metadata: {name: DLQ_SESSION_CONFIGMAP_NAME},
+        metadata: {name: FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME},
         data: {
             session_id: makeStringTypeProxy(sessionId),
-            prefix: makeStringTypeProxy(dlqS3Prefix)
+            prefix: makeStringTypeProxy(failedDocumentStreamS3Prefix)
         }
     };
 }
@@ -189,11 +189,11 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // Terminal RFS document failures now go to a durable S3 DLQ
-            // (see RFS/.../reindexer/dlq). The previous OFF override turned off the
+            // Terminal RFS document failures now go to a durable S3 failed document stream
+            // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
             // pod-local FailedRequests log because no durable replacement existed; we
             // can now keep the in-pod logger at WARN as a local-dev safety net. The
-            // S3 sink is enabled by providing --dlq-s3-bucket inside rfsJsonConfig, or
+            // S3 sink is enabled by providing --failed-document-stream-s3-bucket inside rfsJsonConfig, or
             // (by default) by falling back to MIGRATIONS_DEFAULT_S3_BUCKET below, which
             // resolves to the migrations-default-<account>-<stage>-<region> bucket that
             // the deployment provisions. Per-pod session id comes from the workflow.
@@ -300,20 +300,20 @@ touch /tmp/phase-output.txt
 status_json=$(console --config-file=/config/migration_services.yaml --json backfill status --deep-check)
 status=$(echo "$status_json" | jq -r '.status')
 
-dlq_loc=$(echo "$status_json" | jq -r '.dlq_location // empty')
-dlq_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
-dlq_suffix=""
-if [[ -n "$dlq_loc" ]]; then
-    if [[ -n "$dlq_count" && "$dlq_count" != "null" ]]; then
-        dlq_suffix="; DLQ: $dlq_count failed doc(s) at $dlq_loc"
+failed_document_stream_loc=$(echo "$status_json" | jq -r '.failed_document_stream_location // empty')
+failed_document_stream_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
+failed_document_stream_suffix=""
+if [[ -n "$failed_document_stream_loc" ]]; then
+    if [[ -n "$failed_document_stream_count" && "$failed_document_stream_count" != "null" ]]; then
+        failed_document_stream_suffix="; failed document stream: $failed_document_stream_count failed doc(s) at $failed_document_stream_loc"
     else
-        dlq_suffix="; DLQ location: $dlq_loc (count unavailable)"
+        failed_document_stream_suffix="; failed document stream location: $failed_document_stream_loc (count unavailable)"
     fi
 fi
 
 # Check if initializing
 if [[ "$status" == "Pending" ]]; then
-    echo "Shards are initializing$dlq_suffix" > /tmp/status-output.txt
+    echo "Shards are initializing$failed_document_stream_suffix" > /tmp/status-output.txt
 else
     eval "$(echo "$status_json" | jq -r '
       @sh "pct=\(.percentage_completed // 0)
@@ -324,7 +324,7 @@ else
       total=\(.shard_total // 0)"
     ')"
     printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d%s\\n" \
-           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" "$dlq_suffix" > /tmp/status-output.txt
+           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" "$failed_document_stream_suffix" > /tmp/status-output.txt
 fi
 
 # Check completion status - exit 0 only if complete, otherwise exit 1
@@ -545,13 +545,13 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
     )
 
 
-    .addTemplate("publishDlqSession", t => t
-        .addRequiredInput("dlqS3Prefix", typeToken<string>())
+    .addTemplate("publishFailedDocumentStreamSession", t => t
+        .addRequiredInput("failedDocumentStreamS3Prefix", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeDlqSessionConfigMap(expr.getWorkflowValue("uid"), b.inputs.dlqS3Prefix)
+                manifest: makeFailedDocumentStreamSessionConfigMap(expr.getWorkflowValue("uid"), b.inputs.failedDocumentStreamS3Prefix)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -572,9 +572,9 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("publishDlqSession", INTERNAL, "publishDlqSession", c =>
+            .addStep("publishFailedDocumentStreamSession", INTERNAL, "publishFailedDocumentStreamSession", c =>
                 c.register({
-                    dlqS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["dlqS3Prefix"], "rfs-dlq/")
+                    failedDocumentStreamS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Prefix"], "rfs-failed-document-stream/")
                 }))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({

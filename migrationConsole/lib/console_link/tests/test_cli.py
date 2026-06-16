@@ -1343,78 +1343,78 @@ def test_cli_integration_with_exception_verbose_mode(runner, mocker):
     assert exit_code == 1
 
 
-# ##################### DLQ CLI commands ###################
+# ##################### failed document stream CLI commands ###################
 #
-# These cover the dlq subgroup (location/count/list) and the related
-# additions to backfill (the new `reset` command + DLQ summary appended
-# to `backfill status`). Coverage gap was introduced by the DLQ branch.
+# These cover the failed_document_stream subgroup (location/count/list) and the related
+# additions to backfill (the new `reset` command + failed document stream summary appended
+# to `backfill status`). Coverage gap was introduced by the failed document stream branch.
 
-# Bare-minimum services file: just a target cluster is enough for the dlq
-# group, since none of the dlq commands touch the configured backfill.
+# Bare-minimum services file: just a target cluster is enough for the failed_document_stream
+# group, since none of the failed_document_stream commands touch the configured backfill.
 TARGET_ONLY_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
 
 
-def _fake_dlq_cfg(cli_module_=None):
-    """Construct a real DlqConfig (frozen dataclass) for stubbing load_config.
+def _fake_failed_document_stream_cfg(cli_module_=None):
+    """Construct a real FailedDocumentStreamConfig (frozen dataclass) for stubbing load_config.
     Going through the actual class keeps the tests honest if its shape
     changes."""
-    from console_link.middleware.dlq import DlqConfig
-    return DlqConfig(bucket="b", prefix="rfs-dlq/", session_id="sess-A", region=None)
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamConfig
+    return FailedDocumentStreamConfig(bucket="b", prefix="rfs-failed-document-stream/", session_id="sess-A", region=None)
 
 
-def test_dlq_location_prints_session_uri(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'location'],
+def test_failed_document_stream_location_prints_session_uri(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location'],
                            catch_exceptions=False)
     assert result.exit_code == 0
-    assert "s3://b/rfs-dlq/session=sess-A/" in result.output
+    assert "s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
 
 
-def test_dlq_location_passes_session_override(runner, mocker):
+def test_failed_document_stream_location_passes_session_override(runner, mocker):
     # --session is the operator's way to inspect a historical run that
     # isn't the one the ConfigMap currently points at.
-    load_mock = mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
+    load_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
     result = runner.invoke(
         cli,
-        ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'location', '--session', 'historical-1'],
+        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location', '--session', 'historical-1'],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
     load_mock.assert_called_once_with(session_override='historical-1')
 
 
-def test_dlq_location_when_not_configured_raises_click_exception(runner, mocker):
-    from console_link.middleware.dlq import DlqNotConfigured
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("no bucket"))
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'location'],
+def test_failed_document_stream_location_when_not_configured_raises_click_exception(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("no bucket"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location'],
                            catch_exceptions=False)
     # ClickException exits with code 1 and prints the message via Error: prefix.
     assert result.exit_code == 1
     assert "no bucket" in result.output
 
 
-def test_dlq_count_prints_count(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    mocker.patch.object(cli_module.dlq_, "count", return_value=7)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'count'],
+def test_failed_document_stream_count_prints_count(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "count", return_value=7)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'count'],
                            catch_exceptions=False)
     assert result.exit_code == 0
     assert "7" in result.output
 
 
-def test_dlq_count_when_not_configured(runner, mocker):
-    from console_link.middleware.dlq import DlqNotConfigured
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("no session"))
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'count'],
+def test_failed_document_stream_count_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("no session"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'count'],
                            catch_exceptions=False)
     assert result.exit_code == 1
     assert "no session" in result.output
 
 
-def test_dlq_list_text_mode_renders_tab_table(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
+def test_failed_document_stream_list_text_mode_renders_tab_table(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
     records = [
         {"timestamp": "2026-05-01T00:00:00Z", "targetIndex": "movies",
          "documentId": "doc-1", "failureClass": "NON_RETRYABLE",
@@ -1423,9 +1423,9 @@ def test_dlq_list_text_mode_renders_tab_table(runner, mocker):
         # fallback path renders '-' rather than blowing up.
         {"timestamp": "2026-05-02T00:00:00Z", "documentId": "doc-2"},
     ]
-    mocker.patch.object(cli_module.dlq_, "list_records", return_value=records)
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=records)
 
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'list'],
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
                            catch_exceptions=False)
     assert result.exit_code == 0
     # Each record on its own line, tab-separated.
@@ -1436,14 +1436,14 @@ def test_dlq_list_text_mode_renders_tab_table(runner, mocker):
     assert "doc-2\t-\t-" in result.output
 
 
-def test_dlq_list_json_mode_emits_json_array(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
+def test_failed_document_stream_list_json_mode_emits_json_array(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
     records = [{"documentId": "doc-1"}, {"documentId": "doc-2"}]
-    mocker.patch.object(cli_module.dlq_, "list_records", return_value=records)
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=records)
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(VALID_SERVICES_YAML), '--json', 'dlq', 'list'],
+        ['--config-file', str(VALID_SERVICES_YAML), '--json', 'failed-document-stream', 'list'],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
@@ -1451,23 +1451,23 @@ def test_dlq_list_json_mode_emits_json_array(runner, mocker):
     assert json.loads(result.output) == records
 
 
-def test_dlq_list_empty_shows_no_records_message(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    mocker.patch.object(cli_module.dlq_, "list_records", return_value=[])
+def test_failed_document_stream_list_empty_shows_no_records_message(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=[])
 
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'list'],
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
                            catch_exceptions=False)
     assert result.exit_code == 0
-    assert "no DLQ records" in result.output
+    assert "no failed document stream records" in result.output
 
 
-def test_dlq_list_passes_limit_through_to_middleware(runner, mocker):
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    list_mock = mocker.patch.object(cli_module.dlq_, "list_records", return_value=[])
+def test_failed_document_stream_list_passes_limit_through_to_middleware(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    list_mock = mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=[])
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'list', '--limit', '5'],
+        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list', '--limit', '5'],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
@@ -1476,40 +1476,40 @@ def test_dlq_list_passes_limit_through_to_middleware(runner, mocker):
     assert list_mock.call_args.kwargs == {"limit": 5}
 
 
-def test_dlq_list_when_not_configured(runner, mocker):
-    from console_link.middleware.dlq import DlqNotConfigured
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("nope"))
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'dlq', 'list'],
+def test_failed_document_stream_list_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nope"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
                            catch_exceptions=False)
     assert result.exit_code == 1
     assert "nope" in result.output
 
 
-# ----- backfill status: DLQ summary append --------------------------------
+# ----- backfill status: failed document stream summary append --------------------------------
 
-def test_backfill_status_appends_dlq_summary_when_configured(runner, mocker):
+def test_backfill_status_appends_failed_document_stream_summary_when_configured(runner, mocker):
     # Stub the underlying ECS lookup so we hit SUCCESS in status_backfill_cmd,
-    # then verify the DLQ tail is appended.
+    # then verify the failed document stream tail is appended.
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    mocker.patch.object(cli_module.dlq_, "safe_count", return_value=4)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=4)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
-    assert "DLQ location: s3://b/rfs-dlq/session=sess-A/" in result.output
+    assert "failed document stream location: s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
     assert "Failed document count: 4" in result.output
 
 
-def test_backfill_status_dlq_count_unavailable_renders_placeholder(runner, mocker):
+def test_backfill_status_failed_document_stream_count_unavailable_renders_placeholder(runner, mocker):
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
     # safe_count returning None means S3 was unreachable — we mustn't crash.
-    mocker.patch.object(cli_module.dlq_, "safe_count", return_value=None)
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=None)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
@@ -1518,24 +1518,24 @@ def test_backfill_status_dlq_count_unavailable_renders_placeholder(runner, mocke
     assert "Failed document count: unavailable" in result.output
 
 
-def test_backfill_status_no_dlq_section_when_not_configured(runner, mocker):
+def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
-    from console_link.middleware.dlq import DlqNotConfigured
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("nothing"))
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nothing"))
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
-    # DLQ block is intentionally absent when DLQ isn't configured.
-    assert "DLQ location:" not in result.output
+    # failed document stream block is intentionally absent when failed document stream isn't configured.
+    assert "failed document stream location:" not in result.output
     assert "Failed document count:" not in result.output
 
 
-def test_backfill_status_json_deep_check_includes_dlq_keys(runner, mocker):
-    """The --json --deep-check path goes through _augment_status_with_dlq
+def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(runner, mocker):
+    """The --json --deep-check path goes through _augment_status_with_failed_document_stream
     rather than the trailing click.echo block."""
     mocked_status = {
         "status": "Completed",
@@ -1550,8 +1550,8 @@ def test_backfill_status_json_deep_check_includes_dlq_keys(runner, mocker):
     }
     mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
                         return_value=cli_module.BackfillOverallStatus(**mocked_status))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    mocker.patch.object(cli_module.dlq_, "safe_count", return_value=2)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=2)
 
     result = runner.invoke(
         cli,
@@ -1561,19 +1561,19 @@ def test_backfill_status_json_deep_check_includes_dlq_keys(runner, mocker):
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["dlq_location"] == "s3://b/rfs-dlq/session=sess-A/"
+    assert payload["failed_document_stream_location"] == "s3://b/rfs-failed-document-stream/session=sess-A/"
     assert payload["failed_document_count"] == 2
 
 
-def test_backfill_status_json_deep_check_omits_dlq_keys_when_not_configured(runner, mocker):
-    from console_link.middleware.dlq import DlqNotConfigured
+def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
     mocked_status = cli_module.BackfillOverallStatus(
         status=cli_module.StepStateWithPause.PENDING, percentage_completed=0.0,
     )
     mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
                         return_value=mocked_status)
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("missing"))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("missing"))
 
     result = runner.invoke(
         cli,
@@ -1583,19 +1583,19 @@ def test_backfill_status_json_deep_check_omits_dlq_keys_when_not_configured(runn
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert "dlq_location" not in payload
+    assert "failed_document_stream_location" not in payload
     assert "failed_document_count" not in payload
 
 
 def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
     # When build_backfill_status raises DeepStatusNotYetAvailable, the command
-    # should emit a PENDING fallback payload (still augmented with DLQ keys
+    # should emit a PENDING fallback payload (still augmented with failed document stream keys
     # when configured).
     from console_link.cli import DeepStatusNotYetAvailable
     mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
                         side_effect=DeepStatusNotYetAvailable("not yet"))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    mocker.patch.object(cli_module.dlq_, "safe_count", return_value=0)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=0)
 
     result = runner.invoke(
         cli,
@@ -1612,12 +1612,12 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
 
 # ----- backfill reset ------------------------------------------------------
 
-def test_backfill_reset_default_preserves_dlq(runner, mocker):
+def test_backfill_reset_default_preserves_failed_document_stream(runner, mocker):
     mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
-    # Without --include-dlq, the dlq middleware should never be loaded.
-    load_cfg_mock = mocker.patch.object(cli_module.dlq_, "load_config")
-    delete_mock = mocker.patch.object(cli_module.dlq_, "delete_session")
+    # Without --include-failed-document-stream, the failed_document_stream middleware should never be loaded.
+    load_cfg_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config")
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session")
 
     result = runner.invoke(
         cli,
@@ -1627,39 +1627,39 @@ def test_backfill_reset_default_preserves_dlq(runner, mocker):
     )
     assert result.exit_code == 0
     assert "Backfill working state archived" in result.output
-    assert "DLQ records preserved" in result.output
+    assert "failed document stream records preserved" in result.output
     load_cfg_mock.assert_not_called()
     delete_mock.assert_not_called()
 
 
-def test_backfill_reset_with_include_dlq_deletes_session(runner, mocker):
+def test_backfill_reset_with_include_failed_document_stream_deletes_session(runner, mocker):
     mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    delete_mock = mocker.patch.object(cli_module.dlq_, "delete_session", return_value=3)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session", return_value=3)
 
     result = runner.invoke(
         cli,
         ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-         'backfill', 'reset', '--include-dlq', '--yes'],
+         'backfill', 'reset', '--include-failed-document-stream', '--yes'],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
-    assert "Deleted 3 DLQ object(s)" in result.output
+    assert "Deleted 3 failed document stream object(s)" in result.output
     delete_mock.assert_called_once()
 
 
-def test_backfill_reset_include_dlq_prompts_without_yes(runner, mocker):
+def test_backfill_reset_include_failed_document_stream_prompts_without_yes(runner, mocker):
     mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
-    mocker.patch.object(cli_module.dlq_, "load_config", return_value=_fake_dlq_cfg())
-    delete_mock = mocker.patch.object(cli_module.dlq_, "delete_session", return_value=0)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session", return_value=0)
 
     # Send 'n' to abort the click.confirm prompt — verifies the abort path.
     result = runner.invoke(
         cli,
         ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-         'backfill', 'reset', '--include-dlq'],
+         'backfill', 'reset', '--include-failed-document-stream'],
         input="n\n",
         catch_exceptions=False,
     )
@@ -1668,23 +1668,23 @@ def test_backfill_reset_include_dlq_prompts_without_yes(runner, mocker):
     delete_mock.assert_not_called()
 
 
-def test_backfill_reset_include_dlq_when_dlq_not_configured(runner, mocker):
-    from console_link.middleware.dlq import DlqNotConfigured
+def test_backfill_reset_include_failed_document_stream_when_failed_document_stream_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
     mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
-    mocker.patch.object(cli_module.dlq_, "load_config",
-                        side_effect=DlqNotConfigured("nothing here"))
-    delete_mock = mocker.patch.object(cli_module.dlq_, "delete_session")
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nothing here"))
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session")
 
     result = runner.invoke(
         cli,
         ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-         'backfill', 'reset', '--include-dlq', '--yes'],
+         'backfill', 'reset', '--include-failed-document-stream', '--yes'],
         catch_exceptions=False,
     )
-    # No DLQ configured ⇒ informative message, exit cleanly, no delete call.
+    # No failed document stream configured ⇒ informative message, exit cleanly, no delete call.
     assert result.exit_code == 0
-    assert "DLQ not configured" in result.output
+    assert "failed document stream not configured" in result.output
     delete_mock.assert_not_called()
 
 

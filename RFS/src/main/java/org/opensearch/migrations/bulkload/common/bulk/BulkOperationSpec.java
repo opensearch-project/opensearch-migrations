@@ -45,7 +45,7 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     private String documentPath;
 
     /**
-     * Original (pre-transformation) source document, captured at conversion time so DLQ
+     * Original (pre-transformation) source document, captured at conversion time so failed document stream
      * records can carry the source-index document rather than the transformed one. This
      * is never serialized to the bulk request wire format or exposed to the transformer;
      * it is purely an in-memory side-channel for failure reporting.
