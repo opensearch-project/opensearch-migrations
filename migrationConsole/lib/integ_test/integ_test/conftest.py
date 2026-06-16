@@ -5,6 +5,7 @@
 #   0004-0005  Multi-type index tests (union, split)
 #   0006       Benchmark backfill (OpenSearch Benchmark)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0020       GCS snapshot migration tests
 #   0021-0029  AOSS collection tests (search, time-series, vector)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
@@ -35,6 +36,7 @@ from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
+from .test_cases.gcs_snapshot_tests import *
 
 logger = logging.getLogger(__name__)
 

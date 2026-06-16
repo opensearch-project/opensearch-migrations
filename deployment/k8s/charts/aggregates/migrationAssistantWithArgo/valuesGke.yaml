@@ -24,7 +24,7 @@ charts:
       artifactRepository:
         s3: null
         gcs:
-          keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
+          keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
   fluent-bit:
     values:
       extraVolumes:
