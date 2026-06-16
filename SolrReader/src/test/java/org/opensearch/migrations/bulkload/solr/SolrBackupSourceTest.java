@@ -3,22 +3,22 @@ package org.opensearch.migrations.bulkload.solr;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
+
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import reactor.test.StepVerifier;
 
-import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
-
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 class SolrBackupSourceTest {
 
@@ -139,32 +139,56 @@ class SolrBackupSourceTest {
     }
 
     @Test
-    void throwsClassifiedFailureWhenBackupDirUnreadable() throws IOException {
-        // A backup directory that exists but cannot be listed (e.g. permissions on the downloaded
-        // backup) must surface as a classified SolrBackupReadException carrying the IOException,
-        // not an unclassified failure. Skipped where the FS/user ignores POSIX permissions (e.g.
-        // running as root), since the read would then succeed.
-        var unreadable = tempDir.resolve("unreadable");
-        Files.createDirectories(unreadable);
-        try {
-            Files.setPosixFilePermissions(unreadable, Set.of());
-        } catch (UnsupportedOperationException e) {
-            Assumptions.abort("POSIX permissions not supported on this filesystem");
-        }
-        Assumptions.assumeFalse(isListable(unreadable), "Directory still listable (likely running as root)");
+    void hasSegmentsFileSurfacesClassifiedFailureWhenListFails() throws IOException {
+        // An I/O error while listing the backup dir (via hasSegmentsFile) must surface as a classified SolrBackupReadException.
+        Files.createDirectories(tempDir.resolve("backup"));
+        var backupDir = tempDir.resolve("backup");
+        var source = new SolrBackupSource(backupDir, "test", emptySchema(), 8);
 
-        var source = new SolrBackupSource(unreadable, "test", emptySchema(), 8);
-        var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
-        assertThat(ex, instanceOf(SnapshotReadFailure.class));
-        assertThat("the underlying IOException is preserved", ex.getCause() != null, equalTo(true));
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(backupDir)).thenThrow(new IOException("simulated I/O error"));
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
+        }
     }
 
-    private static boolean isListable(Path dir) {
-        try (var stream = Files.list(dir)) {
-            stream.findAny();
-            return true;
-        } catch (IOException e) {
-            return false;
+    @Test
+    void discoverShardDirsSurfacesClassifiedFailureWhenBackupListingFails() throws IOException {
+        // An I/O error while enumerating shard subdirectories must surface as a classified SolrBackupReadException.
+        Files.createDirectories(tempDir.resolve("backup"));
+        var backupDir = tempDir.resolve("backup");
+        var source = new SolrBackupSource(backupDir, "test", emptySchema(), 8);
+
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(backupDir))
+                .thenReturn(java.util.stream.Stream.of())          // hasSegmentsFile probe: no segments
+                .thenThrow(new IOException("simulated I/O error")); // shard enumeration fails
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list backup directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    @Test
+    void findSegmentsFileSurfacesClassifiedFailureWhenListFails() throws IOException {
+        // An I/O error while listing the index dir to locate segments_N must surface as a classified SolrBackupReadException.
+        var indexDir = tempDir.resolve("idx");
+        Files.createDirectories(indexDir);
+        var partition = new SolrShardPartition("test", "shard1", indexDir);
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(indexDir)).thenThrow(new IOException("simulated I/O error"));
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, 0));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
         }
     }
 

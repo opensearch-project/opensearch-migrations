@@ -79,8 +79,7 @@ class RfsMigrateDocumentsTest {
         var args = new RfsMigrateDocuments.Args();
         args.snapshotName = "snap1";
         args.s3RepoUri = "s3://bucket/repo";
-        // A snapshot read failure surfacing wrapped the way real callers wrap it (re-thrown around
-        // the reactive pipeline). find() must locate the marker and the call must classify it.
+        // A wrapped snapshot read failure must be located and classified with the dedicated exit code.
         var wrapped = new RuntimeException("reading snapshot failed",
             new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata: index-0"));
 
