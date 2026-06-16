@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -665,26 +666,42 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
-            var snapshotReadFailure = SnapshotReadFailures.find(e);
-            if (snapshotReadFailure != null) {
+            var snapshotReadExitCode = classifySnapshotReadFailure(e, arguments);
+            if (snapshotReadExitCode.isPresent()) {
                 // A non-retriable snapshot read failure (the snapshot's repo/index/shard metadata or
-                // blob data could not be read). Surface the reason, snapshot path, and context at ERROR
-                // BEFORE exiting so it is visible in the workflow log and CloudWatch even if the pod is
-                // terminated immediately afterward. We exit explicitly (rather than rethrowing to the JVM
-                // uncaught handler) to emit a clean, labeled entry, flush the appenders, and return a
-                // deterministic exit code the workflow can branch on.
-                var repo = arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri;
-                log.atError().setCause(e)
-                    .setMessage("{}")
-                    .addArgument(SnapshotReadFailures.describe(
-                        snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
-                    .log();
+                // blob data could not be read). The labeled reason/path/context was already logged at
+                // ERROR by classifySnapshotReadFailure so it is visible in the workflow log and
+                // CloudWatch even if the pod is terminated immediately afterward. We exit explicitly
+                // (rather than rethrowing to the JVM uncaught handler) to flush the appenders and return
+                // a deterministic exit code the workflow can branch on.
                 LogManager.shutdown();
-                System.exit(SNAPSHOT_READ_FAILED_EXIT_CODE);
+                System.exit(snapshotReadExitCode.getAsInt());
             }
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    /**
+     * If {@code e} (or a wrapped cause) is a non-retriable snapshot read failure, log a labeled ERROR
+     * line naming the reason, snapshot path, and context, then return the dedicated
+     * {@link #SNAPSHOT_READ_FAILED_EXIT_CODE}; otherwise return empty so the caller rethrows. Extracted
+     * from the {@code runMigration} catch block so the classification/logging is unit-testable without
+     * forking a JVM — the caller performs the actual {@link System#exit}. Mirrors the metadata
+     * command's {@code MigratorEvaluatorBase.classifyFailure}.
+     */
+    static OptionalInt classifySnapshotReadFailure(Exception e, Args arguments) {
+        var snapshotReadFailure = SnapshotReadFailures.find(e);
+        if (snapshotReadFailure == null) {
+            return OptionalInt.empty();
+        }
+        var repo = arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri;
+        log.atError().setCause(e)
+            .setMessage("{}")
+            .addArgument(SnapshotReadFailures.describe(
+                snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
+            .log();
+        return OptionalInt.of(SNAPSHOT_READ_FAILED_EXIT_CODE);
     }
 
     private static MigrationSourceFactory buildElasticsearchSourceFactory(

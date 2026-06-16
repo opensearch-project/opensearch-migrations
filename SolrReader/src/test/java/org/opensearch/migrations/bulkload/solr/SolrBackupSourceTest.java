@@ -3,16 +3,21 @@ package org.opensearch.migrations.bulkload.solr;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import reactor.test.StepVerifier;
 
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
+
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SolrBackupSourceTest {
@@ -131,6 +136,36 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
             () -> source.listPartitions("test"));
+    }
+
+    @Test
+    void throwsClassifiedFailureWhenBackupDirUnreadable() throws IOException {
+        // A backup directory that exists but cannot be listed (e.g. permissions on the downloaded
+        // backup) must surface as a classified SolrBackupReadException carrying the IOException,
+        // not an unclassified failure. Skipped where the FS/user ignores POSIX permissions (e.g.
+        // running as root), since the read would then succeed.
+        var unreadable = tempDir.resolve("unreadable");
+        Files.createDirectories(unreadable);
+        try {
+            Files.setPosixFilePermissions(unreadable, Set.of());
+        } catch (UnsupportedOperationException e) {
+            Assumptions.abort("POSIX permissions not supported on this filesystem");
+        }
+        Assumptions.assumeFalse(isListable(unreadable), "Directory still listable (likely running as root)");
+
+        var source = new SolrBackupSource(unreadable, "test", emptySchema(), 8);
+        var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+        assertThat(ex, instanceOf(SnapshotReadFailure.class));
+        assertThat("the underlying IOException is preserved", ex.getCause() != null, equalTo(true));
+    }
+
+    private static boolean isListable(Path dir) {
+        try (var stream = Files.list(dir)) {
+            stream.findAny();
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     @Test
