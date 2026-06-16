@@ -470,8 +470,6 @@ charts:
         s3:
           insecure: false
           keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
-        gcs:
-          keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
       images:
         pullPolicy: IfNotPresent
       crds:
