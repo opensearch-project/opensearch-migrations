@@ -32,9 +32,14 @@ class WaiterInterface:
         _ready_signal = threading.Event()
         _active_process: List[subprocess.Popen] = []
         _lock = threading.Lock()  # The gatekeeper for process management
+        _wait_thread: List[Optional[threading.Thread]] = [None]
+        _generation = [0]
+        _stop_signal = threading.Event()
 
         def cleanup_subprocess():
             """Kill kubectl processes safely using the lock."""
+            _running.clear()
+            _stop_signal.set()
             with _lock:
                 for p in _active_process:
                     if p.poll() is None:
@@ -46,10 +51,18 @@ class WaiterInterface:
                             p.kill()
                 _active_process.clear()
 
+        def reset():
+            _ready_signal.clear()
+            _generation[0] += 1
+            cleanup_subprocess()
+            wait_thread = _wait_thread[0]
+            if wait_thread and wait_thread is not threading.current_thread() and wait_thread.is_alive():
+                wait_thread.join(timeout=0.5)
+
         atexit.register(cleanup_subprocess)
 
-        def run_kubectl_wait_loop():
-            while _running.is_set():
+        def run_kubectl_wait_loop(thread_generation: int):
+            while _running.is_set() and _generation[0] == thread_generation:
                 cmd = [
                     "kubectl", "wait", f"workflow/{workflow_name}",
                     "--for=create", "-n", namespace, "--timeout=300s"
@@ -59,7 +72,7 @@ class WaiterInterface:
 
                 # Ensure we don't start a process if cleanup is happening (or about to)
                 with _lock:  # CRITICAL SECTION:
-                    if not _running.is_set():
+                    if not _running.is_set() or _generation[0] != thread_generation:
                         logger.debug("Spawn aborted: waiter is stopping.")
                         return
 
@@ -79,16 +92,26 @@ class WaiterInterface:
                         if proc in _active_process:
                             _active_process.remove(proc)
 
+                    if _generation[0] != thread_generation:
+                        return
+
                     if exit_code == 0:
                         logger.info(f"Kubectl wait {proc.pid} succeeded.")
                         _running.clear()
                         _ready_signal.set()
                         return
 
+                    if not _running.is_set() or _generation[0] != thread_generation:
+                        return
+
+                    if _stop_signal.wait(timeout=2):
+                        return
+
                 except Exception:
                     logger.exception("Caught exception while waiting for kubectl process")
-                    # Use event.wait for a interruptible sleep
-                    if not _running.wait(timeout=2):
+                    if not _running.is_set() or _generation[0] != thread_generation:
+                        break
+                    if _stop_signal.wait(timeout=2):
                         break
 
         def trigger():
@@ -96,13 +119,21 @@ class WaiterInterface:
                 if not _running.is_set():
                     logger.debug("Starting background wait thread.")
                     _ready_signal.clear()
+                    _stop_signal.clear()
                     _running.set()
-                    threading.Thread(target=run_kubectl_wait_loop, daemon=True, name="run_kubectl_wait_loop").start()
+                    thread_generation = _generation[0]
+                    _wait_thread[0] = threading.Thread(
+                        target=run_kubectl_wait_loop,
+                        args=(thread_generation,),
+                        daemon=True,
+                        name="run_kubectl_wait_loop",
+                    )
+                    _wait_thread[0].start()
 
         return cls(
             trigger=trigger,
             checker=lambda: _ready_signal.is_set(),
-            reset=lambda: _ready_signal.clear()
+            reset=reset
         )
 
 

@@ -15,7 +15,7 @@ cerberus = "*"
 awscli = "*"
 pydantic = "==2.12.2"
 rich = "==14.2.0"
-textual = "==7.0.0"
+textual = ">=8.2.7"
 ijson = "*"
 psutil = "*"
 
