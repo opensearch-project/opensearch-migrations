@@ -1,7 +1,10 @@
 package org.opensearch.migrations.commands;
 
+import java.util.regex.Pattern;
+
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +17,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 
 class MigrateTest {
+
+    // Matches a Java stack-trace frame, e.g. "at com.foo.Bar.method(Bar.java:42)".
+    private static final Pattern JAVA_STACK_FRAME = Pattern.compile("\\bat [\\w.$]+\\([^)]*:\\d+\\)");
 
     @Test
     void migrate_failsInvalidParameters() {
@@ -39,6 +45,50 @@ class MigrateTest {
 
         assertThat(result.getExitCode(), equalTo(Migrate.UNEXPECTED_FAILURE_CODE));
         assertThat(result.getErrorMessage(), containsString("Unexpected failure: No host was found"));
+    }
+
+    @Test
+    void migrate_classifiesSnapshotReadFailureWithDedicatedExitCode() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration();
+
+        var migrate = spy(meta.migrate(args));
+        // A snapshot read failure surfacing during source/snapshot setup, wrapped the way real
+        // callers wrap it (e.g. inside a metadata-read wrapper).
+        var readFailure = new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata: index-0");
+        doThrow(new RuntimeException("reading snapshot failed", readFailure))
+            .when(migrate).createClusters();
+
+        var result = migrate.execute(context);
+
+        assertThat(result.getExitCode(), equalTo(MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE));
+        assertThat(result.getErrorMessage(), containsString("Non-retriable snapshot read failure"));
+        assertThat(result.getErrorMessage(), containsString("corrupt repo metadata: index-0"));
+        assertThat(result.getErrorMessage(), containsString("snap1"));
+        assertThat("error should be a labeled line, not a raw stack trace",
+            JAVA_STACK_FRAME.matcher(result.getErrorMessage()).find(), equalTo(false));
+    }
+
+    @Test
+    void migrate_snapshotReadFailureNamesFilesystemRepo() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap2";
+        args.fileSystemRepoPath = "/backups/repo";
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration();
+
+        var migrate = spy(meta.migrate(args));
+        doThrow(new RuntimeException("read failed",
+            new SnapshotRepo.CannotParseRepoFile("bad index-0"))).when(migrate).createClusters();
+
+        var result = migrate.execute(context);
+
+        assertThat(result.getExitCode(), equalTo(MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE));
+        assertThat(result.getErrorMessage(), containsString("repo=/backups/repo"));
+        assertThat("error should be a labeled line, not a raw stack trace",
+            JAVA_STACK_FRAME.matcher(result.getErrorMessage()).find(), equalTo(false));
     }
 
     @Test
