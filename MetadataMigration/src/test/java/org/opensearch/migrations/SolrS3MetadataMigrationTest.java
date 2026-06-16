@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -10,6 +9,9 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
+import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer.Mode;
+import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer.SolrVersion;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -23,14 +25,11 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.utility.MountableFile;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -44,9 +43,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
  *
  * <p>Parameterized over Solr version × deployment mode:
  * <ul>
- *   <li>Versions: {@code 8.11.4} and {@code 9.8.1}. (Solr's S3BackupRepository, SIP-12,
- *       only exists in 8.10+, so 6/7 cannot back up to S3 — those are covered by the
- *       filesystem-based {@code SolrMetadataMigrationTest}.)</li>
+ *   <li>Versions: {@code 8.10.1} (the earliest S3-capable Solr — S3BackupRepository / SIP-12
+ *       landed in 8.10), {@code 8.11.4}, and {@code 9.8.1}. Solr 6/7 cannot back up to S3, so
+ *       they are covered by the filesystem-based {@code SolrMetadataMigrationTest}.)</li>
  *   <li>{@link Mode#CLOUD} — SolrCloud (Collections API BACKUP). Config comes from
  *       ZooKeeper and Solr writes it into {@code zk_backup_N/configs/}.</li>
  *   <li>{@link Mode#STANDALONE} — single-node Solr (replication-handler backup). The
@@ -54,6 +53,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
  *       each core's {@code managed-schema} via the raw-file API and uploads it to the
  *       {@code zk_backup_0/configs/<core>/managed-schema.xml} key the reader expects.</li>
  * </ul>
+ *
+ * <p>Container construction (version/mode-specific launch, S3 wiring, contrib-vs-module layout)
+ * is encapsulated in the shared {@link SolrClusterContainer#withS3Backup} fixture.
  *
  * <p>Per-version S3 module wiring differs: Solr 8 ships the S3 repository under
  * {@code /opt/solr/contrib/s3-repository/lib} (the main jar lives in {@code dist/} and is
@@ -89,12 +91,6 @@ class SolrS3MetadataMigrationTest {
     private static final String REGION = "us-east-1";
     private static final String LOCALSTACK_ALIAS = "localstack";
     private static final String COLLECTION = "s3_meta_coll";
-
-    /** Which Solr deployment mode a test run targets. */
-    enum Mode {
-        CLOUD,
-        STANDALONE
-    }
 
     static {
         // LocalStack accepts any non-empty credentials, but production code uses
@@ -132,12 +128,12 @@ class SolrS3MetadataMigrationTest {
     static Stream<Arguments> versionsAndModes() {
         return Stream.of(
             // 8.10.1 is the earliest S3-capable Solr (S3BackupRepository / SIP-12 landed in 8.10).
-            Arguments.of("8.10.1", Mode.CLOUD),
-            Arguments.of("8.10.1", Mode.STANDALONE),
-            Arguments.of("8.11.4", Mode.CLOUD),
-            Arguments.of("8.11.4", Mode.STANDALONE),
-            Arguments.of("9.8.1", Mode.CLOUD),
-            Arguments.of("9.8.1", Mode.STANDALONE)
+            Arguments.of(SolrClusterContainer.SOLR_8_10, Mode.CLOUD),
+            Arguments.of(SolrClusterContainer.SOLR_8_10, Mode.STANDALONE),
+            Arguments.of(SolrClusterContainer.SOLR_8, Mode.CLOUD),
+            Arguments.of(SolrClusterContainer.SOLR_8, Mode.STANDALONE),
+            Arguments.of(SolrClusterContainer.SOLR_9, Mode.CLOUD),
+            Arguments.of(SolrClusterContainer.SOLR_9, Mode.STANDALONE)
         );
     }
 
@@ -148,20 +144,24 @@ class SolrS3MetadataMigrationTest {
     @ParameterizedTest(name = "Solr {0} {1} → S3 → MetadataMigration → OpenSearch")
     @MethodSource("versionsAndModes")
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
-    void solrS3BackupProducesCorrectOpenSearchMappings(String solrVersion, Mode mode) throws Exception {
+    void solrS3BackupProducesCorrectOpenSearchMappings(SolrVersion solrVersion, Mode mode) throws Exception {
         try (
-            var solr = startSolr(solrVersion, mode);
+            var solr = SolrClusterContainer.withS3Backup(
+                solrVersion, mode, NETWORK, COLLECTION, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
             var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
-            CompletableFuture.runAsync(target::start).join();
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(solr::start),
+                CompletableFuture.runAsync(target::start)
+            ).join();
             var targetOps = new ClusterOperations(target);
 
-            var solrUrl = "http://" + solr.getHost() + ":" + solr.getMappedPort(8983);
+            var solrUrl = solr.getSolrUrl();
             createCollectionWithSchema(solr, mode);
             indexOneDoc(solr);
 
             // Unique S3 prefix per case so cases never collide in the shared bucket.
-            String tag = solrVersion.replace('.', '_') + "_" + mode.name().toLowerCase();
+            String tag = solrVersion.tag().replace('.', '_') + "_" + mode.name().toLowerCase();
             String snapshotName = "meta_s3_snap_" + tag;
             String subpath = "v-" + tag;
             String s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
@@ -189,7 +189,7 @@ class SolrS3MetadataMigrationTest {
             Files.createDirectories(s3LocalDir);
 
             var metaArgs = new MigrateOrEvaluateArgs();
-            metaArgs.sourceVersion = Version.fromString("SOLR " + solrVersion);
+            metaArgs.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
             metaArgs.snapshotName = snapshotName;
             metaArgs.s3RepoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
@@ -230,15 +230,19 @@ class SolrS3MetadataMigrationTest {
     @Test
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void incrementalCloudBackupReadsLatestZkBackupRevision() throws Exception {
-        String version = "8.11.4";
+        var version = SolrClusterContainer.SOLR_8;
         try (
-            var solr = startSolr(version, Mode.CLOUD);
+            var solr = SolrClusterContainer.withS3Backup(
+                version, Mode.CLOUD, NETWORK, COLLECTION, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
             var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
-            CompletableFuture.runAsync(target::start).join();
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(solr::start),
+                CompletableFuture.runAsync(target::start)
+            ).join();
             var targetOps = new ClusterOperations(target);
 
-            var solrUrl = "http://" + solr.getHost() + ":" + solr.getMappedPort(8983);
+            var solrUrl = solr.getSolrUrl();
             createCollectionWithSchema(solr, Mode.CLOUD);
             indexOneDoc(solr);
 
@@ -294,7 +298,7 @@ class SolrS3MetadataMigrationTest {
             Files.createDirectories(s3LocalDir);
 
             var metaArgs = new MigrateOrEvaluateArgs();
-            metaArgs.sourceVersion = Version.fromString("SOLR " + version);
+            metaArgs.sourceVersion = Version.fromString("SOLR " + version.tag());
             metaArgs.snapshotName = snapshotName;
             metaArgs.s3RepoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
@@ -320,81 +324,17 @@ class SolrS3MetadataMigrationTest {
         }
     }
 
-    // ---- container setup ----
-
-    /**
-     * Start a Solr container for the given version and mode, with the S3 backup repository
-     * wired to LocalStack. Handles the per-version module layout:
-     * <ul>
-     *   <li>Solr 8: copy the main {@code solr-s3-repository} jar from {@code dist/} into the
-     *       contrib lib dir referenced by {@code solr.xml}'s {@code sharedLib}.</li>
-     *   <li>Solr 9: enable the {@code s3-repository} module via {@code SOLR_MODULES} and point
-     *       {@code sharedLib} at the module lib dir.</li>
-     * </ul>
-     * Cloud mode starts SolrCloud ({@code -c}); standalone precreates the core and starts a
-     * single node. Both run as root with {@code -force} (testcontainers default user).
-     */
-    @SuppressWarnings("resource")
-    private static GenericContainer<?> startSolr(String version, Mode mode) {
-        boolean solr9 = version.startsWith("9");
-        String sharedLib = solr9
-            ? "/opt/solr/modules/s3-repository/lib"
-            : "/opt/solr/contrib/s3-repository/lib";
-
-        var solrOpts = "-DS3_BUCKET_NAME=" + BUCKET_NAME
-            + " -DS3_REGION=" + REGION
-            + " -DS3_ENDPOINT=http://" + LOCALSTACK_ALIAS + ":4566"
-            + " -DsharedLib=" + sharedLib;
-
-        // Solr 8 needs the main s3-repository jar copied into the contrib lib; Solr 9's module
-        // lib already contains everything, so its copy step is a harmless no-op (|| true).
-        String enableS3 = solr9
-            ? "true"
-            : "cp /opt/solr/dist/solr-s3-repository-*.jar " + sharedLib + "/";
-
-        String startCmd = mode == Mode.CLOUD
-            ? "exec solr-foreground -c -force"
-            : "precreate-core " + COLLECTION + " && exec solr-foreground -force";
-
-        var container = new GenericContainer<>(DockerImageName.parse("solr:" + version))
-            .withNetwork(NETWORK)
-            .withExposedPorts(8983)
-            .withCopyFileToContainer(
-                MountableFile.forClasspathResource("solr-s3-backup.xml"),
-                "/var/solr/data/solr.xml")
-            .withEnv("AWS_ACCESS_KEY_ID", "test")
-            .withEnv("AWS_SECRET_ACCESS_KEY", "test")
-            .withEnv("SOLR_OPTS", solrOpts)
-            .withEnv("SOLR_SECURITY_MANAGER_ENABLED", "false")
-            .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
-            .withCommand("bash", "-c",
-                "init-var-solr && " + enableS3 + " && " + startCmd);
-
-        if (solr9) {
-            container.withEnv("SOLR_MODULES", "s3-repository");
-        }
-
-        var wait = mode == Mode.CLOUD
-            ? Wait.forHttp("/solr/admin/collections?action=LIST&wt=json")
-                .forPort(8983).forStatusCode(200)
-            : Wait.forHttp("/solr/admin/cores?action=STATUS&indexInfo=false&wt=json")
-                .forPort(8983).forStatusCode(200)
-                .forResponsePredicate(body -> body.contains("\"" + COLLECTION + "\""));
-        container.waitingFor(wait.withStartupTimeout(Duration.ofMinutes(3)));
-
-        log.info("Starting Solr {} ({})", version, mode);
-        container.start();
-        return container;
-    }
-
     // ---- Solr data setup ----
+    //
+    // Container construction lives in the shared SolrClusterContainer fixture
+    // (SolrClusterContainer.withS3Backup); these helpers just drive Solr's REST API.
 
     private static String localStackEndpoint() {
         return LOCAL_STACK.getEndpoint().toString();
     }
 
     /** Create a SolrCloud collection (standalone core is precreated at startup), then add fields. */
-    private void createCollectionWithSchema(GenericContainer<?> solr, Mode mode) throws Exception {
+    private void createCollectionWithSchema(SolrClusterContainer solr, Mode mode) throws Exception {
         if (mode == Mode.CLOUD) {
             solr.execInContainer("curl", "-sf",
                 "http://localhost:8983/solr/admin/collections?action=CREATE"
@@ -412,20 +352,20 @@ class SolrS3MetadataMigrationTest {
         log.info("[{}] Created '{}' with schema fields", mode, COLLECTION);
     }
 
-    private void addField(GenericContainer<?> solr, String fieldName, String type) throws Exception {
+    private void addField(SolrClusterContainer solr, String fieldName, String type) throws Exception {
         solr.execInContainer("curl", "-sf",
             "http://localhost:8983/solr/" + COLLECTION + "/schema",
             "-H", "Content-Type: application/json",
             "-d", "{\"add-field\":{\"name\":\"" + fieldName + "\",\"type\":\"" + type + "\",\"stored\":true}}");
     }
 
-    private void indexOneDoc(GenericContainer<?> solr) throws Exception {
+    private void indexOneDoc(SolrClusterContainer solr) throws Exception {
         indexDoc(solr, "1");
         log.info("Indexed 1 doc into '{}'", COLLECTION);
     }
 
     /** Index (and commit) a single doc with the given id, so the index changes between backups. */
-    private void indexDoc(GenericContainer<?> solr, String id) throws Exception {
+    private void indexDoc(SolrClusterContainer solr, String id) throws Exception {
         solr.execInContainer("curl", "-sf",
             "http://localhost:8983/solr/" + COLLECTION + "/update?commit=true",
             "-H", "Content-Type: application/json",
@@ -435,7 +375,7 @@ class SolrS3MetadataMigrationTest {
     }
 
     /** Poll a Collections API async request id until it completes (or fail after maxWaitSeconds). */
-    private void waitForAsync(GenericContainer<?> solr, String asyncId, int maxWaitSeconds) throws Exception {
+    private void waitForAsync(SolrClusterContainer solr, String asyncId, int maxWaitSeconds) throws Exception {
         for (int i = 0; i < maxWaitSeconds; i++) {
             var resp = solr.execInContainer("curl", "-sf",
                 "http://localhost:8983/solr/admin/collections?action=REQUESTSTATUS&requestid="
