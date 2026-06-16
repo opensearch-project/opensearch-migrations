@@ -29,6 +29,7 @@ import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -339,11 +340,19 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--otelCollectorEndpoint", "--otel-collector-endpoint" },
+            names = { "--otelTraceCollectorEndpoint", "--otel-trace-collector-endpoint" },
             arity = 1,
-            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-                + "forwarded. If no value is provided, metrics will not be forwarded.")
-        String otelCollectorEndpoint;
+            description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+                "Omit this option to disable trace export.")
+        String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--otelMetricsCollectorEndpoint", "--otel-metrics-collector-endpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+                "Omit this option to disable metric export.")
+        String otelMetricsCollectorEndpoint;
 
         @Parameter(
             required = false,
@@ -567,7 +576,10 @@ public class TrafficReplayer {
 
     private static void runDumpMode(Parameters params) throws Exception {
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(null, "dump", ProcessHelpers.getNodeInstanceName()),
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                OtelCollectorEndpoints.empty(),
+                "dump",
+                ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
@@ -594,8 +606,12 @@ public class TrafficReplayer {
         }
     }
 
-    private static void runReplayMode(Parameters params) throws Exception {
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+    /**
+     * Parse and validate the replay target URI and timing params. On invalid input this prints the
+     * error and calls System.exit (matching the prior inline behavior); it returns null only on the
+     * exit paths so the caller can stop without duplicating the exit handling.
+     */
+    private static URI parseAndValidateReplayTarget(Parameters params) {
         URI uri;
         try {
             uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
@@ -605,7 +621,7 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
-            return;
+            return null;
         }
         if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
@@ -619,6 +635,15 @@ public class TrafficReplayer {
             System.err.println(msg);
             log.error(msg);
             System.exit(4);
+            return null;
+        }
+        return uri;
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+        URI uri = parseAndValidateReplayTarget(params);
+        if (uri == null) {
             return;
         }
         var globalContextTracker = new ActiveContextTracker();
@@ -629,13 +654,15 @@ public class TrafficReplayer {
         );
         var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
                 "replay",
                 ProcessHelpers.getNodeInstanceName()),
             contextTrackers
         );
 
         ActiveContextMonitor activeContextMonitor = null;
+        ThreadLocalTupleWriter tupleWriter = null;
         try (
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
@@ -725,7 +752,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(
+            tupleWriter = createS3TupleWriterIfConfigured(
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
@@ -753,6 +780,9 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
+            if (tupleWriter != null) {
+                tupleWriter.close();
+            }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()

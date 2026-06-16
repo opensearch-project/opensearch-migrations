@@ -196,7 +196,15 @@ function makeDeployKafkaClusterKraftManifest(args: {
         },
         spec: {
             kafka: makeDirectTypeProxy(expr.deserializeRecord(args.kafkaSpec)),
-            entityOperator: {topicOperator: {}, userOperator: {}}
+            // Reserve CPU/memory on both operator sidecars. Empty {} leaves them with no
+            // resource requests (BestEffort), which lets the scheduler pack them onto a
+            // saturated node where the JVM cold-start loses the liveness-probe race and
+            // crash-loops — wedging the migration since the user-operator owns the KafkaUser
+            // SCRAM secret. See DEFAULT_RESOURCES.ENTITY_OPERATOR.
+            entityOperator: {
+                topicOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR},
+                userOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR}
+            }
         }
     };
 }

@@ -50,6 +50,57 @@ Describe a particular Consumer Group
 ./kafka-consumer-groups.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --timeout 100000 --describe --group logging-group-default
 ```
 
+#### `console kafka describe-consumer-group` (with TIME LAG section)
+
+The migration console wraps the native describe with a per-partition
+**TIME LAG** section, showing how stale each partition's consumer position is
+in wall-clock time — useful when message-count lag (`LAG = LOG-END-OFFSET -
+CURRENT-OFFSET`) doesn't tell you whether the group is 50ms or 50min behind.
+
+Invocation (inside the migration-console pod, EKS or local):
+
+```shell
+console kafka describe-consumer-group logging-group-default
+```
+
+The native `kafka-consumer-groups.sh --describe` table is preserved verbatim,
+followed by a section like:
+
+```
+TOPIC  PARTITION  PROBED-OFFSET  TIMESTAMP (UTC)         TIME-LAG  NOTE
+t1     0          100            2024-01-02T03:04:05Z    8m12s
+t1     1          199            2024-01-02T03:11:50Z    27s       caught up; showing last record
+t1     2          -              -                       -         partition empty
+```
+
+Row semantics:
+
+- **Active-lag** partitions probe `CURRENT-OFFSET` (the next record the group
+  is about to consume) so `TIME-LAG` is the age of the oldest unprocessed
+  record.
+- **Caught-up** partitions (`LAG == 0`) probe `LOG-END-OFFSET - 1` so the row
+  still surfaces the age of the last produced record; annotated `caught up;
+  showing last record`.
+- **Empty** partitions (`LOG-END-OFFSET == 0`) skip the probe and render
+  `partition empty`.
+- Records without a timestamp (`timestamp.type=NoTimestampType`) surface as
+  `record has no timestamp`; per-partition probe failures (timeout, parse
+  error, missing tool) render `-` in the affected columns and never abort the
+  rest of the table.
+
+If the consumer group has not yet committed any offsets (e.g. the replayer
+joined the group but auto-commit hasn't fired), the section falls back to:
+
+```
+PARTITION TIME LAG
+  (no committed offsets parsed from the describe output above; nothing to probe)
+```
+
+In the EKS CDC integ tests, `log_kafka_consumer_group_state` polls briefly
+for the first auto-commit before invoking describe, so the labelled
+`[replay-start]` / `[replay-end]` snapshots in the test log capture the
+full time-lag table rather than the empty-group fallback.
+
 Delete a particular Consumer Group (Requires Consumer Group to be empty to perform)
 ```shell
 ./kafka-consumer-groups.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --timeout 100000 --delete --group logging-group-default
@@ -59,4 +110,37 @@ Reset a Consumer Group offset to latest (Requires Consumer Group to not be activ
 More options for different types of reset [here](https://docs.cloudera.com/runtime/7.2.8/kafka-managing/topics/kafka-manage-cli-cgroups.html#pnavId2)
 ```shell
 ./kafka-consumer-groups.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --timeout 100000 --reset-offsets --to-latest --topic logging-traffic-topic --group logging-group-default --execute
+```
+
+### Importing Captured Traffic from S3
+
+Streams a `kafkaExport.sh`-produced archive (gzipped, base64-encoded TrafficStream
+records) onto a Kafka topic. The export and import are symmetric — every record
+loaded matches the bytes of the original capture, so the replayer reads it the
+same way as live-captured traffic.
+
+The topic must already exist (the import does not create it).
+
+Using the `kafkaImport.sh` helper (recommended — handles MSK/EKS auth detection):
+```shell
+/root/kafka-tools/kafkaImport.sh \
+    --topic "$TOPIC" \
+    --s3-uri "s3://your-bucket/kafka_export_from_migration_console_<ts>.proto.gz"
+```
+
+Or the underlying recipe directly:
+```shell
+aws s3 cp "$S3_URI" - \
+  | gunzip \
+  | /root/kafkaUtils/bin/kafkaUtils \
+      --stdin \
+      --topicName "$TOPIC" \
+      --kafkaBrokers "$MIGRATION_KAFKA_BROKER_ENDPOINTS"
+```
+
+Importing from a local file instead of S3:
+```shell
+/root/kafka-tools/kafkaImport.sh \
+    --topic "$TOPIC" \
+    --input-file /shared-logs-output/kafka_export_from_migration_console_<ts>.proto.gz
 ```

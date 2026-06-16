@@ -261,7 +261,8 @@ Downstream dependencies that consume the proxy's checksum:
 | `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) | ❌ | ❌ |
 | `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A | ❌ | ❌ |
 | `spec.loggingConfigurationOverrideConfigMap` | Safe       | Logging config swap | Yes (rolling) | ❌ | ❌ |
-| `spec.otelCollectorEndpoint` | Safe       | Observability config | Yes (rolling) | ❌ | ❌ |
+| `spec.otelTraceCollectorEndpoint` | Safe       | Trace export config | Yes (rolling) | ❌ | ❌ |
+| `spec.otelMetricsCollectorEndpoint` | Safe       | Metrics export config | Yes (rolling) | ❌ | ❌ |
 | `spec.setHeader` | Gated      | Header injection tweaks | Yes (rolling) | ✅ | ✅ |
 | `spec.destinationConnectionPoolSize` | Safe       | Connection tuning | Yes (rolling) | ❌ | ❌ |
 | `spec.destinationConnectionPoolTimeout` | Safe       | Connection tuning | Yes (rolling) | ❌ | ❌ |
@@ -295,7 +296,8 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | `spec.resources` | Safe | Resource limits/requests | Yes (rolling) | ❌ |
 | `spec.jvmArgs` | Safe | JVM tuning | Yes (rolling) | ❌ |
 | `spec.loggingConfigurationOverrideConfigMap` | Safe | Logging config swap | Yes (rolling) | ❌ |
-| `spec.otelCollectorEndpoint` | Safe | Observability config | Yes (rolling) | ❌ |
+| `spec.otelTraceCollectorEndpoint` | Safe | Trace export config | Yes (rolling) | ❌ |
+| `spec.otelMetricsCollectorEndpoint` | Safe | Metrics export config | Yes (rolling) | ❌ |
 | `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
 | `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
 | `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
@@ -349,7 +351,8 @@ in-progress, they would need to delete the existing snapshot and redrive.
 | `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | | ❌ |
 | `spec.documentBackfillConfig.maxConnections` | Gated      | | ❌ |
 | `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.otelCollectorEndpoint` | Safe       | | ❌ |
+| `spec.documentBackfillConfig.otelTraceCollectorEndpoint` | Safe       | Trace export config | ❌ |
+| `spec.documentBackfillConfig.otelMetricsCollectorEndpoint` | Safe       | Metrics export config | ❌ |
 | `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | | ❌ |
 | `spec.documentBackfillConfig.jvmArgs` |  Safe          | | ❌ |
 | `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | | ❌ |

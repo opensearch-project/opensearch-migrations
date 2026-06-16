@@ -64,7 +64,7 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void periodicFlushUploadsPendingTuple() throws Exception {
+    void selfScheduledFlushUploadsPendingTupleOnceMaxAgeReached() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
         var upload = new CompletableFuture<PutObjectResponse>();
         var putCallCount = new AtomicInteger();
@@ -75,13 +75,13 @@ class S3TupleSinkTest {
                 return upload;
             });
 
-        try (var sink = makeSink(s3Client, 100)) {
+        // Short max-age: the sink's own scheduled worker should rotate the trailing batch
+        // WITHOUT any further accept() calls or external flush — this is the stall fix.
+        try (var sink = makeSink(s3Client, 100, Duration.ofMillis(50))) {
             var future = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), future);
-            assertFalse(future.isDone(), "Tuple future should wait until the batch is uploaded");
 
-            sink.periodicFlush();
-            assertEquals(1, putCallCount.get(), "Periodic flush should upload the pending tuple batch");
+            waitForPutCalls(putCallCount, 1);
             assertFalse(future.isDone(), "Tuple future should still wait for the upload result");
 
             upload.complete(PutObjectResponse.builder().build());
@@ -90,7 +90,24 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void closeUploadsPendingTuple() throws Exception {
+    void doesNotUploadBeforeMaxAgeWhileQuiet() throws Exception {
+        var s3Client = mock(S3AsyncClient.class);
+
+        // Long max-age: a quiet sink must NOT upload a tiny object on its scheduled ticks.
+        try (var sink = makeSink(s3Client, 100, Duration.ofMinutes(10))) {
+            var future = new CompletableFuture<Void>();
+            sink.accept(makeTuple("conn1.0"), future);
+
+            // Give the scheduled worker several opportunities to (incorrectly) flush.
+            Thread.sleep(200);
+
+            verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class));
+            assertFalse(future.isDone(), "Tuple future stays pending until size/count/age rotation");
+        }
+    }
+
+    @Test
+    void closeUploadsPendingTupleAndAwaitsUpload() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
         var upload = new CompletableFuture<PutObjectResponse>();
         var putCallCount = new AtomicInteger();
@@ -102,19 +119,19 @@ class S3TupleSinkTest {
             });
 
         var sink = makeSink(s3Client, 100);
-        try {
-            var future = new CompletableFuture<Void>();
-            sink.accept(makeTuple("conn1.0"), future);
+        var future = new CompletableFuture<Void>();
+        sink.accept(makeTuple("conn1.0"), future);
 
-            sink.close();
-            assertEquals(1, putCallCount.get(), "Close should upload pending tuples before releasing them");
-            assertFalse(future.isDone(), "Tuple future should still wait for the upload result");
+        // Complete the upload shortly after close() starts waiting for it
+        var closer = new Thread(() -> sink.close());
+        closer.start();
+        waitForPutCalls(putCallCount, 1);
+        upload.complete(PutObjectResponse.builder().build());
+        closer.join(5000);
+        assertFalse(closer.isAlive(), "close() should return after uploads complete");
 
-            upload.complete(PutObjectResponse.builder().build());
-            future.get(1, TimeUnit.SECONDS);
-        } finally {
-            sink.close();
-        }
+        assertTrue(future.isDone(), "Tuple future should be done after close() awaits upload");
+        future.get(1, TimeUnit.SECONDS);
     }
 
     @Test
@@ -158,6 +175,10 @@ class S3TupleSinkTest {
     }
 
     private S3TupleSink makeSink(S3AsyncClient s3Client, int rotateAfterTuples) {
+        return makeSink(s3Client, rotateAfterTuples, Duration.ofMinutes(10));
+    }
+
+    private S3TupleSink makeSink(S3AsyncClient s3Client, int rotateAfterTuples, Duration rotateAfterAge) {
         return new S3TupleSink(
             s3Client,
             "bucket",
@@ -165,7 +186,7 @@ class S3TupleSinkTest {
             "replayer-1",
             0,
             1024 * 1024,
-            Duration.ofMinutes(10),
+            rotateAfterAge,
             rotateAfterTuples,
             Duration.ofMillis(10)
         );

@@ -27,8 +27,12 @@ done
 
 mkdir -p "$(dirname "$OUTPUT")"
 
-# Collect @source paths from the bootstrap script
-mapfile -t SOURCE_PATHS < <(grep '# @source ' "$BOOTSTRAP" | sed 's/.*# @source //')
+# Collect @source paths from the bootstrap script. Avoid mapfile so this works
+# with the Bash 3.x shipped on macOS.
+SOURCE_PATHS=()
+while IFS= read -r rel_path; do
+  SOURCE_PATHS+=("$rel_path")
+done < <(grep '# @source ' "$BOOTSTRAP" | sed 's/.*# @source //')
 
 # Validate all source files exist
 for rel_path in "${SOURCE_PATHS[@]}"; do
@@ -41,7 +45,7 @@ extract_body() {
   local file="$1"
   # Remove shebang, standalone set lines, and everything from the main guard to EOF
   sed -E \
-    -e '1{/^#!/d}' \
+    -e '1{/^#!/d;}' \
     -e '/^set -[a-z ]+$/d' \
     -e '/^if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then$/,$ d' \
     "$file"
@@ -74,7 +78,7 @@ extract_body() {
 
   # Emit the main bootstrap script, removing the source block
   sed -E \
-    -e '1{/^#!/d}' \
+    -e '1{/^#!/d;}' \
     -e '/^# --- source helper scripts/,/^fi$/d' \
     "$BOOTSTRAP"
 

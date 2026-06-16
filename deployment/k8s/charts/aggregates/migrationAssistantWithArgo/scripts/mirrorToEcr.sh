@@ -5,13 +5,62 @@
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
 #
-# Can be run standalone or sourced by aws-bootstrap.sh (which calls
+# Can be run standalone or sourced by the migration-assistant CLI (which calls
 # mirror_images_to_ecr and mirror_charts_to_ecr directly).
 #
 # Usage: ./mirrorToEcr.sh <ecr-host> [--region <region>]
 # Example: ./mirrorToEcr.sh 123456789012.dkr.ecr.us-east-2.amazonaws.com
 # =============================================================================
 set -euo pipefail
+
+default_private_ecr_manifest() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  echo "$(cd "$script_dir/../infra/mirror" && pwd)/private-ecr-manifest.yaml"
+}
+
+manifest_section() {
+  local manifest="$1" section="$2"
+  awk -v section="$section" '
+    /^[A-Za-z0-9_-]+:[[:space:]]*$/ {
+      if (in_section) {
+        exit
+      }
+      in_section = ($1 == section ":")
+      next
+    }
+    in_section {
+      original = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+      if ($0 == original) {
+        next
+      }
+      sub(/[[:space:]]*#.*$/, "", $0)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 == "") {
+        next
+      }
+      if ($0 ~ /^".*"$/ || $0 ~ /^'\''.*'\''$/) {
+        $0 = substr($0, 2, length($0) - 2)
+      }
+      print
+    }
+  ' "$manifest"
+}
+
+load_private_ecr_manifest() {
+  local manifest="${1:-}"
+  if [ -z "$manifest" ]; then
+    manifest="$(default_private_ecr_manifest)"
+  fi
+  [ -f "$manifest" ] || { echo "Missing ECR mirror manifest: $manifest" >&2; return 1; }
+
+  CHARTS="$(manifest_section "$manifest" charts)"
+  IMAGES="$(manifest_section "$manifest" images)"
+
+  [ -n "$CHARTS" ] || { echo "No charts found in ECR mirror manifest: $manifest" >&2; return 1; }
+  [ -n "$IMAGES" ] || { echo "No images found in ECR mirror manifest: $manifest" >&2; return 1; }
+}
 
 # --- install crane if missing ---
 ensure_crane() {
@@ -213,23 +262,15 @@ mirror_charts_to_ecr() {
 # --- CLI entrypoint (only when run directly, not sourced) ---
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  . "$SCRIPT_DIR/privateEcrManifest.sh"
 
   ECR_HOST="${1:-}"
   shift || true
   REGION="${AWS_CFN_REGION:-us-east-1}"
+  MANIFEST_FILE=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --region) REGION="$2"; shift 2 ;;
-      --manifest)
-        . "$2"
-        [ -n "${TEST_CHARTS:-}" ] && CHARTS="$CHARTS
-$TEST_CHARTS"
-        [ -n "${TEST_IMAGES:-}" ] && IMAGES="$IMAGES
-$TEST_IMAGES"
-        [ -n "${BUILD_IMAGES:-}" ] && IMAGES="$IMAGES
-$BUILD_IMAGES"
-        shift 2 ;;
+      --manifest) MANIFEST_FILE="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -239,6 +280,7 @@ $BUILD_IMAGES"
     exit 1
   fi
 
+  load_private_ecr_manifest "${MANIFEST_FILE:-}"
   mirror_images_to_ecr "$ECR_HOST" "$REGION" "$IMAGES"
   mirror_charts_to_ecr "$ECR_HOST" "$REGION" "$CHARTS"
 fi

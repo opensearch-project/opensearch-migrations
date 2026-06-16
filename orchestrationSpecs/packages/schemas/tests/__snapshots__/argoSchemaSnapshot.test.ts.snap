@@ -308,6 +308,35 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": "",
                                             "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                           },
+                                          "otelTraceCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                          },
+                                          "otelMetricsCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "default": "http://otel-collector:4317",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                          },
                                           "indexAllowlist": {
                                             "type": "array",
                                             "items": {
@@ -586,9 +615,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "setHeader": {
                       "type": "array",
@@ -917,18 +971,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "sslTrustCertFile": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "sslTrustCertPem": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Inline PEM from tls.clientAuth.trustedClientCaPem, passed to the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "sslTrustCertPemEnvVar": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "requireClientAuth": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "fileSourceVolumes": {
                       "type": "array",
@@ -1065,6 +1123,155 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "default": []
           },
+          "s3TrafficLoaders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "sourceLabel": {
+                  "type": "string"
+                },
+                "s3Uri": {
+                  "type": "string"
+                },
+                "awsRegion": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string",
+                  "default": ""
+                },
+                "kafkaClusterName": {
+                  "type": "string"
+                },
+                "kafkaConfig": {
+                  "type": "object",
+                  "properties": {
+                    "enableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "kafkaConnection": {
+                      "type": "string",
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                    },
+                    "kafkaTopic": {
+                      "type": "string",
+                      "default": "",
+                      "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
+                    },
+                    "managedByWorkflow": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "listenerName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "authType": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "scram-sha-512"
+                      ],
+                      "default": "none"
+                    },
+                    "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "caSecretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "properties": {
+                        "partitions": {
+                          "type": "number"
+                        },
+                        "replicas": {
+                          "type": "number"
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
+                          }
+                        }
+                      },
+                      "default": {
+                        "partitions": 1,
+                        "replicas": 3,
+                        "config": {
+                          "retention.ms": 604800000,
+                          "segment.bytes": 1073741824
+                        }
+                      },
+                      "required": [
+                        "partitions",
+                        "replicas",
+                        "config"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "configChecksum": {
+                      "type": "string"
+                    },
+                    "clusterResourceUid": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kafkaConnection",
+                    "label",
+                    "configChecksum"
+                  ]
+                },
+                "topicConfigChecksum": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "sourceLabel",
+                "s3Uri",
+                "awsRegion",
+                "kafkaClusterName",
+                "kafkaConfig",
+                "topicConfigChecksum",
+                "checksumForReplayer",
+                "configChecksum",
+                "resourceUid"
+              ]
+            },
+            "default": []
+          },
           "snapshots": {
             "type": "array",
             "items": {
@@ -1091,6 +1298,35 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
+                          },
+                          "otelTraceCollectorEndpoint": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  ""
+                                ]
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                          },
+                          "otelMetricsCollectorEndpoint": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  ""
+                                ]
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "default": "http://otel-collector:4317",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -1407,18 +1643,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 1
                     },
-                    "multiTypeBehavior": {
-                      "type": "string",
-                      "enum": [
-                        "NONE",
-                        "UNION",
-                        "SPLIT"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ],
-                      "default": "NONE"
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "output": {
                       "type": "string",
@@ -1683,9 +1935,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 85899345920
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "serverGeneratedIds": {
                       "type": "string",
@@ -2084,10 +2361,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     ]
                   }
                 },
-                "fromProxy": {
+                "fromCapturedTraffic": {
                   "type": "string"
                 },
-                "fromProxyConfigChecksum": {
+                "fromCapturedTrafficConfigChecksum": {
                   "type": "string"
                 },
                 "kafkaClusterName": {
@@ -2302,9 +2579,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 360
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
@@ -2602,8 +2904,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "sourceLabel",
                 "dependsOn",
                 "dependsOnSnapshotMigrations",
-                "fromProxy",
-                "fromProxyConfigChecksum",
+                "fromCapturedTraffic",
+                "fromCapturedTrafficConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
                 "replayerConfig",
@@ -2637,64 +2939,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "object",
       "additionalProperties": {
         "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "autoCreate": {
-                "type": "object",
-                "nullable": true,
-                "properties": {
-                  "auth": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "none"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "scram-sha-512"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      }
-                    ],
-                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
-                  },
-                  "clusterSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaSpec",
-                    "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
-                  },
-                  "nodePoolSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-                    "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
-                  },
-                  "topicSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaTopicSpec",
-                    "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
-                  }
-                },
-                "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
-              }
-            },
-            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
-          },
           {
             "type": "object",
             "properties": {
@@ -2773,6 +3017,64 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "existing"
             ],
             "description": "Use an existing Kafka cluster by providing connection details."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "autoCreate": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "scram-sha-512"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      }
+                    ],
+                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+                  },
+                  "clusterSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaSpec",
+                    "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+                  },
+                  "nodePoolSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
+                    "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
+                  },
+                  "topicSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                    "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+                  }
+                },
+                "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+              }
+            },
+            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
           }
         ],
         "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
@@ -2958,6 +3260,35 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "type": "string",
                                   "default": "",
                                   "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                },
+                                "otelTraceCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                },
+                                "otelMetricsCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "default": "http://otel-collector:4317",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
@@ -3214,20 +3545,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": 1,
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
-                      "multiTypeBehavior": {
-                        "type": "string",
-                        "enum": [
-                          "NONE",
-                          "UNION",
-                          "SPLIT"
+                      "otelTraceCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
                         ],
-                        "default": "NONE",
-                        "description": "Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). 'NONE': fail if multi-type indices are encountered. 'UNION': merge all types into a single mapping. 'SPLIT': create separate indices for each type."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
                       },
-                      "otelCollectorEndpoint": {
-                        "type": "string",
+                      "otelMetricsCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "output": {
                         "type": "string",
@@ -4089,10 +4434,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
                         "changeRestriction": "gated"
                       },
-                      "otelCollectorEndpoint": {
-                        "type": "string",
+                      "otelTraceCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      },
+                      "otelMetricsCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -4310,10 +4679,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
-                  "otelCollectorEndpoint": {
-                    "type": "string",
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "setHeader": {
                     "type": "array",
@@ -4691,16 +5084,64 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             ],
             "description": "Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding."
           },
-          "description": "Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."
+          "default": {},
+          "description": "Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."
+        },
+        "s3Sources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "s3Uri": {
+                "type": "string",
+                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\\\\/.+\\\\.proto\\\\.gz$",
+                "description": "S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."
+              },
+              "awsRegion": {
+                "type": "string",
+                "description": "AWS region of the S3 bucket holding the export."
+              },
+              "endpoint": {
+                "type": "string",
+                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                "default": "",
+                "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
+              },
+              "kafka": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "default": "default",
+                "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."
+              },
+              "kafkaTopic": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "default": "",
+                "description": "Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."
+              },
+              "sourceLabel": {
+                "type": "string",
+                "description": "Label of the source cluster this dump was originally captured from. Used for resource labeling. Does NOT need to match a sourceClusters key (the original source may be long gone by the time the dump is replayed)."
+              }
+            },
+            "required": [
+              "s3Uri",
+              "awsRegion",
+              "sourceLabel"
+            ],
+            "description": "Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow."
+          },
+          "default": {},
+          "description": "Map of pre-recorded traffic source names to their S3 archive configurations. Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."
         },
         "replayers": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "fromProxy": {
+              "fromCapturedTraffic": {
                 "type": "string",
-                "description": "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."
+                "description": "Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."
               },
               "toTarget": {
                 "type": "string",
@@ -4851,10 +5292,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 360,
                     "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
-                  "otelCollectorEndpoint": {
-                    "type": "string",
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",
@@ -5609,16 +6074,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             },
             "required": [
-              "fromProxy",
+              "fromCapturedTraffic",
               "toTarget"
             ],
-            "description": "Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster."
+            "description": "Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster."
           },
-          "description": "Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster."
+          "description": "Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster."
         }
       },
       "required": [
-        "proxies",
         "replayers"
       ],
       "description": "Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency."

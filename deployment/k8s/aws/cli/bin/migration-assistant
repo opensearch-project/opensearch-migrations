@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# migration-assistant — source-checkout entry point for the Rust CLI.
+#
+# The CLI is a Rust crate rooted at this directory's parent (deployment/k8s/
+# aws/cli/). Every caller — Jenkins (vars/resolveBootstrap.groovy,
+# vars/resolveCli.groovy), the curl-pipe install.sh, awsRunEksValidation.sh,
+# and operators running from a checkout — invokes THIS path:
+#
+#     deployment/k8s/aws/cli/bin/migration-assistant <args…>
+#
+# To keep that contract byte-identical while distributing as build-from-source
+# (no prebuilt binary committed), this wrapper resolves a binary in priority
+# order and exec-replaces itself with it:
+#
+#   1. MIGRATE_CLI_BIN              explicit override (operator pin / packaging)
+#   2. bin/migration-assistant-bin prebuilt shipped in the release tarball
+#   3. target/release/…           a binary an earlier Gradle/cargo build made
+#   4. build from source          cargo (if a C linker exists) else delegate to
+#                                  the Gradle task, which uses `cross`
+#
+# Reusing (3) matters on the Jenkins EKS agents: the build stage compiles the
+# CLI (via `cross`, since those hosts have no `cc` linker) and a later deploy
+# stage invokes THIS wrapper — which must reuse that binary rather than try a
+# native recompile that would fail to link. Set MIGRATE_CLI_FORCE_BUILD=1 to
+# force a rebuild.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Resolve symlinks so `bin/` is found even when this script is symlinked onto
+# PATH (install.sh path mode does exactly that).
+__resolve() {
+  local target="$1"
+  while [[ -L "$target" ]]; do
+    local link
+    link=$(readlink "$target")
+    case "$link" in
+      /*) target="$link" ;;
+      *)  target="$(dirname "$target")/$link" ;;
+    esac
+  done
+  printf '%s\n' "$target"
+}
+BIN_DIR="$(cd -- "$(dirname -- "$(__resolve "${BASH_SOURCE[0]}")")" && pwd)"
+CRATE_DIR="$(cd -- "$BIN_DIR/.." && pwd)"
+
+# 1. Explicit override (release packaging / operator pin).
+if [[ -n "${MIGRATE_CLI_BIN:-}" && -x "${MIGRATE_CLI_BIN}" ]]; then
+  exec "${MIGRATE_CLI_BIN}" "$@"
+fi
+
+# 2. Prebuilt binary shipped alongside this wrapper (release tarball drops it
+#    here as `migration-assistant-bin`, so installs need no toolchain).
+PREBUILT="$BIN_DIR/migration-assistant-bin"
+if [[ -x "$PREBUILT" ]]; then
+  exec "$PREBUILT" "$@"
+fi
+if [[ -x "$PREBUILT.exe" ]]; then
+  exec "$PREBUILT.exe" "$@"
+fi
+
+# 3. A release binary already built at target/release/ — reuse it. The Gradle
+#    build (buildMigrationAssistantBinary) drops it here, possibly via `cross`
+#    on hosts with no C linker. Reusing it means a later invocation (e.g. the
+#    Jenkins deploy stage running this wrapper after the build stage) never
+#    recompiles — which on a linker-less agent would otherwise fail. Set
+#    MIGRATE_CLI_FORCE_BUILD=1 to force a rebuild regardless.
+TARGET_BIN="$CRATE_DIR/target/release/migration-assistant"
+if [[ -x "$TARGET_BIN" && -z "${MIGRATE_CLI_FORCE_BUILD:-}" ]]; then
+  exec "$TARGET_BIN" "$@"
+fi
+
+# 4. Build from source. Prefer cargo on PATH; otherwise fall back to a
+#    Gradle-provisioned toolchain. Gradle's packageMigrationAssistantCli task
+#    auto-installs rustup into a managed home (mirroring the repo's JDK
+#    auto-download); reuse it here so the source-checkout path also works on a
+#    fresh agent that has no cargo on PATH.
+if ! command -v cargo >/dev/null 2>&1; then
+  __gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+  for __cargo_bin in \
+      "${MIGRATE_RUST_HOME:-}/cargo/bin" \
+      "$__gradle_home/rust/cargo/bin" \
+      "$HOME/.cargo/bin"; do
+    if [[ -n "$__cargo_bin" && -x "$__cargo_bin/cargo" ]]; then
+      export PATH="$__cargo_bin:$PATH"
+      break
+    fi
+  done
+fi
+
+# Does a C linker exist? rustc needs one to link a native cargo build. Some
+# agents provision a Rust toolchain via rustup but ship no `cc` — there, a
+# plain `cargo build` fails at link time, and we must build via Gradle (which
+# routes through `cross`, compiling inside a container that has the toolchain).
+__has_linker() { command -v cc >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; }
+
+# Find a gradlew to delegate to when a native build isn't viable. The wrapper
+# lives at <repo>/deployment/k8s/aws/cli/bin; gradlew is at the repo root.
+__find_gradlew() {
+  local d="$CRATE_DIR"
+  for _ in 1 2 3 4 5 6; do
+    d="$(cd -- "$d/.." && pwd)"
+    if [[ -x "$d/gradlew" ]]; then printf '%s\n' "$d/gradlew"; return 0; fi
+  done
+  return 1
+}
+
+# Build path selection:
+#   * cargo present AND a linker exists -> fast native `cargo build`.
+#   * otherwise -> delegate to the Gradle task, which provisions Rust and uses
+#     `cross` when there's no linker. This is the same task CI runs, so the
+#     source-checkout wrapper and the packaged build stay byte-for-byte aligned.
+if command -v cargo >/dev/null 2>&1 && __has_linker; then
+  printf '· building migration-assistant (cargo build --release)…\n' >&2
+  ( cd "$CRATE_DIR" && cargo build --release --quiet ) 1>&2
+else
+  __gradlew="$(__find_gradlew)" || {
+    printf 'error: cannot build migration-assistant.\n' >&2
+    printf '  No prebuilt binary, and a native build is not possible here\n' >&2
+    printf '  (cargo missing or no C linker `cc`), and no gradlew was found to\n' >&2
+    printf '  delegate to. Options:\n' >&2
+    printf '    - run ./gradlew :deployment:k8s:aws:buildMigrationAssistantBinary from a checkout\n' >&2
+    printf '    - install Rust + a C toolchain (https://rustup.rs), or\n' >&2
+    printf '    - use the released tarball (ships a prebuilt binary).\n' >&2
+    exit 127
+  }
+  printf '· building migration-assistant via Gradle (provisions Rust; uses cross if no linker)…\n' >&2
+  __root="$(cd -- "$(dirname -- "$__gradlew")" && pwd)"
+  ( cd "$__root" && ./gradlew :deployment:k8s:aws:buildMigrationAssistantBinary --console=plain ) 1>&2
+fi
+
+if [[ ! -x "$TARGET_BIN" ]]; then
+  printf 'error: build did not produce %s\n' "$TARGET_BIN" >&2
+  exit 1
+fi
+exec "$TARGET_BIN" "$@"

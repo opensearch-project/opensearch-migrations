@@ -197,13 +197,23 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     fileSourceVolumeMounts: true,
 }));
 
+// Fields config lowering adds on top of the user-facing proxy schema, named as a
+// single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
+// source of truth.
+const PROXY_RESOLVED_FIELDS = {
+    sslTrustCertFile: z.string().min(1).optional()
+        .describe("Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPem: z.string().min(1).optional()
+        .describe("Inline PEM from tls.clientAuth.trustedClientCaPem, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPemEnvVar: z.string().min(1).optional()
+        .describe("Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."),
+    requireClientAuth: z.boolean().optional()
+        .describe("Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."),
+    ...FILE_SOURCE_RESOLVED_FIELDS,
+} as const;
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend({
-        sslTrustCertFile: z.string().min(1).optional(),
-        sslTrustCertPem: z.string().min(1).optional(),
-        sslTrustCertPemEnvVar: z.string().min(1).optional(),
-        requireClientAuth: z.boolean().optional(),
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
@@ -216,6 +226,22 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     fileSourceVolumes: true,
     fileSourceVolumeMounts: true,
 }));
+
+// Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
+// schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
+// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
+// does not define and that must be stripped from the CR. Derived from the shape so
+// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
+    Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
+
+// All keys stripped from the CaptureProxy custom resource: workflow-option fields,
+// which makeCaptureProxyManifest re-adds explicitly as spec fields, plus the
+// resolved-only fields above. Deduped because the two sets overlap, so the rendered
+// sprig.omit lists each key once.
+export const ARGO_PROXY_CR_OMITTED_KEYS = [
+    ...new Set([...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS]),
+];
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({
@@ -329,12 +355,34 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     sourceLabel: z.string(),
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
-    fromProxy: z.string(),
-    fromProxyConfigChecksum: z.string(),
+    // Captured-traffic source name + checksum: works uniformly across live
+    // proxy and S3 loader paths. The replayer uses these to wait on the
+    // CapturedTraffic CR (whose name is `<fromCapturedTraffic>-topic`) and
+    // re-evaluate when the source's checksum changes.
+    fromCapturedTraffic: z.string(),
+    fromCapturedTrafficConfigChecksum: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    configChecksum: z.string(),
+    resourceUid: z.string(),
+});
+
+// One-time S3 → Kafka topic load. Created from a traffic.s3Sources entry.
+// Workflow runs the loader exactly once per CapturedTraffic resource;
+// re-runs are blocked by the resource's lifecycle (loadStarted gate +
+// lock-on-complete VAP).
+export const DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG = z.object({
+    name: z.string(),
+    sourceLabel: z.string(),
+    s3Uri: z.string(),
+    awsRegion: z.string(),
+    endpoint: z.string().default("").optional(),
+    kafkaClusterName: z.string(),
+    kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
+    topicConfigChecksum: z.string(),
+    checksumForReplayer: z.string(),
     configChecksum: z.string(),
     resourceUid: z.string(),
 });
@@ -350,6 +398,7 @@ function makeResourceUidOptional<
 export const ARGO_MIGRATION_CONFIG = z.object({
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
+    s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),
     snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG).default([]),
     snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
@@ -370,6 +419,9 @@ function makePreEnrichMigrationConfigSchema() {
         ).min(1).optional(),
         proxies: z.array(
             makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
+        ).default([]),
+        s3TrafficLoaders: z.array(
+            makeResourceUidOptional(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG)
         ).default([]),
         snapshots: z.array(preEnrichCreateSnapshotsConfig).default([]),
         snapshotMigrations: z.array(

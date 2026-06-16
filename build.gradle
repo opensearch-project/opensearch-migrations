@@ -4,7 +4,7 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '8.4.0'
+    id "com.diffplug.spotless" version '8.6.0'
     id 'io.freefair.lombok' version '9.5.0' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
@@ -55,7 +55,8 @@ allprojects {
 }
 
 
-def commonExclusions = ['**/build/**',
+def commonExclusions = ['.gradle/**',
+                        '**/build/**',
                         '**/node_modules/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
@@ -87,6 +88,15 @@ spotless {
         }
         prettier()
         endWithNewline()
+    }
+}
+
+// Jenkins runs broad build graphs where nodeSetup and root Spotless tasks can
+// both be present. Keep Spotless out of Gradle-managed output and order it
+// after nodeSetup to satisfy Gradle's implicit-dependency validation.
+['spotlessMisc', 'spotlessYaml', 'spotlessJson'].each { taskName ->
+    tasks.named(taskName) {
+        mustRunAfter ':deployment:migration-assistant-solution:nodeSetup'
     }
 }
 

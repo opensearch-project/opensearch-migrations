@@ -656,6 +656,129 @@
         }
       },
       {
+        "name": "setupsingles3source",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "loaderConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "topicCrName"
+            },
+            {
+              "name": "kafkaClusterOwnerUid"
+            },
+            {
+              "name": "topicPartitions"
+            },
+            {
+              "name": "topicReplicas"
+            },
+            {
+              "name": "topicConfig"
+            },
+            {
+              "name": "groupName_view",
+              "value": "S3 Source"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "reconcilecapturedtrafficandload",
+                "name": "s3-traffic-loader"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "loaderConfig",
+                    "value": "{{inputs.parameters.loaderConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{inputs.parameters.kafkaClusterOwnerUid}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "topicConfigChecksum",
+                    "value": "{{=sprig.dig('topicConfigChecksum', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": ""
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=sprig.dig('sourceLabel', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  }
+                ]
+              },
+              "name": "setupS3Source"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "createsinglesnapshot",
         "inputs": {
           "parameters": [
@@ -1643,10 +1766,10 @@
               "name": "sourceLabel"
             },
             {
-              "name": "fromProxy"
+              "name": "fromCapturedTraffic"
             },
             {
-              "name": "fromProxyConfigChecksum"
+              "name": "fromCapturedTrafficConfigChecksum"
             },
             {
               "name": "targetConfig"
@@ -1782,7 +1905,7 @@
           [
             {
               "templateRef": {
-                "template": "waitindefinitelyforcaptureproxy",
+                "template": "waitindefinitelyforcapturedtraffic",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -1790,11 +1913,11 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{inputs.parameters.fromProxy}}"
+                    "value": "{{=inputs.parameters.fromCapturedTraffic+'-topic'}}"
                   },
                   {
                     "name": "configChecksum",
-                    "value": "{{inputs.parameters.fromProxyConfigChecksum}}"
+                    "value": "{{inputs.parameters.fromCapturedTrafficConfigChecksum}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -1810,7 +1933,7 @@
                   }
                 ]
               },
-              "name": "waitIndefinitelyForProxy"
+              "name": "waitIndefinitelyForCapturedTraffic"
             }
           ],
           [
@@ -2202,6 +2325,63 @@
               "name": "createProxy"
             },
             {
+              "template": "setupsingles3source",
+              "withParam": "{{=sprig.dig('s3TrafficLoaders', [], fromJSON(inputs.parameters.config))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "loaderConfig",
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceLabel\", item['sourceLabel'], \"s3Uri\", item['s3Uri'], \"awsRegion\", item['awsRegion'], \"endpoint\", sprig.dig('endpoint', '', item), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"kafkaClusterName\", sprig.dig('label', '', fromJSON(item['kafkaConfig'])), \"resourceUid\", sprig.dig('resourceUid', '', item)))}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{=sprig.dig('label', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{=sprig.dig('kafkaTopic', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicCrName",
+                    "value": "{{=item['name']+'-topic'}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{=sprig.dig('clusterResourceUid', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=toJSON(sprig.dig('topicSpecOverrides', 'config', sprig.dict(), fromJSON(item['kafkaConfig'])))}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "2"
+                  }
+                ]
+              },
+              "name": "createS3Source"
+            },
+            {
               "template": "createsnapshotsforsource",
               "withParam": "{{=fromJSON(inputs.parameters.config)['snapshots']}}",
               "arguments": {
@@ -2381,12 +2561,12 @@
                     "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
                   },
                   {
-                    "name": "fromProxy",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromProxy')}}"
+                    "name": "fromCapturedTraffic",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
                   },
                   {
-                    "name": "fromProxyConfigChecksum",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromProxyConfigChecksum')}}"
+                    "name": "fromCapturedTrafficConfigChecksum",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficConfigChecksum')}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -2430,7 +2610,7 @@
                   },
                   {
                     "name": "groupName_view",
-                    "value": "{{=item['fromProxy']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
+                    "value": "{{=item['fromCapturedTraffic']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
                   },
                   {
                     "name": "sortOrder_view",

@@ -16,7 +16,7 @@
     },
     "replayers": {
       "replayer1": {
-        "fromProxy": "proxy1",
+        "fromCapturedTraffic": "proxy1",
         "toTarget": "target",
         "dependsOnSnapshotMigrations": [
           { "source": "does-not-exist", "snapshot": "snap1" }

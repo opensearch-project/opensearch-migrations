@@ -19,6 +19,17 @@ test_report.json
 **/builds/
 jenkinsdocker/**/nextBuildNumber
 **/bin/
+# The migration-assistant CLI ships a source-checkout entry wrapper at
+# deployment/k8s/aws/cli/bin/migration-assistant. It is SOURCE (not a build
+# artifact) and every caller — Jenkins, install.sh, awsRunEksValidation.sh —
+# invokes that exact path, so it must stay tracked despite the **/bin/ rule.
+!deployment/k8s/aws/cli/bin/
+!deployment/k8s/aws/cli/bin/migration-assistant
+# Rust build output for the CLI crate.
+deployment/k8s/aws/cli/target/
+# Per-project runtime state the CLI writes at $PWD/migration-assistant-workspace
+# (see cli/src/core/config.rs). Never a build/PR artifact.
+migration-assistant-workspace/
 
 # The whole plugins directory needs to be removed
 plugins/opensearch/loggable-transport-netty4/.gradle/
@@ -35,6 +46,9 @@ TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 DocumentsFromSnapshotMigration/docker/snapshots/
 transformation/standardJavascriptTransforms/coverage/
 transformation/standardJavascriptTransforms/node_modules/
+schema-viewer/node_modules/
+schema-viewer/package-lock.json
+schema-viewer/schemas/
 orchestrationSpecs/k8sResources/
 orchestrationSpecs/dist/
 orchestrationSpecs/node_modules/
@@ -53,6 +67,7 @@ frontend/
 .settings/
 .factorypath
 deployment/k8s/aws/dist/
+deployment/k8s/aws/cli/dist/
 .scannerwork/
 .sisyphus/
 

@@ -4,7 +4,7 @@ import uuid
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     CDC_SOURCE_TARGET_COMBINATIONS, wait_for_proxy_ready, wait_for_replayer_consuming,
-    run_generate_data,
+    run_generate_data, log_kafka_consumer_group_state, log_topic_records, assert_replay_drained,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,13 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         logger.info("Waiting for capture-proxy to be ready...")
         wait_for_proxy_ready(ns, timeout_seconds)
 
+        # Topic-record counts bracket the pre-snapshot generate-data. No consumer
+        # group exists yet, so this is the earliest confirmation that the capture
+        # proxy is actually offloading the generated traffic into the topic.
+        log_topic_records(label="pre-gen")
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
+        log_topic_records(label="post-gen")
 
         logger.info("Waiting for workflow to pause before full migration submit...")
         self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
@@ -80,7 +85,12 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=ns)
+        wait_for_replayer_consuming(namespace=ns, workflow_name=self.workflow_name)
+
+        # Snapshot consumer-group offsets/lag at the start of replay so the log
+        # captures what the replayer is about to consume. The end-of-replay
+        # snapshot is logged in verify_clusters() after target verification.
+        log_kafka_consumer_group_state(label="replay-start")
 
         logger.info("Post-snapshot: generating %d docs into %s via proxy", self.POST_SNAPSHOT_DOCS, self.idx_post)
         run_generate_data("proxy", self.idx_post, self.POST_SNAPSHOT_DOCS)
@@ -113,11 +123,21 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         # snapshot-restored ones.
         expected_pre = self.PRE_SNAPSHOT_DOCS * 2
         logger.info("Verifying both indices on target (pre-snapshot expects %d due to duplication)...", expected_pre)
-        self.target_operations.check_doc_counts_match(
-            cluster=self.target_cluster,
-            expected_index_details={
-                self.idx_pre: {"count": expected_pre},
-                self.idx_post: {"count": self.POST_SNAPSHOT_DOCS},
-            },
-            max_attempts=120, delay=10.0,
-        )
+        try:
+            self.target_operations.check_doc_counts_match(
+                cluster=self.target_cluster,
+                expected_index_details={
+                    self.idx_pre: {"count": expected_pre},
+                    self.idx_post: {"count": self.POST_SNAPSHOT_DOCS},
+                },
+                max_attempts=120, delay=10.0,
+            )
+        finally:
+            # Wait for the replayer to actually drain, regardless of whether
+            # verification passed: target docs matching is necessary but not
+            # sufficient — we've hit cases where check_doc_counts_match passed
+            # while the replayer's consumer group never committed past offset
+            # 0 (in-order commit constraint stuck behind a head-of-line
+            # in-flight TrafficStream). A drain stall raises here so it
+            # surfaces as a test failure instead of a silent log warning.
+            assert_replay_drained(label="replay-end")

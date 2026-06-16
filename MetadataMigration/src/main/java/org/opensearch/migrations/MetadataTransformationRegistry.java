@@ -57,6 +57,20 @@ public class MetadataTransformationRegistry {
                 .descriptionLine("Convert field data type dense_vector to OpenSearch knn_vector")
                 .build())
             .build(),
+        // Any source whose target is OpenSearch: pre-OS index-level knn params
+        // are rejected on create-index, so lift them onto field-level method
+        // config. No-op when absent (see the js file for the full rationale).
+        TransformerConfigs.builder()
+            .filename("js/es-knn-index-to-field-level-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    v -> true,
+                    UnboundVersionMatchers.anyOS
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("Index-level knn settings to field-level method")
+                .descriptionLine("Lift index.knn.* settings onto knn_vector field method config")
+                .build())
+            .build(),
         TransformerConfigs.builder()
             .filename("js/knn-to-serverless-metadata.js")
             .isRelevantForVersions(andSourceTargetVersionPredicate(
@@ -122,8 +136,46 @@ public class MetadataTransformationRegistry {
                 .name("Analysis component compatibility")
                 .descriptionLine("Strip or rename removed/renamed analyzer/tokenizer/filter names")
                 .build())
+            .build(),
+        // Resolve legacy multiple-types-per-index mappings (ES <7) into a single type by
+        // unioning the type mappings. Auto-applied for any source at ES 6 or below migrating
+        // to a target at ES 6 or above (including any OpenSearch). This supersedes the old Java
+        // IndexMappingTypeRemoval rule + --multi-type-behavior flag: the TypeMappingsSanitization
+        // transformer unions by default and runs ahead of the version transformer (see
+        // MigratorEvaluatorBase.selectTransformer), so version rules see single-type mappings.
+        TransformerConfigs.builder()
+            // Sentinel filename: this entry emits its own provider config via providerConfigProvider
+            // (TypeMappingSanitizationTransformerProvider) rather than a JsonJSTransformerProvider.
+            .filename("<TypeMappingSanitizationTransformerProvider>")
+            .providerConfigProvider(MetadataTransformationRegistry::typeMappingSanitizationProviderConfig)
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                UnboundVersionMatchers.isBelowES_7_X,
+                UnboundVersionMatchers.isGreaterOrEqualES_6_X.or(UnboundVersionMatchers.anyOS)
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("Multi-type mapping union")
+                .descriptionLine("Union legacy multiple-types-per-index mappings into a single type")
+                .build())
             .build()
     );
+
+    /**
+     * Build the full TypeMappingSanitizationTransformerProvider config for the given (source, target)
+     * pair. The provider supplies union-by-default regex mappings on its own; we only need to inject
+     * the source version so the JS transform can reason about include_type_name semantics.
+     */
+    private static String typeMappingSanitizationProviderConfig(Version sourceVersion, Version targetVersion) {
+        return "{" +
+            "  \"TypeMappingSanitizationTransformerProvider\": {" +
+            "    \"sourceProperties\": {" +
+            "      \"version\": {" +
+            "        \"major\": " + sourceVersion.getMajor() + "," +
+            "        \"minor\": " + sourceVersion.getMinor() +
+            "      }" +
+            "    }" +
+            "  }" +
+            "}";
+    }
 
     private static BiPredicate<Version, Version> andSourceTargetVersionPredicate(
         Predicate<Version> sourcePredicate,
@@ -141,6 +193,12 @@ public class MetadataTransformationRegistry {
         private String context;
         /** Dynamic context computed from (source, target). May return null to skip the transform. */
         private BiFunction<Version, Version, String> contextProvider;
+        /**
+         * Emits the entire provider config JSON for this entry, bypassing the default
+         * JsonJSTransformerProvider wrapper. Used by transforms that resolve through a dedicated
+         * provider (e.g. TypeMappingSanitizationTransformerProvider). May return null to skip.
+         */
+        private BiFunction<Version, Version, String> providerConfigProvider;
         @NonNull private BiPredicate<Version, Version> isRelevantForVersions;
 
         /**
@@ -185,6 +243,12 @@ public class MetadataTransformationRegistry {
         if (transformerConfigs.isEmpty()) return NOOP_TRANSFORMATION_CONFIG;
         var rendered = transformerConfigs.stream()
             .map(c -> {
+                // Entries with a providerConfigProvider emit their entire provider config
+                // (e.g. TypeMappingSanitizationTransformerProvider) instead of the default
+                // JsonJSTransformerProvider wrapper.
+                if (c.getProviderConfigProvider() != null) {
+                    return c.getProviderConfigProvider().apply(sourceVersion, targetVersion);
+                }
                 var resolution = c.resolveContext(sourceVersion, targetVersion);
                 return resolution.shouldSkip ? null : getJSTransform(c.getFilename(), resolution.context);
             })

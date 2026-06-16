@@ -168,24 +168,32 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
     session = requests.Session()
     total_inserted = 0
     total_errors = 0
+    consecutive_zero_progress_batches = 0
+    # Bail after this many consecutive batches that insert zero documents — covers both
+    # transport-level failures (status_code != 200) and per-item rejections returning 200
+    # with all items 4xx. Without this, a persistent failure (sigv4-via-proxy mismatch,
+    # 403 from target, etc.) made the loop spin until the outer subprocess timeout.
+    max_consecutive_zero_progress_batches = 5
+    last_failure_summary = None
     start_time = time.time()
-    
+
     try:
         while total_inserted < num_docs:
             # Generate batch of documents
             batch_docs = min(batch_size, num_docs - total_inserted)
             docs = [generate_small_doc(doc_size_bytes) for _ in range(batch_docs)]
-            
+
             # Prepare bulk request
             bulk_data = []
             for doc in docs:
                 bulk_data.append(json.dumps({"index": {"_index": index_name}}))
                 bulk_data.append(json.dumps(doc))
-            
+
             bulk_body = '\n'.join(bulk_data) + '\n'
             headers = {'Content-Type': 'application/x-ndjson'}
-            
+
             # Send bulk request
+            successful = 0
             try:
                 response = session.post(
                     f"{cluster.endpoint}/_bulk",
@@ -195,7 +203,7 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
                     verify=False,
                     timeout=30
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     # Count successful insertions
@@ -203,14 +211,37 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
                                      if item.get('index', {}).get('status') in [200, 201])
                     total_inserted += successful
                     total_errors += (batch_docs - successful)
+                    if successful == 0:
+                        # All items failed; capture the first item's status/error for diagnostics
+                        sample = next((item.get('index', {}) for item in result.get('items', [])), {})
+                        last_failure_summary = (
+                            f"all {batch_docs} items failed; first item status="
+                            f"{sample.get('status')} error={sample.get('error')}"
+                        )
                 else:
                     total_errors += batch_docs
                     logger.error(f"Bulk insert failed with status {response.status_code}")
-                    
+                    last_failure_summary = (
+                        f"HTTP {response.status_code}: {response.text[:200]}"
+                    )
+
             except Exception as e:
                 total_errors += batch_docs
                 logger.error(f"Error during bulk insert: {e}")
-                
+                last_failure_summary = f"exception: {e}"
+
+            if successful == 0:
+                consecutive_zero_progress_batches += 1
+                if consecutive_zero_progress_batches >= max_consecutive_zero_progress_batches:
+                    logger.error(
+                        "Aborting bulk insert: %d consecutive batches with zero progress. "
+                        "Last failure: %s",
+                        consecutive_zero_progress_batches, last_failure_summary,
+                    )
+                    break
+            else:
+                consecutive_zero_progress_batches = 0
+
     except KeyboardInterrupt:
         logger.info("Bulk insert interrupted by user")
     finally:

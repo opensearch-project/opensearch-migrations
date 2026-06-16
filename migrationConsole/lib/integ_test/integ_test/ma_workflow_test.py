@@ -7,6 +7,7 @@ from console_link.workflow.commands.crd_utils import list_migration_resources, r
 from console_link.workflow.models.utils import load_k8s_config
 
 from .test_cases.ma_argo_test_base import MATestBase
+from .metric_operations import assert_cloudwatch_capture_replay_metrics_for_workflow_run
 
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,12 @@ def setup_and_teardown(
         if status_result.value.get("phase", "") not in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
             test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
             test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
-        test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
-        test_case.argo_service.print_migration_resource_status()
-        # Print workflow details and save diagnostics if test failed
+        # On success the full workflow-status JSON and migration-resource YAML are just noise.
+        # Only dump them (along with the heavier details/diagnostics) when the test failed.
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
+            test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
+            test_case.argo_service.print_migration_resource_status()
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
             test_case.argo_service.print_namespace_diagnostics(
                 workflow_name=test_case.workflow_name,
@@ -136,3 +138,5 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     test_case.verify_clusters()
     test_case.workflow_finish()
     test_case.test_after()
+    test_case.assert_observability()
+    assert_cloudwatch_capture_replay_metrics_for_workflow_run(namespace=test_case.argo_service.namespace)

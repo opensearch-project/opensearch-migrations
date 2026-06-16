@@ -58,7 +58,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
             replayers: {
                 replay: {
-                    fromProxy: "source-proxy",
+                    fromCapturedTraffic: "source-proxy",
                     toTarget: "target",
                     replayerConfig: {
                         speedupFactor: 5,
@@ -126,11 +126,20 @@ describe("resolved migration resources", () => {
                 paths: ["ca.crt"],
             }]),
         }));
+        // clientAuth stays inside spec.tls (gated subtree); only the flat resolved
+        // bridge fields are stripped from the custom resource.
         expect(proxyResource?.parameters).toEqual(expect.objectContaining({
             dependsOn: ["source-proxy-topic"],
             tls: {
                 mode: "existingSecret",
                 secretName: "proxy-tls",
+                clientAuth: {
+                    required: true,
+                    trustedClientCaFile: {
+                        configMap: "trusted-client-roots",
+                        path: "ca.crt",
+                    },
+                },
             },
         }));
         expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumes");

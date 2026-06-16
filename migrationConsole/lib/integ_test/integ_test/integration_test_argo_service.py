@@ -61,11 +61,22 @@ class IntegrationTestArgoService:
     def __init__(self, namespace: str = "ma"):
         self.namespace = namespace
 
-    def start_workflow(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> CommandResult:
+    def start_workflow(
+        self,
+        workflow_template_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        workflow_name: Optional[str] = None,
+        service_account_name: Optional[str] = None,
+    ) -> CommandResult:
         temp_file = None
         try:
             # Create temporary workflow file
-            temp_file = self._create_workflow_yaml(workflow_template_name, parameters)
+            temp_file = self._create_workflow_yaml(
+                workflow_template_name,
+                parameters,
+                workflow_name=workflow_name,
+                service_account_name=service_account_name,
+            )
 
             # Use kubectl create to start the workflow
             kubectl_args = {
@@ -490,7 +501,10 @@ class IntegrationTestArgoService:
             "has_suspended_nodes": has_suspended_nodes
         }
 
-        logger.info(f"Workflow {workflow_name} status: {status_info}")
+        # debug, not info: this is polled repeatedly (finish-wait loop, teardown pre-check) and
+        # at info it prints the same line several times per run. Callers that want a one-shot
+        # record of the final phase can log it themselves.
+        logger.debug(f"Workflow {workflow_name} status: {status_info}")
 
         return CommandResult(
             success=True,
@@ -658,14 +672,23 @@ class IntegrationTestArgoService:
             parameter["value"] = value_from["default"]
             parameter.pop("valueFrom", None)
 
-    def _create_workflow_yaml(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> str:
+    def _create_workflow_yaml(
+        self,
+        workflow_template_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        workflow_name: Optional[str] = None,
+        service_account_name: Optional[str] = None,
+    ) -> str:
         """Create a temporary workflow YAML file based on the template structure."""
+        metadata = (
+            {"name": workflow_name}
+            if workflow_name
+            else {"generateName": f"{workflow_template_name}-"}
+        )
         workflow_data = {
             "apiVersion": "argoproj.io/v1alpha1",
             "kind": "Workflow",
-            "metadata": {
-                "generateName": f"{workflow_template_name}-"
-            },
+            "metadata": metadata,
             "spec": {
                 "workflowTemplateRef": {
                     "name": workflow_template_name
@@ -673,6 +696,8 @@ class IntegrationTestArgoService:
                 "entrypoint": "main"
             }
         }
+        if service_account_name:
+            workflow_data["spec"]["serviceAccountName"] = service_account_name
 
         # Add parameters if provided
         if parameters:
