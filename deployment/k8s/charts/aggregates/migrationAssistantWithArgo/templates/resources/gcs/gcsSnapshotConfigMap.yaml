@@ -1,6 +1,7 @@
-{{- if eq .Values.cloudProvider "gcp" }}
-{{- $gcpProject := required "Missing required value: .Values.gcp.project" .Values.gcp.project }}
-{{- $bucketName := .Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" $gcpProject) }}
+{{- $useLocalGcs := index .Values.conditionalPackageInstalls "fake-gcs-server" | default false }}
+{{- if or (eq .Values.cloudProvider "gcp") $useLocalGcs }}
+{{- $gcpProject := or .Values.gcp.project "" }}
+{{- $bucketName := .Values.gcsBucketConfiguration.bucketName | default (ternary "migration-test-bucket" (printf "migration-snapshots-%s" $gcpProject) $useLocalGcs) }}
 {{- $localEndpoint := printf "http://%s.%s.svc.cluster.local:4443" .Values.gcsBucketConfiguration.localGcsEndpoint .Release.Namespace }}
 apiVersion: v1
 kind: ConfigMap
