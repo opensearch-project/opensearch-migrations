@@ -91,12 +91,25 @@ spotless {
     }
 }
 
-// Jenkins runs broad build graphs where nodeSetup and root Spotless tasks can
-// both be present. Keep Spotless out of Gradle-managed output and order it
-// after nodeSetup to satisfy Gradle's implicit-dependency validation.
-['spotlessMisc', 'spotlessYaml', 'spotlessJson'].each { taskName ->
-    tasks.named(taskName) {
-        mustRunAfter ':deployment:migration-assistant-solution:nodeSetup'
+// A Spotless task's `target` fileTree is rooted at its project dir, so it walks
+// any node-using subproject's `node_modules` that lives underneath it (e.g.
+// :deployment's tree spans :deployment:migration-assistant-solution). Even though
+// node_modules is excluded from the walk, that directory is the OUTPUT of the
+// `nodeSetup` task, so the input/output overlap trips Gradle's implicit-dependency
+// validation ("uses this output ... without declaring an explicit or implicit
+// dependency"). Order every Spotless task after each nodeSetup whose project sits
+// at or below the Spotless task's project, satisfying the validation without
+// forcing nodeSetup to run when only Spotless is requested.
+gradle.projectsEvaluated {
+    def nodeSetupTasks = allprojects.collect { it.tasks.findByName('nodeSetup') }.findAll { it != null }
+    allprojects.each { proj ->
+        proj.tasks.matching { it.name.startsWith('spotless') }.configureEach { spotlessTask ->
+            nodeSetupTasks.each { nodeSetupTask ->
+                if (nodeSetupTask.project.projectDir.toPath().startsWith(proj.projectDir.toPath())) {
+                    spotlessTask.mustRunAfter nodeSetupTask
+                }
+            }
+        }
     }
 }
 
