@@ -218,7 +218,7 @@ function makeProxyDeploymentManifest(args: {
             },
             {
                 name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR,
-                value: makeStringTypeProxy(args.sslTrustCertPem)
+                value: makeStringTypeProxy(expr.toBase64(args.sslTrustCertPem))
             }
         ],
         volumeMounts: [

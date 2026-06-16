@@ -352,6 +352,23 @@ public class CaptureProxy {
         return () -> sslContext.newEngine(ByteBufAllocator.DEFAULT);
     }
 
+    /**
+     * Decodes a PEM value that may be base64-encoded.
+     * If the value contains "-----BEGIN", it is assumed to be raw PEM and returned as-is.
+     * Otherwise, base64 decoding is attempted. If decoding fails, the raw value is returned.
+     */
+    static String decodePemIfBase64(String pem) {
+        if (pem.contains("-----BEGIN")) {
+            return pem;
+        }
+        try {
+            return new String(java.util.Base64.getDecoder().decode(pem), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            // Not valid base64 — use the raw value as-is
+            return pem;
+        }
+    }
+
     private static String readTrustCertPemFromEnv(String envVarName) {
         if (envVarName == null || envVarName.isEmpty()) {
             return null;
@@ -361,7 +378,7 @@ public class CaptureProxy {
             throw new ParameterException("Environment variable " + envVarName
                 + " is required by --sslTrustCertPemEnvVar but was not set or was empty.");
         }
-        return pem;
+        return decodePemIfBase64(pem);
     }
 
     protected static Map<String, String> convertPairListToMap(List<String> list) {
