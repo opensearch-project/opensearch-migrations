@@ -41,6 +41,14 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         {
           "Fn::Equals": [
             {
+              "Ref": "CreateCloudWatchMonitoringEndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
               "Ref": "CreateEFSEndpoint",
             },
             "true",
@@ -68,6 +76,14 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "Fn::Equals": [
         {
           "Ref": "CreateCloudWatchLogsEndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateCloudWatchMonitoringEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateCloudWatchMonitoringEndpoint",
         },
         "true",
       ],
@@ -150,6 +166,7 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             "CreateEFSEndpoint",
             "CreateSTSEndpoint",
             "CreateEKSAuthEndpoint",
+            "CreateCloudWatchMonitoringEndpoint",
             "S3EndpointRouteTableIds",
           ],
         },
@@ -165,6 +182,9 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "ParameterLabels": {
         "CreateCloudWatchLogsEndpoint": {
           "default": "Create CloudWatch Logs VPC Endpoint",
+        },
+        "CreateCloudWatchMonitoringEndpoint": {
+          "default": "Create CloudWatch Monitoring VPC Endpoint",
         },
         "CreateECRDockerEndpoint": {
           "default": "Create ECR Docker VPC Endpoint",
@@ -323,6 +343,15 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "Description": "Create a CloudWatch Logs interface VPC endpoint.",
       "Type": "String",
     },
+    "CreateCloudWatchMonitoringEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create a CloudWatch Monitoring interface VPC endpoint (required for reading metrics in isolated subnets).",
+      "Type": "String",
+    },
     "CreateECRDockerEndpoint": {
       "AllowedValues": [
         "true",
@@ -462,6 +491,26 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
           },
         ],
         "ServiceName": "com.amazonaws.us-west-1.logs",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "CloudWatchMonitoringVpcEndpoint": {
+      "Condition": "CreateCloudWatchMonitoringEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.monitoring",
         "SubnetIds": {
           "Ref": "VPCSubnetIds",
         },
