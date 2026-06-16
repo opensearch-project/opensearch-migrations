@@ -9,6 +9,8 @@ import subprocess
 import click
 import time
 
+from typing import Optional
+
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
@@ -16,7 +18,12 @@ from ..services.script_runner import ScriptRunner
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
-from .hints import hint_after_submit, hint_after_submit_wait, hint_on_submit_error
+from .hints import (
+    hint_after_submit,
+    hint_after_submit_wait,
+    hint_after_submit_wait_error,
+    hint_on_submit_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +33,12 @@ def _handle_workflow_wait(
         namespace: str,
         workflow_name: str,
         timeout: int,
-        wait_interval: int) -> str:
-    """Handle waiting for workflow completion. Returns the final phase string, or '' on error."""
+        wait_interval: int) -> Optional[str]:
+    """Handle waiting for workflow completion.
+
+    Returns the final phase string, or ``None`` if monitoring failed before a phase could be
+    determined (the workflow was still submitted; its state is simply unknown).
+    """
     click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
 
     try:
@@ -51,7 +62,7 @@ def _handle_workflow_wait(
         return 'Running'
     except Exception as e:
         click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
-        return ''
+        return None
 
 
 def _remove_existing_workflow(workflow_name, namespace):
@@ -185,7 +196,10 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
             if wait:
                 service = WorkflowService()
                 phase = _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
-                hint_after_submit_wait(phase)
+                if phase is None:
+                    hint_after_submit_wait_error()
+                else:
+                    hint_after_submit_wait(phase)
             else:
                 hint_after_submit()
 

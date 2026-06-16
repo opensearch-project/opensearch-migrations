@@ -47,6 +47,16 @@ def hint_after_submit_wait(phase: str) -> None:
     )
 
 
+def hint_after_submit_wait_error() -> None:
+    """Hint when the workflow was submitted but monitoring it failed before a phase was known.
+
+    The submission itself succeeded, so the right next step is to check progress manually
+    rather than to fix and resubmit the config.
+    """
+    _hint("workflow was submitted but could not be monitored — "
+          "check progress with `workflow manage` or `workflow status`")
+
+
 def hint_on_submit_error() -> None:
     """Hint when the submit script itself fails (e.g. config validation error)."""
     _hint("fix the issue above, then update config with `workflow configure edit`")

@@ -28,6 +28,7 @@ IS_RUNNING_HINT = "workflow is running"          # status-specific wording
 FAILED_HINT = "workflow failed"
 NO_FURTHER_ACTION_HINT = "no further action needed"
 FIX_ABOVE_HINT = "fix the issue above"
+MONITOR_ERROR_HINT = "could not be monitored"    # submit --wait, monitoring failed
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -127,6 +128,15 @@ class TestPublicHintFunctions:
             assert expected in out
         else:
             assert HINT_PREFIX not in out
+
+    def test_hint_after_submit_wait_error(self, capsys):
+        from console_link.workflow.commands.hints import hint_after_submit_wait_error
+        hint_after_submit_wait_error()
+        out = capsys.readouterr().out
+        assert HINT_PREFIX in out
+        assert MONITOR_ERROR_HINT in out
+        # monitoring failure is not a config problem — must not nudge a reconfigure/resubmit
+        assert FIX_HINT not in out
 
     def test_hint_on_submit_error(self, capsys):
         from console_link.workflow.commands.hints import hint_on_submit_error
@@ -442,6 +452,32 @@ class TestSubmitHints:
         assert result.exit_code == 0
         assert HINT_PREFIX in result.output
         assert MANAGE_HINT in result.output
+
+    @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
+    @patch("console_link.workflow.commands.submit.WorkflowService")
+    @patch("console_link.workflow.commands.submit.ScriptRunner")
+    @patch("console_link.workflow.commands.submit.load_k8s_config")
+    @patch("console_link.workflow.commands.submit.workflow_exists", return_value=False)
+    @patch("console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace")
+    @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
+    def test_wait_monitor_error_shows_monitor_hint(
+        self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_svc_class, mock_store_class
+    ):
+        # Submission succeeds, but monitoring the workflow raises a non-timeout error.
+        # The user should be told the workflow is submitted and to check it manually —
+        # not nudged to fix the config (the submit itself worked).
+        mock_runner_class.return_value.submit_workflow.return_value = {
+            "workflow_name": "migration-workflow", "warnings": []
+        }
+        mock_svc_class.return_value.wait_for_workflow_completion.side_effect = Exception("argo unreachable")
+        self._setup_store(mock_store_class)
+
+        result = CliRunner().invoke(workflow_cli, ["submit", "--wait", "--timeout", "60"])
+
+        assert result.exit_code == 0
+        assert HINT_PREFIX in result.output
+        assert MONITOR_ERROR_HINT in result.output
+        assert FIX_HINT not in result.output
 
     @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
     @patch("console_link.workflow.commands.submit.ScriptRunner")
