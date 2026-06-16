@@ -8,13 +8,11 @@ on:
     paths:
       - 'deployment/k8s/aws/cli/**'
       - 'deployment/k8s/aws/build.gradle'
-      - 'agent-skills/**'
       - '.github/workflows/migrate-cli.yml'
   pull_request:
     paths:
       - 'deployment/k8s/aws/cli/**'
       - 'deployment/k8s/aws/build.gradle'
-      - 'agent-skills/**'
       - '.github/workflows/migrate-cli.yml'
   merge_group:
 
@@ -74,7 +72,7 @@ jobs:
           [ "$rc" -eq 64 ] || { echo "::error::expected exit 64, got $rc"; exit 1; }
 
   # The release packaging path: gradle cargo-builds the binary, stages the
-  # bundle (wrapper + prebuilt binary + agent-skills + manifest), tars it, and
+  # bundle (wrapper + prebuilt binary), tars it, and
   # renders install.sh. This job deliberately does NOT install Rust itself — it
   # verifies that gradle auto-provisions the toolchain (the same way it
   # auto-downloads Corretto JDK 21), which is the exact scenario that failed on
@@ -104,12 +102,9 @@ jobs:
           test -f "$dist/installers/manifest.json"
           # Rendered install.sh is well-formed bash.
           bash -n "$dist/install.sh"
-          # The tarball carries the wrapper, the prebuilt binary, and a
-          # root manifest.json.
+          # The tarball carries the wrapper and the prebuilt binary.
           tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
             | grep -q 'migration-assistant-cli-0.0.0-ci/bin/migration-assistant-bin'
-          tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
-            | grep -q 'migration-assistant-cli-0.0.0-ci/manifest.json'
           tar -tzf "$dist/installers/migration-assistant-cli-0.0.0-ci-linux-amd64.tar.gz" \
             | grep -q 'migration-assistant-cli-0.0.0-ci-linux-amd64/bin/migration-assistant-bin'
       - name: install.sh from local tarball needs NO Rust toolchain
