@@ -127,9 +127,6 @@ jobs:
           git archive --format=tar.gz \
             -o opensearch-migrations-source.tar.gz \
             HEAD
-      - name: Create agent-skills archive
-        run: |
-          ./gradlew :agent-skills:agentSkillsTar
       - name: Build and Publish to Maven
         if: ${{ !github.event.act }}
         env:
@@ -357,7 +354,6 @@ jobs:
             deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json,
             opensearch-migrations-source.tar.gz,
             opensearch-migrations-build.tar.gz,
-            agent-skills/build/agent-skills.tar.gz,
             bootstrap-kiro-agent.sh,
             deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz,
             workflowMigration.schema.json,
