@@ -91,10 +91,8 @@ spotless {
     }
 }
 
-// The root misc/yaml/json formats target fileTree('.'), which spans the node_modules
-// dirs that nodeSetup populates. Order them after nodeSetup so the input/output overlap
-// doesn't trip Gradle's implicit-dependency validation. (The Java format avoids this by
-// targeting src/ directly.)
+// These formats scan fileTree('.'), which overlaps node_modules (nodeSetup's output);
+// order them after nodeSetup so Gradle's implicit-dependency validation doesn't fail.
 gradle.projectsEvaluated {
     def nodeSetupTasks = allprojects.findResults { it.tasks.findByName('nodeSetup') }
     ['spotlessMisc', 'spotlessYaml', 'spotlessJson'].each { name ->
@@ -108,25 +106,20 @@ subprojects {
 
     apply plugin: "com.diffplug.spotless"
 
-    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
-    // though what '#' does is still undocumented from what I can tell
     spotless {
         java {
-                // All Java sources live under src/, so target it directly. This keeps the walk
-                // out of node_modules (whose dangling npm bin-link symlinks otherwise fail the
-                // walk) and out of nodeSetup's output dirs (which would trip Gradle's
-                // implicit-dependency validation).
-                target 'src/**/*.java'
-                importOrder(
-                        'javax',
-                        'java',
-                        'org.opensearch',
-                        '',
-                        '\\#')
-                indentWithSpaces()
-                endWithNewline()
-                removeUnusedImports()
-            }
+            // src/ only: source-set resolution would pull in generated proto under build/.
+            target 'src/**/*.java'
+            importOrder(
+                    'javax',
+                    'java',
+                    'org.opensearch',
+                    '',
+                    '\\#')
+            indentWithSpaces()
+            endWithNewline()
+            removeUnusedImports()
+        }
     }
 
     plugins.withId('com.google.cloud.tools.jib') {
