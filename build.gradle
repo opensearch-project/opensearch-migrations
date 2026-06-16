@@ -91,25 +91,14 @@ spotless {
     }
 }
 
-// A Spotless task's `target` fileTree is rooted at its project dir, so it walks
-// any node-using subproject's `node_modules` that lives underneath it (e.g.
-// :deployment's tree spans :deployment:migration-assistant-solution). Even though
-// node_modules is excluded from the walk, that directory is the OUTPUT of the
-// `nodeSetup` task, so the input/output overlap trips Gradle's implicit-dependency
-// validation ("uses this output ... without declaring an explicit or implicit
-// dependency"). Order every Spotless task after each nodeSetup whose project sits
-// at or below the Spotless task's project, satisfying the validation without
-// forcing nodeSetup to run when only Spotless is requested.
+// The root misc/yaml/json formats target fileTree('.'), which spans the node_modules
+// dirs that nodeSetup populates. Order them after nodeSetup so the input/output overlap
+// doesn't trip Gradle's implicit-dependency validation. (The Java format avoids this by
+// targeting src/ directly.)
 gradle.projectsEvaluated {
-    def nodeSetupTasks = allprojects.collect { it.tasks.findByName('nodeSetup') }.findAll { it != null }
-    allprojects.each { proj ->
-        proj.tasks.matching { it.name.startsWith('spotless') }.configureEach { spotlessTask ->
-            nodeSetupTasks.each { nodeSetupTask ->
-                if (nodeSetupTask.project.projectDir.toPath().startsWith(proj.projectDir.toPath())) {
-                    spotlessTask.mustRunAfter nodeSetupTask
-                }
-            }
-        }
+    def nodeSetupTasks = allprojects.findResults { it.tasks.findByName('nodeSetup') }
+    ['spotlessMisc', 'spotlessYaml', 'spotlessJson'].each { name ->
+        tasks.named(name).configure { mustRunAfter nodeSetupTasks }
     }
 }
 
@@ -123,20 +112,11 @@ subprojects {
     // though what '#' does is still undocumented from what I can tell
     spotless {
         java {
-                // Bake the directory exclusions into the FileTree walk rather than using
-                // targetExclude. Spotless resolves `target` minus `targetExclude` as a set
-                // subtraction (SubtractingFileCollection), which forces a full walk of the
-                // *unfiltered* target tree before the exclude is applied. That walk descends
-                // into node_modules/.bin and dies on npm's dangling atomic-rename symlinks
-                // (e.g. .cdk-XXXX left behind by an interrupted `npm install`), failing with
-                // "Couldn't follow symbolic link ...". A targetExclude of '**/node_modules/**'
-                // does NOT help -- its subtrahend tree must itself be walked, re-triggering the
-                // same descent. Excluding at walk time prunes these directories so they are
-                // never traversed. Mirrors the misc/yaml/json formats above.
-                target project.fileTree(project.projectDir) {
-                    include '**/*.java'
-                    exclude '**/build/**', '**/node_modules/**', '**/cdk.out/**', '**/cdk.out-minified/**', '.gradle/**'
-                }
+                // All Java sources live under src/, so target it directly. This keeps the walk
+                // out of node_modules (whose dangling npm bin-link symlinks otherwise fail the
+                // walk) and out of nodeSetup's output dirs (which would trip Gradle's
+                // implicit-dependency validation).
+                target 'src/**/*.java'
                 importOrder(
                         'javax',
                         'java',
