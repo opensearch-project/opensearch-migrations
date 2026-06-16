@@ -555,7 +555,8 @@ def test_metadata_with_gcs_snapshot_makes_correct_subprocess_call(mocker):
                 "repo_uri": "gs://my-bucket/path",
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
@@ -567,7 +568,8 @@ def test_metadata_with_gcs_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
