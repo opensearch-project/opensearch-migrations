@@ -106,22 +106,6 @@ subprojects {
 
     apply plugin: "com.diffplug.spotless"
 
-    spotless {
-        java {
-            // src/ only: source-set resolution would pull in generated proto under build/.
-            target 'src/**/*.java'
-            importOrder(
-                    'javax',
-                    'java',
-                    'org.opensearch',
-                    '',
-                    '\\#')
-            indentWithSpaces()
-            endWithNewline()
-            removeUnusedImports()
-        }
-    }
-
     plugins.withId('com.google.cloud.tools.jib') {
         tasks.withType(JibTask).configureEach {
             notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
@@ -138,6 +122,22 @@ subprojects {
             toolchain {
                 languageVersion.set(JavaLanguageVersion.of(21))
                 vendor.set(JvmVendorSpec.AMAZON)
+            }
+        }
+
+        spotless {
+            java {
+                // src/ only: source-set resolution would pull in generated proto under build/.
+                target 'src/**/*.java'
+                importOrder(
+                        'javax',
+                        'java',
+                        'org.opensearch',
+                        '',
+                        '\\#')
+                indentWithSpaces()
+                endWithNewline()
+                removeUnusedImports()
             }
         }
 
