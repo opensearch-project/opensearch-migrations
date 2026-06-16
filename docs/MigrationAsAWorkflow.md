@@ -257,6 +257,31 @@ console and workflow commands should check to confirm that they’re being run
 from the right environment and if not, issue helpful messages to redirect the
 user.
 
+### Next-Step Hints
+
+Each `workflow` command prints a one-line `Hint:` after it runs, nudging the user toward the next
+step in the migration sequence. Hints live centrally in
+`console_link/workflow/commands/hints.py`; a shared `_hint_for_phase()` helper dispatches on the
+Argo workflow phase (`Running`/`Pending`, `Succeeded`, `Failed`/`Error`/`Stopped`), and unknown or
+empty phases intentionally produce no hint.
+
+| Command | Hint |
+|---|---|
+| `configure edit` (valid save) | `workflow submit` to start the migration |
+| `configure edit` (invalid: save-anyway / discard / stdin error) | `workflow configure edit` to fix the config |
+| `submit` (no `--wait`) | `workflow manage` to monitor progress |
+| `submit --wait` | phase-aware: running → `workflow manage`; succeeded → `workflow show`; failed → reconfigure & resubmit |
+| `submit --wait` (submitted, but monitoring failed) | submitted but could not be monitored — check with `workflow manage` / `workflow status` |
+| `submit` (script error) | fix the issue above, then `workflow configure edit` (not emitted for `FileNotFoundError`) |
+| `approve step` | `workflow manage`, or `workflow approve step --list` for more gates |
+| `approve change` / `approve retry` | `workflow manage` to monitor progress |
+| `status` / `manage` | phase-aware (running / succeeded / failed); no hint for `--all-workflows` or resource views |
+| `show` (output view) | migration complete — no further action needed (no hint for `--list` / `--history` / `--run`) |
+
+Commands outside the migration journey — `configure view` / `sample` / `credentials`, `log`,
+`reset`, and exploration/audit modes — emit no hint. This behavior is covered by
+`tests/workflow-tests/test_hints.py`.
+
 ### Configurations
 
 What does that mean for a user though? How can users make sense of these
@@ -547,6 +572,59 @@ inProgress:
         01_01_01_indices (14/87) 
         01_01_02_indices (0/15)
 ```
+
+#### Approval gates under the hood
+
+Each approval checkpoint is backed by an `ApprovalGate` custom resource
+(`migrations.opensearch.org/v1alpha1`). Its `spec` is empty; only `status.phase` carries state:
+`Created` (gate exists, workflow not yet there), `Pending` (workflow blocked, awaiting approval),
+`Approved` (unblocked), or `Error`. Gates come in two categories:
+
+- **Step gates** — intentional breakpoints at migration milestones; any gate whose name does
+  *not* end in `.vapretry`, e.g. `captureproxysetup.{proxyName}`, `evaluatemetadata{suffix}`,
+  `documentbackfill.{crdName}`.
+- **Runtime gates** (`.vapretry`) — automatic pauses created when a ValidatingAdmissionPolicy
+  rejects a change to a live resource. These are covered in
+  [reconfiguringWorkflows.md](reconfiguringWorkflows.md#runtime-gates-and-the-approve-cli).
+
+Every gate carries labels for filtering and cleanup, keyed by
+`migrations.opensearch.org/workflow` (used to delete all of a workflow's gates on exit) plus
+resource-kind/name, source, target, snapshot, and migration labels.
+
+The lifecycle has three stages:
+
+1. **Pre-creation** — `configProcessor`
+   (`MigrationInitializer.generateCustomMigrationResources()`) generates every step and runtime
+   gate up front with `status.phase = Created`, applied with the rest of the migration resources
+   before Argo starts the workflow.
+2. **Step-gate flow** — the workflow reaches a `waitforuserapproval` step that polls the gate
+   (`successCondition: status.phase == Approved`, with bounded retry/backoff). The operator
+   approves via the TUI or `workflow approve step`, which patches `status.phase = Approved`, and
+   the step succeeds.
+3. **Cleanup** — an `onExit` handler (`cleanupApprovalGates.sh`) deletes every gate labelled with
+   the workflow name, however the workflow ended.
+
+The TUI does not rely on Argo node status alone. Its refresh loop (`tree_utils.py`) walks the
+Argo nodes, finds those whose template is `waitforuserapproval`, reads each gate's `resourceName`
+parameter, fetches the matching `ApprovalGate` from Kubernetes, and overlays its `status.phase`
+onto the node — so an approval shows up immediately rather than after the Argo controller
+reconciles. On top of the raw CRD phase the `approve` CLI distinguishes `waiting` (the node is
+actively blocked on this gate) from `pending` (the gate exists but the workflow has not reached
+it yet).
+
+```bash
+# Step gates (user-defined checkpoints)
+workflow approve step --list                       # list waiting step gates
+workflow approve step captureproxysetup.my-proxy   # approve one
+workflow approve step --all                        # approve all waiting step gates
+
+# Runtime gates (VAP field-change approvals) — see reconfiguringWorkflows.md
+workflow approve change --list
+workflow approve change kafkacluster.my-cluster    # allow a Gated change to proceed
+workflow approve retry  kafkacluster.my-cluster    # after manually resetting an Impossible field
+```
+
+Gate names may be given with or without the `.vapretry` suffix.
 
 ### Logging
 

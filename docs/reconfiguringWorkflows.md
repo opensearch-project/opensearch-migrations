@@ -138,6 +138,26 @@ The important distinction is stage, not whether the next operation happens in th
 * **later convergence steps** = perform the actual infrastructure work if the returned checksum says it is still needed
 * **final status patch** = record that the contract has now been successfully realized
 
+### Runtime gates and the `approve` CLI
+
+The `waitForFix` step blocks on a runtime `ApprovalGate` whose name ends in `.vapretry` (one per
+managed resource, e.g. `kafkacluster.my-cluster.vapretry`). The operator clears it through the
+`workflow approve` CLI, and the gate's subcategory — derived from the VAP denial message —
+selects the command:
+
+| Subcategory | When | Operator action | CLI |
+|---|---|---|---|
+| `change` | denial does **not** contain "Impossible" — a **Gated** field changed | Approve to let the workflow annotate the resource and retry the apply | `workflow approve change <resource>` |
+| `retry` | denial contains "Impossible" — an **Impossible** field changed | Manually reset the resource (e.g. delete & recreate), then approve to retry | `workflow approve retry <resource>` |
+
+`workflow approve change --list` / `--list` for retry enumerate the waiting runtime gates; the
+resource name is accepted with or without the `.vapretry` suffix. Approving a `change` gate
+drives the `patchApproval → resetGate → retryLoop` path above: the approval annotation
+(`migrations.opensearch.org/approved-during-run`) is written onto the resource, the gate is reset
+to `Pending`, and the apply is retried — this time accepted by the VAP. Step gates (the
+non-`.vapretry` milestone checkpoints) are described in
+[MigrationAsAWorkflow.md](MigrationAsAWorkflow.md#blocking-upon-user-approval).
+
 ---
 
 ## Field Classification
