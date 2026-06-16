@@ -23,9 +23,6 @@ plugins {
 //                                      the prebuilt binary when present)
 //     bin/migration-assistant-bin     the compiled release binary (so installs
 //                                      need NO Rust toolchain)
-//     skills/...                      the agent-skills bundle (Startup.md,
-//                                      manifest.json, <skill>/SKILL.md, kiro/)
-//     manifest.json                   promoted to root for fast resolution
 //     install.sh, README, LICENSE
 //
 // `assemble` (the base plugin's lifecycle) depends on
@@ -44,22 +41,6 @@ import org.gradle.process.ExecOperations
 import org.gradle.api.file.FileSystemOperations
 import groovy.json.JsonOutput
 import javax.inject.Inject
-
-configurations {
-    agentSkills {
-        canBeConsumed = false
-        canBeResolved = true
-    }
-}
-
-dependencies {
-    // Pull in agent-skills.tar.gz from the agent-skills module's declared
-    // producer artifact. A change to any skill file (Startup.md, manifest.json,
-    // any skills/<name>/SKILL.md, the kiro config) triggers a rebuild of the CLI
-    // tarball -- no copy-by-hand drift. Partner packs add new skills the same
-    // way: drop a skills/<your-skill>/SKILL.md into the producer.
-    agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
-}
 
 def cliVersionProvider = providers.environmentVariable('CLI_VERSION')
         .orElse(providers.gradleProperty('cliVersion'))
@@ -642,7 +623,6 @@ abstract class PackageCliTarballTask extends DefaultTask {
     @InputFile abstract RegularFileProperty getCompiledBinary()
     @InputFile abstract RegularFileProperty getLicenseFile()
     @InputFile abstract RegularFileProperty getMirrorManifestFile()
-    @InputFiles abstract ConfigurableFileCollection getAgentSkillsTar()
     @Input abstract Property<String> getCliVersion()
     @Input abstract Property<String> getArchiveClassifier()
     @Input abstract Property<String> getPackagedBinaryName()
@@ -678,14 +658,6 @@ abstract class PackageCliTarballTask extends DefaultTask {
             new File(root, 'bin/migration-assistant').setExecutable(true)
             new File(root, "bin/${packagedBinaryName.get()}").setExecutable(true)
 
-            // Drop the agent-skills tree under skills/. The producer emits a
-            // gzipped tar whose entries are already rooted at skills/..., so we
-            // extract straight into the bundle root with the `tar` CLI (the same
-            // tool we use to re-pack below — avoids the resources.gzip API).
-            exec.exec {
-                workingDir root
-                commandLine 'tar', '-xzf', agentSkillsTar.singleFile.absolutePath
-            }
             // Vendor the ECR mirror manifest as data, matching the Helm chart layout.
             fs.copy {
                 from mirrorManifestFile
@@ -695,16 +667,6 @@ abstract class PackageCliTarballTask extends DefaultTask {
                 from licenseFile
                 into root
                 rename '.*', 'LICENSE'
-            }
-
-            // Promote skills/manifest.json to the tarball root + stamp the build
-            // version so `migration-assistant version` reports the assembled one.
-            def manifestJsonInner = new File(root, 'skills/manifest.json')
-            def manifestJsonRoot = new File(root, 'manifest.json')
-            if (manifestJsonInner.exists()) {
-                def text = manifestJsonInner.text.replace('"version": "0.0.0-dev"', "\"version\": \"${ver}\"")
-                manifestJsonRoot.text = text
-                manifestJsonInner.text = text
             }
 
             exec.exec {
@@ -758,7 +720,6 @@ tasks.register('packageMigrationAssistantCliTarball', PackageCliTarballTask) {
     licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
     mirrorManifestFile.set(rootProject.layout.projectDirectory.file(
             'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml'))
-    agentSkillsTar.from(configurations.agentSkills)
     cliVersion.set(cliVersionProvider)
     archiveClassifier.set('')
     packagedBinaryName.set('migration-assistant-bin')
@@ -820,7 +781,6 @@ cliInstallerTargetSpecs.each { spec ->
         licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
         mirrorManifestFile.set(rootProject.layout.projectDirectory.file(
                 'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml'))
-        agentSkillsTar.from(configurations.agentSkills)
         cliVersion.set(cliVersionProvider)
         archiveClassifier.set(classifier)
         packagedBinaryName.set(packagedBinaryFileName)
