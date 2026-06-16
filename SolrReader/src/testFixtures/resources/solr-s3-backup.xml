@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <solr>
   <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
-  <str name="sharedLib">/opt/solr/contrib/s3-repository/lib</str>
+  <str name="sharedLib">${sharedLib:/opt/solr/contrib/s3-repository/lib}</str>
   <str name="allowPaths">${solr.allowPaths:}</str>
 
   <solrcloud>

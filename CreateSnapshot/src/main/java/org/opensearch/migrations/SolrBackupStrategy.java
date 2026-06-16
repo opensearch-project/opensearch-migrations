@@ -169,6 +169,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 backupLocation = backupLocation.substring(1);
             }
             log.info("Using S3 backup repository '{}' with location prefix '{}'", repositoryName, backupLocation);
+            // Solr's S3BackupRepository requires the parent location directory to exist (it
+            // HeadObject-checks it) but creates snapshot.<name>/ itself. The cloud path creates
+            // these markers via ensureS3LocationExists; the standalone replication backup does
+            // not, so create the parent marker here. (Only the parent — pre-creating the
+            // snapshot dir yields HTTP 400 "Snapshot directory already exists".)
+            ensureS3ParentLocationExists(args.s3RepoUri, args.s3Region, args.s3Endpoint);
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,
@@ -176,6 +182,88 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);
+
+        // Standalone replication backups contain only raw Lucene segment files — no config.
+        // (SolrCloud BACKUP copies the configset out of ZooKeeper into zk_backup_N/configs/;
+        // standalone has no ZK, and the replication backup API has no parameter to bundle conf.)
+        // The reader (ClusterReaderExtractor S3 branch) derives mappings from the schema in
+        // <snapshotName>/<core>/zk_backup_0/configs/<core>/managed-schema.xml. Fetch each core's
+        // live schema via the raw-file API and write it there so the metadata migration works
+        // against a standalone S3 snapshot — making the standalone layout match cloud's.
+        if (args.s3RepoUri != null) {
+            exportStandaloneSchemasToS3(solrUrl);
+        }
+    }
+
+    /**
+     * Fetch each core's {@code managed-schema} via Solr's raw-file API and upload it to the
+     * S3 key the metadata reader expects:
+     * {@code <s3RepoUri>/<snapshotName>/<core>/zk_backup_0/configs/<core>/managed-schema.xml}.
+     * This mirrors what SolrCloud's BACKUP writes from ZooKeeper, so the reader's
+     * {@code SolrSchemaXmlParser.findAndParse} path works unchanged for standalone snapshots.
+     */
+    private void exportStandaloneSchemasToS3(String solrUrl) {
+        var repoUri = new S3Uri(args.s3RepoUri);
+        var snapshotPrefix = computeParentPrefix(repoUri.key) + args.snapshotName + "/";
+        try (var s3Client = buildS3Client(args.s3Region, args.s3Endpoint)) {
+            for (var core : args.solrCollections) {
+                var schemaXml = fetchStandaloneSchema(solrUrl, core);
+                if (schemaXml == null) {
+                    log.warn("No managed-schema found for core '{}'; metadata migration will see an "
+                        + "empty schema for this collection", core);
+                    continue;
+                }
+                var schemaKey = snapshotPrefix + core + "/zk_backup_0/configs/" + core + "/managed-schema.xml";
+                s3Client.putObject(
+                    PutObjectRequest.builder().bucket(repoUri.bucketName).key(schemaKey).build(),
+                    RequestBody.fromString(schemaXml, java.nio.charset.StandardCharsets.UTF_8));
+                log.info("Exported schema for core '{}' to s3://{}/{}", core, repoUri.bucketName, schemaKey);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to export standalone Solr schema(s) to S3: {} — Lucene data was backed up, "
+                + "but metadata migration may see empty mappings.", e.getMessage());
+        }
+    }
+
+    /**
+     * Fetch a standalone core's schema file via the raw-file API, trying the Solr 8 name
+     * ({@code managed-schema}) then the Solr 9 name ({@code managed-schema.xml}) then the
+     * classic {@code schema.xml}. Returns the file contents, or null if none is found.
+     */
+    private String fetchStandaloneSchema(String solrUrl, String core) {
+        for (var fileName : List.of("managed-schema", "managed-schema.xml", "schema.xml")) {
+            var url = solrUrl + "/solr/" + core + "/admin/file?file=" + fileName + "&contentType=text/xml";
+            try {
+                var body = httpClient.getString(url, Duration.ofSeconds(30));
+                if (body != null && !body.isBlank()) {
+                    log.info("Fetched '{}' for core '{}'", fileName, core);
+                    return body;
+                }
+            } catch (Exception e) {
+                log.debug("Schema file '{}' not available for core '{}': {}", fileName, core, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Create only the parent location directory marker (not the per-snapshot dir, which the
+     * standalone replication backup creates itself). Reuses the same SDK client and marker
+     * convention as the cloud path's {@link #ensureS3LocationExists}.
+     */
+    private void ensureS3ParentLocationExists(String s3RepoUri, String region, String endpoint) {
+        var repoUri = new S3Uri(s3RepoUri);
+        var parentPrefix = computeParentPrefix(repoUri.key);
+        if (parentPrefix.isEmpty()) {
+            return; // bucket root needs no marker
+        }
+        try (var s3Client = buildS3Client(region, endpoint)) {
+            log.info("Ensuring S3 parent directory marker: s3://{}/{}", repoUri.bucketName, parentPrefix);
+            createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, parentPrefix);
+        } catch (Exception e) {
+            log.warn("Failed to ensure S3 parent directory marker under s3://{}/{}: {} — continuing.",
+                repoUri.bucketName, parentPrefix, e.getMessage());
+        }
     }
 
     private void waitForCompletion(BooleanSupplier isFinished) {
