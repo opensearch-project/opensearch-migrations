@@ -146,23 +146,11 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
         STANDALONE
     }
 
-    /**
-     * Create a SolrCloud container whose backup repository writes to an S3-compatible endpoint
-     * (e.g. LocalStack). Convenience for the common Solr 8 cloud case; delegates to
-     * {@link #withS3Backup}. The {@code coreOrCollection} is unused in cloud mode (collections are
-     * created by the test), so a placeholder is passed.
-     *
-     * @param version         Solr version
-     * @param network         shared docker network the S3 endpoint is reachable on
-     * @param bucketName      S3 bucket the backup repository writes to
-     * @param region          S3 region
-     * @param localstackAlias network alias of the S3 endpoint (resolved as {@code http://alias:4566})
-     */
-    public static SolrClusterContainer cloudWithS3Backup(
-        SolrVersion version, Network network, String bucketName, String region, String localstackAlias
-    ) {
-        return withS3Backup(version, Mode.CLOUD, network, "unused", bucketName, region, localstackAlias);
-    }
+    // NOTE: A cloud-only convenience factory cloudWithS3Backup(SolrVersion, Network, String,
+    // String, String) is introduced by PR #3092. It is intentionally NOT defined here to avoid a
+    // duplicate-method clash when the two changes merge; callers wanting the Solr 8 cloud case can
+    // use withS3Backup(version, Mode.CLOUD, ...). Once #3092 lands, its cloudWithS3Backup can be
+    // reduced to a delegate to this general factory.
 
     /**
      * General-purpose S3-backup Solr fixture covering the full version x mode matrix.
