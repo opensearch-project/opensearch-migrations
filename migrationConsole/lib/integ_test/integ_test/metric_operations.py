@@ -183,11 +183,10 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
         try:
             app_metric_found = _any_candidate_has_recent_data(client, app_metric_candidates, lookback_minutes)
         except (ConnectTimeoutError, EndpointConnectionError, OSError) as e:
-            logger.warning(
-                "CloudWatch Metrics API unreachable (likely no VPC endpoint for 'monitoring' in isolated VPC); "
-                "skipping metric assertion. Error: %s", e
-            )
-            return
+            raise AssertionError(
+                "CloudWatch Metrics API unreachable. If running in an isolated VPC, ensure a "
+                "'monitoring' VPC endpoint (com.amazonaws.{region}.monitoring) is configured."
+            ) from e
         if app_metric_found:
             return
         if attempt < attempts:
