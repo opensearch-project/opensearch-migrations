@@ -110,8 +110,20 @@ subprojects {
     // though what '#' does is still undocumented from what I can tell
     spotless {
         java {
-                target "**/*.java"
-                targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
+                // Bake the directory exclusions into the FileTree walk rather than using
+                // targetExclude. Spotless resolves `target` minus `targetExclude` as a set
+                // subtraction (SubtractingFileCollection), which forces a full walk of the
+                // *unfiltered* target tree before the exclude is applied. That walk descends
+                // into node_modules/.bin and dies on npm's dangling atomic-rename symlinks
+                // (e.g. .cdk-XXXX left behind by an interrupted `npm install`), failing with
+                // "Couldn't follow symbolic link ...". A targetExclude of '**/node_modules/**'
+                // does NOT help -- its subtrahend tree must itself be walked, re-triggering the
+                // same descent. Excluding at walk time prunes these directories so they are
+                // never traversed. Mirrors the misc/yaml/json formats above.
+                target project.fileTree(project.projectDir) {
+                    include '**/*.java'
+                    exclude '**/build/**', '**/node_modules/**', '**/cdk.out/**', '**/cdk.out-minified/**', '.gradle/**'
+                }
                 importOrder(
                         'javax',
                         'java',
