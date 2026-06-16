@@ -126,6 +126,7 @@ class ResourceNode:
 
     workflow_progress: Optional[List[Dict[str, Any]]] = None
     config_diff: Optional[Dict[str, Any]] = None
+    config_presence: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -168,7 +169,9 @@ def apply_config_overlays(
     pending = _resolved_resource_map(pending_resolved_config)
     submitted.update(_console_resource_map(submitted_console_config))
     pending.update(_console_resource_map(pending_console_config))
-    if not submitted and not pending:
+    submitted_available = submitted_resolved_config is not None or submitted_console_config is not None
+    pending_available = pending_resolved_config is not None or pending_console_config is not None
+    if not submitted and not pending and not submitted_available and not pending_available:
         return
 
     deployed = {
@@ -177,11 +180,18 @@ def apply_config_overlays(
     }
 
     for key, node in deployed.items():
+        node.config_presence = _build_config_presence(
+            deployed=True,
+            submitted=key in submitted if submitted_available else None,
+            pending=key in pending if pending_available else None,
+        )
         node.config_diff = _build_config_diff(
             node.plural,
             node.spec,
             submitted.get(key),
             pending.get(key),
+            submitted_available=submitted_available,
+            pending_available=pending_available,
         )
 
     for key in sorted((set(submitted) | set(pending)) - set(deployed)):
@@ -195,9 +205,54 @@ def apply_config_overlays(
             depends_on=parameters.get('dependsOn', []) or [],
             spec={},
             status={},
+            config_presence=_build_config_presence(
+                deployed=False,
+                submitted=key in submitted if submitted_available else None,
+                pending=key in pending if pending_available else None,
+            ),
         )
-        virtual.config_diff = _build_config_diff(plural, {}, submitted.get(key), pending.get(key))
+        virtual.config_diff = _build_config_diff(
+            plural,
+            {},
+            submitted.get(key),
+            pending.get(key),
+            submitted_available=submitted_available,
+            pending_available=pending_available,
+        )
         _add_virtual_resource(sections, virtual)
+
+
+def resource_visible_in_config_mode(resource: ResourceNode, value_mode: str) -> bool:
+    """Return whether a resource exists in the selected rollout/config phase."""
+    presence = resource.config_presence or {}
+    if value_mode == CONFIG_MODE_ALL or not presence:
+        return True
+    if value_mode == CONFIG_MODE_DEPLOYED:
+        return presence.get('deployed', True)
+    if value_mode == CONFIG_MODE_CURRENT_WORKFLOW:
+        if 'submitted' in presence:
+            return presence['submitted']
+        return presence.get('deployed', True)
+    if value_mode == CONFIG_MODE_PENDING_SUBMIT:
+        if 'pending' in presence:
+            return presence['pending']
+        if 'submitted' in presence:
+            return presence['submitted']
+        return presence.get('deployed', True)
+    return True
+
+
+def _build_config_presence(
+    deployed: bool,
+    submitted: Optional[bool],
+    pending: Optional[bool],
+) -> Dict[str, bool]:
+    presence = {'deployed': deployed}
+    if submitted is not None:
+        presence['submitted'] = submitted
+    if pending is not None:
+        presence['pending'] = pending
+    return presence
 
 
 def resource_config_change_summary(sections: List[ResourceSection]) -> Dict[str, int]:
@@ -362,12 +417,20 @@ def _build_config_diff(
     deployed_parameters: Dict[str, Any],
     submitted_resource: Optional[Dict[str, Any]],
     pending_resource: Optional[Dict[str, Any]],
+    submitted_available: bool = False,
+    pending_available: bool = False,
 ) -> Optional[Dict[str, Any]]:
     submitted_parameters = (
-        (submitted_resource or {}).get('parameters') if submitted_resource else deployed_parameters
+        (submitted_resource or {}).get('parameters') if submitted_resource else (
+            None if submitted_available else deployed_parameters
+        )
     )
-    pending_parameters = (pending_resource or {}).get('parameters') if pending_resource else submitted_parameters
-    if submitted_parameters is None and pending_parameters is None:
+    pending_parameters = (
+        (pending_resource or {}).get('parameters') if pending_resource else (
+            None if pending_available else submitted_parameters
+        )
+    )
+    if submitted_parameters is None and pending_parameters is None and not deployed_parameters:
         return None
 
     paths = _ordered_config_paths(plural, deployed_parameters, submitted_parameters, pending_parameters)

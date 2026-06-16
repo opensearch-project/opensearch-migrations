@@ -661,7 +661,7 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            assert "[REQ 1] Source Clusters" in get_clean_text_label(tree.root.children[0])
+            assert "Source Clusters [REQ 1]" in get_clean_text_label(tree.root.children[0])
             assert "yellow" in get_label_style(tree.root.children[0])
 
             for _ in range(4):
@@ -670,7 +670,7 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
 
             selected = get_clean_text_label(tree.cursor_node)
             help_text = app.query_one("#edit-help").content
-            assert "[REQ 1] authConfig: < basic >" in selected
+            assert "authConfig: < basic > [REQ 1]" in selected
             assert "yellow" in get_label_style(tree.cursor_node)
             assert "secretName is required" in str(help_text)
             assert "Authentication configuration" in str(help_text)
@@ -787,7 +787,7 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
                     "value": "sigv4",
                 },
             )
-            assert "[REQ 1] authConfig: < sigv4 >" in get_clean_text_label(tree.cursor_node)
+            assert "authConfig: < sigv4 > [REQ 1]" in get_clean_text_label(tree.cursor_node)
 
             await pilot.press("s")
             assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
@@ -925,7 +925,7 @@ async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
             source_node = tree.root.children[0]
-            assert "[CHG 1] Source Clusters" in get_clean_text_label(source_node)
+            assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
             assert "cyan" in get_label_style(source_node)
 
             for _ in range(3):
@@ -941,15 +941,16 @@ async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_
                 pilot,
                 lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
             )
-            assert "[CHG 1] endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
+            assert "endpoint: https://old.example.com:9200 [CHG 1]" in get_clean_text_label(tree.cursor_node)
             assert "Values: Deployed" in str(app.query_one("#pod-status").content)
 
             await pilot.press("t")
             assert await wait_until(
                 pilot,
-                lambda: "[OK] endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
+                lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
             )
-            assert "[OK] endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
+            assert "[OK]" not in get_clean_text_label(tree.cursor_node)
+            assert "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
             assert "green" in get_label_style(tree.cursor_node)
             assert "Status: Deployed" in str(app.query_one("#pod-status").content)
 
@@ -1162,6 +1163,33 @@ async def test_resource_view_shows_pending_only_config_resources_without_workflo
             assert replay_node.is_expanded
             labels = [get_clean_text_label(child) for child in replay_node.children]
             assert "podReplicas: deployed=<absent> | pending=<absent> | to-submit=2" in labels
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: Deployed" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is None
+                ),
+            )
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: Pending" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is None
+                ),
+            )
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: To Submit" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is not None
+                ),
+            )
 
 
 @pytest.mark.asyncio

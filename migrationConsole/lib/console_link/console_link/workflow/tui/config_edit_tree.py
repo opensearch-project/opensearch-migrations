@@ -141,7 +141,9 @@ def _add_edit_node(
 def _node_label(edit_node: Dict[str, Any], value_mode: str, status_mode: str) -> Text:
     status, counts = _effective_status(edit_node, status_mode)
     body = _label_body(edit_node, value_mode)
-    return Text(f"{_badge(status, counts)} {body}", style=_STATUS_STYLE.get(status, ""))
+    badge = _badge(status, counts)
+    label = f"{body} {badge}" if badge else body
+    return Text(label, style=_STATUS_STYLE.get(status, ""))
 
 
 def _label_body(edit_node: Dict[str, Any], value_mode: str) -> str:
@@ -200,7 +202,7 @@ def _badge(status: str, counts: Dict[str, Any]) -> str:
     count_key = _STATUS_COUNT_KEY.get(status)
     count = counts.get(count_key) if count_key else None
     if status == "ok":
-        return "[OK]"
+        return ""
     if count is None:
         count = 1
     return f"[{name} {count}]"

@@ -9,7 +9,7 @@ from console_link.workflow.resource_tree import (
     PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
-    maybe_rewrite_wait_step,
+    maybe_rewrite_wait_step, resource_visible_in_config_mode,
 )
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
@@ -102,7 +102,7 @@ class ResourceTreeStateManager:
 
     def _update_sections(self, root: TreeNode, sections: List[ResourceSection]) -> None:
         """Diff sections against existing tree children."""
-        new_sections = [s for s in sections if any(g.resources or g.not_configured for g in s.groups)]
+        new_sections = [s for s in sections if any(self._group_has_content(g) for g in s.groups)]
         existing = self._existing_by_id(root)
         new_ids = [f'section:{s.name}' for s in new_sections]
 
@@ -126,7 +126,7 @@ class ResourceTreeStateManager:
 
     def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
         """Diff groups within a section."""
-        new_groups = [g for g in groups if g.resources or g.not_configured]
+        new_groups = [g for g in groups if self._group_has_content(g)]
         existing = self._existing_by_id(section_node)
         new_ids = [f'group:{g.display_name}' for g in new_groups]
 
@@ -162,7 +162,10 @@ class ResourceTreeStateManager:
             [group.plural]
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
-        sorted_resources = sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name))
+        sorted_resources = sorted(
+            self._visible_resources(group),
+            key=lambda r: (plural_order.get(r.plural, 99), r.name),
+        )
 
         existing = self._existing_by_id(group_node)
         new_ids = [f'{RESOURCE_ID_PREFIX}{r.name}' for r in sorted_resources]
@@ -199,6 +202,8 @@ class ResourceTreeStateManager:
             live_node.collapse()
         self._add_workflow_progress(resource_node, resource)
         for child in resource.children:
+            if not self._resource_visible(child):
+                continue
             self._add_resource(resource_node, child)
 
         self._restore_collapse_state_recursive(resource_node, collapsed)
@@ -211,6 +216,8 @@ class ResourceTreeStateManager:
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+            if not self._resource_visible(resource):
+                continue
             self._add_resource(group_node, resource)
 
     @staticmethod
@@ -310,7 +317,7 @@ class ResourceTreeStateManager:
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""
         for section in sections:
-            section_has_content = any(g.resources or g.not_configured for g in section.groups)
+            section_has_content = any(self._group_has_content(g) for g in section.groups)
             if not section_has_content:
                 continue
             section_node = self.tree.root.add(
@@ -320,7 +327,7 @@ class ResourceTreeStateManager:
 
     def _add_group(self, parent: TreeNode, group: ResourceGroup) -> None:
         """Add a resource group to the tree."""
-        if not group.resources and not group.not_configured:
+        if not self._group_has_content(group):
             return
         group_node = parent.add(
             f"[bold]{group.display_name}[/]", data={'id': f'group:{group.display_name}'})
@@ -333,7 +340,7 @@ class ResourceTreeStateManager:
             [group.plural]
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
-        for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+        for resource in sorted(self._visible_resources(group), key=lambda r: (plural_order.get(r.plural, 99), r.name)):
             self._add_resource(group_node, resource)
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
@@ -363,6 +370,8 @@ class ResourceTreeStateManager:
 
         # Children (e.g., topics under kafka)
         for child in resource.children:
+            if not self._resource_visible(child):
+                continue
             self._add_resource(resource_node, child)
 
     def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
@@ -370,6 +379,15 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{field}[/dim]", data=None)
         for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
             resource_node.add(field, data=None)
+
+    def _group_has_content(self, group: ResourceGroup) -> bool:
+        return bool(self._visible_resources(group)) or group.not_configured
+
+    def _visible_resources(self, group: ResourceGroup) -> List[ResourceNode]:
+        return [resource for resource in group.resources if self._resource_visible(resource)]
+
+    def _resource_visible(self, resource: ResourceNode) -> bool:
+        return resource_visible_in_config_mode(resource, self._config_value_mode)
 
     def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""

@@ -2,12 +2,16 @@
 
 
 from console_link.workflow.resource_tree import (
+    CONFIG_MODE_CURRENT_WORKFLOW,
+    CONFIG_MODE_DEPLOYED,
+    CONFIG_MODE_PENDING_SUBMIT,
     ResourceGroup,
     ResourceNode,
     ResourceSection,
     _build_tree_from_raw, _nest_topics_under_kafka,
     apply_config_overlays,
     format_config_diff_fields,
+    resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
     mark_not_configured_groups,
@@ -192,7 +196,43 @@ class TestConfigOverlays:
         resource = replay_group.resources[0]
         assert resource.name == 'replay-new'
         assert resource.phase == 'Pending Config'
+        assert resource.config_presence == {'deployed': False, 'pending': True}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        pending = {'resources': []}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert resource.config_presence == {'deployed': True, 'pending': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=2 | to-submit=<absent>'
+        ]
+
+    def test_existing_resource_absent_from_submitted_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        submitted = {'resources': []}
+
+        apply_config_overlays(sections, submitted_resolved_config=submitted)
+
+        assert resource.config_presence == {'deployed': True, 'submitted': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=<absent> | to-submit=<absent>'
+        ]
 
     def test_adds_virtual_source_config_from_console_resources(self):
         sections = _build_tree_from_raw({})
