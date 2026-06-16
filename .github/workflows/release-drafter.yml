@@ -54,11 +54,11 @@ jobs:
             force-cross: 'false'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           java-version: 21
           distribution: corretto
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - id: get_data
         shell: bash
         run: |
@@ -185,7 +185,7 @@ jobs:
             :deployment:k8s:packageMigrationAssistantHelmChart \
             -PhelmChartVersion="${{ steps.get_data.outputs.version }}"
       - name: Download Migration Assistant CLI installers
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: migration-assistant-cli-installers-*-${{ steps.get_data.outputs.version }}
           path: deployment/k8s/aws/build/migrate-cli-dist/release-installers
@@ -348,21 +348,22 @@ jobs:
             -PcliVersion="${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
         with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
-            opensearch-migrations-source.tar.gz
-            opensearch-migrations-build.tar.gz
-            agent-skills/build/agent-skills.tar.gz
-            bootstrap-kiro-agent.sh
-            deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz
-            workflowMigration.schema.json
-            deployment/k8s/aws/dist/aws-bootstrap.sh
-            deployment/k8s/aws/build/migrate-cli-dist/install.sh
-            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz
+          immutableCreate: true
+          prerelease: true
+          generateReleaseNotes: true
+          artifacts: >-
+            deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json,
+            opensearch-migrations-source.tar.gz,
+            opensearch-migrations-build.tar.gz,
+            agent-skills/build/agent-skills.tar.gz,
+            bootstrap-kiro-agent.sh,
+            deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz,
+            workflowMigration.schema.json,
+            deployment/k8s/aws/dist/aws-bootstrap.sh,
+            deployment/k8s/aws/build/migrate-cli-dist/install.sh,
+            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz,
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json,
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz,
             **/*.spdx.json
