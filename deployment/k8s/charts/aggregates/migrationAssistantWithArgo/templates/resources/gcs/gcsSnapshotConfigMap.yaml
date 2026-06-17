@@ -19,4 +19,12 @@ data:
   ENDPOINT: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
   {{- end }}
   BUCKET_URI: {{ printf "gs://%s" $bucketName | quote }}
+  # TODO: SNAPSHOT_ROLE_ARN and AWS_REGION are AWS-specific and have no meaning
+  # for GCS or future providers (e.g. Azure Blob Storage). They are present here
+  # as empty strings only because Argo v4 does not honor optional:true on
+  # configMapKeyRef input parameters and fails parameter resolution if the key
+  # is absent. This should be fixed by moving these fields out of the shared
+  # snapshot configmap into a provider-specific source.
+  SNAPSHOT_ROLE_ARN: ""
+  AWS_REGION: ""
 {{- end }}
