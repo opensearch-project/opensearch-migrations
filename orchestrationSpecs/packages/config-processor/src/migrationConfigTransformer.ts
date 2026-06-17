@@ -31,7 +31,7 @@ export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"
 };
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
-const KAFKA_VERSION = "4.0.0";
+export const KAFKA_VERSION = "4.0.0";
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks

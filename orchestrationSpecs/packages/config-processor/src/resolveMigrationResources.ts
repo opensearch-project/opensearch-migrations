@@ -3,7 +3,7 @@ import {parse} from "yaml";
 import {Console} from "console";
 import * as fs from "fs/promises";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
-import {buildResolvedMigrationResources} from "./resolvedMigrationResources";
+import {buildLooseResolvedMigrationResources, buildResolvedMigrationResources} from "./resolvedMigrationResources";
 
 global.console = new Console({
     stdout: process.stderr,
@@ -21,6 +21,7 @@ Arguments:
   --workflow-name <name>       Optional workflow name to include in the artifact
   --output <file>              Optional output file. Defaults to stdout.
   --include-parameter-policies Include debug field policy metadata for each resource parameter
+  --validation-mode <mode>     strict (default) rejects incomplete configs; loose returns best-effort resources
 
   -h, --help                   Show this help message
 `;
@@ -48,6 +49,7 @@ export async function main(args = process.argv.slice(2)) {
     let workflowName: string | undefined;
     let outputFile: string | undefined;
     let includeParameterPolicies = false;
+    let validationMode: "strict" | "loose" = "strict";
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -61,6 +63,14 @@ export async function main(args = process.argv.slice(2)) {
             outputFile = args[++i];
         } else if (arg === "--include-parameter-policies") {
             includeParameterPolicies = true;
+        } else if (arg === "--validation-mode" && i + 1 < args.length) {
+            const mode = args[++i];
+            if (mode !== "strict" && mode !== "loose") {
+                console.error(`Error: invalid validation mode: \`${mode}\`.`);
+                process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
+                process.exit(5);
+            }
+            validationMode = mode;
         } else {
             console.error(`Error: unknown arg: \`${arg}\`.`);
             process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -78,12 +88,24 @@ export async function main(args = process.argv.slice(2)) {
         process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
         process.exit(4);
     }
+    if (validationMode === "loose" && !userConfigFile) {
+        console.error("Error: --validation-mode loose is only supported with --user-config.");
+        process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
+        process.exit(5);
+    }
 
-    const workflowConfig = userConfigFile
-        ? await new MigrationConfigTransformer().processFromObject(await parseInput(userConfigFile))
-        : ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile!));
+    const inputConfig = await parseInput(userConfigFile ?? workflowConfigFile!);
+    const resolved = userConfigFile && validationMode === "loose"
+        ? await buildLooseResolvedMigrationResources(inputConfig, workflowName, {includeParameterPolicies})
+        : buildResolvedMigrationResources(
+            userConfigFile
+                ? await new MigrationConfigTransformer().processFromObject(inputConfig)
+                : ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(inputConfig),
+            workflowName,
+            {includeParameterPolicies}
+        );
     const contents = JSON.stringify(
-        buildResolvedMigrationResources(workflowConfig, workflowName, {includeParameterPolicies}),
+        resolved,
         null,
         2
     );

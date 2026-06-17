@@ -921,7 +921,7 @@ function zodIssueSeverity(issue: z.core.$ZodIssue): EditDiagnostic["severity"] {
     return messageSeverity(issue.message);
 }
 
-function validationForConfig(config: unknown): EditStateV1["validation"] {
+export function validationForConfig(config: unknown): EditStateV1["validation"] {
     try {
         new MigrationConfigTransformer().validateInput(config);
         return {valid: true, errors: []};

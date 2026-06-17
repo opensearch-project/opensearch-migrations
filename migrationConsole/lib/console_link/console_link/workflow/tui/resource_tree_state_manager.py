@@ -10,6 +10,7 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step, resource_visible_in_config_mode,
+    format_resource_diagnostics,
 )
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
@@ -82,7 +83,7 @@ class ResourceTreeStateManager:
 
     @classmethod
     def _collect_changed_resource_ids(cls, resource: ResourceNode, expansion_ids: set) -> bool:
-        has_changes = bool(resource.config_diff)
+        has_changes = bool(resource.config_diff) or bool(resource.diagnostics)
         child_has_changes = False
         for child in resource.children:
             if cls._collect_changed_resource_ids(child, expansion_ids):
@@ -233,6 +234,12 @@ class ResourceTreeStateManager:
 
     @staticmethod
     def _resource_change_label(resource: ResourceNode) -> str:
+        diagnostic = ResourceTreeStateManager._highest_priority_diagnostic(resource)
+        if diagnostic:
+            severity = diagnostic.get('severity') or 'error'
+            style = ResourceTreeStateManager._diagnostic_style(severity)
+            label = 'required' if severity == 'required' else severity
+            return f' [{style}]({label})[/{style}]'
         diff = resource.config_diff or {}
         if not diff:
             return ''
@@ -241,6 +248,24 @@ class ResourceTreeStateManager:
         if diff.get('has_submitted_changes'):
             return ' [grey50](pending)[/grey50]'
         return ''
+
+    @staticmethod
+    def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict]:
+        rank = {'error': 4, 'required': 3, 'blocked': 3, 'gated': 2, 'warning': 1}
+        diagnostics = resource.diagnostics or []
+        if not diagnostics:
+            return None
+        return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
+
+    @staticmethod
+    def _diagnostic_style(severity: str) -> str:
+        if severity in ('error', 'blocked'):
+            return 'red'
+        if severity == 'required':
+            return 'yellow'
+        if severity == 'gated':
+            return 'magenta'
+        return 'yellow'
 
     @staticmethod
     def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
@@ -379,6 +404,9 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{field}[/dim]", data=None)
         for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
             resource_node.add(field, data=None)
+        for diagnostic in format_resource_diagnostics(resource):
+            style = self._diagnostic_style(diagnostic.get('severity', 'error'))
+            resource_node.add(f"[{style}]{diagnostic['label']}[/{style}]", data=None)
 
     def _group_has_content(self, group: ResourceGroup) -> bool:
         return bool(self._visible_resources(group)) or group.not_configured

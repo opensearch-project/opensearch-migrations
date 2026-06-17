@@ -88,23 +88,34 @@ class ConfigEditService:
     def load_resource_config_snapshots(self, workflow_name: Optional[str] = None) -> Dict[str, Optional[Dict[str, Any]]]:
         """Load resolved resource snapshots for current submitted and saved config."""
         submitted = self.load_latest_submitted_resolved_config()
-        pending = self.load_pending_resolved_config(workflow_name)
+        pending = self.load_pending_resolved_config(workflow_name, validation_mode="loose")
+        pending_console = (pending or {}).get("consoleResources")
+        if pending and pending_console is None and pending.get("workflowConfig"):
+            pending_console = self._run_resolve_console_resources(pending, "--resolved-config")
         return {
             "submitted": submitted,
             "pending": pending,
             "submitted_console": self._run_resolve_console_resources(submitted, "--resolved-config")
             if submitted else None,
-            "pending_console": self._run_resolve_console_resources(pending, "--resolved-config")
-            if pending else None,
+            "pending_console": pending_console,
         }
 
-    def load_pending_resolved_config(self, workflow_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def load_pending_resolved_config(
+        self,
+        workflow_name: Optional[str] = None,
+        validation_mode: str = "strict",
+    ) -> Optional[Dict[str, Any]]:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
         config = store.load_config(self.session_name)
         raw_yaml = config.raw_yaml if config else ""
         if not raw_yaml.strip():
             return None
-        return self._run_resolve_migration_resources(raw_yaml, "--user-config", workflow_name)
+        return self._run_resolve_migration_resources(
+            raw_yaml,
+            "--user-config",
+            workflow_name,
+            validation_mode=validation_mode,
+        )
 
     def load_latest_submitted_resolved_config(self) -> Optional[Dict[str, Any]]:
         runs = list_resources_full(self.namespace, ["migrationruns"]).get("migrationruns", [])
@@ -160,6 +171,7 @@ class ConfigEditService:
         input_data: str,
         input_arg: str,
         workflow_name: Optional[str] = None,
+        validation_mode: str = "strict",
     ) -> Dict[str, Any]:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as temp_file:
             temp_file.write(input_data)
@@ -171,6 +183,8 @@ class ConfigEditService:
             ]
             if workflow_name:
                 args.extend(["--workflow-name", workflow_name])
+            if validation_mode != "strict":
+                args.extend(["--validation-mode", validation_mode])
             output = self._run_config_processor_node_script(*args)
 
         return json.loads(output)

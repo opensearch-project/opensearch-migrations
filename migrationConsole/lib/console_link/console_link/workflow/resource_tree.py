@@ -127,6 +127,7 @@ class ResourceNode:
     workflow_progress: Optional[List[Dict[str, Any]]] = None
     config_diff: Optional[Dict[str, Any]] = None
     config_presence: Dict[str, bool] = field(default_factory=dict)
+    diagnostics: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -180,6 +181,7 @@ def apply_config_overlays(
     }
 
     for key, node in deployed.items():
+        node.diagnostics = _merged_resource_diagnostics(submitted.get(key), pending.get(key))
         node.config_presence = _build_config_presence(
             deployed=True,
             submitted=key in submitted if submitted_available else None,
@@ -205,6 +207,7 @@ def apply_config_overlays(
             depends_on=parameters.get('dependsOn', []) or [],
             spec={},
             status={},
+            diagnostics=_merged_resource_diagnostics(submitted.get(key), pending.get(key)),
             config_presence=_build_config_presence(
                 deployed=False,
                 submitted=key in submitted if submitted_available else None,
@@ -345,6 +348,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'SourceConfig',
                 'name': name,
                 'parameters': source.get('clientConfig') or {},
+                'diagnostics': source.get('diagnostics') or [],
             }
     for target in console_config.get('targets') or []:
         name = target.get('refName')
@@ -353,6 +357,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'TargetConfig',
                 'name': name,
                 'parameters': target.get('clientConfig') or {},
+                'diagnostics': target.get('diagnostics') or [],
             }
     for kafka in console_config.get('kafkas') or []:
         name = kafka.get('refName')
@@ -361,6 +366,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'KafkaConfig',
                 'name': name,
                 'parameters': kafka.get('runtime') or {},
+                'diagnostics': kafka.get('diagnostics') or [],
             }
     return result
 
@@ -380,8 +386,10 @@ def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNod
                     )
                     parent = next((item for item in group.resources if item.name == parent_name), None)
                     if parent:
+                        group.not_configured = False
                         parent.children.append(resource)
                         return
+                group.not_configured = False
                 group.resources.append(resource)
                 return
     display_names = {
@@ -401,6 +409,19 @@ def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNod
         group = ResourceGroup(plural=resource.plural, display_name=display_name, resources=[])
         section.groups.append(group)
     group.resources.append(resource)
+
+
+def _merged_resource_diagnostics(*resources: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result = {}
+    for resource in resources:
+        for diagnostic in (resource or {}).get('diagnostics') or []:
+            key = (
+                diagnostic.get('severity'),
+                tuple(diagnostic.get('path') or []),
+                diagnostic.get('message'),
+            )
+            result[key] = diagnostic
+    return list(result.values())
 
 
 def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
@@ -688,6 +709,9 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
         node.add(f"[dim]{spec_line}[/dim]")
     for config_line in format_config_diff_fields(resource):
         node.add(f"[cyan]{config_line}[/cyan]")
+    for diagnostic in format_resource_diagnostics(resource):
+        style = _diagnostic_style(diagnostic.get('severity', 'error'))
+        node.add(f"[{style}]{diagnostic['label']}[/{style}]")
     if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
@@ -704,6 +728,12 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
 
 
 def _resource_change_label(resource: ResourceNode) -> str:
+    diagnostic = _highest_priority_diagnostic(resource)
+    if diagnostic:
+        severity = diagnostic.get('severity') or 'error'
+        style = _diagnostic_style(severity)
+        label = 'required' if severity == 'required' else severity
+        return f' [{style}]({escape(str(label))})[/{style}]'
     diff = resource.config_diff or {}
     if not diff:
         return ''
@@ -712,6 +742,24 @@ def _resource_change_label(resource: ResourceNode) -> str:
     if diff.get('has_submitted_changes'):
         return ' [magenta](pending)[/magenta]'
     return ''
+
+
+def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict[str, Any]]:
+    rank = {'error': 4, 'required': 3, 'blocked': 3, 'gated': 2, 'warning': 1}
+    diagnostics = resource.diagnostics or []
+    if not diagnostics:
+        return None
+    return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
+
+
+def _diagnostic_style(severity: str) -> str:
+    if severity in ('error', 'blocked'):
+        return 'red'
+    if severity == 'required':
+        return 'yellow'
+    if severity == 'gated':
+        return 'magenta'
+    return 'yellow'
 
 
 def _should_show_step(step: Dict[str, Any]) -> bool:
@@ -887,6 +935,17 @@ def _format_config_value(state: Dict[str, Any]) -> str:
     if value is None:
         return 'null'
     return str(value)
+
+
+def format_resource_diagnostics(resource: ResourceNode) -> List[Dict[str, str]]:
+    result = []
+    for diagnostic in resource.diagnostics or []:
+        severity = str(diagnostic.get('severity') or 'error')
+        message = escape(str(diagnostic.get('message') or 'Invalid value'))
+        path = escape('.'.join(str(part) for part in diagnostic.get('path') or []))
+        label = f"{severity}: {path}: {message}" if path else f"{severity}: {message}"
+        result.append({'severity': severity, 'label': label})
+    return result
 
 
 def format_live_status(resource: ResourceNode):

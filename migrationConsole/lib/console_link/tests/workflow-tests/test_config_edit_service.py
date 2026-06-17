@@ -38,6 +38,30 @@ def test_load_pending_resolved_config_uses_config_processor():
     assert args[3:] == ("--workflow-name", "migration")
 
 
+@patch("console_link.workflow.services.config_edit_service.list_resources_full", return_value={"migrationruns": []})
+def test_load_resource_config_snapshots_uses_loose_pending_projection(_list_resources):
+    runner = MagicMock()
+    runner.run_config_processor_node_script.return_value = """
+    {
+      "resources": [],
+      "consoleResources": {"sources": [], "targets": [], "kafkas": [], "consumerGroups": []}
+    }
+    """
+    service = ConfigEditService(
+        namespace="test",
+        store=FakeStore(WorkflowConfig(raw_yaml="sourceClusters: {}")),
+        runner=runner,
+    )
+
+    result = service.load_resource_config_snapshots("migration")
+
+    assert result["pending"] is not None
+    assert result["pending_console"] == {"sources": [], "targets": [], "kafkas": [], "consumerGroups": []}
+    args = runner.run_config_processor_node_script.call_args.args
+    assert args[:4] == ("resolveMigrationResources", "--user-config", args[2], "--workflow-name")
+    assert args[4:] == ("migration", "--validation-mode", "loose")
+
+
 def test_apply_operation_reports_config_processor_stderr():
     runner = MagicMock()
     runner.run_config_processor_node_script.side_effect = subprocess.CalledProcessError(

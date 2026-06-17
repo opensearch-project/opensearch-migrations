@@ -1,11 +1,16 @@
 import {
     ARGO_MIGRATION_CONFIG_PRE_ENRICH,
     collectProjectedFields,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     ProjectedField,
 } from "@opensearch-migrations/schemas";
 import {createHash} from "crypto";
 import {z} from "zod";
 import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
+import {KAFKA_VERSION, MigrationConfigTransformer} from "./migrationConfigTransformer";
+import {validationForConfig} from "./editConfig";
+import type {EditDiagnostic} from "./editConfig";
+import type {ConsoleResources} from "./consoleResources";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -28,13 +33,24 @@ export interface ResolvedMigrationResource {
     parameters: Record<string, unknown>;
     annotations?: Record<string, string>;
     parameterPolicies?: ResolvedParameterPolicy[];
+    projectionComplete?: boolean;
+    diagnostics?: EditDiagnostic[];
 }
 
 export interface ResolvedMigrationResources {
     formatVersion: 1;
     workflowName?: string;
-    workflowConfig: WorkflowConfig;
+    workflowConfig?: WorkflowConfig;
     resources: ResolvedMigrationResource[];
+    projectionMode?: "strict" | "loose";
+    projectionComplete?: boolean;
+    validation?: {
+        mode: "strict" | "loose";
+        valid: boolean;
+        errors: string[];
+        diagnostics?: EditDiagnostic[];
+    };
+    consoleResources?: ConsoleResources;
 }
 
 export interface ResolvedMigrationResourcesOptions {
@@ -380,6 +396,476 @@ export function buildResolvedMigrationResources(
         workflowConfig,
         resources: buildResolvedMigrationResourceList(workflowConfig, options),
     };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return isRecord(value) ? value : {};
+}
+
+function recordEntries(value: unknown): [string, Record<string, unknown>][] {
+    if (!isRecord(value)) {
+        return [];
+    }
+    return Object.entries(value).flatMap(([key, child]) =>
+        isRecord(child) ? [[key, child] as [string, Record<string, unknown>]] : []
+    );
+}
+
+function asString(value: unknown): string | undefined {
+    return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+    return typeof value === "boolean" ? value : undefined;
+}
+
+function startsWithPath(path: string[] | undefined, prefix: string[]): boolean {
+    if (!path || path.length < prefix.length) {
+        return false;
+    }
+    return prefix.every((part, index) => path[index] === part);
+}
+
+function diagnosticsForPrefixes(
+    diagnostics: EditDiagnostic[] | undefined,
+    prefixes: string[][],
+): EditDiagnostic[] {
+    const result = new Map<string, EditDiagnostic>();
+    for (const diagnostic of diagnostics ?? []) {
+        if (!prefixes.some(prefix => startsWithPath(diagnostic.path, prefix))) {
+            continue;
+        }
+        result.set(
+            `${diagnostic.severity}:${diagnostic.path?.join(".") ?? ""}:${diagnostic.message}`,
+            diagnostic,
+        );
+    }
+    return [...result.values()];
+}
+
+function diagnosticsWithRequiredField(
+    diagnostics: EditDiagnostic[],
+    path: string[],
+    value: unknown,
+    message = "Required field is missing.",
+): EditDiagnostic[] {
+    if (value !== undefined && value !== "") {
+        return diagnostics;
+    }
+    if (diagnostics.some(diagnostic => JSON.stringify(diagnostic.path ?? []) === JSON.stringify(path))) {
+        return diagnostics;
+    }
+    return [
+        ...diagnostics,
+        {
+            severity: "required",
+            message,
+            path,
+        },
+    ];
+}
+
+function resourceWithDiagnostics(
+    kind: string,
+    name: string,
+    parameters: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    diagnosticPrefixes: string[][],
+    options: ResolvedMigrationResourcesOptions = {},
+): ResolvedMigrationResource {
+    const diagnostics = diagnosticsForPrefixes(validation.diagnostics, diagnosticPrefixes);
+    return {
+        ...resource(kind, name, parameters, options),
+        ...(diagnostics.length > 0 ? {diagnostics, projectionComplete: false} : {}),
+    };
+}
+
+function addPathIfDefined(target: Record<string, unknown>, path: string[], value: unknown) {
+    if (value !== undefined) {
+        setPath(target, path, value);
+    }
+}
+
+function looseAuthType(kafkaConfig: Record<string, unknown>): string {
+    const autoCreate = asRecord(kafkaConfig.autoCreate);
+    const auth = asRecord(autoCreate.auth);
+    return asString(auth.type) ?? "scram-sha-512";
+}
+
+function looseKafkaClusterParameters(kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+    const autoCreate = asRecord(kafkaConfig.autoCreate);
+    const nodePool = asRecord(autoCreate.nodePoolSpecOverrides);
+    const storage = asRecord(nodePool.storage);
+    const parameters: Record<string, unknown> = {
+        version: KAFKA_VERSION,
+    };
+    addPathIfDefined(parameters, ["auth", "type"], looseAuthType(kafkaConfig));
+    addPathIfDefined(parameters, ["nodePool", "replicas"], nodePool.replicas);
+    addPathIfDefined(parameters, ["nodePool", "roles"], nodePool.roles);
+    addPathIfDefined(parameters, ["nodePool", "storage", "size"], storage.size);
+    addPathIfDefined(parameters, ["nodePool", "storage", "type"], storage.type);
+    return parameters;
+}
+
+function looseKafkaEntries(config: Record<string, unknown>): [string, Record<string, unknown>][] {
+    const explicit = recordEntries(config.kafkaClusterConfiguration);
+    if (explicit.length > 0) {
+        return explicit;
+    }
+
+    const traffic = asRecord(config.traffic);
+    const names = new Set<string>();
+    for (const [, proxy] of recordEntries(traffic.proxies)) {
+        names.add(asString(proxy.kafka) ?? "default");
+    }
+    for (const [, s3] of recordEntries(traffic.s3Sources)) {
+        names.add(asString(s3.kafka) ?? "default");
+    }
+    return [...names].sort().map(name =>
+        [name, {autoCreate: {}} as Record<string, unknown>] as [string, Record<string, unknown>]
+    );
+}
+
+function looseTopicSpecForKafka(
+    kafkaEntries: [string, Record<string, unknown>][],
+    kafkaName: string,
+): Record<string, unknown> {
+    const kafkaConfig = kafkaEntries.find(([name]) => name === kafkaName)?.[1];
+    const autoCreate = asRecord(kafkaConfig?.autoCreate);
+    return {
+        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+        ...asRecord(autoCreate.topicSpecOverrides),
+    };
+}
+
+function looseCapturedTrafficParameters(
+    sourceName: string,
+    source: Record<string, unknown>,
+    kafkaEntries: [string, Record<string, unknown>][],
+): Record<string, unknown> {
+    const kafkaName = asString(source.kafka) ?? "default";
+    const topicSpec = looseTopicSpecForKafka(kafkaEntries, kafkaName);
+    return {
+        dependsOn: [kafkaName],
+        kafkaClusterName: kafkaName,
+        topicName: asString(source.kafkaTopic) ?? sourceName,
+        partitions: topicSpec.partitions,
+        replicas: topicSpec.replicas,
+        topicConfig: topicSpec.config,
+    };
+}
+
+function looseS3CapturedTrafficParameters(
+    sourceName: string,
+    source: Record<string, unknown>,
+    kafkaEntries: [string, Record<string, unknown>][],
+): Record<string, unknown> {
+    return {
+        ...looseCapturedTrafficParameters(sourceName, source, kafkaEntries),
+        sourceKind: "s3",
+        s3SourceUri: source.s3Uri,
+        loadStarted: true,
+    };
+}
+
+function looseCaptureProxyParameters(proxyName: string, proxy: Record<string, unknown>): Record<string, unknown> {
+    return {
+        ...omitFields(asRecord(proxy.proxyConfig), CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
+        dependsOn: [`${proxyName}-topic`],
+    };
+}
+
+function looseTrafficReplayParameters(
+    replayer: Record<string, unknown>,
+): Record<string, unknown> {
+    const sourceName = asString(replayer.fromCapturedTraffic);
+    return {
+        ...asRecord(replayer.replayerConfig),
+        dependsOn: sourceName ? [sourceName] : [],
+    };
+}
+
+function looseSnapshotMigrationParameters(
+    migration: Record<string, unknown>,
+    snapshotName: string,
+    item: Record<string, unknown>,
+): Record<string, unknown> {
+    const sourceLabel = asString(migration.fromSource);
+    const targetLabel = asString(migration.toTarget);
+    return {
+        ...prefixFields("metadataMigration", asRecord(item.metadataMigrationConfig)),
+        ...prefixFields("documentBackfill", asRecord(item.documentBackfillConfig)),
+        dependsOn: sourceLabel ? [`${sourceLabel}-${snapshotName}`] : [],
+        migrationLabel: asString(item.label) ?? "migration-0",
+        sourceLabel,
+        targetLabel,
+        snapshotLabel: snapshotName,
+    };
+}
+
+function looseClusterClientConfig(cluster: Record<string, unknown>): Record<string, unknown> {
+    const authConfig = asRecord(cluster.authConfig);
+    const result: Record<string, unknown> = {
+        endpoint: cluster.endpoint,
+        version: cluster.version,
+        allow_insecure: asBoolean(cluster.allowInsecure),
+    };
+    if ("basic" in authConfig) {
+        const basic = asRecord(authConfig.basic);
+        result.basic_auth = {
+            k8s_secret_name: basic.secretName,
+            user_secret_arn: basic.secretArn,
+            username: basic.username,
+            password: basic.password,
+        };
+    } else if ("sigv4" in authConfig) {
+        result.sigv4 = authConfig.sigv4 ?? null;
+    } else if ("mtls" in authConfig) {
+        result.mtls_auth = authConfig.mtls ?? null;
+    } else {
+        result.no_auth = null;
+    }
+    return removeUndefined(result) as Record<string, unknown>;
+}
+
+function looseKafkaRuntime(kafkaName: string, kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+    if ("autoCreate" in kafkaConfig || Object.keys(kafkaConfig).length === 0) {
+        const authType = looseAuthType(kafkaConfig);
+        return {
+            type: "strimzi",
+            clusterName: kafkaName,
+            authType,
+            listenerName: authType === "scram-sha-512" ? "tls" : "plain",
+        };
+    }
+
+    return {
+        type: "direct",
+        clientConfig: asRecord(kafkaConfig.existing),
+    };
+}
+
+function looseConsoleResources(
+    rawConfig: Record<string, unknown>,
+    workflowName: string | undefined,
+    validation: ReturnType<typeof validationForConfig>,
+): ConsoleResources {
+    const sources = recordEntries(rawConfig.sourceClusters).map(([name, cluster]) => {
+        const diagnostics = diagnosticsWithRequiredField(
+            diagnosticsForPrefixes(validation.diagnostics, [["sourceClusters", name]]),
+            ["sourceClusters", name, "endpoint"],
+            cluster.endpoint,
+        );
+        return {
+            refName: name,
+            aliases: [name],
+            clientConfig: looseClusterClientConfig(cluster),
+            source: "config" as const,
+            diagnostics,
+        };
+    });
+    const targets = recordEntries(rawConfig.targetClusters).map(([name, cluster]) => {
+        const diagnostics = diagnosticsWithRequiredField(
+            diagnosticsForPrefixes(validation.diagnostics, [["targetClusters", name]]),
+            ["targetClusters", name, "endpoint"],
+            cluster.endpoint,
+        );
+        return {
+            refName: name,
+            aliases: [name],
+            clientConfig: looseClusterClientConfig(cluster),
+            source: "config" as const,
+            diagnostics,
+        };
+    });
+    const kafkas = looseKafkaEntries(rawConfig).map(([name, kafka]) => ({
+        refName: name,
+        aliases: [name, `kafkacluster.${name}`],
+        ...(("autoCreate" in kafka || Object.keys(kafka).length === 0) ? {k8sName: name} : {}),
+        runtime: looseKafkaRuntime(name, kafka) as any,
+        source: "config" as const,
+        diagnostics: diagnosticsForPrefixes(validation.diagnostics, [["kafkaClusterConfiguration", name]]),
+    }));
+
+    return {
+        formatVersion: 1,
+        ...(workflowName ? {workflowName} : {}),
+        sources,
+        targets,
+        kafkas,
+        consumerGroups: [],
+    };
+}
+
+function buildLooseResourceList(
+    rawConfig: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    options: ResolvedMigrationResourcesOptions = {},
+): ResolvedMigrationResource[] {
+    const resources: ResolvedMigrationResource[] = [];
+    const kafkaEntries = looseKafkaEntries(rawConfig);
+
+    for (const [name, kafka] of kafkaEntries) {
+        if ("autoCreate" in kafka || Object.keys(kafka).length === 0) {
+            resources.push(resourceWithDiagnostics(
+                "KafkaCluster",
+                name,
+                looseKafkaClusterParameters(kafka),
+                validation,
+                [["kafkaClusterConfiguration", name]],
+                options,
+            ));
+        }
+    }
+
+    const traffic = asRecord(rawConfig.traffic);
+    for (const [proxyName, proxy] of recordEntries(traffic.proxies)) {
+        resources.push(resourceWithDiagnostics(
+            "CapturedTraffic",
+            `${proxyName}-topic`,
+            looseCapturedTrafficParameters(proxyName, proxy, kafkaEntries),
+            validation,
+            [["traffic", "proxies", proxyName, "kafka"], ["traffic", "proxies", proxyName, "kafkaTopic"]],
+            options,
+        ));
+        resources.push(resourceWithDiagnostics(
+            "CaptureProxy",
+            proxyName,
+            looseCaptureProxyParameters(proxyName, proxy),
+            validation,
+            [["traffic", "proxies", proxyName]],
+            options,
+        ));
+    }
+
+    for (const [s3Name, s3] of recordEntries(traffic.s3Sources)) {
+        resources.push(resourceWithDiagnostics(
+            "CapturedTraffic",
+            `${s3Name}-topic`,
+            looseS3CapturedTrafficParameters(s3Name, s3, kafkaEntries),
+            validation,
+            [["traffic", "s3Sources", s3Name]],
+            options,
+        ));
+    }
+
+    for (const [replayName, replayer] of recordEntries(traffic.replayers)) {
+        const fromCapturedTraffic = asString(replayer.fromCapturedTraffic) ?? replayName;
+        const toTarget = asString(replayer.toTarget) ?? "target";
+        resources.push(resourceWithDiagnostics(
+            "TrafficReplay",
+            [fromCapturedTraffic, toTarget, replayName].join("-"),
+            looseTrafficReplayParameters(replayer),
+            validation,
+            [["traffic", "replayers", replayName]],
+            options,
+        ));
+    }
+
+    for (const [sourceName, source] of recordEntries(rawConfig.sourceClusters)) {
+        const snapshotInfo = asRecord(source.snapshotInfo);
+        for (const [snapshotName, snapshot] of recordEntries(snapshotInfo.snapshots)) {
+            const config = asRecord(snapshot.config);
+            const createSnapshotConfig = asRecord(config.createSnapshotConfig);
+            if (Object.keys(createSnapshotConfig).length === 0) {
+                continue;
+            }
+            resources.push(resourceWithDiagnostics(
+                "DataSnapshot",
+                `${sourceName}-${snapshotName}`,
+                {
+                    snapshotPrefix: asString(createSnapshotConfig.snapshotPrefix) ?? snapshotName,
+                    ...createSnapshotConfig,
+                },
+                validation,
+                [["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName]],
+                options,
+            ));
+        }
+    }
+
+    const migrations = Array.isArray(rawConfig.snapshotMigrationConfigs)
+        ? rawConfig.snapshotMigrationConfigs
+        : [];
+    migrations.forEach((migration, migrationIndex) => {
+        if (!isRecord(migration)) {
+            return;
+        }
+        const sourceLabel = asString(migration.fromSource) ?? `source-${migrationIndex}`;
+        const targetLabel = asString(migration.toTarget) ?? `target-${migrationIndex}`;
+        const perSnapshotConfig = asRecord(migration.perSnapshotConfig);
+        for (const [snapshotName, itemsValue] of Object.entries(perSnapshotConfig)) {
+            const items = Array.isArray(itemsValue) ? itemsValue : [itemsValue];
+            items.forEach((item, itemIndex) => {
+                if (!isRecord(item)) {
+                    return;
+                }
+                const migrationLabel = asString(item.label) ?? `migration-${itemIndex}`;
+                resources.push(resourceWithDiagnostics(
+                    "SnapshotMigration",
+                    [sourceLabel, targetLabel, snapshotName, migrationLabel].join("-"),
+                    looseSnapshotMigrationParameters(migration, snapshotName, item),
+                    validation,
+                    [["snapshotMigrationConfigs", String(migrationIndex)]],
+                    options,
+                ));
+            });
+        }
+    });
+
+    return resources;
+}
+
+export async function buildLooseResolvedMigrationResources(
+    rawConfig: unknown,
+    workflowName?: string,
+    options: ResolvedMigrationResourcesOptions = {},
+): Promise<ResolvedMigrationResources> {
+    const validation = validationForConfig(rawConfig);
+    try {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(rawConfig);
+        return {
+            ...buildResolvedMigrationResources(workflowConfig, workflowName, options),
+            projectionMode: "loose",
+            projectionComplete: true,
+            validation: {
+                mode: "loose",
+                valid: true,
+                errors: [],
+            },
+        };
+    } catch (error) {
+        const raw = asRecord(rawConfig);
+        const looseValidation = validation.valid
+            ? {
+                valid: false,
+                errors: [String(error)],
+                diagnostics: [{
+                    severity: "error" as const,
+                    message: String(error),
+                    path: [],
+                }],
+            }
+            : validation;
+        return {
+            formatVersion: 1,
+            ...(workflowName ? {workflowName} : {}),
+            projectionMode: "loose",
+            projectionComplete: false,
+            validation: {
+                mode: "loose",
+                valid: looseValidation.valid,
+                errors: looseValidation.errors,
+                diagnostics: looseValidation.diagnostics,
+            },
+            consoleResources: looseConsoleResources(raw, workflowName, looseValidation),
+            resources: buildLooseResourceList(raw, looseValidation, options),
+        };
+    }
 }
 
 export function dryRunResourcePolicy(

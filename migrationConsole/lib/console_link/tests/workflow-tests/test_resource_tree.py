@@ -11,6 +11,7 @@ from console_link.workflow.resource_tree import (
     _build_tree_from_raw, _nest_topics_under_kafka,
     apply_config_overlays,
     format_config_diff_fields,
+    format_resource_diagnostics,
     resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
@@ -201,6 +202,38 @@ class TestConfigOverlays:
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_adds_partial_loose_resource_and_clears_not_configured_placeholder(self):
+        sections = _build_tree_from_raw({})
+        capture_group = sections[1].groups[0]
+        capture_group.not_configured = True
+        pending = {'resources': [{
+            'kind': 'CaptureProxy',
+            'name': 'capture-new',
+            'parameters': {'dependsOn': ['capture-new-topic']},
+            'diagnostics': [{
+                'severity': 'required',
+                'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+                'message': 'Invalid input: expected object, received undefined',
+            }],
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert capture_group.not_configured is False
+        assert len(capture_group.resources) == 1
+        resource = capture_group.resources[0]
+        assert resource.name == 'capture-new'
+        assert resource.phase == 'Pending Config'
+        assert resource.diagnostics == [{
+            'severity': 'required',
+            'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+            'message': 'Invalid input: expected object, received undefined',
+        }]
+        assert format_resource_diagnostics(resource) == [{
+            'severity': 'required',
+            'label': 'required: traffic.proxies.capture-new.proxyConfig: Invalid input: expected object, received undefined',
+        }]
 
     def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):
         resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})

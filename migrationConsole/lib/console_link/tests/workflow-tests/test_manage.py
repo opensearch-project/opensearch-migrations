@@ -1193,6 +1193,64 @@ async def test_resource_view_shows_pending_only_config_resources_without_workflo
 
 
 @pytest.mark.asyncio
+async def test_resource_view_shows_loose_projection_diagnostics_without_workflow():
+    """Incomplete saved config resources render in resource view with validation diagnostics."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "CaptureProxy",
+                        "name": "capture-new",
+                        "parameters": {"dependsOn": ["capture-new-topic"]},
+                        "diagnostics": [{
+                            "severity": "required",
+                            "path": ["traffic", "proxies", "capture-new", "proxyConfig"],
+                            "message": "Invalid input: expected object, received undefined",
+                        }],
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=_build_tree_from_raw({})):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "resource:capture-new") is not None,
+                timeout=5.0,
+            )
+
+            capture_node = find_tree_node_by_id(tree.root, "resource:capture-new")
+            assert "(required)" in get_clean_text_label(capture_node)
+            labels = [get_clean_text_label(child) for child in capture_node.children]
+            assert (
+                "required: traffic.proxies.capture-new.proxyConfig: "
+                "Invalid input: expected object, received undefined"
+            ) in labels
+
+
+@pytest.mark.asyncio
 async def test_resource_view_edit_mode_add_row_bindings_do_not_offer_delete(mock_workflow_with_two_pods):
     """Synthetic add rows expose Add actions and never expose remove bindings."""
 

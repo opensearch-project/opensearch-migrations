@@ -351,6 +351,9 @@ export function buildConsoleResources(
 export function buildConsoleResourcesFromResolvedConfig(
     resolvedConfig: ResolvedMigrationResources
 ): ConsoleResources {
+    if (!resolvedConfig.workflowConfig) {
+        throw new Error("Resolved config does not include a strict workflowConfig.");
+    }
     return buildConsoleResources(
         ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(resolvedConfig.workflowConfig),
         resolvedConfig.workflowName,

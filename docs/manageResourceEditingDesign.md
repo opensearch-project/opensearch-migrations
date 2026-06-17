@@ -1,817 +1,176 @@
 # Manage Resource Editing and Resubmission
 
-> Status: prototype in progress. The first implementation exists behind
-> `workflow manage --resource-view` -> `e`, but preview, live inverse
-> regeneration, submit/reset wiring, and policy-aware rollout diffs are still
-> design targets.
+`workflow manage --resource-view` is the resource-centered place to inspect deployed state, pending workflow rollout state, and saved config that has not been submitted yet. It also provides the schema-guided edit path for workflow YAML without requiring users to remember the full YAML structure.
 
-## Summary
-
-The objective is to make workflow configuration editable from `workflow manage`
-without requiring users to remember the full YAML schema. The edit experience
-should operate from the existing resource-centric manage view, use an inline
-guided tree editor, show schema descriptions for resources and fields, offer a
-YAML escape hatch for complex nested structures, and save pending changes back
-to the existing workflow configuration ConfigMap.
-
-Edits are not applied directly to live migration CR specs. The flow remains:
+The edit flow is intentionally indirect:
 
 ```text
-manage edit UI
+manage UI
   -> pending workflow YAML
-  -> config-processor validation/preview
+  -> config-processor validation and resource projection
   -> workflow submit
+  -> MigrationRun.resolvedConfig
   -> migration CR specs
   -> workflow convergence
 ```
 
-The TS config-processor should own schema-aware editing, inverse rendering,
-validation, diffing, and policy preview. The Python Textual UI should stay a
-thin presentation layer that calls config-processor CLI commands, renders the
-returned tree DTO, and updates the config store.
+Live migration CR specs are not edited directly. The pending YAML remains the user-owned source for edits until the user submits a workflow.
 
-Hard maintainability rule: there must be one semantic parser/projection owner.
-Python must not grow a second loose workflow-config parser, and the resource
-view must not grow an edit-tree-to-resource translator. The config-processor
-should expose both strict and loose modes from the same TS pipeline:
+## Ownership Boundaries
 
-- Strict mode is the submit/transform gate. It requires the whole config to pass
-  Zod refinements, unified-schema validation, extra-key checks, and output
-  validation before resources are generated for workflow submission.
-- Loose mode is for manage rendering and field editing. It parses whatever YAML
-  is syntactically readable, preserves the same object/path model, projects the
-  interior structures it can understand, and returns structured diagnostics for
-  missing or invalid pieces. Loose mode may return partial source, target,
-  proxy, replay, Kafka, and snapshot-migration projections; it must also say
-  that the full config is not submittable.
+TypeScript owns workflow-config semantics. Python owns presentation, Kubernetes reads, and command orchestration.
 
-This keeps "valid YAML but invalid workflow config" and "fully valid workflow
-config" on one code path. The only acceptable bifurcation is validation
-strictness, not ownership of schema semantics.
+The config-processor owns:
 
-This does not imply a long-lived Node.js daemon. The v1 design should use
-one-shot Node invocations through the existing `ScriptRunner` pattern: Python
-writes temporary input files, runs a config-processor command, reads the JSON
-result, and lets the process exit. A daemon/helper remains an optimization only
-if measured interaction latency becomes unacceptable; if added later, it should
-be a manage-owned stdio child process, not a cluster service or network daemon.
+- user-schema parsing and validation;
+- Zod refinements and unified-schema validation;
+- JSON Schema descriptions, UI hints, and reference options;
+- edit-state DTO construction;
+- typed edit operations;
+- strict resource projection for submit and stored `MigrationRun` data;
+- loose resource projection for incomplete saved configs;
+- validation diagnostics attached to stable config paths.
 
-## Current Prototype Shape
+The Python/Textual manage code owns:
 
-The current branch has a working first pass that validates the main design
-direction but is intentionally incomplete.
+- building the live resource tree from Kubernetes CRs;
+- calling config-processor commands through `ScriptRunner`;
+- rendering generic DTOs;
+- saving pending YAML through `WorkflowConfigStore`;
+- delegating workflow submit/reset to the existing command paths.
 
-Implemented pieces:
+Python does not parse workflow YAML into domain resources and does not translate the edit tree back into resources. The only best-effort workflow-config projection is the TS loose projection.
 
-- `orchestrationSpecs/packages/config-processor/src/editConfig.ts` exposes
-  `editConfig state` and `editConfig apply`.
-- `editConfig state --pending-config <file|->` parses pending workflow YAML and
-  returns `EditStateV1` JSON.
-- `editConfig apply --pending-config <file|-> --operation <json-file|->`
-  applies one committed operation, returns updated YAML, and returns the next
-  `EditStateV1`.
-- Python `ConfigEditService` is a boundary around those one-shot TS commands.
-  It loads the raw pending YAML from `WorkflowConfigStore`, calls TS, and saves
-  raw YAML back to the same store.
-- `workflow manage --resource-view` binds `e` to enter config edit mode.
-- Edit mode replaces the live resource tree with a generic
-  `Workflow Config Edit` tree rendered from the TS DTO.
-- The bottom help/status panel follows the selected row and shows breadcrumb
-  path, aggregate status/diagnostic text, and the schema description returned by
-  TS.
-- Edit tree rows are colored from a single effective status. The renderer uses
-  the highest-priority status available for the selected status mode, including
-  aggregate status from descendants.
-- The TUI has separate value and status projection modes: `All`, `Deployed`,
-  `After Workflow`, and `After Submit`. Current TS data only has pending YAML,
-  but the renderer already understands future per-state values/statuses and can
-  collapse unchanged values in `All` mode.
-- Current operation support is `set`, `add`, and `removeConfig`.
-- Current editable groups are source clusters, target clusters, Kafka cluster
-  configuration, traffic capture proxies, traffic replayers, and snapshot
-  migration configs.
-- Current guided variants cover HTTP auth (`none`, `basic`, `sigv4`, `mtls`)
-  and Kafka mode (`autoCreate`, `existing`).
-- Current schema hints are authored in `userSchemas.ts` with `.uiHint(...)`,
-  exported to JSON Schema as `x-ui-hint`, copied into `EditStateV1` as
-  `inputHint`, and rendered generically by Python.
-- Reference hints currently drive pickers for source cluster, target cluster,
-  Kafka cluster, and capture proxy references when options are available.
-- Scalar edit dialogs use local schema regex hints immediately and schedule a
-  debounced one-shot TS validation pass for whole-config diagnostics.
-- `Enter` edits scalar values, toggles booleans, opens union pickers, expands objects,
-  or starts add rows depending on the selected row.
-- `Del` and `Backspace` remove config entries after a confirmation modal, and
-  are not bound on synthetic add rows.
-- `Ctrl+s` saves the current draft YAML to the pending config store.
+## Process Model
 
-Current interaction details:
+Manage uses one-shot Node invocations. There is no Node.js daemon.
 
-| Key | Current edit-mode behavior |
-| --- | --- |
-| `e` | Enter edit mode from resource view |
-| `Enter` | Edit scalar with a small input modal, toggle booleans, open union pickers, expand/collapse object rows, approve running gates, or start an add row |
-| `a` | Start the selected synthetic add row |
-| `Left` / `Right` | Collapse/expand the selected tree row |
-| `Space` | Toggle boolean rows |
-| `v` | Cycle value projection mode |
-| `t` | Cycle status projection mode |
-| `Del` / `Backspace` | Confirm and remove removable config entries |
-| `Ctrl+s` | Save pending YAML draft to `WorkflowConfigStore` |
-| `Esc` | Exit edit mode and restore the live resource tree |
-| `?` | Show selected field/resource description as a notification |
+TS runs at committed interaction boundaries:
 
-The current UI still uses modals for scalar value entry and add-name entry.
-That is an implementation shortcut, not the final UX. The desired direction is
-still inline or near-inline editing in the main view, with modals reserved for
-destructive confirmation and genuinely large choices.
+- entering edit mode, to build the editable tree;
+- committing an edit operation, such as scalar set, boolean toggle, union choice, add, or remove;
+- debounced whole-config validation while a scalar modal is open;
+- loading pending resource overlays for the non-edit resource view;
+- immediately before submit.
 
-The current prototype runs TS more often than the original batching sketch:
+TS does not run on cursor movement, normal manage polling refreshes, or every keystroke. `s` and `Ctrl+s` save the current draft YAML that TS already produced for the last committed operation.
 
-- once when entering edit mode, to build the initial editable tree;
-- once for each committed edit operation, such as a completed scalar edit,
-  boolean toggle, union choice, add, or remove;
-- once after a scalar value is idle long enough in the edit dialog, using a
-  transient operation against the current draft YAML; stale validation results
-  are ignored with generation tokens;
-- not on cursor movement;
-- not on every keystroke while typing in the input modal; local regex checks run
-  immediately, while full TS validation is debounced;
-- not on normal manage polling refreshes.
+A long-lived helper remains only a latency optimization. If added, it is a manage-scoped stdio child process with the same JSON contracts, not a cluster service and not a network daemon.
 
-`Ctrl+s` currently only writes the already-computed draft YAML to the ConfigMap.
-It does not rerun TS today. A later preview/submit step should run TS again with
-current pending/live inputs before submitting, so stale policy or validation
-state cannot be accepted silently.
+## Resource View Data Model
 
-Known prototype gaps:
+The resource view combines three projections:
 
-- The edit tree is global; pressing `e` on a resource does not yet focus only
-  that resource's config subtree.
-- Python still knows a small amount of path policy for removability. Longer
-  term, TS should return `removable`, `editable`, and command metadata so Python
-  does not need schema path knowledge.
-- Descriptions are a mix of schema descriptions and hand-authored strings in
-  `editConfig.ts`; this should converge on `userSchemas.ts` metadata wherever
-  possible.
-- Pending-submit changes, submitted-rollout changes, and policy preview arrays
-  are currently empty placeholders.
-- The value/status modes are rendering plumbing only until TS starts sending
-  deployed/current-workflow/pending-submit state values.
-- The prototype edits pending YAML only. It does not yet regenerate user config
-  from live resources or `MigrationRun` history when pending YAML is absent.
-- Save does not submit, and reset/delete of deployed resources is not wired.
-- YAML shape preservation is basic: TS parses to an object and re-stringifies
-  YAML, so comments and formatting are not preserved.
-- Resource-view pending overlays currently depend on strict
-  `resolveMigrationResources`. If the saved YAML is syntactically valid but
-  semantically incomplete, strict projection fails and manage shows only live
-  deployed resources. The fix should not be a Python fallback. The fix should
-  be a TS loose resource projection that reuses the same parser, normalizer,
-  projection metadata, and diagnostics as strict mode.
+- `deployed`: live Kubernetes CR specs;
+- `submitted`: the latest submitted `MigrationRun.spec.resolvedConfig`;
+- `pending`: the saved pending YAML in `WorkflowConfigStore`.
 
-## Maintainability Review
+Submitted config is strict because it comes from a submitted workflow run. Pending config is loose because users often save incomplete YAML while building a workflow.
 
-The prototype is viable if the schema semantics stay in TS and Python remains a
-generic renderer/orchestrator. The places that are currently maintainable are
-the ones that already respect that boundary:
-
-- `userSchemas.ts` owns user-facing field structure, descriptions,
-  refinements, defaults, change restrictions, and UI hints.
-- `editConfig.ts` owns the edit-state DTO, operation application, union
-  expansion, record/array add rows, reference options, and validation
-  diagnostics for incomplete configs.
-- `ConfigEditService` is a narrow Python boundary around config-processor
-  one-shot commands and the pending config store.
-- `config_edit_tree.py` renders a generic edit DTO. It does not know concrete
-  source/target/proxy schemas beyond generic row kinds, hints, diagnostics, and
-  statuses.
-- `resource_tree.py` renders resolved resource projections and live CR state. It
-  should not parse user YAML directly.
-
-The risky areas are the places where the boundary is not yet clean:
-
-- Resource view pending overlays use strict `resolveMigrationResources` only.
-  That is why partially configured proxies disappear from the main view even
-  though edit mode can show them.
-- `resource_tree.py` still hardcodes display fields per resource plural. That is
-  acceptable for the first resource view, but long term those visible fields
-  should come from projection metadata generated by the schema/resource
-  projection layer.
-- Python still has small path checks for removability and add-row behavior. TS
-  should return command metadata such as `editable`, `removable`, `renameable`,
-  `addable`, and `dangerous` so Python can stop knowing those path policies.
-- `editConfig.ts` contains some hand-authored descriptions and defaults. Those
-  should be lifted into `userSchemas.ts` metadata when the schema already has a
-  natural home for them.
-
-### What Should Be Folded Together
-
-These pieces should converge:
-
-- Strict resource projection and loose resource projection should share one TS
-  implementation. Strict mode should fail when required inputs are missing.
-  Loose mode should return best-effort projected resources plus diagnostics for
-  the same missing inputs.
-- Edit-state diagnostics and resource-overlay diagnostics should come from the
-  same validation result shape. A missing `traffic.proxies.cap.proxyConfig`
-  should appear as the same diagnostic whether the user is in edit mode or
-  resource view.
-- Add/remove/edit capability metadata should be generated by TS and consumed by
-  Python. Python should not maintain a second list of paths that can be added or
-  removed.
-- User-visible field lists for resource details should eventually be generated
-  from projection metadata instead of `SPEC_DISPLAY_FIELDS`.
-
-### What Should Not Be Folded Together
-
-These boundaries should remain:
-
-- Python should not parse workflow YAML into domain resources. It may parse JSON
-  DTOs returned by TS, but it should not understand `traffic.proxies`,
-  `snapshotMigrationConfigs`, `authConfig`, or other schema internals as a
-  source of truth.
-- Textual tree rendering should stay separate from config mutation. The renderer
-  consumes immutable DTOs and emits operations; TS applies operations and
-  returns the next DTO.
-- Live Kubernetes CR/resource discovery should remain in Python because manage
-  already has the kube client, live polling, pod/log wiring, reset flows, and
-  Argo workflow state there.
-- Workflow submission must stay strict. Loose mode is only for display,
-  diagnosis, and draft editing. It should never be used to submit a workflow or
-  produce final CR manifests.
-
-### Adding New Schema Features
-
-When a new user-config field is added, the expected work should be:
-
-1. Add the field to `userSchemas.ts` with its description, default,
-   refinements, change restriction/checksum metadata when applicable, and
-   `.uiHint(...)` if the UI should do better than a plain scalar editor.
-2. If the field affects workflow runtime behavior, update
-   `migrationConfigTransformer.ts` and the resource projection metadata in TS.
-3. If the field should appear in resource-view detail rows, add or generate its
-   projected field metadata. The long-term goal is generation; the current
-   short-term path may still require updating `SPEC_DISPLAY_FIELDS`.
-4. Add TS tests for strict validation, loose projection behavior if the field
-   can be partially specified, edit-state rendering, and policy/checksum impact.
-5. Add Python tests only if the DTO shape introduces a new generic UI behavior.
-   A new scalar/reference/union/record field should not require Python changes.
-
-When a new constraint/refinement is added, the expected work should be:
-
-1. Add the Zod refinement or unified-schema rule in TS.
-2. Ensure validation diagnostics carry the correct path and severity.
-3. Add TS tests that strict mode rejects invalid config and loose mode still
-   returns the relevant partial nodes/resources with diagnostics.
-4. Add Python tests only if the renderer needs a new severity, new status
-   priority, or new interaction affordance.
-
-When a new resource type is added, the expected work should be:
-
-1. Add the user-schema model and config transformer output in TS.
-2. Add resource projection metadata in TS, including kind, name, parameters,
-   dependencies, consumed virtual source/target fields, and policy metadata.
-3. Add loose projection support from the same projection metadata so partial
-   resource rows can appear before the config is complete.
-4. Add the resource to Python's resource section/group taxonomy only if it needs
-   a new top-level placement. The group placement is UI structure, not schema
-   validation.
-5. Add Python rendering tests for grouping/filtering only; field semantics
-   should be covered in TS.
-
-The desired steady state is: schema additions usually require TS changes and
-tests, while Python changes are reserved for new generic widget behaviors or new
-top-level grouping decisions.
-
-## Sample UI
-
-The screenshots below are static mockups of the intended Textual experience.
-They are not pixel-perfect final output, but they show the planned screen
-structure, modes, and change-stage language.
-
-### Resource Overview
-
-The resource view becomes the default place to inspect deployed resources,
-virtual source/target resources, and pending edit state.
-
-![Manage resource overview](diagrams/manage-edit-overview.svg)
-
-### Inline Guided Tree Editor
-
-Edit mode keeps the user inside the resource tree. The selected resource is
-expanded into schema-backed config rows. Leaf values can be edited in place:
-booleans toggle, enum/union fields open a picker from `Enter`, and text-like values
-open a focused inline input below the selected row. If a union selection requires
-nested input, the tree grows those child rows immediately beneath it. Branch
-labels show aggregate completion/error cues, and a bottom help strip follows the
-selected row with the relevant schema description and current diagnostic.
-
-![Inline guided tree editor](diagrams/manage-edit-form.svg)
-
-### Pending Submit Preview
-
-Before submit, manage shows changes saved in pending YAML but not yet submitted
-as a workflow run. Source/target changes are grouped under their virtual
-resource name and repeated as provenance only under consumers affected by those
-specific fields.
-
-![Pending submit preview](diagrams/manage-edit-preview.svg)
-
-### Submitted Rollout and Approval State
-
-After submit, the UI distinguishes accepted CR spec changes that have not
-converged from active workflow progress and approval gates.
-
-![Submitted rollout state](diagrams/manage-edit-rollout.svg)
-
-## Existing Repo Context
-
-Relevant current pieces:
-
-- `workflow manage` launches a Textual app from
-  `migrationConsole/lib/console_link/console_link/workflow/commands/manage.py`.
-- `--resource-view` already builds a CR-centric tree from live migration CRs and
-  merges Argo workflow progress.
-- `workflow configure edit` stores raw pending YAML in the existing
-  `WorkflowConfigStore` ConfigMap.
-- `workflow submit` reads that ConfigMap and uses config-processor to generate
-  workflow artifacts and migration CR resources.
-- `MigrationRun.spec.resolvedConfig` records effective submitted resource
-  parameters for each run.
-- `resolvedMigrationResources.ts` already exposes a VAP-style dry-run policy
-  evaluator for `safe`, `gated`, and `impossible` field changes.
-- `userSchemas.ts` already has field descriptions, defaults,
-  `changeRestriction`, and `checksumFor` metadata.
-
-The design should reuse those pieces instead of creating a second config path.
-
-## UX Model
-
-`workflow manage --resource-view` should show these top-level groups:
-
-- `Source Clusters` virtual resources from `sourceClusters`.
-- `Target Clusters` virtual resources from `targetClusters`.
-- Existing real migration resources: Kafka, captured traffic, proxy, snapshot,
-  snapshot migration, and replay.
-
-Context-sensitive keys:
-
-| Key | Action |
-| --- | --- |
-| `Enter` | Open selected node; on synthetic add rows, start the add wizard |
-| `e` | Edit selected resource or virtual resource |
-| `u` | Duplicate selected config entry |
-| `Del` / `Backspace` | Remove selected config entry, or launch reset flow for real resources, after confirmation |
-| `p` | Preview pending and rollout changes |
-| `s` | Submit pending config through existing `workflow submit` |
-| `r` | Refresh live workflow/resource state |
-
-Adding resources should be represented in the tree instead of through a global
-hotkey. Each actionable collection gets a synthetic add row:
+The load path is:
 
 ```text
-Source Clusters
-  source: legacy-cluster
-  + Add source cluster
-
-Target Clusters
-  target: prod-os
-  + Add target cluster
-
-Snapshot Migration
-  Snapshot
-    datasnapshot.legacy-cluster-snapshot-a
-    + Add snapshot
-  Backfill
-    snapshotmigration.legacy-prod-snapshot-a-migration-0
-    + Add snapshot migration
-
-Live Traffic Migration
-  Capture
-    captureproxy.capture-proxy
-    + Add capture proxy
-  Buffer
-    kafkacluster.default
-    + Add Kafka cluster
-  Replay
-    trafficreplay.capture-proxy-prod-os-replay
-    + Add traffic replay
+build_resource_tree(namespace)
+  -> live deployed CR ResourceNode objects
+mark_not_configured_groups(workflow tree)
+  -> live workflow skipped groups
+ConfigEditService.load_resource_config_snapshots()
+  -> submitted strict resolved config
+  -> pending loose resolved config
+apply_config_overlays()
+  -> deployed/submitted/pending value comparison
+  -> virtual pending-only resources
+  -> source/target/Kafka virtual config rows
+  -> diagnostics on affected resources
 ```
 
-Synthetic add rows are not resources and are not removable. Selecting one and
-pressing `Enter` launches the add flow for that specific collection. This keeps
-add discoverable, avoids a generic "choose a resource type" modal, and lets add
-forms prefill nearby context where useful.
+If a live workflow marks a group as `(not configured)` and pending config adds a resource to that group, the placeholder is cleared and the pending resource is rendered.
 
-The UI should make three change stages explicit:
+## Strict and Loose Projection
 
-1. Pending submit: saved in pending YAML, not submitted yet.
-2. Submitted rollout: accepted into migration CR `.spec`, but not yet reflected
-   in the resource's realized status checksum.
-3. Active workflow progress: current Argo steps, approval gates, retry loops,
-   and live output.
+`resolveMigrationResources` exposes two validation modes:
 
-## Inline Guided Tree Editing
-
-The preferred edit interaction is a tree-based mode, not modal-first guided
-forms. Pressing `e` on a resource enters edit mode in the main manage view:
-
-- the selected resource remains in the tree;
-- unrelated top-level groups can be dimmed or temporarily collapsed to reduce
-  visual noise;
-- schema-backed editable rows appear beneath the resource;
-- a dockable help/status panel, bottom by default, shows the selected resource
-  or field description from `userSchemas.ts`;
-- changes are staged locally in the edit session until the user saves.
-
-The TS edit-state command should return enough schema/edit metadata for Python
-to avoid knowing the workflow schema. The first prototype sends each committed
-row operation back through TS and re-renders the returned tree. That keeps all
-variant expansion, validation, and YAML rendering in one place while the DTO is
-still evolving. If startup latency becomes a UX problem, the next optimization
-is to let Python apply simple local display updates optimistically and reconcile
-through TS on save/preview. Python still should not become a second schema
-engine.
-
-This keeps users moving top-down through the same structure they are editing and
-reduces the fatigue of repeatedly switching between tree, modal, preview, and
-back again.
-
-### Row Types
-
-| Row type | Interaction |
-| --- | --- |
-| Object/resource | `Enter` expands/collapses children; help panel shows resource description |
-| Enum/union | `Enter` opens an option picker; `Left`/`Right` collapse or expand the tree row |
-| Boolean | `Space` toggles |
-| String/number | `Enter` opens an inline input row directly under the selected field |
-| Array | `Enter` expands items; `+ Add item` synthetic row appends a value |
-| Record/map | `+ Add <key>` synthetic row creates a key, then child fields appear |
-| Complex YAML-backed field | `y` opens an inline YAML editor panel scoped to that subtree |
-
-### Completion and Error Cues
-
-Every editable branch should show an aggregate cue computed from its visible and
-latent descendants. This is how users know whether a subtree is done even when
-it is collapsed.
-
-Use compact, text-first badges in tree labels. The badge is part of the branch
-label, not a separate side panel, so the signal remains visible while scrolling:
-
-| Badge | Meaning |
-| --- | --- |
-| `[OK]` | Field or subtree is valid and complete |
-| `[REQ n]` | `n` required descendant values are missing |
-| `[ERR n]` | `n` validation errors exist under this branch |
-| `[CHG n]` | `n` changed values exist under this branch |
-| `[GATED n]` | `n` changed values will require approval |
-| `[BLOCK n]` | `n` changes are blocked by policy or lifecycle |
-
-`[OK]` means the node and all descendants are complete for the current schema
-variant and locally valid. It does not mean the saved draft has been submitted
-or rolled out; those states remain separate pending-submit and rollout badges in
-the normal resource view.
-
-Badge precedence should be:
-
-```text
-[BLOCK] > [ERR] > [REQ] > [GATED] > [CHG] > [OK]
+```bash
+index.js resolveMigrationResources --user-config <file|-> --validation-mode strict
+index.js resolveMigrationResources --user-config <file|-> --validation-mode loose
 ```
 
-A row can also show secondary badges when useful, for example:
+Strict mode is the submit gate. It validates the entire user config, transforms it into workflow config, validates output, and then builds resolved migration resources. Invalid input exits non-zero.
 
-```text
-[REQ 1] authConfig: < basic >
-  [REQ] secretName:
-```
+Loose mode is for manage rendering. It first attempts the strict path. If strict projection succeeds, loose mode returns the normal resolved resource output with `projectionMode: "loose"` and `projectionComplete: true`. If strict projection fails, the TS projector walks known schema-owned scopes and returns resources with stable identity, known parameters, and diagnostics for missing or invalid pieces.
 
-When a collapsed branch has several conditions, show the highest-precedence
-badge in the main label and summarize the rest in the bottom help/status panel.
-For example, a source cluster row might show `[REQ 1] source: legacy-cluster`
-while the help strip says `1 required field, 2 changed fields`. This keeps the
-tree readable without hiding the queue of work under the branch.
+Loose output uses the same outer DTO as strict output and may include `consoleResources` for source, target, and Kafka virtual rows:
 
-### Field Validation, Hints, and Suggestions
-
-The validation model should be layered so Python stays a thin UI and TS remains
-the schema authority:
-
-1. Generative UI hints are authored in `userSchemas.ts` as Zod metadata:
-   `.uiHint(...)`. JSON schema generation lifts them to `x-ui-hint`, and the
-   config-processor edit engine copies them into `EditStateV1.inputHint`.
-   Python does not maintain a parallel field model.
-2. Static scalar validation metadata travels with each editable node. For
-   example, a string field can include a regex pattern, a human message,
-   requiredness, examples, and the field description. Python can then show
-   immediate feedback in the input dialog without invoking Node on every
-   keystroke.
-3. Cross-field and lifecycle validation stays in TS. This includes Zod
-   `refine`/`superRefine` logic such as unknown source/target references,
-   duplicate names, source snapshot references, SigV4 snapshot constraints,
-   and policy checks. Python should render the resulting diagnostics and
-   aggregate status counts returned by TS after committed edits, preview, save,
-   and submit.
-4. Reference fields should be modeled as suggestions or selectable values
-   instead of plain strings. Current implemented examples include `fromSource`
-   over `sourceClusters`, `toTarget` over `targetClusters`, proxy references
-   over `traffic.proxies`, and Kafka references over
-   `kafkaClusterConfiguration`. Snapshot names over the selected source's
-   `snapshotInfo.snapshots` should follow the same pattern.
-
-The DTO can grow without changing the Python architecture:
-
-```ts
-type EditInputHint =
-  | {
-      kind: "text";
-      format?: "text" | "http-endpoint" | "optional-http-endpoint" | "cluster-version" | "k8s-name";
-      pattern?: string;
-      message?: string;
-      examples?: string[];
+```json
+{
+  "formatVersion": 1,
+  "workflowName": "migration-workflow",
+  "projectionMode": "loose",
+  "projectionComplete": false,
+  "validation": {
+    "mode": "loose",
+    "valid": false,
+    "errors": ["..."],
+    "diagnostics": [
+      {
+        "severity": "required",
+        "path": ["traffic", "proxies", "cap", "proxyConfig"],
+        "message": "Invalid input: expected object, received undefined"
+      }
+    ]
+  },
+  "resources": [
+    {
+      "apiVersion": "migrations.opensearch.org/v1alpha1",
+      "kind": "CaptureProxy",
+      "name": "cap",
+      "parameters": {"dependsOn": ["cap-topic"]},
+      "projectionComplete": false,
+      "diagnostics": [
+        {
+          "severity": "required",
+          "path": ["traffic", "proxies", "cap", "proxyConfig"],
+          "message": "Invalid input: expected object, received undefined"
+        }
+      ]
     }
-  | {
-      kind: "reference";
-      sourcePath: string[];
-      options?: { label: string; value: string; description?: string }[];
-      allowCustom?: boolean;
-      emptyMeansDefault?: string;
-      message?: string;
-    }
-  | {
-      kind: "record";
-      addLabel: string;
-      keyFormat?: "text" | "k8s-name";
-      keyPattern?: string;
-      message?: string;
-    }
-  | { kind: "array"; addLabel: string };
-```
-
-Implemented first-pass hints:
-
-| Schema location | Hint | UI behavior |
-| --- | --- | --- |
-| `sourceClusters.*.endpoint` | optional HTTP endpoint text pattern | local regex feedback, full-config preview after idle |
-| `targetClusters.*.endpoint` | required HTTP endpoint text pattern | local regex feedback, full-config preview after idle |
-| `sourceClusters.*.version` | cluster version text pattern and examples | local regex feedback with examples in the message |
-| `authConfig.basic.secretName` | Kubernetes-name text pattern | local regex feedback for Basic auth secret names |
-| `sourceClusters`, `targetClusters`, `kafkaClusterConfiguration`, `traffic.proxies`, `traffic.replayers` | record add labels and key hints | synthetic add rows use the label and key validation |
-| `traffic.proxies.*.source`, `traffic.proxies.*.kafka`, `traffic.replayers.*.fromProxy`, `traffic.replayers.*.toTarget`, `snapshotMigrationConfigs.*.fromSource`, `snapshotMigrationConfigs.*.toTarget` | references to named config scopes | Python opens a picker when options exist, otherwise falls back to text |
-| `snapshotMigrationConfigs` | array add label | add row appends a new snapshot migration without asking for a key |
-
-For now, scalar regex validation is cheap enough to run locally in Python using
-metadata supplied by TS. The source of truth is still the Zod schema and the
-full TS validation pass; the modal feedback is a fast, user-friendly first line
-of defense.
-
-Narrow field validation should work by applying a transient operation to the
-whole draft in TS, not by validating the scalar in isolation. The one-shot
-response returns structured diagnostics:
-
-```ts
-interface EditDiagnostic {
-  severity: "required" | "error" | "warning" | "gated" | "blocked";
-  message: string;
-  path?: string[];
+  ],
+  "consoleResources": {
+    "formatVersion": 1,
+    "sources": [],
+    "targets": [],
+    "kafkas": [],
+    "consumerGroups": []
+  }
 }
 ```
 
-The active dialog displays only diagnostics whose `path` matches the active
-edit node. This preserves whole-config validation, including Zod refinements,
-without flooding a narrow field edit with unrelated errors. Python schedules the
-one-shot after a short idle delay and increments a generation token for each
-change; when an older response arrives, the generation mismatch drops it.
+Loose projection currently covers:
 
-There are two viable ways to pick up richer Zod refinements without rewriting
-them in Python:
+- workflow-managed Kafka clusters;
+- captured traffic topics from proxies and S3 sources;
+- capture proxies with partial `proxyConfig`;
+- traffic replayers with partial `replayerConfig`;
+- data snapshots when snapshot identity is present;
+- snapshot migrations when source, target, snapshot, and migration identity are present;
+- virtual source, target, and Kafka console resources.
 
-- Keep one-shot TS commands for committed operations. This is the safest v1:
-  Python sends an operation, TS applies it, runs Zod validation/refinements,
-  returns the next tree, and Python renders it. It avoids daemon lifecycle bugs
-  and is already consistent with submit. This is also the current scalar-dialog
-  validation path, except the returned YAML is discarded until the user commits.
-- Add a manage-scoped Node helper later if the UI needs per-keystroke
-  cross-field validation, dynamic suggestions, or very low-latency preview. If
-  we do this, it should be a child process using stdio JSON-RPC, not a network
-  daemon. Python would start it when manage enters edit mode, send
-  `load`, `validateField`, `apply`, `suggest`, and `preview` requests, and
-  terminate it when manage exits edit mode or quits.
+Source and target endpoint completeness is surfaced in loose console resources even when the strict schema path does not emit that diagnostic. This keeps `endpoint: <required>` from appearing healthy in the non-edit resource view.
 
-The daemon/helper option becomes attractive only if one-shot startup latency is
-visible or if we decide that reference pickers must update live while the user
-types. Until then, one-shot commands plus richer DTO metadata keep the failure
-model simpler.
+## Edit Mode
 
-For HTTP Basic auth, selecting `basic` immediately adds the required child rows.
-Until `secretName` is set, both the child and the parent auth branch show
-required/missing state. If the user cycles back to `none`, the basic-only child
-rows disappear and the branch can return to `[OK]` if auth is optional for that
-resource.
+`workflow manage --resource-view` binds `e` to enter config edit mode. Edit mode replaces the resource tree with a generic `Workflow Config Edit` tree from `EditStateV1`.
 
-For HTTP auth, the user should see an explicit union selector:
-
-```text
-authConfig: < none >
-```
-
-Cycling right changes it to:
-
-```text
-authConfig: < basic >
-  secretName: legacy-basic-auth
-```
-
-Cycling again could switch to:
-
-```text
-authConfig: < sigv4 >
-  region:
-  service: es
-```
-
-The nested rows are added or removed immediately as the selected union variant
-changes. This same model applies to TLS modes, Kafka `autoCreate` vs `existing`,
-snapshot source selection, and transform entry-point variants.
-
-### Descriptions and Help
-
-Every editable resource and field should surface its schema description:
-
-- resource descriptions appear when the resource row is selected;
-- field descriptions appear when a field row is selected;
-- expert fields keep their `[Expert]` signal, but the UI should render that as a
-  warning label instead of burying it in prose;
-- changed fields show old and new values in the help panel;
-- blocked/gated fields show the policy reason near the description.
-
-Descriptions should be shown in a persistent help panel, not in transient
-tooltips. The default edit-mode layout should put a two-to-four-line help panel
-at the bottom of the screen so the text updates naturally as users scroll
-through the tree. On wide terminals the same panel can be docked to the side,
-but it should be the same content and interaction model.
-
-Recommended layout behavior:
-
-- default: tree/editor on top, help panel on bottom;
-- wide terminal: allow side-by-side tree/help if it gives enough width to both;
-- narrow terminal: bottom help panel only;
-- `?` expands the help panel for the selected field when the description is
-  longer than the visible lines.
-
-The bottom help panel should include:
-
-- breadcrumb path;
-- one or two lines of field/resource description;
-- required/default/variant summary when relevant;
-- current validation or policy cue for the selected row;
-- first actionable descendant diagnostic when the selected row is a collapsed
-  branch.
-
-### Textual Feasibility
-
-Do not assume arbitrary widgets can be mounted inside `Tree` rows. The practical
-Textual shape should be:
-
-- use `Tree` for structure, selection, labels, and stable row IDs;
-- update tree labels to show compact values, e.g. `authConfig: < basic >`;
-- handle left/right/space/enter key events at the app layer for selected rows;
-- use `Input`, `Select`/option list, `Switch`-style toggles, `Markdown`/`Static`,
-  and a YAML text editor area in adjacent panes or inline panels within the same
-  screen;
-- implement the help panel as the same widget docked bottom or side by layout,
-  not as a separate interaction mode;
-- avoid modal dialogs except for destructive confirmation, large option pickers,
-  and submit/reset confirmations.
-
-The end result should feel inline even if the actual `Input` widget lives in a
-small editor panel below the selected row or in the help panel.
-
-### Additional UX Ideas
-
-- Add a breadcrumb above the help text, such as
-  `sourceClusters > legacy-cluster > authConfig > basic > secretName`.
-- Add a "focus resource" mode that dims or hides other top-level groups while
-  editing one resource, with `Esc` returning to the full tree.
-- Add a compact "changed fields only" filter inside edit mode.
-- Add "next required field" navigation for newly selected union variants.
-- Add "next problem" navigation that jumps through `[REQ]`, `[ERR]`, and
-  `[BLOCK]` rows in precedence order.
-- Add reversible local edits before save: `z` undo and `Shift+Z` redo inside the
-  edit session.
-- Let `p` preview only the focused resource while in edit mode, and all changes
-  from the normal resource view.
-
-## Virtual Source and Target Resources
-
-Source and target clusters should remain virtual resources, not Kubernetes CRs.
-They are named config scopes, and real resources refer to them by name.
-
-Delete semantics:
-
-- Removing a source or target only removes it from pending YAML.
-- It is allowed only when no pending config entries reference it.
-- It never deletes an external cluster.
-- It never calls `workflow reset`.
-
-Versioning/provenance:
-
-- Do not create one coarse source/target version hash.
-- Instead, define projection metadata for the fields each consuming resource
-  actually uses.
-- Show virtual source/target diffs under nodes like `source: legacy-cluster`
-  only when fields changed.
-- Under consumers, show those same changed values as provenance only when the
-  consumer actually depends on that field.
-
-Initial consumed-field projections:
-
-| Consumer | Virtual fields consumed |
-| --- | --- |
-| CaptureProxy | source `endpoint`, `allowInsecure`, `authConfig` |
-| DataSnapshot | source connection identity, selected snapshot config, selected repo config, snapshot serialization setting |
-| SnapshotMigration | source `version`, source connection fields, selected snapshot/repo fields, target connection fields |
-| TrafficReplay | target connection fields |
-
-The config checksums should be reviewed and updated so each real resource
-includes exactly the virtual fields its workflow steps consume.
-
-## TS Edit Engine
-
-Add a config-processor edit engine with these responsibilities:
-
-- Parse current pending user YAML.
-- Support strict and loose projection modes from the same parsed object and
-  schema/projection metadata. Strict mode gates submit. Loose mode feeds manage
-  and returns partial resources plus diagnostics when interior structures are
-  incomplete.
-- Load latest submitted provenance from `MigrationRun` history when available.
-- Fall back to canonical inverse generation from `resolvedConfig.workflowConfig`
-  for older runs.
-- Build an edit state for Python manage.
-- Apply typed edit operations.
-- Validate updated config through existing Zod and unified schema validators.
-- Produce pending-submit diffs and VAP-style dry-run policy previews.
-- Render updated YAML while preserving the pending YAML shape when possible.
-
-Current CLI:
+The config-processor commands are:
 
 ```bash
 index.js editConfig state --pending-config <file|->
 index.js editConfig apply --pending-config <file|-> --operation <json-file|->
-index.js resolveMigrationResources --user-config <file|-> --workflow-name <name>
 ```
 
-`resolveMigrationResources` is currently strict. It calls
-`MigrationConfigTransformer.processFromObject`, so any missing required subtree
-prevents all pending resource overlays from being generated. The target change
-is to keep that strict behavior as the default and add an explicit loose mode:
+Python sends typed operations and renders the returned DTO. It does not know concrete schema structure beyond generic row types, hints, diagnostics, and command metadata.
 
-```bash
-index.js resolveMigrationResources --user-config <file|-> --workflow-name <name> --validation-mode strict
-index.js resolveMigrationResources --user-config <file|-> --workflow-name <name> --validation-mode loose
-```
-
-Loose mode should not be a separate parser. It should use the same YAML parser,
-normalization/defaulting helpers, resource name derivation, projection metadata,
-and diagnostic formatter as strict mode. The implementation should look like
-one pipeline with different validation gates:
-
-```text
-raw YAML
-  -> parse YAML into object
-  -> loose structural walk over known schema scopes
-  -> best-effort normalization/defaulting where inputs are present
-  -> best-effort resource projection where each resource has enough identity
-  -> strict validation diagnostics attached to the same paths
-  -> DTO: { resources, consoleResources, diagnostics, valid: false }
-
-strict mode:
-raw YAML
-  -> parse YAML into object
-  -> Zod + unified schema + extra-key validation
-  -> full normalization/defaulting
-  -> full resource projection
-  -> output validation
-  -> DTO: { resources, consoleResources, diagnostics: [], valid: true }
-```
-
-The same command can return the same outer DTO in both modes. In loose mode,
-resources that cannot be fully projected should still include stable identity,
-kind/plural, known parameter values, missing-field diagnostics, and
-`projectionComplete: false`. For example, a capture proxy with `source` but no
-`proxyConfig` can still render as `cap` under Capture, show `source: source`,
-and surface `proxyConfig` as required.
-
-Target CLI extensions:
-
-```bash
-index.js editConfig state --pending-config <file|-> --history <file> --live-resources <file>
-index.js editConfig preview --pending-config <file|-> --history <file> --live-resources <file>
-index.js resolveMigrationResources --user-config <file|-> --validation-mode loose --include-diagnostics
-```
-
-Current operation types:
+Current operation types are:
 
 ```ts
 type EditOperation =
@@ -820,339 +179,246 @@ type EditOperation =
   | { op: "add"; path: string[]; value: unknown };
 ```
 
-Target operation extensions:
+The edit DTO carries:
 
-```ts
-type FutureEditOperation =
-  | EditOperation
-  | { op: "duplicate"; fromPath: string[]; toPath: string[] }
-  | { op: "renameKey"; fromPath: string[]; toPath: string[] };
+- row path and label;
+- value kind (`object`, `record`, `array`, `union`, `enum`, `boolean`, `scalar`, `command`);
+- schema descriptions;
+- required flags;
+- diagnostics;
+- aggregate status counts;
+- UI hints;
+- reference options;
+- union variants;
+- add/remove command metadata.
+
+Schema hints are authored in `userSchemas.ts` with `.uiHint(...)`, exported to JSON Schema as `x-ui-hint`, copied into `EditStateV1.inputHint`, and rendered generically by Python.
+
+Reference hints drive picker-style editing for source cluster, target cluster, Kafka cluster, and captured traffic references.
+
+## Key Bindings
+
+Resource view:
+
+| Key | Behavior |
+| --- | --- |
+| `e` | Enter config edit mode |
+| `s` | Submit saved workflow config |
+| `v` | Cycle value mode |
+| `r` | Refresh |
+| `q` | Quit |
+| `Left` / `Right` | Collapse or expand selected tree row |
+| `Enter` | Activate the selected row, including approval confirmations |
+
+Edit mode:
+
+| Key | Behavior |
+| --- | --- |
+| `Enter` | Edit scalar, toggle boolean, open union picker, or start command row |
+| `a` | Start selected synthetic add row |
+| `s` / `Ctrl+s` | Save pending YAML |
+| `Esc` | Confirm discard if dirty, otherwise leave edit mode |
+| `Del` / `Backspace` | Confirm and remove a removable config entry |
+| `v` | Cycle value mode |
+| `t` | Cycle status mode |
+| `Left` / `Right` | Collapse or expand selected tree row |
+| `Space` | Toggle boolean rows |
+| `?` | Show selected field/resource description |
+
+Synthetic add rows expose add actions and never expose delete bindings.
+
+## Status and Color Rules
+
+Rows use one effective status color, selected by highest priority from the row and relevant descendants.
+
+Priority:
+
+1. `error` / `blocked`
+2. `required`
+3. `gated`
+4. `warning`
+5. `changed`
+6. normal deployed state
+
+Resource-view rollout colors:
+
+- green: saved pending config differs from submitted config and is not submitted yet;
+- grey: submitted config differs from deployed CR state and is still rolling out;
+- default foreground: deployed state matches the submitted projection and there is no newer saved config difference;
+- yellow/red/magenta: validation or policy diagnostics override rollout labels for that row.
+
+The edit tree propagates aggregate status counts upward through branches. The resource tree expands resources and ancestors that contain config diffs or diagnostics. Resource-row labels show the highest-priority diagnostic when present, and diagnostic detail lines appear beneath the resource.
+
+## Value Modes
+
+Resource view has four value modes:
+
+| Mode | Meaning |
+| --- | --- |
+| `All` | Show deployed, submitted/pending-rollout, and to-submit values on the same changed field line |
+| `Deployed` | Show only values present in live CRs |
+| `Pending` | Show values from the current submitted workflow projection |
+| `To Submit` | Show values from saved pending YAML |
+
+In `All`, changed fields render as phase-separated segments:
+
+```text
+listenPort: deployed=9200 | pending=9201 | to-submit=9202
 ```
 
-Target `EditStateV1` shape. The current DTO is a subset of this shape: it
-already includes `formatVersion`, `provenance`, `nodes`, placeholder change
-arrays, and `validation`, but provenance is currently only `pending-yaml`.
+Pending-only resources disappear in `Deployed` and `Pending` modes, then appear in `To Submit` mode. Resources marked for deletion appear in modes where they still exist and disappear in modes where the projected resource is absent.
 
-```ts
-interface EditStateV1 {
-  formatVersion: 1;
-  provenance: {
-    pendingConfigHash?: string;
-    submittedConfigHash?: string;
-    source: "pending-yaml" | "migration-run-input" | "canonical-regenerated";
-    lossy: boolean;
-    warnings: string[];
-  };
-  nodes: EditNode[];
-  pendingSubmitChanges: ChangeGroup[];
-  submittedRolloutChanges: ChangeGroup[];
-  policyPreview: PolicyPreview[];
-  validation: {
-    valid: boolean;
-    errors: string[];
-    diagnostics?: {
-      severity: "required" | "error" | "warning" | "gated" | "blocked";
-      message: string;
-      path?: string[];
-    }[];
-  };
-}
+## Non-Edit Resource View Examples
+
+Loose pending config with missing source endpoint and missing proxy config:
+
+```text
+Migration Status
+├── Workflow Configuration
+│   └── Sources
+│       └── ○ aux-source (Pending Config) (required)
+│           └── required: sourceClusters.aux-source.endpoint: Required field is missing.
+└── Live Traffic Migration
+    ├── Capture
+    │   └── ○ cap (Pending Config) (required)
+    │       ├── required: traffic.proxies.cap.proxyConfig: Invalid input: expected object, received undefined
+    │       └── Depends on: cap-topic
+    └── Buffer
+        └── ○ default (Pending Config) (to submit)
+            ├── version: deployed=<absent> | pending=<absent> | to-submit=4.0.0
+            └── ○ cap-topic (Pending Config) (to submit)
+                ├── topicName: deployed=<absent> | pending=<absent> | to-submit=cap
+                ├── partitions: deployed=<absent> | pending=<absent> | to-submit=1
+                └── replicas: deployed=<absent> | pending=<absent> | to-submit=1
 ```
 
-Each `EditNode` should include schema-derived UI metadata, not just values. The
-current DTO already includes `command` rows for synthetic add entries.
+Same saved config in `Deployed` mode:
 
-```ts
-interface EditNode {
-  id: string;
-  path: string[];
-  label: string;
-  value?: unknown;
-  valueKind:
-    | "object"
-    | "record"
-    | "array"
-    | "union"
-    | "enum"
-    | "boolean"
-    | "scalar"
-    | "command";
-  description?: string;
-  descriptionShort?: string;
-  expert?: boolean;
-  required?: boolean;
-  defaultValue?: unknown;
-  status?:
-    | "ok"
-    | "required"
-    | "error"
-    | "warning"
-    | "changed"
-    | "gated"
-    | "blocked";
-  statusCounts?: {
-    required?: number;
-    errors?: number;
-    warnings?: number;
-    changed?: number;
-    gated?: number;
-    blocked?: number;
-  };
-  inputHint?: EditInputHint;
-  validation?: {
-    pattern?: string;
-    message?: string;
-  };
-  diagnostics?: {
-    severity: "required" | "error" | "warning" | "gated" | "blocked";
-    message: string;
-    path?: string[];
-  }[];
-  variants?: {
-    label: string;
-    value: unknown;
-    description?: string;
-    childSchema?: EditNode[];
-  }[];
-  command?: {
-    requiresName?: boolean;
-  };
-  children?: EditNode[];
-}
+```text
+Migration Status
+├── Capture
+│   └── (not configured)
+└── Replay
+    └── (not configured)
 ```
 
-## Provenance and Inverse Rendering
+Same saved config in `To Submit` mode:
 
-The preferred source of editable YAML is the pending ConfigMap used by
-`workflow configure edit`.
-
-When pending YAML is absent or stale:
-
-1. Prefer future `MigrationRun.spec.resolvedConfig.inputConfig`, if present.
-2. Otherwise generate canonical user YAML from existing
-   `MigrationRun.spec.resolvedConfig.workflowConfig`.
-3. Mark regenerated YAML as canonical and potentially lossy.
-
-Add optional fields to future `ResolvedMigrationResources` records:
-
-```ts
-interface ResolvedMigrationResources {
-  formatVersion: 1;
-  workflowName?: string;
-  workflowConfig: WorkflowConfig;
-  inputConfig?: {
-    formatVersion: 1;
-    canonicalConfig: unknown;
-    canonicalHash: string;
-    rawConfigHash?: string;
-  };
-  resources: ResolvedMigrationResource[];
-}
+```text
+Migration Status
+├── Workflow Configuration
+│   └── Sources
+│       └── ○ aux-source (Pending Config) (required)
+└── Live Traffic Migration
+    ├── Capture
+    │   └── ○ cap (Pending Config) (required)
+    └── Buffer
+        └── ○ default (Pending Config) (to submit)
+            └── ○ cap-topic (Pending Config) (to submit)
 ```
 
-This is backward-compatible because current `MigrationRun` CRD preserves unknown
-fields inside `resolvedConfig`.
+Submitted workflow still rolling out while saved config has another edit:
 
-## Python Manage Changes
+```text
+Migration Status
+└── Live Traffic Migration
+    └── Replay
+        └── ▶ replay-a
+            ├── speedupFactor: deployed=1.0 | pending=1.5 | to-submit=2.0
+            ├── tupleMaxFileSizeMb: deployed=128 | pending=128 | to-submit=256
+            └── Workflow progress:
+                └── Waiting for: replay-a
+```
 
-Python should not reimplement schema logic. It should:
+## Submit Semantics
 
-- Fetch live migration CRs with the existing Kubernetes helpers.
-- Fetch latest `MigrationRun` records for the workflow.
-- Load pending config from `WorkflowConfigStore`.
-- Call config-processor edit commands through `ScriptRunner` as one-shot Node
-  processes.
-- Ask config-processor for loose resource projections when rendering pending
-  overlays in manage. If loose projection reports `valid: false`, Python should
-  still render returned partial resources and diagnostics, but it should mark
-  submit as blocked until strict validation passes.
-- Render virtual and real nodes from `EditStateV1`.
-- Save edited YAML back through `WorkflowConfigStore`.
-- Reuse existing secret discovery and credential workflows.
-- Reuse `submit_command` behavior for resubmission.
-- Reuse `reset_command` for confirmed resets of real resources.
+Submit always uses strict validation.
 
-TS should run at committed interaction boundaries:
+When the user submits from manage:
 
-- when entering edit or preview mode, to build the editable model;
-- when committing an edit/add/duplicate/delete operation, to apply the operation
-  and refresh validation/preview;
-- when the user explicitly refreshes the preview;
-- immediately before submit, to catch stale pending or live state.
+1. save pending YAML;
+2. run strict config-processor validation/projection;
+3. run credential and secret checks;
+4. show validation, policy, and gated/impossible-change failures;
+5. replace the running workflow through the existing submit path.
 
-It should not run on cursor movement, normal manage polling refreshes, or every
-keystroke in the inline editor. In the current implementation, `Ctrl+s` only
-saves the current draft YAML to `WorkflowConfigStore`; the TS apply step has
-already run when the user committed each row operation. If one-shot startup
-latency becomes noticeable, cache by input hashes in Python first: pending
-config hash, latest `MigrationRun` identity, and live CR `resourceVersion` set.
-A long-lived Node helper is a later optimization, not part of the initial
-design. If added, it should be a manage-scoped child process over stdio
-JSON-RPC, not a cluster daemon or listening network service. The purpose would
-be latency and richer interactive hints only; schema ownership would still stay
-in TS.
+Loose projection never makes a config submittable. It only makes incomplete saved work visible and navigable.
 
-The Textual UI already has:
+## Source, Target, and Kafka Virtual Resources
 
-- A bottom help/status panel for selected resource fields, branch diagnostics,
-  and schema descriptions.
-- A generic edit tree rendered from `EditStateV1`.
-- Single-color row styling from effective status, including aggregate child
-  status.
-- Value/status projection mode controls for `All`, `Deployed`,
-  `After Workflow`, and `After Submit`.
-- Synthetic add rows under current editable collections.
-- Confirmation modals for config removal.
-- Contextual edit-mode bindings for add rows, scalar edits, boolean toggles,
-  union pickers, and removable config entries.
+Source, target, and direct Kafka client configs are virtual resources in manage. They are not Kubernetes CRs and are not reset like real migration resources.
 
-The Textual UI still needs:
+Virtual resources exist so users can see configuration changes that affect consumers:
 
-- Resource-focused edit mode that starts from the selected resource/config
-  subtree instead of replacing the whole live tree with a global config tree.
-- More inline scalar editing; current scalar/add-name edits use modal input even
-  though `Enter` now provides a quick field-edit path.
-- A YAML editor panel for complex nested config.
-- A preview modal that can group changes by stage and policy outcome.
-- Confirmation modals for duplication, submit, and reset.
-- Submit/reset actions wired from manage edit mode.
-- Rendering of partial loose-projection resources in the normal resource view
-  when strict resource projection fails. This must consume a TS projection DTO;
-  it must not infer resources from the edit tree or parse workflow YAML in
-  Python.
+- source endpoint/auth/version changes;
+- target endpoint/auth/version changes;
+- direct Kafka client changes;
+- workflow-managed Kafka cluster config changes.
 
-## CRUD Semantics
+Delete semantics differ:
 
-Add:
+- deleting an unreferenced source/target/Kafka config removes pending YAML only;
+- deleting a referenced virtual config is blocked by validation/reference diagnostics;
+- real deployed resources can require reset/recreate depending on policy and lifecycle state.
 
-- Source cluster.
-- Target cluster.
-- Kafka config.
-- Capture proxy.
-- Snapshot definition.
-- Snapshot migration.
-- Traffic replay.
+## Maintainability Guide
 
-Edit:
+Adding a new user-facing field:
 
-- Use inline guided tree rows for common fields.
-- Use a scoped YAML editor panel for complex config.
-- Always validate after save.
+1. Add the field, description, constraints, refinements, and UI hints in `userSchemas.ts`.
+2. Add or update config transformation logic in `migrationConfigTransformer.ts` only if the workflow-ready config changes.
+3. Add resource projection metadata or explicit resolved-resource mapping if the field affects a migration CR spec.
+4. Add a display-field hint or update the temporary Python `SPEC_DISPLAY_FIELDS` table if the field should be visible before display metadata is generated from TS.
+5. Add TS validation/projection tests and focused Python rendering tests only when the rendered DTO shape changes.
 
-Duplicate:
+Adding a new resource type:
 
-- Copy a selected config entry to a new key.
-- Update references only when the duplicated resource is a composite flow chosen
-  by the user in a later iteration; the first pass should duplicate only the
-  selected config entry.
+1. Add strict projection in `resolvedMigrationResources.ts`.
+2. Add loose identity and best-effort projection in the same TS module.
+3. Add console/virtual projection if the resource is not a Kubernetes CR.
+4. Add `RESOURCE_KIND_TO_PLURAL` and section/group placement in Python.
+5. Add focused tests for strict projection, loose incomplete projection, and resource-tree visibility modes.
 
-Delete:
+Adding a new validation constraint:
 
-- Bound to `Del` and `Backspace` from existing resource/config rows.
-- Always opens a modal confirmation before changing pending config or launching
-  reset.
-- Does nothing on synthetic add rows.
-- Virtual source/target: remove config only, only when unreferenced.
-- Real resources: remove from pending config, and optionally launch the existing
-  `workflow reset` path for deployed state.
-- Terminal completed resources still require reset/recreate for changed
-  impossible fields.
+1. Prefer Zod/refinement logic in `userSchemas.ts`.
+2. Ensure `validationForConfig` emits a path-specific diagnostic.
+3. Attach diagnostics to loose projected resources through path prefixes.
+4. Add one TS test for the diagnostic and one UI/resource-tree test if the diagnostic should be visible outside edit mode.
 
-Submit:
+The rough edge that remains is display metadata. Python still has `SPEC_DISPLAY_FIELDS` for resource details. That is a temporary presentation table. The durable shape is generated TS metadata that identifies user-visible projected fields, their labels, descriptions, and change restrictions.
 
-- Always save pending YAML first.
-- Run validation and secret checks.
-- Show pending preview and blocked/gated warnings.
-- Invoke existing workflow submit.
+## Tests
 
-## Change Presentation Rules
+Current focused coverage includes:
 
-Use a single effective color per resource/config row, chosen from the highest
-priority state represented by that row and its children:
+- strict resolved resource projection;
+- loose resolved resource projection for incomplete config;
+- loose CLI behavior without non-zero exit on validation errors;
+- pending snapshot loading with `--validation-mode loose`;
+- virtual pending-only resources in non-edit resource view;
+- resource diagnostics rendered in the Textual tree;
+- value-mode visibility for pending-only resources;
+- add-row bindings that do not expose delete;
+- scalar/boolean edit interactions;
+- save and submit wiring.
 
-- Green: pending-submit/unsubmitted changes, meaning saved config differs from
-  the submitted workflow projection and can still be submitted.
-- Grey: submitted-rollout/in-progress changes, meaning the submitted workflow
-  projection differs from the deployed resource state and is still converging.
-- Default foreground: fully deployed values, meaning the deployed state matches
-  the submitted projection and there is no newer saved edit for that field.
+Useful next tests are:
 
-Pending-submit changes:
+- source/target virtual changes repeated only under affected consumers;
+- group/section color propagation for resource-view diagnostics;
+- strict submit blocking when loose pending projection is incomplete;
+- policy preview rendering for gated, blocked, and non-decreasing invariant failures;
+- canonical inverse generation from `MigrationRun` when pending YAML is absent.
 
-- Compare pending YAML against last submitted user config if available.
-- If last submitted user config is unavailable, compare against canonical
-  regenerated config and show a lossy provenance warning.
+## Remaining Work
 
-Submitted-rollout changes:
+The current implementation is maintainable because schema semantics stay in TS and Python remains a renderer/orchestrator. The important remaining work is to remove the last presentation-specific duplication:
 
-- Compare live CR `.spec` to the last realized state represented by
-  `status.configChecksum` and matching `MigrationRun` resources.
-- If no exact checksum match can be found, show checksum drift without inventing
-  field-level detail.
-
-Policy preview:
-
-- Use `dryRunResourcePolicy`.
-- Mark outcomes as `allowed`, `approval-required`, or `blocked`.
-- Include non-decreasing invariant failures such as captured traffic partition
-  decreases.
-
-Virtual provenance:
-
-- Show source/target fields only when they changed.
-- Show them under the virtual resource node.
-- Repeat them under affected consumers only when the consumer projection includes
-  that field.
-
-## Testing
-
-TS unit tests:
-
-- Build edit state from pending YAML and latest `MigrationRun`.
-- Apply each edit operation type.
-- Preserve YAML shape where pending YAML exists.
-- Generate canonical fallback YAML from old `MigrationRun` histories.
-- Mark fallback provenance as lossy.
-- Validate source/target reference deletion rules.
-- Verify virtual field projections affect only intended consumers.
-- Verify policy preview for safe, gated, impossible, and invariant-blocked
-  changes.
-
-Python unit tests:
-
-- Resource tree includes virtual source and target groups.
-- Context bindings appear only on valid node types.
-- Edit/add/duplicate/delete actions call `ScriptRunner` with expected payloads.
-- Saved YAML is written through `WorkflowConfigStore`.
-- Source/target delete never calls reset.
-- Real resource reset delegates to the existing reset flow only after
-  confirmation.
-
-Integration tests:
-
-- `MigrationInitializer` writes `inputConfig` metadata for new runs.
-- A manage-edited config submits through the same workflow artifact path as
-  `workflow configure edit` followed by `workflow submit`.
-- A source endpoint change appears as pending virtual provenance and causes only
-  the intended consuming resources to show affected changes.
-
-## Rollout
-
-1. First pass complete: add TS edit-state/apply commands, unit tests, Python
-   `ConfigEditService`, generic Textual render, basic add/set/remove operations,
-   help/status panel, and delete confirmation.
-2. Add `inputConfig` provenance to new `MigrationRun` records.
-3. Extend resource tree model with virtual source/target nodes and change-stage
-   labels.
-4. Add preview-only manage actions.
-5. Improve inline guided edit mode: resource focus, inline scalar editing,
-   YAML subtree editing, duplicate handling, and richer add rows.
-6. Wire submit/reset actions.
-7. Expand projection metadata and checksum material where tests reveal missing
-   source/target consumers.
-
-## Open Follow-Up
-
-The largest technical risk is ensuring virtual source/target field projections
-match actual workflow-template consumers. That should be treated as a small
-schema/projection subsystem, not as display-only UI code.
+- generate resource display metadata from TS instead of `SPEC_DISPLAY_FIELDS`;
+- return `editable`, `removable`, `renameable`, and `addable` metadata from TS instead of keeping small Python path checks;
+- add resource-focused edit entry so pressing `e` on a resource opens the relevant subtree;
+- add a scoped YAML editor for complex nested values;
+- add duplicate/rename operations;
+- wire strict preview and policy summary directly into the submit confirmation;
+- persist original input config provenance in new `MigrationRun` records so inverse rendering is canonical and non-lossy.
