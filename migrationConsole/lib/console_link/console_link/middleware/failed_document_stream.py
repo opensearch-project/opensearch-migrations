@@ -1,19 +1,19 @@
 """Workflow-facing operations for the RFS Reindex-from-Snapshot failed document stream.
 
 The failed document stream is an append-only set of NDJSON.gz objects in S3, written by RFS workers
-when terminal document failures occur. Records for a given
-backfill session live under ``s3://<bucket>/<prefix>/session=<session_id>/`` —
-new runs use a new ``session_id``, so prior-run records are never mixed in.
+when terminal document failures occur. Records for a given backfill live under
+``s3://<bucket>/<prefix>/session=<session_id>/``, where ``session_id`` is the owning
+``SnapshotMigration``'s own UID — so each backfill (even multiple parallel ones in a single workflow)
+has its own prefix and records are never mixed.
 
-Bucket/region/endpoint/prefix/session are read from a single source of truth: the
-``rfs-failed-document-stream-current-session`` Kubernetes ConfigMap. The config processor resolves
-the effective bucket/region/endpoint (including the deployment default) before workflow submission and
-the bulk-load workflow publishes them — along with the current ``{{workflow.uid}}`` session id — to
-this ConfigMap before launching RFS. The console reads it via the Kubernetes API on demand, so it
-always reports exactly what RFS wrote, with no separate env-based resolution that could drift.
+Bucket/region/endpoint/prefix come from a single source of truth: the config processor resolves them
+(including the deployment default) before workflow submission and projects them onto the owning
+``SnapshotMigration``'s spec. The console reads those resolved fields, and the session id, directly
+from the ``SnapshotMigration`` it is reporting on (via the Kubernetes custom-objects API) — so it
+always agrees with what RFS wrote. There is intentionally no namespace-global ConfigMap (which could
+not represent multiple/parallel backfills).
 
-``--session <id>`` overrides only the session id, to inspect a specific (e.g. historical) run within
-the same deployment.
+``--migration <name>`` selects which ``SnapshotMigration`` to inspect when several exist.
 
 This module is intentionally a thin wrapper around the S3 listing/get APIs so a
 customer can also inspect the failed document stream with the aws CLI if they prefer.
@@ -54,21 +54,25 @@ class FailedDocumentStreamNotConfigured(RuntimeError):
     """Raised when no session id / bucket is available from any source."""
 
 
-FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME = "rfs-failed-document-stream-current-session"
+# The SnapshotMigration CRD the console reads failed-document-stream config from.
+FAILED_DOCUMENT_STREAM_API_GROUP = "migrations.opensearch.org"
+FAILED_DOCUMENT_STREAM_API_VERSION = "v1alpha1"
+SNAPSHOT_MIGRATION_PLURAL = "snapshotmigrations"
 
-_configmap_cache: Optional[dict] = None
+# The resolved failed-document-stream destination is projected onto the SnapshotMigration spec under
+# these prefixed keys (config processor: prefixFields("documentBackfill", ...)).
+_SPEC_BUCKET = "documentBackfillFailedDocumentStreamS3Bucket"
+_SPEC_PREFIX = "documentBackfillFailedDocumentStreamS3Prefix"
+_SPEC_REGION = "documentBackfillFailedDocumentStreamS3Region"
+_SPEC_ENDPOINT = "documentBackfillFailedDocumentStreamS3Endpoint"
 
 
-def _read_configmap(key: str) -> Optional[str]:
-    """Read a key from the rfs-failed-document-stream-current-session ConfigMap via the Kubernetes API."""
-    global _configmap_cache
-    if _configmap_cache is None:
-        _configmap_cache = _fetch_configmap_data()
-    value = _configmap_cache.get(key)
-    return value.strip() if value else None
+def _trim(value) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _fetch_configmap_data() -> dict:
+def _list_snapshot_migrations() -> List[dict]:
+    """List SnapshotMigration CRs in the current namespace ([] if the k8s client is unavailable)."""
     try:
         from kubernetes import client, config
         from kubernetes.client.rest import ApiException
@@ -76,54 +80,80 @@ def _fetch_configmap_data() -> dict:
             config.load_incluster_config()
         except config.ConfigException:
             config.load_kube_config()
-        v1 = client.CoreV1Api()
         from console_link.workflow.models.utils import get_current_namespace
         ns = get_current_namespace()
-        cm = v1.read_namespaced_config_map(name=FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, namespace=ns)
-        return cm.data or {}
+        custom = client.CustomObjectsApi()
+        resp = custom.list_namespaced_custom_object(
+            group=FAILED_DOCUMENT_STREAM_API_GROUP,
+            version=FAILED_DOCUMENT_STREAM_API_VERSION,
+            namespace=ns,
+            plural=SNAPSHOT_MIGRATION_PLURAL,
+        )
+        return resp.get("items", []) or []
     except ImportError:
-        logger.debug("kubernetes client not available; ConfigMap lookup skipped")
-        return {}
+        logger.debug("kubernetes client not available; SnapshotMigration lookup skipped")
+        return []
     except ApiException as e:
-        if e.status == 404:
-            logger.debug("ConfigMap %s not found (no bulk-load run yet)", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME)
-        else:
-            logger.warning("Failed to read ConfigMap %s: %s", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, e)
-        return {}
+        logger.warning("Failed to list SnapshotMigration resources: %s", e)
+        return []
     except Exception as e:
-        logger.warning("Failed to read ConfigMap %s: %s", FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME, e)
-        return {}
+        logger.warning("Failed to list SnapshotMigration resources: %s", e)
+        return []
 
 
-def load_config(session_override: Optional[str] = None) -> FailedDocumentStreamConfig:
-    global _configmap_cache
-    _configmap_cache = None
-    # Single source of truth: the config processor resolves the effective bucket/region/endpoint/prefix
-    # before workflow submission and the bulk-load workflow publishes them to the
-    # rfs-failed-document-stream-current-session ConfigMap. The console reads those resolved values so it
-    # always agrees with what RFS wrote, rather than re-resolving from console env (which could drift).
-    bucket = _read_configmap("bucket")
+def _select_snapshot_migration(migration_override: Optional[str], items: List[dict]) -> dict:
+    by_name = {it.get("metadata", {}).get("name"): it for it in items}
+    if migration_override:
+        sm = by_name.get(migration_override)
+        if sm is None:
+            available = sorted(n for n in by_name if n)
+            raise FailedDocumentStreamNotConfigured(
+                f"No SnapshotMigration named '{migration_override}' was found. "
+                f"Available: {available or 'none'}."
+            )
+        return sm
+    if not items:
+        raise FailedDocumentStreamNotConfigured(
+            "No SnapshotMigration resources found. Run a bulk-load workflow first."
+        )
+    if len(items) == 1:
+        return items[0]
+    names = sorted(n for n in by_name if n)
+    raise FailedDocumentStreamNotConfigured(
+        f"Multiple SnapshotMigration resources exist ({names}); pass --migration <name> to choose one."
+    )
+
+
+def load_config(migration_override: Optional[str] = None) -> FailedDocumentStreamConfig:
+    # Single source of truth: the failed-document-stream destination (bucket/prefix/region/endpoint) is
+    # resolved by the config processor and projected onto the owning SnapshotMigration's spec, and the
+    # session id is that SnapshotMigration's own UID. The console reads both directly from the
+    # SnapshotMigration it is reporting on, so it always agrees with what RFS wrote. There is no
+    # namespace-global "current session" ConfigMap (which could not represent parallel backfills).
+    sm = _select_snapshot_migration(migration_override, _list_snapshot_migrations())
+    spec = sm.get("spec", {}) or {}
+    meta = sm.get("metadata", {}) or {}
+
+    bucket = _trim(spec.get(_SPEC_BUCKET))
     if not bucket:
         raise FailedDocumentStreamNotConfigured(
-            "No failed document stream bucket is configured. Run a bulk-load workflow first, which "
-            "publishes the resolved bucket to the rfs-failed-document-stream-current-session ConfigMap."
+            f"SnapshotMigration '{meta.get('name')}' has no failed-document-stream bucket configured "
+            "(failed document stream disabled for this backfill)."
         )
-    prefix = _read_configmap("prefix") or "rfs-failed-document-stream/"
+    prefix = _trim(spec.get(_SPEC_PREFIX)) or "rfs-failed-document-stream/"
     if not prefix.endswith("/"):
         prefix = prefix + "/"
-    # The ConfigMap holds the *current* session id (Argo workflow UID) the bulk-load workflow most
-    # recently published. --session targets a specific (e.g. historical) run instead.
-    session = session_override or _read_configmap("session_id")
+    session = _trim(meta.get("uid"))
     if not session:
         raise FailedDocumentStreamNotConfigured(
-            "No failed document stream session id is available. Run a bulk-load workflow first "
-            "(which publishes the workflow UID to the rfs-failed-document-stream-current-session ConfigMap), "
-            "or pass --session <id> to target a specific historical run."
+            f"SnapshotMigration '{meta.get('name')}' has no metadata.uid; cannot resolve the session."
         )
-    region = _read_configmap("region")
-    endpoint = _read_configmap("endpoint")
     return FailedDocumentStreamConfig(
-        bucket=bucket, prefix=prefix, session_id=session, region=region, endpoint=endpoint
+        bucket=bucket,
+        prefix=prefix,
+        session_id=session,
+        region=_trim(spec.get(_SPEC_REGION)),
+        endpoint=_trim(spec.get(_SPEC_ENDPOINT)),
     )
 
 

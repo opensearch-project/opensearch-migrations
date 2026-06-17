@@ -1370,17 +1370,17 @@ def test_failed_document_stream_location_prints_session_uri(runner, mocker):
     assert "s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
 
 
-def test_failed_document_stream_location_passes_session_override(runner, mocker):
-    # --session is the operator's way to inspect a historical run that
-    # isn't the one the ConfigMap currently points at.
+def test_failed_document_stream_location_passes_migration_override(runner, mocker):
+    # --migration is the operator's way to choose which SnapshotMigration's stream to inspect
+    # when several exist (or to target a specific historical backfill).
     load_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config", return_value=_fake_failed_document_stream_cfg())
     result = runner.invoke(
         cli,
-        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location', '--session', 'historical-1'],
+        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location', '--migration', 'backfill-1'],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
-    load_mock.assert_called_once_with(session_override='historical-1')
+    load_mock.assert_called_once_with(migration_override='backfill-1')
 
 
 def test_failed_document_stream_location_when_not_configured_raises_click_exception(runner, mocker):

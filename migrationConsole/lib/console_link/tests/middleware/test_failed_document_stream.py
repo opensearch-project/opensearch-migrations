@@ -2,7 +2,7 @@
 
 Coverage targets:
   * FailedDocumentStreamConfig properties (session_prefix, location_uri)
-  * load_config reads resolved values from the session ConfigMap (+ --session override)
+  * load_config reads bucket/prefix/region/endpoint from the SnapshotMigration spec; session = its UID
   * Both FailedDocumentStreamNotConfigured branches (no bucket / no session)
   * _s3_client region/endpoint selection
   * list_records — sorting, limit, malformed gzip/JSON skipping
@@ -28,13 +28,6 @@ import console_link.middleware.failed_document_stream as failed_document_stream
 
 
 # ---------- shared fixtures / helpers --------------------------------------
-
-@pytest.fixture(autouse=True)
-def reset_configmap_cache():
-    # load_config reads the resolved values only from the session ConfigMap, so reset the
-    # module-level cache between tests to keep them independent.
-    failed_document_stream._configmap_cache = None
-
 
 def _gz(text: str) -> bytes:
     buf = io.BytesIO()
@@ -112,50 +105,52 @@ class TestS3ClientFactory:
 
 class TestLoadConfig:
     @staticmethod
-    def _set_cm(monkeypatch, cm: dict):
-        # _read_configmap strips and returns None for empty values; emulate by reading the dict.
-        monkeypatch.setattr(failed_document_stream, "_read_configmap", lambda key: cm.get(key))
+    def _set_migrations(monkeypatch, items):
+        monkeypatch.setattr(failed_document_stream, "_list_snapshot_migrations", lambda: items)
 
-    def test_raises_when_no_bucket(self, monkeypatch):
-        self._set_cm(monkeypatch, {"session_id": "s"})
-        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="bucket"):
-            failed_document_stream.load_config(session_override="s")
+    @staticmethod
+    def _sm(name="m1", uid="uid-1", bucket="b", prefix=None, region=None, endpoint=None):
+        spec = {"documentBackfillFailedDocumentStreamS3Bucket": bucket}
+        if prefix is not None:
+            spec["documentBackfillFailedDocumentStreamS3Prefix"] = prefix
+        if region is not None:
+            spec["documentBackfillFailedDocumentStreamS3Region"] = region
+        if endpoint is not None:
+            spec["documentBackfillFailedDocumentStreamS3Endpoint"] = endpoint
+        return {"metadata": {"name": name, "uid": uid}, "spec": spec}
 
-    def test_raises_when_bucket_present_but_no_session(self, monkeypatch):
-        self._set_cm(monkeypatch, {"bucket": "b"})
-        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="session"):
-            failed_document_stream.load_config()
-
-    def test_reads_resolved_values_from_configmap(self, monkeypatch):
-        self._set_cm(monkeypatch, {
-            "bucket": "from-cm", "session_id": "cm-sess", "prefix": "p/",
-            "region": "ap-south-1", "endpoint": "https://s3.local",
-        })
+    def test_reads_config_from_spec_with_uid_as_session(self, monkeypatch):
+        self._set_migrations(monkeypatch, [self._sm(
+            uid="uid-xyz", bucket="from-cr", prefix="p/", region="ap-south-1", endpoint="https://s3.local")])
         cfg = failed_document_stream.load_config()
-        assert cfg.bucket == "from-cm"
-        assert cfg.session_id == "cm-sess"
+        assert cfg.bucket == "from-cr"
+        assert cfg.session_id == "uid-xyz"   # session is the SnapshotMigration's own UID
         assert cfg.prefix == "p/"
         assert cfg.region == "ap-south-1"
         assert cfg.endpoint == "https://s3.local"
+        assert cfg.location_uri == "s3://from-cr/p/session=uid-xyz/"
 
-    def test_session_override_wins_over_configmap(self, monkeypatch):
-        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "cm-sess"})
-        cfg = failed_document_stream.load_config(session_override="from-arg")
-        assert cfg.session_id == "from-arg"
+    def test_raises_when_bucket_absent(self, monkeypatch):
+        self._set_migrations(monkeypatch, [self._sm(bucket="")])
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="bucket"):
+            failed_document_stream.load_config()
+
+    def test_migration_override_selects_by_name(self, monkeypatch):
+        self._set_migrations(monkeypatch, [self._sm(name="a", uid="ua"), self._sm(name="b", uid="ub")])
+        cfg = failed_document_stream.load_config(migration_override="b")
+        assert cfg.session_id == "ub"
 
     def test_prefix_trailing_slash_appended(self, monkeypatch):
-        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s", "prefix": "custom-prefix"})
-        cfg = failed_document_stream.load_config()
+        self._set_migrations(monkeypatch, [self._sm(prefix="custom-prefix")])
         # Trailing slash must be appended so session= joins cleanly.
-        assert cfg.prefix == "custom-prefix/"
+        assert failed_document_stream.load_config().prefix == "custom-prefix/"
 
     def test_prefix_defaults_when_absent(self, monkeypatch):
-        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s"})
-        cfg = failed_document_stream.load_config()
-        assert cfg.prefix == "rfs-failed-document-stream/"
+        self._set_migrations(monkeypatch, [self._sm()])
+        assert failed_document_stream.load_config().prefix == "rfs-failed-document-stream/"
 
     def test_region_and_endpoint_optional(self, monkeypatch):
-        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s"})
+        self._set_migrations(monkeypatch, [self._sm()])
         cfg = failed_document_stream.load_config()
         assert cfg.region is None
         assert cfg.endpoint is None
@@ -392,161 +387,33 @@ class TestSafeCount:
             failed_document_stream.safe_count(_config())
 
 
-# ---------- _read_configmap / _fetch_configmap_data ------------------------
+# ---------- _select_snapshot_migration --------------------------------------
 
-class TestReadConfigmap:
-    def test_returns_stripped_value(self, mocker):
-        mocker.patch.object(failed_document_stream, "_fetch_configmap_data",
-                            return_value={"session_id": "  s1 \n"})
-        assert failed_document_stream._read_configmap("session_id") == "s1"
+class TestSelectSnapshotMigration:
+    @staticmethod
+    def _sm(name, uid="u"):
+        return {"metadata": {"name": name, "uid": uid}, "spec": {}}
 
-    def test_returns_none_for_missing_key(self, mocker):
-        mocker.patch.object(failed_document_stream, "_fetch_configmap_data", return_value={})
-        assert failed_document_stream._read_configmap("absent") is None
+    def test_single_item_returned_without_override(self):
+        sm = self._sm("only")
+        assert failed_document_stream._select_snapshot_migration(None, [sm]) is sm
 
-    def test_returns_none_for_empty_value(self, mocker):
-        mocker.patch.object(failed_document_stream, "_fetch_configmap_data", return_value={"session_id": ""})
-        assert failed_document_stream._read_configmap("session_id") is None
+    def test_override_selects_by_name(self):
+        a, b = self._sm("a"), self._sm("b")
+        assert failed_document_stream._select_snapshot_migration("b", [a, b]) is b
 
-    def test_caches_result_across_calls(self, mocker):
-        fetch_mock = mocker.patch.object(failed_document_stream, "_fetch_configmap_data",
-                                         return_value={"bucket": "b1"})
-        assert failed_document_stream._read_configmap("bucket") == "b1"
-        # Second call should NOT refetch — the cache is module-level and lives
-        # until load_config explicitly clears it.
-        assert failed_document_stream._read_configmap("bucket") == "b1"
-        assert fetch_mock.call_count == 1
+    def test_no_items_raises(self):
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="No SnapshotMigration"):
+            failed_document_stream._select_snapshot_migration(None, [])
 
+    def test_multiple_without_override_raises(self):
+        items = [self._sm("a"), self._sm("b")]
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="Multiple SnapshotMigration"):
+            failed_document_stream._select_snapshot_migration(None, items)
 
-class TestFetchConfigmapData:
-    """The Kubernetes client is an optional dep that may or may not be
-    importable. These tests stub out the import machinery so we exercise
-    the success / 404 / generic-API-error / ImportError branches without
-    touching a real cluster."""
-
-    def _install_fake_kubernetes(self, monkeypatch, *, read_returns=None, read_raises=None,
-                                 incluster_raises=False, kubeconfig_raises=False):
-        """Inject a fake `kubernetes` package into sys.modules so
-        `from kubernetes import client, config` inside _fetch_configmap_data
-        resolves to our stubs."""
-        import sys
-        import types
-
-        # Build the fake config module with load_incluster_config / load_kube_config.
-        class FakeConfigException(Exception):
-            pass
-
-        fake_config = types.SimpleNamespace(
-            ConfigException=FakeConfigException,
-            load_incluster_config=MagicMock(
-                side_effect=FakeConfigException("not in cluster") if incluster_raises else None
-            ),
-            load_kube_config=MagicMock(
-                side_effect=FakeConfigException("no kubeconfig") if kubeconfig_raises else None
-            ),
-        )
-
-        # The CoreV1Api ConfigMap object — read_namespaced_config_map returns
-        # an object whose .data is what _fetch_configmap_data ultimately
-        # returns.
-        cm_obj = MagicMock()
-        cm_obj.data = read_returns
-
-        v1 = MagicMock()
-        if read_raises is not None:
-            v1.read_namespaced_config_map.side_effect = read_raises
-        else:
-            v1.read_namespaced_config_map.return_value = cm_obj
-
-        fake_client = types.SimpleNamespace(CoreV1Api=MagicMock(return_value=v1))
-
-        # ApiException with a settable .status — mirror the real one.
-        class FakeApiException(Exception):
-            def __init__(self, status):
-                super().__init__(f"api error {status}")
-                self.status = status
-
-        fake_rest = types.SimpleNamespace(ApiException=FakeApiException)
-
-        # Wire the fake package tree.
-        fake_pkg = types.ModuleType("kubernetes")
-        fake_pkg.client = fake_client
-        fake_pkg.config = fake_config
-        fake_client_pkg = types.ModuleType("kubernetes.client")
-        fake_client_pkg.rest = fake_rest
-
-        monkeypatch.setitem(sys.modules, "kubernetes", fake_pkg)
-        monkeypatch.setitem(sys.modules, "kubernetes.client", fake_client_pkg)
-        monkeypatch.setitem(sys.modules, "kubernetes.client.rest", fake_rest)
-
-        # Stub the namespace helper that _fetch_configmap_data imports.
-        utils_mod = types.ModuleType("console_link.workflow.models.utils")
-        utils_mod.get_current_namespace = MagicMock(return_value="ma")
-        monkeypatch.setitem(sys.modules, "console_link.workflow.models.utils", utils_mod)
-        # Ensure the parent packages exist so the import lookup succeeds.
-        for parent in ("console_link.workflow", "console_link.workflow.models"):
-            if parent not in sys.modules:
-                monkeypatch.setitem(sys.modules, parent, types.ModuleType(parent))
-
-        return FakeApiException
-
-    def test_returns_data_on_success(self, monkeypatch):
-        self._install_fake_kubernetes(monkeypatch,
-                                      read_returns={"session_id": "s", "bucket": "b"})
-        assert failed_document_stream._fetch_configmap_data() == {"session_id": "s", "bucket": "b"}
-
-    def test_returns_empty_dict_when_data_is_none(self, monkeypatch):
-        # ConfigMap exists but has no data — k8s returns None, we want {}.
-        self._install_fake_kubernetes(monkeypatch, read_returns=None)
-        assert failed_document_stream._fetch_configmap_data() == {}
-
-    def test_returns_empty_dict_on_404(self, monkeypatch):
-        FakeApiException = self._install_fake_kubernetes(monkeypatch)
-        # Re-wire read_namespaced_config_map to raise the 404 form.
-        import sys
-        v1_factory = sys.modules["kubernetes"].client.CoreV1Api
-        v1_instance = v1_factory.return_value
-        v1_instance.read_namespaced_config_map.side_effect = FakeApiException(404)
-        v1_instance.read_namespaced_config_map.return_value = None  # gone
-
-        assert failed_document_stream._fetch_configmap_data() == {}
-
-    def test_returns_empty_dict_on_other_api_error(self, monkeypatch):
-        FakeApiException = self._install_fake_kubernetes(monkeypatch)
-        import sys
-        v1_instance = sys.modules["kubernetes"].client.CoreV1Api.return_value
-        v1_instance.read_namespaced_config_map.side_effect = FakeApiException(500)
-
-        assert failed_document_stream._fetch_configmap_data() == {}
-
-    def test_falls_back_to_kube_config_when_not_in_cluster(self, monkeypatch):
-        self._install_fake_kubernetes(
-            monkeypatch,
-            read_returns={"session_id": "out-of-cluster"},
-            incluster_raises=True,   # load_incluster_config raises -> fall through
-        )
-        assert failed_document_stream._fetch_configmap_data() == {"session_id": "out-of-cluster"}
-
-    def test_returns_empty_dict_on_generic_exception(self, monkeypatch):
-        # Any non-ApiException error (e.g., the namespace helper exploding)
-        # is swallowed too — a failed document stream inspection command shouldn't crash on
-        # ConfigMap weirdness.
-        self._install_fake_kubernetes(monkeypatch)
-        import sys
-        utils_mod = sys.modules["console_link.workflow.models.utils"]
-        utils_mod.get_current_namespace.side_effect = RuntimeError("can't read /var/run/...")
-
-        assert failed_document_stream._fetch_configmap_data() == {}
-
-    def test_returns_empty_dict_when_kubernetes_module_missing(self, monkeypatch):
-        # If the kubernetes client isn't installed at all, _fetch_configmap_data
-        # must return {} rather than propagating ImportError.
-        import sys
-        # Force the import inside _fetch_configmap_data to fail.
-        for mod_name in ("kubernetes", "kubernetes.client", "kubernetes.client.rest"):
-            monkeypatch.setitem(sys.modules, mod_name, None)
-
-        assert failed_document_stream._fetch_configmap_data() == {}
+    def test_unknown_override_raises(self):
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="No SnapshotMigration named"):
+            failed_document_stream._select_snapshot_migration("nope", [self._sm("a")])
 
 
 # ---------- _iter_objects ---------------------------------------------------

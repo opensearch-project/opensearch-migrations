@@ -670,10 +670,10 @@ def failed_document_stream_group():
 
 
 @failed_document_stream_group.command(name="location", help="Print the S3 URI of the failed document stream for the current session.")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
-def backfill_failed_document_stream_location_cmd(session):
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+def backfill_failed_document_stream_location_cmd(migration):
     try:
-        cfg = failed_document_stream_.load_config(session_override=session)
+        cfg = failed_document_stream_.load_config(migration_override=migration)
     except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
     click.echo(cfg.location_uri)
@@ -682,22 +682,22 @@ def backfill_failed_document_stream_location_cmd(session):
 @failed_document_stream_group.command(name="count",
                    help="Count distinct failed documents in the current session's failed document stream "
                         "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
-def backfill_failed_document_stream_count_cmd(session):
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+def backfill_failed_document_stream_count_cmd(migration):
     try:
-        cfg = failed_document_stream_.load_config(session_override=session)
+        cfg = failed_document_stream_.load_config(migration_override=migration)
     except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
     click.echo(str(failed_document_stream_.count(cfg)))
 
 
 @failed_document_stream_group.command(name="list", help="List failed document records in stable order.")
-@click.option('--session', default=None, help='Override the session id (defaults to RFS_FAILED_DOCUMENT_STREAM_SESSION_ID).')
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
 @click.option('--limit', default=100, show_default=True, type=int, help='Maximum records to print.')
 @click.pass_obj
-def backfill_failed_document_stream_list_cmd(ctx, session, limit):
+def backfill_failed_document_stream_list_cmd(ctx, migration, limit):
     try:
-        cfg = failed_document_stream_.load_config(session_override=session)
+        cfg = failed_document_stream_.load_config(migration_override=migration)
     except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
     records = failed_document_stream_.list_records(cfg, limit=limit)

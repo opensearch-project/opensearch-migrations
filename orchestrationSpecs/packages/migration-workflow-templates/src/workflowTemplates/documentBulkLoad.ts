@@ -63,12 +63,15 @@ function makeParamsDict(
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>,
-    workflowUid: BaseExpression<string>,
+    snapshotMigrationUid: BaseExpression<string>,
     sourceEndpoint?: BaseExpression<string>
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
     const failedDocumentStreamParams = expr.makeDict({
-        failedDocumentStreamSessionId: workflowUid
+        // The SnapshotMigration's own UID is the failed-document-stream session id: it uniquely
+        // identifies this backfill (so multiple backfills in one workflow never share a session=
+        // prefix) and is exactly what the console reads back from the SnapshotMigration it reports on.
+        failedDocumentStreamSessionId: snapshotMigrationUid
     });
     const base = expr.mergeDicts(
         expr.mergeDicts(
@@ -101,31 +104,10 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-const FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME = "rfs-failed-document-stream-current-session";
-
-function makeFailedDocumentStreamSessionConfigMap(
-    sessionId: BaseExpression<string>,
-    failedDocumentStreamS3Prefix: BaseExpression<string>,
-    failedDocumentStreamS3Bucket: BaseExpression<string>,
-    failedDocumentStreamS3Region: BaseExpression<string>,
-    failedDocumentStreamS3Endpoint: BaseExpression<string>
-) {
-    return {
-        apiVersion: "v1",
-        kind: "ConfigMap",
-        metadata: {name: FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME},
-        // Carry the config-processor-resolved bucket/region/endpoint (not just the prefix) so the
-        // console reads the same explicit values RFS writes with, rather than re-resolving from env.
-        // Empty strings mean "failed document stream disabled / not configured for this run".
-        data: {
-            session_id: makeStringTypeProxy(sessionId),
-            prefix: makeStringTypeProxy(failedDocumentStreamS3Prefix),
-            bucket: makeStringTypeProxy(failedDocumentStreamS3Bucket),
-            region: makeStringTypeProxy(failedDocumentStreamS3Region),
-            endpoint: makeStringTypeProxy(failedDocumentStreamS3Endpoint)
-        }
-    };
-}
+// The failed-document-stream session id is the SnapshotMigration's own UID (see makeParamsDict).
+// There is intentionally no namespace-global "current session" ConfigMap: a single ConfigMap can
+// only point at one backfill, which breaks with multiple/parallel SnapshotMigrations in a workflow.
+// The console instead reads the stream's config + UID directly from the SnapshotMigration it reports on.
 
 function getRfsDoneCronJobName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs-done"));
@@ -530,7 +512,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName,
-                            expr.getWorkflowValue("uid"),
+                            b.inputs.crdUid,
                             b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
@@ -543,26 +525,6 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                 })
             )
         )
-    )
-
-
-    .addTemplate("publishFailedDocumentStreamSession", t => t
-        .addRequiredInput("failedDocumentStreamS3Prefix", typeToken<string>())
-        .addRequiredInput("failedDocumentStreamS3Bucket", typeToken<string>())
-        .addRequiredInput("failedDocumentStreamS3Region", typeToken<string>())
-        .addRequiredInput("failedDocumentStreamS3Endpoint", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: makeFailedDocumentStreamSessionConfigMap(
-                    expr.getWorkflowValue("uid"),
-                    b.inputs.failedDocumentStreamS3Prefix,
-                    b.inputs.failedDocumentStreamS3Bucket,
-                    b.inputs.failedDocumentStreamS3Region,
-                    b.inputs.failedDocumentStreamS3Endpoint)
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -581,13 +543,6 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("publishFailedDocumentStreamSession", INTERNAL, "publishFailedDocumentStreamSession", c =>
-                c.register({
-                    failedDocumentStreamS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Prefix"], "rfs-failed-document-stream/"),
-                    failedDocumentStreamS3Bucket: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Bucket"], ""),
-                    failedDocumentStreamS3Region: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Region"], ""),
-                    failedDocumentStreamS3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Endpoint"], "")
-                }))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)

@@ -590,7 +590,7 @@
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'useTargetClusterForWorkCoordination', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.dict(\"failedDocumentStreamSessionId\", workflow.uid)), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'useTargetClusterForWorkCoordination', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.dict(\"failedDocumentStreamSessionId\", inputs.parameters.crdUid)), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))))}}"
                   },
                   {
                     "name": "resources",
@@ -618,42 +618,6 @@
             }
           ]
         ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "publishfaileddocumentstreamsession",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "failedDocumentStreamS3Prefix"
-            },
-            {
-              "name": "failedDocumentStreamS3Bucket"
-            },
-            {
-              "name": "failedDocumentStreamS3Region"
-            },
-            {
-              "name": "failedDocumentStreamS3Endpoint"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rfs-failed-document-stream-current-session\ndata:\n  session_id: \"{{workflow.uid}}\"\n  prefix: \"{{inputs.parameters.failedDocumentStreamS3Prefix}}\"\n  bucket: \"{{inputs.parameters.failedDocumentStreamS3Bucket}}\"\n  region: \"{{inputs.parameters.failedDocumentStreamS3Region}}\"\n  endpoint: \"{{inputs.parameters.failedDocumentStreamS3Endpoint}}\"\n",
-          "action": "apply",
-          "setOwnerReference": false
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
         "outputs": {
           "parameters": []
         }
@@ -711,32 +675,6 @@
           ]
         },
         "steps": [
-          [
-            {
-              "template": "publishfaileddocumentstreamsession",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "failedDocumentStreamS3Prefix",
-                    "value": "{{=sprig.dig('failedDocumentStreamS3Prefix', 'rfs-failed-document-stream/', fromJSON(inputs.parameters.documentBackfillConfig))}}"
-                  },
-                  {
-                    "name": "failedDocumentStreamS3Bucket",
-                    "value": "{{=sprig.dig('failedDocumentStreamS3Bucket', '', fromJSON(inputs.parameters.documentBackfillConfig))}}"
-                  },
-                  {
-                    "name": "failedDocumentStreamS3Region",
-                    "value": "{{=sprig.dig('failedDocumentStreamS3Region', '', fromJSON(inputs.parameters.documentBackfillConfig))}}"
-                  },
-                  {
-                    "name": "failedDocumentStreamS3Endpoint",
-                    "value": "{{=sprig.dig('failedDocumentStreamS3Endpoint', '', fromJSON(inputs.parameters.documentBackfillConfig))}}"
-                  }
-                ]
-              },
-              "name": "publishFailedDocumentStreamSession"
-            }
-          ],
           [
             {
               "template": "starthistoricalbackfillfromconfig",
