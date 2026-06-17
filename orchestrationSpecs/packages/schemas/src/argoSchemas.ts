@@ -22,6 +22,16 @@ import {
 } from "./userSchemas";
 import {z} from "zod";
 
+// zod ≥4.4 makes structural ops (.omit()/.pick()) throw when the object schema
+// still carries refinements (.refine/.superRefine/.transform), instead of
+// silently discarding them as pre-4.4 did. The Argo-side schemas below are
+// resolved/denormalized projections that intentionally shed the user-level
+// cross-field refinements, so rebuilding a plain object from the shape before
+// the structural op restores the prior (and intended) behavior.
+function dropRefinements<T extends z.ZodRawShape>(schema: z.ZodObject<T>): z.ZodObject<T> {
+    return z.object(schema.shape);
+}
+
 // DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
 export const SOURCE_PROXY_CONFIG = z.object({
     name: z.string(),
@@ -132,7 +142,7 @@ export const NAMED_SOURCE_CLUSTER_CONFIG =
     }));
 
 export const NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO =
-    NAMED_SOURCE_CLUSTER_CONFIG.omit({snapshotInfo: true});
+    dropRefinements(NAMED_SOURCE_CLUSTER_CONFIG).omit({snapshotInfo: true});
 
 export const NAMED_TARGET_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.safeExtend({
@@ -160,7 +170,7 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
     }));
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_METADATA_OPTIONS.omit({
+    dropRefinements(USER_METADATA_OPTIONS).omit({
         skipEvaluateApproval: true,
         skipMigrateApproval: true,
         metadataTransforms: true,
@@ -182,7 +192,7 @@ export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_
 }));
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_RFS_OPTIONS.in.omit({
+    dropRefinements(USER_RFS_OPTIONS.in).omit({
         skipApproval: true,
         documentTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
@@ -244,7 +254,7 @@ export const ARGO_PROXY_CR_OMITTED_KEYS = [
 ];
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_REPLAYER_OPTIONS.omit({
+    dropRefinements(USER_REPLAYER_OPTIONS).omit({
         requestTransforms: true,
         tupleTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
