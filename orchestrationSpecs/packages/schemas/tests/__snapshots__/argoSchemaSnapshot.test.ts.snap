@@ -337,6 +337,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": "http://otel-collector:4317",
                                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                           },
+                                          "mode": {
+                                            "type": "string",
+                                            "enum": [
+                                              "create",
+                                              "import"
+                                            ],
+                                            "default": "create",
+                                            "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' runs the config retrieval and import workflow."
+                                          },
                                           "indexAllowlist": {
                                             "type": "array",
                                             "items": {
@@ -1327,6 +1336,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             ],
                             "default": "http://otel-collector:4317",
                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "create",
+                              "import"
+                            ],
+                            "default": "create"
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -3289,6 +3306,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   ],
                                   "default": "http://otel-collector:4317",
                                   "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "create",
+                                    "import"
+                                  ],
+                                  "default": "create",
+                                  "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' runs the config retrieval and import workflow."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
