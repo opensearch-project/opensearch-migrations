@@ -108,6 +108,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "jvmArgs": "",
       "loggingConfigurationOverrideConfigMap": "",
       "maxSnapshotRateMbPerNode": 0,
+      "mode": "create",
       "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "snapshotPrefix": "snap1",
     },
