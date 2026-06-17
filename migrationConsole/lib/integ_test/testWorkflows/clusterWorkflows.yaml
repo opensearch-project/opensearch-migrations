@@ -824,6 +824,12 @@ spec:
                       volumeMounts:
                         - name: plugins
                           mountPath: /usr/share/elasticsearch/plugins
+                    - name: install-gcs-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-gcs"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                     - name: inject-aws-creds
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
                       command:
@@ -1000,6 +1006,12 @@ spec:
                     - name: install-s3-plugin
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
                       command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                    - name: install-gcs-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-gcs"]
                       volumeMounts:
                         - name: plugins
                           mountPath: /usr/share/elasticsearch/plugins
