@@ -14,6 +14,20 @@ Users can reach the validation pipeline from two directions:
 The important point is that there is one TypeScript validation pipeline. Python
 is a caller, not a second validator.
 
+That rule also applies to manage/edit partial rendering. A partially authored
+workflow config should not be parsed once by `editConfig`, again by
+`resolveMigrationResources`, and a third time by Python. The intended shape is a
+single TypeScript-owned parser/projection pipeline with two validation modes:
+
+- `strict`: require the complete config to pass all validation layers before
+  producing workflow/runtime resources. This is the submit path.
+- `loose`: parse syntactically valid YAML, walk known schema scopes,
+  best-effort project interior structures that have enough identity, and return
+  diagnostics for missing/invalid pieces. This is the manage rendering path.
+
+Loose mode is allowed to return partial resources and `valid: false`; it is not
+allowed to submit workflows or generate final CR manifests.
+
 ## Direct `config-processor` Entry Points
 
 - `packages/config-processor/src/validateConfig.ts`
@@ -55,6 +69,14 @@ raw user input
 The central implementation is:
 
 - `packages/config-processor/src/migrationConfigTransformer.ts`
+
+Current strict callers use `MigrationConfigTransformer.processFromObject(...)`.
+`processFromObject` always validates before transforming, so a missing interior
+object such as `traffic.proxies.<name>.proxyConfig` prevents the resource
+projection from returning any pending resources. That behavior is correct for
+submit and strict validation, but manage needs a loose sibling path in TS that
+shares the same schema/projection metadata and returns partial projections plus
+diagnostics.
 
 After transformation, resource parameter projection, CRD/VAP generation, and
 resolved migration resources generation are described in
