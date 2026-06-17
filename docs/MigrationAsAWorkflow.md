@@ -626,6 +626,10 @@ workflow approve retry  kafkacluster.my-cluster    # after manually resetting an
 
 Gate names may be given with or without the `.vapretry` suffix.
 
+To exercise the approval-gate TUI/CLI by hand during development without running a full migration,
+see [testingApprovalGatesManually.md](./testingApprovalGatesManually.md). Automated coverage lives
+in the `Test0003ApprovalGateIntegration` integration test.
+
 ### Logging
 
 With K8s, we need to manage log offloading ourselves more than we did for ECS.
