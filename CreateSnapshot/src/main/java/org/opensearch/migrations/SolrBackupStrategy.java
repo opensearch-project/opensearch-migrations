@@ -95,8 +95,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
         // ── Shared steps (both modes) ──────────────────────────────────────────
         resolveCollections(solrUrl);
-        ensureConfigFilesInS3(solrUrl);
-        ensureConfigFilesOnFilesystem(solrUrl);
+
+        // Config upload runs BEFORE backup only for standalone or IMPORT mode.
+        // SolrCloud CREATE mode: Solr's BACKUP command writes zk_backup_0/configs/
+        // from ZooKeeper itself — pre-uploading would create a partial directory
+        // structure that the downstream RFS reader finds before actual backup data lands.
+        if (!isCloud || mode != SnapshotMode.CREATE) {
+            ensureConfigFilesInS3(solrUrl);
+            ensureConfigFilesOnFilesystem(solrUrl);
+        }
 
         // ── Mode-specific branching ────────────────────────────────────────────
         executeModeSpecificOperation(solrUrl);
