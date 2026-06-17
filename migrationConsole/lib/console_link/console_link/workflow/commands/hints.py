@@ -2,6 +2,10 @@
 
 import click
 
+# Shared hint fragments reused across commands.
+MONITOR_PROGRESS = "`workflow manage` to monitor progress"
+MIGRATION_COMPLETE = "migration complete — view results with `workflow show`"
+
 
 def _hint(msg: str) -> None:
     click.echo(f"\nHint: {msg}")
@@ -34,15 +38,15 @@ def hint_configure_fix() -> None:
 
 def hint_after_submit() -> None:
     """Hint after `workflow submit` (no --wait): workflow is now queued."""
-    _hint("`workflow manage` to monitor progress")
+    _hint(MONITOR_PROGRESS)
 
 
 def hint_after_submit_wait(phase: str) -> None:
     """Hint after `workflow submit --wait` completes with a known phase."""
     _hint_for_phase(
         phase,
-        running_hint="`workflow manage` to monitor progress",
-        succeeded_hint="migration complete — view results with `workflow show`",
+        running_hint=MONITOR_PROGRESS,
+        succeeded_hint=MIGRATION_COMPLETE,
         failed_hint="update config with `workflow configure edit`, then resubmit with `workflow submit`",
     )
 
@@ -65,15 +69,15 @@ def hint_on_submit_error() -> None:
 # ── approve ────────────────────────────────────────────────────────────────
 
 def hint_after_approve_step() -> None:
-    _hint("`workflow manage` to monitor progress, or `workflow approve step --list` to check for more gates")
+    _hint(f"{MONITOR_PROGRESS}, or `workflow approve step --list` to check for more gates")
 
 
 def hint_after_approve_change() -> None:
-    _hint("`workflow manage` to monitor progress")
+    _hint(MONITOR_PROGRESS)
 
 
 def hint_after_approve_retry() -> None:
-    _hint("`workflow manage` to monitor progress")
+    _hint(MONITOR_PROGRESS)
 
 
 # ── status ─────────────────────────────────────────────────────────────────
@@ -83,7 +87,7 @@ def hint_after_status(phase: str) -> None:
     _hint_for_phase(
         phase,
         running_hint="workflow is running — re-run `workflow status` or open TUI with `workflow manage`",
-        succeeded_hint="migration complete — view results with `workflow show`",
+        succeeded_hint=MIGRATION_COMPLETE,
         failed_hint=(
             "workflow failed — update config with `workflow configure edit`, "
             "then resubmit with `workflow submit`"
@@ -98,7 +102,7 @@ def hint_after_manage(phase: str) -> None:
     _hint_for_phase(
         phase,
         running_hint="workflow still running — re-open with `workflow manage` or check with `workflow status`",
-        succeeded_hint="migration complete — view results with `workflow show`",
+        succeeded_hint=MIGRATION_COMPLETE,
         failed_hint=(
             "workflow failed — update config with `workflow configure edit`, "
             "then resubmit with `workflow submit`"
