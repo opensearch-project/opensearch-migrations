@@ -167,9 +167,9 @@ class Snapshot(ABC):
 
         if self._is_solr_source():
             command_args["--source-type"] = "solr"
-            mode = self.config.get("mode")
-            if mode:
-                command_args["--mode"] = mode
+            # Always pass --mode for Solr sources; both standalone and SolrCloud
+            # go through CreateSnapshot with the mode flag controlling behavior.
+            command_args["--mode"] = self.config.get("mode", "create")
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
