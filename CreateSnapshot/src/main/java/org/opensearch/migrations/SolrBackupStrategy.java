@@ -58,6 +58,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient);
     }
 
+    private static final String COLLECTION_LABEL = "collection";
+    private static final String CORE_LABEL = "core";
+
     /**
      * Required config files for Solr migration. The downstream pipeline (SolrSchemaXmlParser,
      * SolrBackupLayout, MetadataMigration) needs these to produce OpenSearch index mappings.
@@ -65,6 +68,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private static final List<String> REQUIRED_CONFIG_FILES = List.of(
         "managed-schema.xml"
     );
+
+    private String topologyLabel() {
+        return isCloud ? COLLECTION_LABEL : CORE_LABEL;
+    }
 
     /**
      * Unified entry point for Solr backup/import operations.
@@ -139,38 +146,39 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         try (var s3Client = buildS3Client(args.s3Region, args.s3Endpoint)) {
             for (var collection : args.solrCollections) {
                 for (var configFile : REQUIRED_CONFIG_FILES) {
-                    // Path matches what SolrSchemaXmlParser.findAndParse() expects:
-                    // <snapshot>/<collection>/zk_backup_0/configs/<collection>/<configFile>
-                    // For standalone, <collection> is actually a core name — the path still works
-                    // because SolrBackupSource uses the same name for both.
-                    var configKey = snapshotPrefix + collection + "/zk_backup_0/configs/" + collection + "/" + configFile;
-
-                    if (s3ObjectExists(s3Client, repoUri.bucketName, configKey)) {
-                        log.info("Config '{}' already present in S3 for {} '{}', skipping",
-                            configFile, isCloud ? "collection" : "core", collection);
-                        continue;
-                    }
-
-                    log.info("Config '{}' missing in S3 for {} '{}', fetching from source",
-                        configFile, isCloud ? "collection" : "core", collection);
-                    var content = fetchConfigFile(solrUrl, collection, configFile);
-                    if (content == null) {
-                        log.warn("Could not retrieve '{}' for {} '{}' from source — "
-                            + "downstream migration may see empty mappings",
-                            configFile, isCloud ? "collection" : "core", collection);
-                        continue;
-                    }
-
-                    s3Client.putObject(
-                        PutObjectRequest.builder().bucket(repoUri.bucketName).key(configKey).build(),
-                        RequestBody.fromString(content, java.nio.charset.StandardCharsets.UTF_8));
-                    log.info("Uploaded '{}' for {} '{}' to s3://{}/{}",
-                        configFile, isCloud ? "collection" : "core", collection, repoUri.bucketName, configKey);
+                    uploadConfigFileToS3IfMissing(s3Client, repoUri, snapshotPrefix, solrUrl, collection, configFile);
                 }
             }
         } catch (Exception e) {
             log.warn("Config file check-and-upload failed: {} — migration may see empty mappings", e.getMessage());
         }
+    }
+
+    private void uploadConfigFileToS3IfMissing(S3Client s3Client, S3Uri repoUri, String snapshotPrefix,
+            String solrUrl, String collection, String configFile) {
+        var configKey = snapshotPrefix + collection + "/zk_backup_0/configs/" + collection + "/" + configFile;
+
+        if (s3ObjectExists(s3Client, repoUri.bucketName, configKey)) {
+            log.info("Config '{}' already present in S3 for {} '{}', skipping",
+                configFile, topologyLabel(), collection);
+            return;
+        }
+
+        log.info("Config '{}' missing in S3 for {} '{}', fetching from source",
+            configFile, topologyLabel(), collection);
+        var content = fetchConfigFile(solrUrl, collection, configFile);
+        if (content == null) {
+            log.warn("Could not retrieve '{}' for {} '{}' from source — "
+                + "downstream migration may see empty mappings",
+                configFile, topologyLabel(), collection);
+            return;
+        }
+
+        s3Client.putObject(
+            PutObjectRequest.builder().bucket(repoUri.bucketName).key(configKey).build(),
+            RequestBody.fromString(content, java.nio.charset.StandardCharsets.UTF_8));
+        log.info("Uploaded '{}' for {} '{}' to s3://{}/{}",
+            configFile, topologyLabel(), collection, repoUri.bucketName, configKey);
     }
 
     /**
@@ -195,28 +203,33 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             var configDir = Paths.get(args.fileSystemRepoPath, args.snapshotName, core,
                 "zk_backup_0", "configs", core);
             for (var configFile : REQUIRED_CONFIG_FILES) {
-                var targetFile = configDir.resolve(configFile);
-                if (Files.exists(targetFile)) {
-                    log.info("Config '{}' already present on filesystem for core '{}'", configFile, core);
-                    continue;
-                }
-
-                log.info("Config '{}' missing on filesystem for core '{}', fetching from source", configFile, core);
-                var content = fetchConfigFile(solrUrl, core, configFile);
-                if (content == null) {
-                    log.warn("Could not retrieve '{}' for core '{}' — downstream may see empty mappings",
-                        configFile, core);
-                    continue;
-                }
-
-                try {
-                    Files.createDirectories(configDir);
-                    Files.writeString(targetFile, content);
-                    log.info("Wrote '{}' for core '{}' to {}", configFile, core, targetFile);
-                } catch (IOException e) {
-                    log.warn("Failed to write config file {}: {}", targetFile, e.getMessage());
-                }
+                writeConfigFileToFilesystemIfMissing(configDir, solrUrl, core, configFile);
             }
+        }
+    }
+
+    private void writeConfigFileToFilesystemIfMissing(java.nio.file.Path configDir, String solrUrl,
+            String core, String configFile) {
+        var targetFile = configDir.resolve(configFile);
+        if (Files.exists(targetFile)) {
+            log.info("Config '{}' already present on filesystem for core '{}'", configFile, core);
+            return;
+        }
+
+        log.info("Config '{}' missing on filesystem for core '{}', fetching from source", configFile, core);
+        var content = fetchConfigFile(solrUrl, core, configFile);
+        if (content == null) {
+            log.warn("Could not retrieve '{}' for core '{}' — downstream may see empty mappings",
+                configFile, core);
+            return;
+        }
+
+        try {
+            Files.createDirectories(configDir);
+            Files.writeString(targetFile, content);
+            log.info("Wrote '{}' for core '{}' to {}", configFile, core, targetFile);
+        } catch (IOException e) {
+            log.warn("Failed to write config file {}: {}", targetFile, e.getMessage());
         }
     }
 
@@ -234,7 +247,20 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * since Solr versions use different filenames.
      */
     private String fetchConfigFile(String solrUrl, String collection, String configFile) {
-        // Strategy 1: Admin File Handler (both topologies)
+        var result = fetchViaFileHandler(solrUrl, collection, configFile);
+        if (result != null) {
+            return result;
+        }
+
+        // Strategy 2: Schema API fallback (standalone cores where file handler may be disabled)
+        if (!isCloud && configFile.contains("schema")) {
+            return fetchViaSchemaApi(solrUrl, collection);
+        }
+
+        return null;
+    }
+
+    private String fetchViaFileHandler(String solrUrl, String collection, String configFile) {
         var variants = configFile.contains("schema")
             ? List.of("managed-schema", "managed-schema.xml", "schema.xml")
             : List.of(configFile);
@@ -245,7 +271,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 var body = httpClient.getString(url, Duration.ofSeconds(30));
                 if (body != null && !body.isBlank()) {
                     log.info("Fetched '{}' for {} '{}' via file handler",
-                        fileName, isCloud ? "collection" : "core", collection);
+                        fileName, topologyLabel(), collection);
                     return body;
                 }
             } catch (Exception e) {
@@ -253,21 +279,20 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                     fileName, collection, e.getMessage());
             }
         }
+        return null;
+    }
 
-        // Strategy 2: Schema API fallback (standalone cores where file handler may be disabled)
-        if (!isCloud && configFile.contains("schema")) {
-            var schemaUrl = solrUrl + "/solr/" + collection + "/schema?wt=schema.xml";
-            try {
-                var body = httpClient.getString(schemaUrl, Duration.ofSeconds(30));
-                if (body != null && !body.isBlank()) {
-                    log.info("Fetched schema for core '{}' via Schema API fallback", collection);
-                    return body;
-                }
-            } catch (Exception e) {
-                log.debug("Schema API fallback failed for core '{}': {}", collection, e.getMessage());
+    private String fetchViaSchemaApi(String solrUrl, String collection) {
+        var schemaUrl = solrUrl + "/solr/" + collection + "/schema?wt=schema.xml";
+        try {
+            var body = httpClient.getString(schemaUrl, Duration.ofSeconds(30));
+            if (body != null && !body.isBlank()) {
+                log.info("Fetched schema for core '{}' via Schema API fallback", collection);
+                return body;
             }
+        } catch (Exception e) {
+            log.debug("Schema API fallback failed for core '{}': {}", collection, e.getMessage());
         }
-
         return null;
     }
 
@@ -308,6 +333,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * Both standalone and SolrCloud topologies are handled identically in import mode since
      * the snapshot format is the same once created.
      */
+    @SuppressWarnings("java:S1172") // solrUrl reserved for future import validation against live cluster
     private void runImportMode(String solrUrl) {
         var backupLocation = args.s3RepoUri != null ? args.s3RepoUri : args.fileSystemRepoPath;
         log.info("IMPORT mode: verifying snapshot location accessibility for {} collection(s) at {}",
