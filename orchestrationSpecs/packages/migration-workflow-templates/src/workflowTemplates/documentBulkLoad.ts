@@ -103,14 +103,26 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
 
 const FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME = "rfs-failed-document-stream-current-session";
 
-function makeFailedDocumentStreamSessionConfigMap(sessionId: BaseExpression<string>, failedDocumentStreamS3Prefix: BaseExpression<string>) {
+function makeFailedDocumentStreamSessionConfigMap(
+    sessionId: BaseExpression<string>,
+    failedDocumentStreamS3Prefix: BaseExpression<string>,
+    failedDocumentStreamS3Bucket: BaseExpression<string>,
+    failedDocumentStreamS3Region: BaseExpression<string>,
+    failedDocumentStreamS3Endpoint: BaseExpression<string>
+) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name: FAILED_DOCUMENT_STREAM_SESSION_CONFIGMAP_NAME},
+        // Carry the config-processor-resolved bucket/region/endpoint (not just the prefix) so the
+        // console reads the same explicit values RFS writes with, rather than re-resolving from env.
+        // Empty strings mean "failed document stream disabled / not configured for this run".
         data: {
             session_id: makeStringTypeProxy(sessionId),
-            prefix: makeStringTypeProxy(failedDocumentStreamS3Prefix)
+            prefix: makeStringTypeProxy(failedDocumentStreamS3Prefix),
+            bucket: makeStringTypeProxy(failedDocumentStreamS3Bucket),
+            region: makeStringTypeProxy(failedDocumentStreamS3Region),
+            endpoint: makeStringTypeProxy(failedDocumentStreamS3Endpoint)
         }
     };
 }
@@ -189,24 +201,13 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // Terminal RFS document failures now go to a durable S3 failed document stream
+            // Terminal RFS document failures go to a durable S3 failed document stream
             // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
-            // pod-local FailedRequests log because no durable replacement existed; we
-            // can now keep the in-pod logger at WARN as a local-dev safety net. The
-            // S3 sink is enabled by providing --failed-document-stream-s3-bucket inside rfsJsonConfig, or
-            // (by default) by falling back to MIGRATIONS_DEFAULT_S3_BUCKET below, which
-            // resolves to the migrations-default-<account>-<stage>-<region> bucket that
-            // the deployment provisions. Per-pod session id comes from the workflow.
-            {
-                name: "MIGRATIONS_DEFAULT_S3_BUCKET",
-                valueFrom: {
-                    configMapKeyRef: {
-                        name: "migrations-default-s3-config",
-                        key: "BUCKET_NAME",
-                        optional: true
-                    }
-                }
-            },
+            // pod-local FailedRequests log because no durable replacement existed; we can now keep the
+            // in-pod logger at WARN as a local-dev safety net. The S3 sink is enabled via the
+            // --failed-document-stream-s3-* args, which the config processor resolves (including the
+            // deployment default) before submission — RFS no longer reads any S3 default from the pod
+            // environment. Per-pod session id comes from the workflow.
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
                 value: "WARN"
@@ -547,11 +548,19 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
     .addTemplate("publishFailedDocumentStreamSession", t => t
         .addRequiredInput("failedDocumentStreamS3Prefix", typeToken<string>())
+        .addRequiredInput("failedDocumentStreamS3Bucket", typeToken<string>())
+        .addRequiredInput("failedDocumentStreamS3Region", typeToken<string>())
+        .addRequiredInput("failedDocumentStreamS3Endpoint", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeFailedDocumentStreamSessionConfigMap(expr.getWorkflowValue("uid"), b.inputs.failedDocumentStreamS3Prefix)
+                manifest: makeFailedDocumentStreamSessionConfigMap(
+                    expr.getWorkflowValue("uid"),
+                    b.inputs.failedDocumentStreamS3Prefix,
+                    b.inputs.failedDocumentStreamS3Bucket,
+                    b.inputs.failedDocumentStreamS3Region,
+                    b.inputs.failedDocumentStreamS3Endpoint)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -574,7 +583,10 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addSteps(b => b
             .addStep("publishFailedDocumentStreamSession", INTERNAL, "publishFailedDocumentStreamSession", c =>
                 c.register({
-                    failedDocumentStreamS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Prefix"], "rfs-failed-document-stream/")
+                    failedDocumentStreamS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Prefix"], "rfs-failed-document-stream/"),
+                    failedDocumentStreamS3Bucket: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Bucket"], ""),
+                    failedDocumentStreamS3Region: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Region"], ""),
+                    failedDocumentStreamS3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["failedDocumentStreamS3Endpoint"], "")
                 }))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({

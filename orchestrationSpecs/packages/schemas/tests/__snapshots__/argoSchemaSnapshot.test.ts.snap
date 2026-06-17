@@ -1742,7 +1742,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the failed document stream. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for failed document stream records."
+                      "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                    },
+                    "failedDocumentStreamS3Region": {
+                      "type": "string",
+                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                    },
+                    "failedDocumentStreamS3Endpoint": {
+                      "type": "string",
+                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
                     },
                     "failedDocumentStreamMaxBufferBytes": {
                       "type": "number",
@@ -4182,7 +4190,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the failed document stream. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for failed document stream records."
+                        "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                      },
+                      "failedDocumentStreamS3Region": {
+                        "type": "string",
+                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                      },
+                      "failedDocumentStreamS3Endpoint": {
+                        "type": "string",
+                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
                       },
                       "failedDocumentStreamMaxBufferBytes": {
                         "type": "number",

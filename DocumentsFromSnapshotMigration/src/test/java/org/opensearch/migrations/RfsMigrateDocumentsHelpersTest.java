@@ -76,11 +76,10 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void buildFailedDocumentStreamSink_returnsNullWhenNoBucketConfigured() {
         var args = new RfsMigrateDocuments.Args();
-        // Don't set --failed-document-stream-s3-bucket. If the env doesn't supply a default bucket
-        // either, the sink should be null (failed document stream disabled).
-        if (System.getenv("MIGRATIONS_DEFAULT_S3_BUCKET") == null) {
-            assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "sess"), nullValue());
-        }
+        // No --failed-document-stream-s3-bucket: the sink is disabled. The bucket is now explicit
+        // configuration only — RFS no longer falls back to the MIGRATIONS_DEFAULT_S3_BUCKET env var,
+        // so this holds regardless of the pod environment.
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "sess"), nullValue());
     }
 
     @Test

@@ -1,4 +1,4 @@
-import {ARGO_MIGRATION_CONFIG_PRE_ENRICH} from "@opensearch-migrations/schemas";
+import {ARGO_MIGRATION_CONFIG_PRE_ENRICH, DEPLOYMENT_DEFAULTS_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
@@ -23,6 +23,8 @@ Arguments:
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
   --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
   --run-number <number>        Required with --output-dir. Millisecond run number to stamp on generated resources and pass to the workflow
+  --deployment-defaults <file> Deployment-provisioned S3 defaults (defaultS3Bucket/Region/Endpoint) read from the cluster
+                               by the submitter; used to resolve the failed-document-stream destination before submission
 
   -h, --help               Show this help message
 `;
@@ -56,6 +58,7 @@ export async function main() {
     let outputDir: string | undefined;
     let workflowName: string | undefined;
     let runNumber: number | undefined;
+    let deploymentDefaultsFile: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -68,6 +71,8 @@ export async function main() {
             outputDir = args[++i];
         } else if (arg === '--workflow-name' && i + 1 < args.length) {
             workflowName = args[++i];
+        } else if (arg === '--deployment-defaults' && i + 1 < args.length) {
+            deploymentDefaultsFile = args[++i];
         } else if (arg === '--run-number' && i + 1 < args.length) {
             runNumber = Number(args[++i]);
             if (!Number.isInteger(runNumber) || runNumber < 0) {
@@ -97,7 +102,10 @@ export async function main() {
     try {
         const workflows: z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH> = await (async ()=>{
             if (userConfigFile) {
-                const processor = new MigrationConfigTransformer();
+                const deploymentDefaults = deploymentDefaultsFile
+                    ? DEPLOYMENT_DEFAULTS_CONFIG.parse(await parseInput(deploymentDefaultsFile))
+                    : {};
+                const processor = new MigrationConfigTransformer(deploymentDefaults);
                 const userConfig = await parseInput(userConfigFile) as any;
                 return processor.processFromObject(userConfig);
             } else if (workflowConfigFile) {

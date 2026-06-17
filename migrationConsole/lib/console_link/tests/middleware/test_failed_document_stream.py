@@ -2,9 +2,9 @@
 
 Coverage targets:
   * FailedDocumentStreamConfig properties (session_prefix, location_uri)
-  * load_config resolution precedence (CLI/env > ConfigMap > deployment default)
+  * load_config reads resolved values from the session ConfigMap (+ --session override)
   * Both FailedDocumentStreamNotConfigured branches (no bucket / no session)
-  * _s3_client region selection
+  * _s3_client region/endpoint selection
   * list_records — sorting, limit, malformed gzip/JSON skipping
   * count — line counting, malformed gzip skipping
   * delete_session — 1000-key batching boundary
@@ -29,31 +29,11 @@ import console_link.middleware.failed_document_stream as failed_document_stream
 
 # ---------- shared fixtures / helpers --------------------------------------
 
-# Names of every env var failed_document_stream.load_config looks at — clearing them up-front
-# keeps a developer's shell environment from leaking into assertions.
-_ENV_VARS = [
-    "RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET",
-    "RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX",
-    "RFS_FAILED_DOCUMENT_STREAM_SESSION_ID",
-    "RFS_FAILED_DOCUMENT_STREAM_S3_REGION",
-    "MIGRATIONS_DEFAULT_S3_BUCKET",
-    "BUCKET_NAME",
-]
-
-
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch):
-    for name in _ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
-    # Reset the module-level ConfigMap cache so each test starts fresh.
+def reset_configmap_cache():
+    # load_config reads the resolved values only from the session ConfigMap, so reset the
+    # module-level cache between tests to keep them independent.
     failed_document_stream._configmap_cache = None
-
-
-@pytest.fixture
-def no_configmap(monkeypatch):
-    """Make _read_configmap always return None — used by tests that aren't
-    exercising the ConfigMap branch."""
-    monkeypatch.setattr(failed_document_stream, "_read_configmap", lambda key: None)
 
 
 def _gz(text: str) -> bytes:
@@ -122,83 +102,63 @@ class TestS3ClientFactory:
         failed_document_stream._s3_client(_config(region=None))
         boto_mock.assert_called_once_with("s3")
 
+    def test_uses_endpoint_when_set(self, mocker):
+        boto_mock = mocker.patch("console_link.middleware.failed_document_stream.boto3.client")
+        failed_document_stream._s3_client(_config(region="us-east-1", endpoint="https://s3.local"))
+        boto_mock.assert_called_once_with("s3", region_name="us-east-1", endpoint_url="https://s3.local")
+
 
 # ---------- load_config -----------------------------------------------------
 
 class TestLoadConfig:
-    def test_raises_when_no_bucket_anywhere(self, monkeypatch, no_configmap):
+    @staticmethod
+    def _set_cm(monkeypatch, cm: dict):
+        # _read_configmap strips and returns None for empty values; emulate by reading the dict.
+        monkeypatch.setattr(failed_document_stream, "_read_configmap", lambda key: cm.get(key))
+
+    def test_raises_when_no_bucket(self, monkeypatch):
+        self._set_cm(monkeypatch, {"session_id": "s"})
         with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="bucket"):
             failed_document_stream.load_config(session_override="s")
 
-    def test_raises_when_bucket_present_but_no_session(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
+    def test_raises_when_bucket_present_but_no_session(self, monkeypatch):
+        self._set_cm(monkeypatch, {"bucket": "b"})
         with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="session"):
             failed_document_stream.load_config()
 
-    def test_explicit_env_bucket_wins_over_default_fallbacks(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "explicit-bucket")
-        monkeypatch.setenv("MIGRATIONS_DEFAULT_S3_BUCKET", "deployment-default")
-        monkeypatch.setenv("BUCKET_NAME", "old-style-bucket")
-        cfg = failed_document_stream.load_config(session_override="s")
-        assert cfg.bucket == "explicit-bucket"
-
-    def test_falls_back_to_migrations_default_when_explicit_unset(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("MIGRATIONS_DEFAULT_S3_BUCKET", "deployment-default")
-        cfg = failed_document_stream.load_config(session_override="s")
-        assert cfg.bucket == "deployment-default"
-
-    def test_falls_back_to_bucket_name_when_others_unset(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("BUCKET_NAME", "old-style-bucket")
-        cfg = failed_document_stream.load_config(session_override="s")
-        assert cfg.bucket == "old-style-bucket"
-
-    def test_configmap_bucket_used_when_env_unset(self, monkeypatch):
-        cm = {"bucket": "from-cm", "session_id": "cm-sess"}
-        monkeypatch.setattr(failed_document_stream, "_read_configmap", lambda key: cm.get(key))
+    def test_reads_resolved_values_from_configmap(self, monkeypatch):
+        self._set_cm(monkeypatch, {
+            "bucket": "from-cm", "session_id": "cm-sess", "prefix": "p/",
+            "region": "ap-south-1", "endpoint": "https://s3.local",
+        })
         cfg = failed_document_stream.load_config()
         assert cfg.bucket == "from-cm"
         assert cfg.session_id == "cm-sess"
+        assert cfg.prefix == "p/"
+        assert cfg.region == "ap-south-1"
+        assert cfg.endpoint == "https://s3.local"
 
-    def test_session_override_arg_wins_over_env_and_configmap(self, monkeypatch):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_SESSION_ID", "from-env")
-        monkeypatch.setattr(failed_document_stream, "_read_configmap",
-                            lambda key: "from-cm" if key == "session_id" else None)
+    def test_session_override_wins_over_configmap(self, monkeypatch):
+        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "cm-sess"})
         cfg = failed_document_stream.load_config(session_override="from-arg")
         assert cfg.session_id == "from-arg"
 
-    def test_session_env_wins_over_configmap(self, monkeypatch):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_SESSION_ID", "env-sess")
-        monkeypatch.setattr(failed_document_stream, "_read_configmap",
-                            lambda key: "cm-sess" if key == "session_id" else None)
+    def test_prefix_trailing_slash_appended(self, monkeypatch):
+        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s", "prefix": "custom-prefix"})
         cfg = failed_document_stream.load_config()
-        assert cfg.session_id == "env-sess"
-
-    def test_prefix_env_overrides_default(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX", "custom-prefix")  # no trailing slash
-        cfg = failed_document_stream.load_config(session_override="s")
         # Trailing slash must be appended so session= joins cleanly.
         assert cfg.prefix == "custom-prefix/"
 
-    def test_prefix_default_when_env_and_configmap_unset(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        cfg = failed_document_stream.load_config(session_override="s")
+    def test_prefix_defaults_when_absent(self, monkeypatch):
+        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s"})
+        cfg = failed_document_stream.load_config()
         assert cfg.prefix == "rfs-failed-document-stream/"
 
-    def test_region_pulled_from_env(self, monkeypatch, no_configmap):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_REGION", "us-west-2")
-        cfg = failed_document_stream.load_config(session_override="s")
-        assert cfg.region == "us-west-2"
-
-    def test_region_pulled_from_configmap_when_env_unset(self, monkeypatch):
-        monkeypatch.setenv("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET", "b")
-        monkeypatch.setattr(failed_document_stream, "_read_configmap",
-                            lambda key: {"session_id": "s", "region": "ap-south-1"}.get(key))
+    def test_region_and_endpoint_optional(self, monkeypatch):
+        self._set_cm(monkeypatch, {"bucket": "b", "session_id": "s"})
         cfg = failed_document_stream.load_config()
-        assert cfg.region == "ap-south-1"
+        assert cfg.region is None
+        assert cfg.endpoint is None
 
 
 # ---------- list_records ----------------------------------------------------

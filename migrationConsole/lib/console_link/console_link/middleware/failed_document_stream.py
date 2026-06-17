@@ -5,22 +5,15 @@ when terminal document failures occur. Records for a given
 backfill session live under ``s3://<bucket>/<prefix>/session=<session_id>/`` —
 new runs use a new ``session_id``, so prior-run records are never mixed in.
 
-Location/session are conveyed to the console via these sources, in priority order:
+Bucket/region/endpoint/prefix/session are read from a single source of truth: the
+``rfs-failed-document-stream-current-session`` Kubernetes ConfigMap. The config processor resolves
+the effective bucket/region/endpoint (including the deployment default) before workflow submission and
+the bulk-load workflow publishes them — along with the current ``{{workflow.uid}}`` session id — to
+this ConfigMap before launching RFS. The console reads it via the Kubernetes API on demand, so it
+always reports exactly what RFS wrote, with no separate env-based resolution that could drift.
 
-1. **CLI / env override** — for explicit operator control:
-   * ``RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET`` — explicit bucket override
-   * ``RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX`` — key prefix above ``session=``
-   * ``RFS_FAILED_DOCUMENT_STREAM_SESSION_ID`` — pinned session id
-   * ``RFS_FAILED_DOCUMENT_STREAM_S3_REGION`` — region for the bucket
-
-2. **Kubernetes ConfigMap** (``rfs-failed-document-stream-current-session``) — the bulk-load
-   workflow patches this ConfigMap with the current ``{{workflow.uid}}``
-   before launching RFS. The console reads it via the Kubernetes API on
-   demand, so it always sees the latest run's session with no refresh delay.
-
-3. **Default bucket fallback** — ``MIGRATIONS_DEFAULT_S3_BUCKET`` /
-   ``BUCKET_NAME`` from the deployment-provisioned
-   ``migrations-default-<account>-<stage>-<region>`` bucket.
+``--session <id>`` overrides only the session id, to inspect a specific (e.g. historical) run within
+the same deployment.
 
 This module is intentionally a thin wrapper around the S3 listing/get APIs so a
 customer can also inspect the failed document stream with the aws CLI if they prefer.
@@ -31,7 +24,6 @@ import gzip
 import io
 import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
@@ -47,6 +39,7 @@ class FailedDocumentStreamConfig:
     prefix: str          # always trailing-slash-terminated
     session_id: str
     region: Optional[str] = None
+    endpoint: Optional[str] = None
 
     @property
     def session_prefix(self) -> str:
@@ -105,52 +98,42 @@ def _fetch_configmap_data() -> dict:
 def load_config(session_override: Optional[str] = None) -> FailedDocumentStreamConfig:
     global _configmap_cache
     _configmap_cache = None
-    # Bucket resolution: explicit override → ConfigMap → deployment
-    # default bucket. The explicit override exists so an operator can pin
-    # inspection to a non-default bucket (e.g., investigating a historical
-    # run that wrote elsewhere).
-    bucket = (
-        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET") or
-        _read_configmap("bucket") or
-        os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET") or
-        os.environ.get("BUCKET_NAME")
-    )
+    # Single source of truth: the config processor resolves the effective bucket/region/endpoint/prefix
+    # before workflow submission and the bulk-load workflow publishes them to the
+    # rfs-failed-document-stream-current-session ConfigMap. The console reads those resolved values so it
+    # always agrees with what RFS wrote, rather than re-resolving from console env (which could drift).
+    bucket = _read_configmap("bucket")
     if not bucket:
         raise FailedDocumentStreamNotConfigured(
-            "No failed document stream bucket is configured. Run a bulk-load workflow first (which "
-            "creates the rfs-failed-document-stream-current-session ConfigMap), or set RFS_FAILED_DOCUMENT_STREAM_S3_BUCKET / "
-            "MIGRATIONS_DEFAULT_S3_BUCKET / BUCKET_NAME in the console env."
+            "No failed document stream bucket is configured. Run a bulk-load workflow first, which "
+            "publishes the resolved bucket to the rfs-failed-document-stream-current-session ConfigMap."
         )
-    # Prefix resolution: env override → ConfigMap → safe default.
-    prefix = (
-        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_PREFIX") or
-        _read_configmap("prefix") or
-        "rfs-failed-document-stream/"
-    )
+    prefix = _read_configmap("prefix") or "rfs-failed-document-stream/"
     if not prefix.endswith("/"):
         prefix = prefix + "/"
-    # Session resolution: --session arg → env override → ConfigMap.
-    # The ConfigMap holds the *current* session id (Argo workflow UID) that
-    # the bulk-load workflow most recently patched in.
-    session = (
-        session_override or
-        os.environ.get("RFS_FAILED_DOCUMENT_STREAM_SESSION_ID") or
-        _read_configmap("session_id")
-    )
+    # The ConfigMap holds the *current* session id (Argo workflow UID) the bulk-load workflow most
+    # recently published. --session targets a specific (e.g. historical) run instead.
+    session = session_override or _read_configmap("session_id")
     if not session:
         raise FailedDocumentStreamNotConfigured(
             "No failed document stream session id is available. Run a bulk-load workflow first "
-            "(which patches the rfs-failed-document-stream-current-session ConfigMap with the workflow UID), "
+            "(which publishes the workflow UID to the rfs-failed-document-stream-current-session ConfigMap), "
             "or pass --session <id> to target a specific historical run."
         )
-    region = os.environ.get("RFS_FAILED_DOCUMENT_STREAM_S3_REGION") or _read_configmap("region")
-    return FailedDocumentStreamConfig(bucket=bucket, prefix=prefix, session_id=session, region=region)
+    region = _read_configmap("region")
+    endpoint = _read_configmap("endpoint")
+    return FailedDocumentStreamConfig(
+        bucket=bucket, prefix=prefix, session_id=session, region=region, endpoint=endpoint
+    )
 
 
 def _s3_client(cfg: FailedDocumentStreamConfig):
+    kwargs = {}
     if cfg.region:
-        return boto3.client("s3", region_name=cfg.region)
-    return boto3.client("s3")
+        kwargs["region_name"] = cfg.region
+    if cfg.endpoint:
+        kwargs["endpoint_url"] = cfg.endpoint
+    return boto3.client("s3", **kwargs)
 
 
 def location(cfg: FailedDocumentStreamConfig) -> str:
