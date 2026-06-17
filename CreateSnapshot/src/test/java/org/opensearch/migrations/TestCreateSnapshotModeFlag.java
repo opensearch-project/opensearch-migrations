@@ -159,7 +159,8 @@ public class TestCreateSnapshotModeFlag {
         Assertions.assertEquals(SnapshotMode.IMPORT, CreateSnapshot.getSnapshotMode(args));
     }
 
-    // ── Config file check runs in CREATE mode ─────────────────────────────────
+    // ── Config file check runs in CREATE mode (standalone only — SolrCloud
+    //    BACKUP writes configs from ZK so pre-upload is skipped) ───────────────
 
     @Test
     void createMode_configFilesUploadedToS3WhenMissing() throws Exception {
@@ -167,13 +168,10 @@ public class TestCreateSnapshotModeFlag {
         String snapshotName = "cfg_create_test";
         String subpath = "cfg-create";
 
-        // Create a collection in cloud Solr
-        CLOUD_SOLR.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/admin/collections?action=CREATE"
-                + "&name=cfgcoll&numShards=1&replicationFactor=1&wt=json");
-
+        // Standalone Solr — config upload runs in CREATE mode because the
+        // replication backup doesn't include configs (unlike SolrCloud BACKUP).
         var args = new CreateSnapshot.Args();
-        args.sourceArgs.host = cloudSolrUrl();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
@@ -182,35 +180,30 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "create";
-        args.solrCollections = List.of("cfgcoll");
+        args.solrCollections = List.of("dummy");
         args.noWait = false;
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
 
-        // Run may fail on actual backup (Solr not configured for S3 backup in this container),
+        // Run may fail on actual backup (standalone replication needs local path),
         // but config file check runs BEFORE the backup step. Catch and verify config was uploaded.
         try {
             creator.run();
         } catch (Exception e) {
-            log.info("Expected backup failure (Solr not S3-configured): {}", e.getMessage());
+            log.info("Expected backup failure (standalone not S3-configured): {}", e.getMessage());
         }
 
         // Verify config file was uploaded to the expected S3 path
-        String expectedKey = subpath + "/" + snapshotName + "/cfgcoll/zk_backup_0/configs/cfgcoll/managed-schema.xml";
+        String expectedKey = subpath + "/" + snapshotName + "/dummy/zk_backup_0/configs/dummy/managed-schema.xml";
         try (var s3 = testS3Client()) {
             Assertions.assertTrue(s3ObjectExists(s3, expectedKey),
                 "Config file should be uploaded to S3 in CREATE mode at: " + expectedKey);
             String content = s3ObjectContent(s3, expectedKey);
             Assertions.assertFalse(content.isBlank(), "Config file content should not be empty");
-            // Schema files contain XML with field definitions
             Assertions.assertTrue(content.contains("<") && content.contains(">"),
                 "Config file should be XML content; got: " + content.substring(0, Math.min(200, content.length())));
         }
-
-        // Clean up collection
-        CLOUD_SOLR.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/admin/collections?action=DELETE&name=cfgcoll&wt=json");
     }
 
     // ── Config file check runs in IMPORT mode ─────────────────────────────────
