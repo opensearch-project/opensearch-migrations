@@ -41,17 +41,20 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private final CreateSnapshot.Args args;
     private final ConnectionContext connectionContext;
     private final SolrHttpClient httpClient;
+    private final SnapshotMode mode;
 
     public SolrBackupStrategy(CreateSnapshot.Args args) {
         this.args = args;
         this.connectionContext = args.sourceArgs.toConnectionContext();
         this.httpClient = new SolrHttpClient(connectionContext);
+        this.mode = CreateSnapshot.getSnapshotMode(args);
     }
 
     @Override
     public void run() {
         var backupLocation = args.fileSystemRepoPath != null ? args.fileSystemRepoPath : args.s3RepoUri;
         var solrUrl = connectionContext.getUri().toString();
+        log.info("Running SolrBackupStrategy in {} mode", mode);
 
         if (args.solrCollections.isEmpty()) {
             try {

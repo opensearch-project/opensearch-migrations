@@ -131,6 +131,12 @@ public class CreateSnapshot {
         public String sourceType = "elasticsearch";
 
         @Parameter(
+                names = {"--mode"},
+                required = false,
+                description = "Snapshot mode: 'create' (default, standard snapshot creation) or 'import' (config retrieval + import workflow)")
+        public String mode = "create";
+
+        @Parameter(
                 names = {"--solr-collections"},
                 required = false,
                 description = "Comma-separated list of Solr collection names to back up (required when source-type=solr)")
@@ -142,6 +148,10 @@ public class CreateSnapshot {
     public static class S3RepoInfo {
         String awsRegion;
         String repoUri;
+    }
+
+    public static SnapshotMode getSnapshotMode(Args args) {
+        return SnapshotMode.fromString(args.mode);
     }
 
     public static void main(String[] args) throws Exception {
@@ -170,6 +180,11 @@ public class CreateSnapshot {
         }
         if (arguments.s3RepoUri != null && arguments.s3Region == null) {
             throw new ParameterException("If an s3 repo is being used, s3-region must be set");
+        }
+        try {
+            SnapshotMode.fromString(arguments.mode);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException("Invalid --mode value '" + arguments.mode + "'. Must be 'create' or 'import'.");
         }
 
         var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());

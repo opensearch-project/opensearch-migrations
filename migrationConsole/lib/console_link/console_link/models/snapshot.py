@@ -49,6 +49,7 @@ SNAPSHOT_SCHEMA = {
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
             'snapshot_repo_name': {'type': 'string', 'required': False},
+            'mode': {'type': 'string', 'required': False, 'allowed': ['create', 'import']},
             'otel_trace_endpoint': {'type': 'string', 'required': False},
             'otel_metrics_endpoint': {'type': 'string', 'required': False},
             's3': {
@@ -166,6 +167,9 @@ class Snapshot(ABC):
 
         if self._is_solr_source():
             command_args["--source-type"] = "solr"
+            mode = self.config.get("mode")
+            if mode:
+                command_args["--mode"] = mode
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
