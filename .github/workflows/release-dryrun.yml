@@ -1,5 +1,17 @@
 name: Release dry-run
 
+# Secret-free rehearsal of the release-drafter build path. Builds every release
+# artifact (Maven, Docker images, Helm chart, CFN templates, bootstrap script,
+# and the migration-companion image) against a job-local registry and uploads
+# them as workflow artifacts. Nothing is published and no secrets are used, so
+# this runs on any fork.
+#
+# Use it to catch release-build regressions before tagging — e.g. a companion
+# Dockerfile that COPYs a context dir the staging task no longer produces would
+# fail here instead of in the real release. Run it on your fork from the
+# Actions tab ("Release dry-run" > "Run workflow") on the commit you intend to
+# tag, and confirm it is green before pushing the release tag.
+
 on:
   workflow_dispatch:
     inputs:

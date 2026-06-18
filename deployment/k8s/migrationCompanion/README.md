@@ -32,3 +32,16 @@ Registry build:
 
 The final image base defaults to `docker.io/library/amazonlinux:2023`. Override
 it with `-PmigrationCompanionBaseImage=...`.
+
+## Build contract
+
+The `stageMigrationCompanionDockerContext` task (see `build.gradle`) stages the
+Docker build context, and the `Dockerfile` may only `COPY` from what that task
+produces. Today that is the `Dockerfile` itself plus
+`artifacts/helm/migration-assistant.tgz`. If you change one side, change the
+other — a `Dockerfile` that `COPY`s a directory the staging task does not
+produce fails the build with `"/<dir>": not found`.
+
+To validate the full release build path (including this image) without any
+secrets, run the **Release dry-run** workflow
+(`.github/workflows/release-dryrun.yml`) on your fork before tagging a release.
