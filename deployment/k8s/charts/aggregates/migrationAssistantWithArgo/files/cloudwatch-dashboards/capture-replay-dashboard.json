@@ -99,7 +99,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "IF(m2 > 0, 1, 0)", "label": "CommitsObserved", "id": "e1", "region": "REGION", "period": 300 } ],
+                    [ { "expression": "FILL(m2, 0)", "label": "Kafka Commits", "id": "e1", "region": "REGION", "period": 300 } ],
                     [ "OpenSearchMigrations", "kafkaCommitCount", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "m2", "region": "REGION", "visible": false } ]
                 ],
                 "sparkline": true,
@@ -107,7 +107,7 @@
                 "region": "REGION",
                 "period": 300,
                 "stat": "Sum",
-                "title": "Replayer Kafka Healthy",
+                "title": "Replayer Kafka Commit Activity",
                 "stacked": false,
                 "liveData": false,
                 "yAxis": {
