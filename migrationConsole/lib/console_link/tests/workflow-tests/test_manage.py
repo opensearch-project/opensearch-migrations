@@ -594,6 +594,20 @@ def test_mouse_reporting_private_disable_also_releases_pixel_mode():
     assert driver.flushes == 1
 
 
+def test_config_scalar_value_coercion_handles_number_nodes():
+    number_node = {
+        "path": ["traffic", "proxies", "cap", "proxyConfig", "listenPort"],
+        "valueType": "number",
+    }
+
+    assert WorkflowTreeApp._coerce_config_scalar_value(number_node, "9201") == 9201
+    assert WorkflowTreeApp._coerce_config_scalar_value(number_node, "1.5") == 1.5
+    assert WorkflowTreeApp._coerce_config_scalar_value({"valueType": "string"}, "9201") == "9201"
+
+    with pytest.raises(ValueError, match="traffic.proxies.cap.proxyConfig.listenPort must be a number"):
+        WorkflowTreeApp._coerce_config_scalar_value(number_node, "not-a-number")
+
+
 @pytest.mark.asyncio
 async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspend):
     """Verify that injected K8sInterface and ArgoService methods are called by keys."""

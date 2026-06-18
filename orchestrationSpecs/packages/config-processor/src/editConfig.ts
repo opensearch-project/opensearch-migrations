@@ -64,6 +64,7 @@ export interface EditNode {
     path: string[];
     label: string;
     value?: unknown;
+    valueType?: "string" | "number" | "boolean";
     valueKind: EditNodeValueKind;
     description?: string;
     descriptionShort?: string;
@@ -406,6 +407,9 @@ function findPathAncestors(nodes: EditNode[], path: string[]): EditNode[] {
     const stack = [...nodes];
     while (stack.length) {
         const node = stack.pop()!;
+        if (node.valueKind === "command") {
+            continue;
+        }
         if (pathStartsWith(path, node.path)) {
             ancestors.push(node);
             stack.push(...(node.children ?? []));
@@ -453,11 +457,7 @@ function applyValidationDiagnostics(nodes: EditNode[], diagnostics: EditDiagnost
         if (!addDiagnosticIfNew(target, adjustedDiagnostic)) {
             continue;
         }
-        const alreadyRepresentedRequired = (
-            diagnostic.severity === "error"
-            && severity === "required"
-            && Boolean(target.statusCounts?.required)
-        );
+        const alreadyRepresentedRequired = severity === "required" && Boolean(target.statusCounts?.required);
         for (const node of ancestors) {
             node.statusCounts = node.statusCounts ?? emptyCounts();
             if (!alreadyRepresentedRequired) {
@@ -479,7 +479,8 @@ function scalarNode(
     value: unknown,
     description: string,
     required = false,
-    inputHint?: EditInputHint
+    inputHint?: EditInputHint,
+    valueType?: EditNode["valueType"]
 ): EditNode {
     const validation = validationFromHint(inputHint);
     const missing = required && (value === undefined || value === null || value === "");
@@ -502,6 +503,7 @@ function scalarNode(
         path,
         label: `${key}: ${value === undefined || value === null || value === "" ? (required ? "<required>" : "<unset>") : String(value)}`,
         value,
+        valueType: valueType ?? (typeof value === "number" ? "number" : "string"),
         valueKind: typeof value === "boolean" ? "boolean" : "scalar",
         description,
         required,
@@ -684,6 +686,50 @@ function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
     });
 }
 
+function captureProxyConfigNode(rootPath: string[], value: any): EditNode {
+    const proxyConfig = value && typeof value === "object" ? value : {};
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: "proxyConfig",
+        valueKind: "object",
+        description: "Process-level and deployment-level configuration options for the capture proxy.",
+        status: "ok",
+        children: [
+            scalarNode(
+                [...rootPath, "listenPort"],
+                "listenPort",
+                proxyConfig.listenPort,
+                "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.",
+                true,
+                undefined,
+                "number"
+            ),
+            scalarNode(
+                [...rootPath, "podReplicas"],
+                "podReplicas",
+                proxyConfig.podReplicas ?? 1,
+                "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability.",
+                false,
+                undefined,
+                "number"
+            ),
+            scalarNode(
+                [...rootPath, "serviceType"],
+                "serviceType",
+                proxyConfig.serviceType ?? "LoadBalancer",
+                "Expert setting controlling how the capture proxy Kubernetes Service is exposed."
+            ),
+            booleanNode(
+                [...rootPath, "internetFacing"],
+                "internetFacing",
+                proxyConfig.internetFacing,
+                "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."
+            ),
+        ],
+    });
+}
+
 function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode {
     const rootPath = ["traffic", "proxies", name];
     return finalizeNode({
@@ -697,6 +743,7 @@ function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode 
             scalarNode([...rootPath, "source"], "source", value?.source, "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.", true, referenceHint(CAPTURE_SOURCE_HINT, ctx.sourceOptions)),
             scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.", false, referenceHint(CAPTURE_KAFKA_HINT, ctx.kafkaOptions)),
             scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name for captured traffic. If empty, defaults to the proxy name.", false, CAPTURE_KAFKA_TOPIC_HINT),
+            captureProxyConfigNode([...rootPath, "proxyConfig"], value?.proxyConfig),
         ],
     });
 }
@@ -1102,7 +1149,7 @@ function defaultConfigForPath(path: string[]): Record<string, unknown> {
         return {autoCreate: {}};
     }
     if (key === "traffic.proxies") {
-        return {source: ""};
+        return {source: "", proxyConfig: {}};
     }
     if (key === "traffic.s3Sources") {
         return {s3Uri: "", awsRegion: "", sourceLabel: ""};

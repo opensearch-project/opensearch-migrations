@@ -1122,12 +1122,30 @@ class WorkflowTreeApp(App):
     def _handle_scalar_config_value(self, node: Dict, value: Optional[Any]) -> None:
         if value is None:
             return
+        try:
+            value = self._coerce_config_scalar_value(node, value)
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         self._cancel_config_edit_validation()
         self._apply_config_edit_operation({
             "op": "set",
             "path": node.get("path"),
             "value": value,
         }, selected_id=node.get("id"))
+
+    @staticmethod
+    def _coerce_config_scalar_value(node: Dict, value: Any) -> Any:
+        if node.get("valueType") != "number":
+            return value
+        text = str(value).strip()
+        if not text:
+            return value
+        try:
+            return float(text) if any(part in text.lower() for part in (".", "e")) else int(text)
+        except ValueError as e:
+            path = ".".join(str(part) for part in node.get("path", [])) or "value"
+            raise ValueError(f"{path} must be a number.") from e
 
     def _schedule_scalar_config_validation(
         self,
@@ -1157,10 +1175,15 @@ class WorkflowTreeApp(App):
     ) -> None:
         if generation != self._edit_validation_generation or self._edit_draft_yaml is None:
             return
+        try:
+            operation_value = self._coerce_config_scalar_value(node, value)
+        except ValueError as e:
+            modal.set_remote_validation(str(e), "error")
+            return
         operation = {
             "op": "set",
             "path": node.get("path"),
-            "value": value,
+            "value": operation_value,
         }
         raw_yaml = self._edit_draft_yaml or ""
         self.run_worker(

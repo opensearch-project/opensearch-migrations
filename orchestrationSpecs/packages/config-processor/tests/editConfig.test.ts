@@ -399,6 +399,43 @@ describe("editConfig state", () => {
         });
     });
 
+    it("renders missing capture proxy options as visible required fields", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+            traffic: {
+                proxies: {
+                    cap: {source: "source"},
+                },
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const captureGroup = findNode(state.nodes, "edit:traffic.proxies");
+        const proxy = findNode(state.nodes, "edit:traffic.proxies.cap");
+        const proxyConfig = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig");
+        const listenPort = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.listenPort");
+        const kafkaTopic = findNode(state.nodes, "edit:traffic.proxies.cap.kafkaTopic");
+        const addProxy = findNode(state.nodes, "edit:traffic.proxies:add");
+
+        expect(proxy?.status).toBe("required");
+        expect(proxy?.label).toContain("[REQ 1]");
+        expect(proxyConfig?.status).toBe("required");
+        expect(proxyConfig?.label).toContain("[REQ 1]");
+        expect(listenPort?.status).toBe("required");
+        expect(listenPort?.valueType).toBe("number");
+        expect(listenPort?.label).toContain("listenPort: <required>");
+        expect(kafkaTopic?.status).toBe("ok");
+        expect(kafkaTopic?.label).toContain("kafkaTopic: <unset>");
+        expect(captureGroup?.label).toContain("[REQ 1]");
+        expect(addProxy?.status).toBe("ok");
+        expect(addProxy?.label).toContain("[OK] + Add capture proxy");
+    });
+
     it("adds/removes nested traffic resources and switches Kafka mode", () => {
         const config = {
             sourceClusters: {},
@@ -438,6 +475,7 @@ describe("editConfig state", () => {
 
         expect(existingKafka.yaml).toContain("existing: {}");
         expect(addedProxy.yaml).toContain("capture:");
+        expect(addedProxy.yaml).toContain("proxyConfig: {}");
         expect(addedS3Source.yaml).toContain("archive:");
         expect(addedReplayer.yaml).toContain("fromCapturedTraffic: \"\"");
         expect(removedProxy.yaml).not.toContain("capture:");
