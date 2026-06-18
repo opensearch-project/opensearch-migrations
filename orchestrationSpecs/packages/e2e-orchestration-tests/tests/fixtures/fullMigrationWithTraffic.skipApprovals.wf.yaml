@@ -4,7 +4,33 @@
 skipApprovals: true
 kafkaClusterConfiguration:
   default:
-    autoCreate: {}
+    autoCreate:
+      # Local e2e profile: single broker, RF=1. This keeps kind/minikube runs
+      # from paying for the production-oriented 3-broker quorum defaults.
+      # Not safe for production configs.
+      clusterSpecOverrides:
+        kafka:
+          config:
+            offsets.topic.replication.factor: 1
+            transaction.state.log.replication.factor: 1
+            transaction.state.log.min.isr: 1
+            default.replication.factor: 1
+            min.insync.replicas: 1
+      nodePoolSpecOverrides:
+        replicas: 1
+        roles:
+          - controller
+          - broker
+        storage:
+          type: persistent-claim
+          size: 1Gi
+          deleteClaim: true
+      topicSpecOverrides:
+        partitions: 1
+        replicas: 1
+        config:
+          retention.ms: 604800000
+          segment.bytes: 1073741824
 
 sourceClusters:
   source:
@@ -55,7 +81,23 @@ traffic:
       source: "source"
       proxyConfig:
         listenPort: 9201
+        serviceType: ClusterIP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
   replayers:
     replay1:
       fromProxy: "capture-proxy"
       toTarget: "target"
+      replayerConfig:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi

@@ -161,6 +161,8 @@ export type WorkflowCasePlanOperation =
 export interface WorkflowCheckpointOperation {
     kind: "checkpoint";
     checkpoint: Checkpoint;
+    /** Human-facing checkpoint label for reports and progress logs. */
+    label?: string;
     subject: ComponentId | null;
     waitMode?: "phase-complete" | "subject-incomplete";
     expectedRerunComponents?: readonly ComponentId[];
@@ -236,6 +238,7 @@ export async function runNoopCase(deps: LiveRunnerDeps): Promise<string> {
                     {
                         kind: "checkpoint",
                         checkpoint: "noop",
+                        label: "noop-pre",
                         subject: null,
                     },
                 ],
@@ -278,6 +281,7 @@ export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTe
                     {
                         kind: "checkpoint",
                         checkpoint: "noop",
+                        label: "noop-pre",
                         subject: null,
                     },
                 ],
@@ -302,6 +306,7 @@ export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTe
                     {
                         kind: "checkpoint",
                         checkpoint: "noop",
+                        label: "noop-post",
                         subject: null,
                     },
                 ],
@@ -791,6 +796,7 @@ function noopStep(runName: "noop-pre" | "noop-post", configYaml: string): Workfl
             {
                 kind: "checkpoint",
                 checkpoint: "noop",
+                label: runName,
                 subject: null,
             },
         ],
@@ -1091,12 +1097,14 @@ async function runSubmittedWorkflow(args: {
     }
     for (const operation of operations) {
         if (operation.kind === "checkpoint") {
-            progress(deps, `[${workflowName}] checkpoint ${operation.checkpoint}`);
+            const checkpointLabel = operation.label ?? operation.checkpoint;
+            progress(deps, `[${workflowName}] checkpoint ${checkpointLabel}`);
             await waitAndCheckpoint(
                 deps,
                 checkpoints,
                 workflowName,
                 operation.checkpoint,
+                checkpointLabel,
                 operation.subject,
                 operation.waitMode,
                 operation.expectedRerunComponents,
@@ -1290,6 +1298,7 @@ async function waitAndCheckpoint(
     into: RunCheckpoint[],
     workflowName: string,
     checkpoint: Checkpoint,
+    checkpointLabel: string,
     subject: ComponentId | null,
     waitMode: WorkflowCheckpointOperation["waitMode"] | undefined,
     expectedRerunComponents: readonly ComponentId[] | undefined,
@@ -1306,6 +1315,7 @@ async function waitAndCheckpoint(
             into,
             workflowName,
             checkpoint,
+            checkpointLabel,
             subject,
             priorComponents,
             diagnostics,
@@ -1315,7 +1325,7 @@ async function waitAndCheckpoint(
         return;
     }
 
-    events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
+    events.push(event(clock, checkpointLabel, "wait-phase-completion", "ok", {
         message: `waiting up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
     }));
     let workflowWaitTimedOut = false;
@@ -1324,14 +1334,14 @@ async function waitAndCheckpoint(
             deps.innerWorkflowMissingGraceSeconds ?? DEFAULT_INNER_WORKFLOW_MISSING_GRACE_SECONDS,
             deps.spec.phaseCompletionTimeoutSeconds,
         );
-        events.push(event(clock, checkpoint, "wait-workflow-completion", "ok", {
+        events.push(event(clock, checkpointLabel, "wait-workflow-completion", "ok", {
             message:
                 `waiting for ${INNER_MIGRATION_WORKFLOW_NAME} to appear up to ${missingGraceSeconds}s ` +
                 `and complete up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
         }));
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: wait for ${INNER_MIGRATION_WORKFLOW_NAME} up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: wait for ${INNER_MIGRATION_WORKFLOW_NAME} up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
         );
         const workflowOutcome = await waitForInnerWorkflowCompletion({
             k8sClient: deps.k8sClient,
@@ -1340,46 +1350,46 @@ async function waitAndCheckpoint(
             clock,
         });
         if (workflowOutcome.kind === "missing-timeout") {
-            events.push(event(clock, checkpoint, "wait-workflow-completion", "error", {
+            events.push(event(clock, checkpointLabel, "wait-workflow-completion", "error", {
                 message:
                     `${INNER_MIGRATION_WORKFLOW_NAME} was not observed after ${workflowOutcome.waitedMs}ms; ` +
                     "continuing with CRD phase completion",
             }));
             diagnostics.push(
-                `workflow-missing at ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} was not observed within ${workflowOutcome.waitedMs}ms`,
+                `workflow-missing at ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME} was not observed within ${workflowOutcome.waitedMs}ms`,
             );
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} missing after ${workflowOutcome.waitedMs}ms; continuing with CRD phases`,
+                `[${workflowName}] checkpoint ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME} missing after ${workflowOutcome.waitedMs}ms; continuing with CRD phases`,
             );
         } else if (workflowOutcome.kind === "timeout") {
             workflowWaitTimedOut = true;
-            events.push(event(clock, checkpoint, "wait-workflow-completion", "error", {
+            events.push(event(clock, checkpointLabel, "wait-workflow-completion", "error", {
                 message: `${INNER_MIGRATION_WORKFLOW_NAME} did not complete after ${workflowOutcome.waitedMs}ms; last phase=${workflowOutcome.phase}`,
             }));
             diagnostics.push(
-                `workflow-timeout at ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME}=${workflowOutcome.phase}`,
+                `workflow-timeout at ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME}=${workflowOutcome.phase}`,
             );
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} still ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME} still ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
             );
         } else {
             const result = ARGO_WORKFLOW_FAILURE_PHASES.has(workflowOutcome.phase)
                 ? "error"
                 : "ok";
-            events.push(event(clock, checkpoint, "wait-workflow-completion", result, {
+            events.push(event(clock, checkpointLabel, "wait-workflow-completion", result, {
                 message: `${INNER_MIGRATION_WORKFLOW_NAME} ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
             }));
             if (ARGO_WORKFLOW_FAILURE_PHASES.has(workflowOutcome.phase)) {
                 diagnostics.push(
-                    `workflow-failed at ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME}=${workflowOutcome.phase}` +
+                    `workflow-failed at ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME}=${workflowOutcome.phase}` +
                         (workflowOutcome.message ? ` (${workflowOutcome.message})` : ""),
                 );
             }
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpointLabel}: ${INNER_MIGRATION_WORKFLOW_NAME} ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
             );
         }
     }
@@ -1387,7 +1397,7 @@ async function waitAndCheckpoint(
     let admissionPolicyBlocked = false;
     let approvalGateWaitFailed = false;
     if (approvalGate) {
-        events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+        events.push(event(clock, checkpointLabel, "wait-approval-gate", "ok", {
             command: workflowApproveListCommand(approvalGate.category, deps.namespace),
             message:
                 `waiting for actionable ${approvalGate.category} gate ` +
@@ -1395,7 +1405,7 @@ async function waitAndCheckpoint(
         }));
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: wait for actionable ${approvalGate.category} gate ${approvalGate.pattern}`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: wait for actionable ${approvalGate.category} gate ${approvalGate.pattern}`,
         );
         const gateOutcome = await waitForApprovalGate({
             workflowCli: deps.workflowCli,
@@ -1407,7 +1417,7 @@ async function waitAndCheckpoint(
         });
         if (gateOutcome.kind === "ready") {
             approvalGateActionable = true;
-            events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+            events.push(event(clock, checkpointLabel, "wait-approval-gate", "ok", {
                 command: workflowApproveListCommand(approvalGate.category, deps.namespace),
                 message:
                     `${approvalGate.category} gate ${approvalGate.pattern} ` +
@@ -1416,7 +1426,7 @@ async function waitAndCheckpoint(
             }));
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate actionable after ${gateOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpointLabel}: ${approvalGate.category} gate actionable after ${gateOutcome.waitedMs}ms`,
             );
         } else if (gateOutcome.kind === "workflow-error") {
             if (
@@ -1427,7 +1437,7 @@ async function waitAndCheckpoint(
                 )
             ) {
                 admissionPolicyBlocked = true;
-                events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+                events.push(event(clock, checkpointLabel, "wait-approval-gate", "ok", {
                     command: workflowApproveListCommand(approvalGate.category, deps.namespace),
                     message:
                         "mutation was rejected by admission policy before a retry gate became actionable: " +
@@ -1437,44 +1447,44 @@ async function waitAndCheckpoint(
                 }));
                 progress(
                     deps,
-                    `[${workflowName}] checkpoint ${checkpoint}: mutation rejected by admission policy after ${gateOutcome.waitedMs}ms`,
+                    `[${workflowName}] checkpoint ${checkpointLabel}: mutation rejected by admission policy after ${gateOutcome.waitedMs}ms`,
                 );
             } else {
                 approvalGateWaitFailed = true;
-                events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
+                events.push(event(clock, checkpointLabel, "wait-approval-gate", "error", {
                     command: workflowApproveListCommand(approvalGate.category, deps.namespace),
                     message: gateOutcome.message,
                     stdout: gateOutcome.stdout || undefined,
                     stderr: gateOutcome.stderr || undefined,
                 }));
                 diagnostics.push(
-                    `approval-gate-workflow-error at ${checkpoint}: ${gateOutcome.message}`,
+                    `approval-gate-workflow-error at ${checkpointLabel}: ${gateOutcome.message}`,
                 );
                 progress(
                     deps,
-                    `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate blocked by workflow error after ${gateOutcome.waitedMs}ms`,
+                    `[${workflowName}] checkpoint ${checkpointLabel}: ${approvalGate.category} gate blocked by workflow error after ${gateOutcome.waitedMs}ms`,
                 );
             }
         } else {
             approvalGateWaitFailed = true;
-            events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
+            events.push(event(clock, checkpointLabel, "wait-approval-gate", "error", {
                 command: workflowApproveListCommand(approvalGate.category, deps.namespace),
                 message: `${approvalGate.category} gate ${approvalGate.pattern} was not actionable after ${gateOutcome.waitedMs}ms`,
                 stdout: gateOutcome.stdout || undefined,
                 stderr: gateOutcome.stderr || undefined,
             }));
             diagnostics.push(
-                `approval-gate-timeout at ${checkpoint}: ${approvalGate.category} gate ${approvalGate.pattern} was not actionable after ${gateOutcome.waitedMs}ms`,
+                `approval-gate-timeout at ${checkpointLabel}: ${approvalGate.category} gate ${approvalGate.pattern} was not actionable after ${gateOutcome.waitedMs}ms`,
             );
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate not actionable after ${gateOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpointLabel}: ${approvalGate.category} gate not actionable after ${gateOutcome.waitedMs}ms`,
             );
         }
     }
     progress(
         deps,
-        `[${workflowName}] checkpoint ${checkpoint}: wait for ${deps.topology.components.length} component phase(s)`,
+        `[${workflowName}] checkpoint ${checkpointLabel}: wait for ${deps.topology.components.length} component phase(s)`,
     );
     const outcome: PhaseCompletionOutcome = await waitForPhaseCompletion({
         components: deps.topology.components,
@@ -1536,13 +1546,13 @@ async function waitAndCheckpoint(
 
     if (outcome.kind === "timeout") {
         const workflowSummary = summarizeArgoWorkflow(deps.k8sClient);
-        events.push(event(clock, checkpoint, "wait-phase-completion", "error", {
+        events.push(event(clock, checkpointLabel, "wait-phase-completion", "error", {
             message: outcome.blockingComponents
                 .map((b) => `${b.componentId}=${b.phase}`)
                 .join(", ") + (workflowSummary ? `; ${workflowSummary}` : ""),
         }));
         diagnostics.push(
-            `phase-timeout at ${checkpoint}: ${outcome.blockingComponents
+            `phase-timeout at ${checkpointLabel}: ${outcome.blockingComponents
                 .map((b) => `${b.componentId}=${b.phase}`)
                 .join(", ")}`,
         );
@@ -1551,19 +1561,19 @@ async function waitAndCheckpoint(
         }
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: component phase wait timed out after ${outcome.waitedMs}ms`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: component phase wait timed out after ${outcome.waitedMs}ms`,
         );
     } else {
-        events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
+        events.push(event(clock, checkpointLabel, "wait-phase-completion", "ok", {
             message: `ready after ${outcome.waitedMs}ms`,
         }));
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: component phases ready after ${outcome.waitedMs}ms`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: component phases ready after ${outcome.waitedMs}ms`,
         );
     }
     const argoWorkflow = readArgoWorkflowObservation(deps.k8sClient);
-    events.push(event(clock, checkpoint, "observe", "ok", {
+    events.push(event(clock, checkpointLabel, "observe", "ok", {
         message: [
             `captured ${Object.keys(finalObs.components).length} component(s)`,
             argoWorkflow
@@ -1576,6 +1586,7 @@ async function waitAndCheckpoint(
 
     into.push({
         checkpoint,
+        label: checkpointLabel,
         observedAt: new Date(clock.now()).toISOString(),
         argoWorkflow,
         components: withBehavior,
@@ -1595,6 +1606,7 @@ async function waitAndCheckpointSubjectIncomplete(args: {
     into: RunCheckpoint[];
     workflowName: string;
     checkpoint: Checkpoint;
+    checkpointLabel: string;
     subject: ComponentId | null;
     priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null;
     diagnostics: string[];
@@ -1606,6 +1618,7 @@ async function waitAndCheckpointSubjectIncomplete(args: {
         into,
         workflowName,
         checkpoint,
+        checkpointLabel,
         subject,
         priorComponents,
         diagnostics,
@@ -1615,12 +1628,12 @@ async function waitAndCheckpointSubjectIncomplete(args: {
     if (!subject) {
         throw new Error(`${checkpoint} checkpoint with waitMode=subject-incomplete requires subject`);
     }
-    events.push(event(clock, checkpoint, "wait-subject-incomplete", "ok", {
+    events.push(event(clock, checkpointLabel, "wait-subject-incomplete", "ok", {
         message: `waiting up to ${deps.spec.phaseCompletionTimeoutSeconds}s for ${subject} to exist without reaching completion`,
     }));
     progress(
         deps,
-        `[${workflowName}] checkpoint ${checkpoint}: wait for ${subject} to remain incomplete`,
+        `[${workflowName}] checkpoint ${checkpointLabel}: wait for ${subject} to remain incomplete`,
     );
     const outcome = await waitForSubjectIncomplete({
         readObservations: deps.readObservations,
@@ -1630,29 +1643,29 @@ async function waitAndCheckpointSubjectIncomplete(args: {
     });
 
     if (outcome.kind === "timeout") {
-        events.push(event(clock, checkpoint, "wait-subject-incomplete", "error", {
+        events.push(event(clock, checkpointLabel, "wait-subject-incomplete", "error", {
             message: `${subject} did not reach an incomplete observable state after ${outcome.waitedMs}ms; last phase=${outcome.lastPhase ?? "(missing)"}`,
         }));
         diagnostics.push(
-            `subject-incomplete-timeout at ${checkpoint}: ${subject}=${outcome.lastPhase ?? "(missing)"}`,
+            `subject-incomplete-timeout at ${checkpointLabel}: ${subject}=${outcome.lastPhase ?? "(missing)"}`,
         );
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: ${subject} did not become incomplete after ${outcome.waitedMs}ms`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: ${subject} did not become incomplete after ${outcome.waitedMs}ms`,
         );
     } else {
-        events.push(event(clock, checkpoint, "wait-subject-incomplete", "ok", {
+        events.push(event(clock, checkpointLabel, "wait-subject-incomplete", "ok", {
             message: `${subject}=${outcome.phase} after ${outcome.waitedMs}ms`,
         }));
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: ${subject}=${outcome.phase} after ${outcome.waitedMs}ms`,
+            `[${workflowName}] checkpoint ${checkpointLabel}: ${subject}=${outcome.phase} after ${outcome.waitedMs}ms`,
         );
     }
 
     const finalObs = await deps.readObservations();
     const argoWorkflow = readArgoWorkflowObservation(deps.k8sClient);
-    events.push(event(clock, checkpoint, "observe", "ok", {
+    events.push(event(clock, checkpointLabel, "observe", "ok", {
         message: [
             `captured ${Object.keys(finalObs.components).length} component(s)`,
             argoWorkflow
@@ -1664,6 +1677,7 @@ async function waitAndCheckpointSubjectIncomplete(args: {
     const withBehavior = deriveBehaviorOnAll(finalObs.components, priorComponents);
     into.push({
         checkpoint,
+        label: checkpointLabel,
         observedAt: new Date(clock.now()).toISOString(),
         argoWorkflow,
         components: withBehavior,

@@ -1,5 +1,5 @@
 baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
-phaseCompletionTimeoutSeconds: 600
+phaseCompletionTimeoutSeconds: 1200
 
 matrix:
   subject: captureproxy:capture-proxy

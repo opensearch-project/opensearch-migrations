@@ -168,6 +168,85 @@ describe("writeCaseSnapshot", () => {
         });
     });
 
+    it("uses checkpoint labels for human-readable workflow steps and wait durations", () => {
+        const snap: CaseSnapshot = {
+            ...MIN_SNAPSHOT,
+            finishedAt: "2025-01-01T00:00:10.000Z",
+            runs: {
+                "noop-pre": {
+                    name: "noop-pre",
+                    checkpoints: [
+                        {
+                            checkpoint: "noop",
+                            label: "noop-pre",
+                            observedAt: "2025-01-01T00:00:04.000Z",
+                            components: {},
+                            violations: [],
+                        },
+                    ],
+                },
+                "noop-post": {
+                    name: "noop-post",
+                    checkpoints: [
+                        {
+                            checkpoint: "noop",
+                            label: "noop-post",
+                            observedAt: "2025-01-01T00:00:09.000Z",
+                            components: {},
+                            violations: [],
+                        },
+                    ],
+                },
+            },
+            events: [
+                {
+                    at: "2025-01-01T00:00:01.000Z",
+                    phase: "noop-pre",
+                    action: "configure",
+                    result: "ok",
+                },
+                {
+                    at: "2025-01-01T00:00:02.000Z",
+                    phase: "noop-pre",
+                    action: "submit",
+                    result: "ok",
+                },
+                {
+                    at: "2025-01-01T00:00:03.000Z",
+                    phase: "noop-pre",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "migration-workflow Succeeded after 1000ms",
+                },
+                {
+                    at: "2025-01-01T00:00:08.000Z",
+                    phase: "noop-post",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "migration-workflow Succeeded after 2000ms",
+                },
+            ],
+        };
+
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir });
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+
+        expect(report.workflowSteps).toEqual([
+            "noop-pre: configure -> submit -> wait-workflow-completion",
+            "noop-post: wait-workflow-completion",
+        ]);
+        expect(report.runs[0].checkpoints[0]).toMatchObject({
+            checkpoint: "noop",
+            label: "noop-pre",
+            workflowWaitDurationMs: 1000,
+        });
+        expect(report.runs[1].checkpoints[0]).toMatchObject({
+            checkpoint: "noop",
+            label: "noop-post",
+            workflowWaitDurationMs: 2000,
+        });
+    });
+
     it("creates the output directory if needed", () => {
         const nested = path.join(tmpDir, "a", "b", "c");
         const out = writeCaseSnapshot(MIN_SNAPSHOT, { outputDir: nested });

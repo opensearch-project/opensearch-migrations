@@ -108,6 +108,7 @@ export interface CaseReport {
         duration?: string;
         checkpoints: Array<{
             checkpoint: string;
+            label?: string;
             durationMs?: number;
             duration?: string;
             workflowWaitDurationMs?: number;
@@ -191,9 +192,10 @@ export function buildCaseReport(snapshot: CaseSnapshot, detailPath: string): Cas
         name: run.name,
         ...durationFromTimes(runBoundaryTimes(snapshot, run.name, run.checkpoints)),
         checkpoints: run.checkpoints.map((cp) => {
-            const events = nextCheckpointEvents(cp.checkpoint, cp.observedAt);
+            const events = nextCheckpointEvents(cp.label ?? cp.checkpoint, cp.observedAt);
             return {
                 checkpoint: cp.checkpoint,
+                label: cp.label,
                 ...durationFromTimes([
                     ...events.map((e) => parseTimeMs(e.at)),
                     parseTimeMs(cp.observedAt),

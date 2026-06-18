@@ -80,6 +80,8 @@ export type CheckerVerdict = z.infer<typeof CheckerVerdictSchema>;
 export const RunCheckpointSchema = z
     .object({
         checkpoint: CheckpointSchema,
+        /** Optional human-facing label when several runs share one checkpoint rule. */
+        label: z.string().optional(),
         /** Wall-clock time when this checkpoint was captured. */
         observedAt: z.string(),
         /** Diagnostic-only snapshot of the inner Argo workflow. */

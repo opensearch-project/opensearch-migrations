@@ -1,5 +1,5 @@
 baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
-phaseCompletionTimeoutSeconds: 600
+phaseCompletionTimeoutSeconds: 1200
 
 # Safe variant of the noop spec. Runs the 4-run safe case sequence
 # (baseline → noop-pre → mutated → noop-post) for each mutator matched

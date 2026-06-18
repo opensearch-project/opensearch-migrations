@@ -82,7 +82,7 @@ Current branch status:
 - `[x]` Core spec/schema loading exists for `baseConfig`, `phaseCompletionTimeoutSeconds`, `matrix`, `lifecycle`, and `approvalGates`.
 - `[x]` Scenario specs can declare poison-pill fixtures for config-value toggles and workflow-managed basic-auth credential toggles.
 - `[x]` Matrix selectors can request `subjectStates: [completed, in-progress]`; in-progress cases require a named poison pill.
-- `[~]` Selector validation exists, but the `subject-change` comment and implementation still need to be reconciled.
+- `[x]` Selector validation exists and class-specific dependency patterns are documented/tested (`subject-change` is safe, `subject-gated-change` is gated, `subject-impossible-change` is impossible).
 
 Create the package with no cluster dependency yet.
 
@@ -114,6 +114,7 @@ Current branch status:
 - `[x]` The runner no longer directly deletes `migration-workflow` between submissions; repeated submissions rely on the normal `workflow submit` replacement behavior a user would exercise.
 - `[ ]` Optional generated workflow-name override is deferred until the workflow CLI and test framework can prove that path without diverging from normal user behavior.
 - `[x]` Noop, safe, gated leave-blocked, impossible leave-blocked, and poison-pill in-progress assertions are wired into runner snapshots and have at least one live-cluster validation path.
+- `[x]` Short reports label noop checkpoints by run (`noop-pre`, `noop-post`) while preserving the underlying `noop` assertion checkpoint, so the high-level step list does not collapse separate noop waits together.
 - `[x]` Blocking checkpoint wait failures (`workflow-timeout`, `workflow-failed`, `phase-timeout`) now stop the case before the next plan step while preserving the failed run in the snapshot.
 - `[x]` Inner Argo workflow waits use a lightweight JSONPath status projection so large Argo workflow status payloads do not look like missing workflows or consume the full phase timeout.
 - `[x]` Mutation-gate checkpoints now use categorized workflow approval commands: structural gates use `workflow approve step`, gated changes use `workflow approve change`, and impossible retry gates use `workflow approve retry`.
@@ -159,6 +160,7 @@ Current branch status:
 - `[x]` CLI live runs emit lightweight progress lines for setup, configure, submit, checkpoints, approvals, resets, and cleanup.
 - `[x]` Case snapshots can include coverage metadata: subject, subject state at mutation, observed subject phase before mutation, declared change class, mutator, response, changed paths, expected reruns, and poison-pill strategy/collateral.
 - `[x]` CLI runs write `coverage-summary.json` and `coverage-summary.md` beside case snapshots.
+- `[x]` Compact case reports include checkpoint durations and optional checkpoint labels for human-readable repeated checkpoints.
 
 Stabilize the data captured by the thin live test.
 
@@ -278,6 +280,8 @@ Current branch status:
 - `[x]` Configure events record a SHA-256 and byte length for the submitted config so snapshots can prove the runner sent different baseline vs mutated YAML.
 - `[x]` CLI safe-case runs validate mutated configs against `OVERALL_MIGRATION_CONFIG` before submission.
 - `[x]` Safe assertions now use expected rerun components from mutator metadata, reflecting the reconfiguring workflow design's per-dependency checksum materiality.
+- `[x]` Full-traffic local-kind specs use a local service profile: `ClusterIP` capture proxy, single-broker workflow-managed Kafka, RF=1 topics, and smaller proxy/replayer resources.
+- `[x]` Full-traffic local-kind live specs use a 1200s phase timeout; current clean-cluster evidence has full safe baseline completing in about 893s.
 - Live validation note: `basicSnapshotNoop.test.yaml` passes on `kind-ma-workflow-baseline`; latest run wrote `/tmp/e2e-orchestration-snapshots-basic-noop-after-argo-grace/datasnapshot-source-snap1-noop.json` with outcome `passed`.
 - Live validation note: `fullMigrationProxySafe.test.yaml` completes the four-run safe sequence and writes snapshots. With the corrected materiality model, `proxy-numThreads` should rerun only `CaptureProxy`; downstream `DataSnapshot` and `TrafficReplay` are expected to skip because the changed field is not checksum-material to them. If `CaptureProxy` itself stays at the baseline checksum/UID, treat that as SUT signal while framework work continues.
 - Live validation note: a cold `fullMigrationProxySafe.test.yaml` run on the current cluster was stopped after the workflow stayed `Running` with `SnapshotMigration/source-target-snap1-migration-0` still `Initialized`; treat that as SUT/live-environment signal, not an oracle failure.
@@ -345,6 +349,12 @@ Latest live validation note:
 - Terminal SnapshotMigration response cases are order-sensitive when run against a reused cluster. A prior gated approve run left the completed `SnapshotMigration` with `documentBackfillConfig.maxConnections: 5`; a later impossible baseline using the original config was denied by the lock-on-complete admission policy. For live validation, run impossible response cases from a fresh cluster or run the baseline-changing `reset-then-approve` case last.
 - 2026-05-22 impossible response validation on `kind-e2e-tests-2` proved `approve-only` and `reset-only` against the completed SnapshotMigration case. Snapshot outputs: `/tmp/e2e-orchestration-e2e-tests-2-impossible-approve-only-20260522001949/` and `/tmp/e2e-orchestration-e2e-tests-2-impossible-reset-only-20260522002643/`.
 - 2026-05-22 `reset-then-approve` remains blocked by current SUT/workflow semantics. The impossible mutation is rejected by admission policy before a retry gate becomes actionable; after `workflow reset`, the same Argo workflow does not retry the failed upsert, so approval cannot advance that workflow. Live nodes showed failed `upsertsnapshotmigrationresource` nodes with lock-on-complete/admission-policy messages while the workflow stayed `Running` at `3/4`; the run was stopped before timeout and did not write a snapshot.
+- 2026-06-03 post-rebase validation used `kind-e2e-postrebase` and image tag `workflow-postrebase-20260603`. `basicSnapshotNoop.test.yaml --noop-only` passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-postrebase-basic-noop-20260603175318/`.
+- 2026-06-03 full proxy-safe validation found that the full-traffic fixture's default `LoadBalancer` capture proxy service blocks endpoint readiness in kind. The same run also showed the fixture was inheriting production-oriented Kafka defaults: three brokers, RF=3, and min ISR 2. The local fixture now sets `proxyConfig.serviceType: ClusterIP`, single-broker workflow-managed Kafka, RF=1 topics, and smaller proxy/replayer resources. The rerun's underlying Argo workflow later succeeded at `60/60`, and all CRDs reached expected terminal phases, but the e2e runner timed out at the 900s CLI override before the workflow completed. Error snapshot: `/tmp/e2e-postrebase-full-proxy-safe-clusterip-20260603183226/`. Revalidate on a fresh cluster with the spec's 1200s timeout and adjust from clean timing evidence.
+- 2026-06-03 impossible `leave-blocked` was attempted on the same already-disturbed cluster and timed out during the baseline before reaching the mutation. The underlying baseline workflow eventually succeeded, so treat this as an invalid validation environment rather than an impossible-flow regression. Error snapshot: `/tmp/e2e-postrebase-impossible-leave-blocked-20260603190509/`. Next impossible/gated validation should use a fresh cluster.
+- 2026-06-04 clean-cluster validation used new kind cluster `e2e-local-profile` and image tag `workflow-local-profile-20260604`. `basicSnapshotNoop.test.yaml --noop-only` passed with zero diagnostics and zero violations; baseline completed in about 252s and noop-pre in about 38s. Snapshot output: `/tmp/e2e-local-profile-basic-noop-20260604091407/`.
+- 2026-06-04 same-cluster full safe validation used `fullMigrationProxySafe.test.yaml` after the basic noop run. The local profile was applied as intended: CaptureProxy service was `ClusterIP`, Kafka used a single KRaft broker with RF=1/min ISR=1, topic replicas/partitions were 1, and proxy/replayer resources were reduced. The four-run safe sequence passed with zero diagnostics and zero violations; baseline completed in about 893s, noop-pre in about 38s, mutated in about 137s, and noop-post in about 38s. Snapshot output: `/tmp/e2e-local-profile-full-safe-20260604091924/`. Caveat: this was not a cold full-safe baseline because `DataSnapshot/source-snap1` and `SnapshotMigration/source-target-snap1-migration-0` were already present from the basic noop run. To prove cold full-safe timing, run this spec first in a fresh namespace/cluster or add resource-unique specs/cleanup.
+- 2026-06-04 full safe still surfaced the known RFS worker signal: a worker pod exited with code 3 after logging `No work left to acquire`, which Kubernetes marks as `Error`. The workflow still completed successfully, so treat this as SUT polish/noisy evidence rather than a framework failure.
 
 ### 7. Matrix Expander And Mutator Registry `[~]`
 
@@ -473,7 +483,7 @@ Current branch status:
 - `[x]` `Pending` is not terminal for generic topology components; approval-gate held phases are modeled separately.
 - `[x]` `Paused` is treated as a held topology phase for gated checkpoints.
 - `[x]` A phase/workflow timeout is now blocking at the case-plan level; the runner does not continue from a timed-out baseline into noop or mutation steps.
-- `[ ]` Phase names still need validation against the first live runs.
+- `[~]` Phase names have been validated across noop, safe, gated, impossible, and poison-pill live runs, but the observed vocabulary still needs to be codified in focused regression tests/docs.
 
 After the safe slice works, harden waiting semantics.
 
@@ -500,7 +510,7 @@ Current branch status:
 - `[x]` Live gated execution is wired into `runExpandedCase` and unit-tested for the approve response.
 - `[x]` The runner waits for `workflow approve change --list` before the `before-approval` checkpoint and sends `workflow approve change <pattern>` for the approve response.
 
-Implement `response: approve` and `response: leave-blocked` after safe flow is stable. `leave-blocked` has passed live; `approve` still needs live validation.
+Implement `response: approve` and `response: leave-blocked` after safe flow is stable. Both paths have live validation evidence for the built-in SnapshotMigration gated mutator.
 
 Use workflow approval commands for actionable gates:
 
@@ -512,8 +522,8 @@ Exit criteria:
 
 - `[x]` `before-approval` and `after-approval` checkpoints are populated by the case-plan executor in unit tests.
 - `[x]` `before-approval` and `after-approval` checkpoints are validated against real CRD observations for the built-in SnapshotMigration gated mutator.
-- `leave-blocked` ends after verifying the gate is still pending/paused and writes a complete snapshot.
-- Gate-time validations use split observer/checker fixtures.
+- `[x]` `leave-blocked` ends after verifying the gate is still pending/paused and writes a complete snapshot.
+- `[ ]` Gate-time validations use split observer/checker fixtures.
 
 ### 11. Impossible Flow `[~]`
 
@@ -561,7 +571,7 @@ Current branch status:
 - `[x]` Safe-case snapshots are written per expanded case.
 - `[x]` Process exit is nonzero if any case errors or produces violations.
 - `[ ]` Failure in one case currently stops the remaining cases; continue-after-failure behavior is not implemented.
-- `[~]` Gated/impossible cases are runnable through the case-plan executor in unit tests; live validation is pending.
+- `[~]` Gated/impossible cases are runnable through the case-plan executor and have focused live validation evidence, but exhaustive multi-case live execution across those selectors is not yet proven.
 
 Run all expanded cases in a spec. For the next slice, this starts with all expanded safe cases; gated/impossible cases join after their single-case semantics are reliable.
 
