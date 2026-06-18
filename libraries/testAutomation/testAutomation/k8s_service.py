@@ -474,12 +474,54 @@ class K8sService:
         status_result = self.run_command(check_command, ignore_errors=True)
         return True if status_result and status_result.returncode == 0 else False
 
-    def helm_upgrade(self, chart_path: str, release_name: str, values_file: str = None) -> CompletedProcess:
+    def helm_upgrade(self, chart_path: str, release_name: str, values_file: str = None,
+                     reuse_values: bool = False, wait: bool = False,
+                     timeout: str = None) -> CompletedProcess:
         logger.info(f"Upgrading {release_name} from {chart_path} with values {values_file}")
         command = self._helm_base() + ["upgrade", release_name, chart_path, "-n", self.namespace]
         if values_file:
             command.extend(["-f", values_file])
-        return self.run_command(command)
+        if reuse_values:
+            command.append("--reuse-values")
+        if wait:
+            command.append("--wait")
+        if timeout:
+            command.extend(["--timeout", timeout])
+        try:
+            return self.run_command(command)
+        except subprocess.CalledProcessError:
+            self._dump_helm_debug_info(release_name)
+            raise
+
+    def wait_for_daemonset_rollout(self, name: str, timeout_seconds: int = 600) -> CompletedProcess:
+        logger.info(f"Waiting for daemonset/{name} rollout in namespace '{self.namespace}'")
+        return self.run_command(self._kubectl_base() + [
+            "rollout", "status", f"daemonset/{name}",
+            "-n", self.namespace,
+            f"--timeout={timeout_seconds}s",
+        ])
+
+    def wait_for_service(self, name: str, timeout_seconds: int = 300) -> None:
+        logger.info(f"Waiting for service/{name} in namespace '{self.namespace}'")
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            result = self.run_command(
+                self._kubectl_base() + ["get", "service", name, "-n", self.namespace],
+                ignore_errors=True,
+            )
+            if result and result.returncode == 0:
+                logger.info(f"service/{name} is available")
+                return
+            time.sleep(3)
+        raise TimeoutError(f"Timed out waiting for service/{name} in namespace '{self.namespace}'")
+
+    def reset_migration_resources(self) -> str | WSClient:
+        logger.info("Resetting Migration Assistant workflow resources")
+        return self.exec_migration_console_cmd(
+            ["workflow", "reset", "--all", "--include-proxies", "--delete-storage",
+             "--namespace", self.namespace],
+            unbuffered=False,
+        )
 
     def helm_install(self, chart_path: str, release_name: str,
                      values_file: str = None, values: Dict[str, str] = None) -> CompletedProcess | bool:

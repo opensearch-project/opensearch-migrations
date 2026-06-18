@@ -285,8 +285,8 @@ def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[
         return "Shards are initializing"
 
     eta_str = _format_duration_ms(values.eta_ms) if values.eta_ms else "N/A"
-    start_time = str(values.started)[:19] if values.started else ''
-    finish_time = str(values.finished)[:19] if values.finished else ''
+    start_time = values.started.isoformat(sep=" ", timespec="seconds") if values.started else ''
+    finish_time = values.finished.isoformat(sep=" ", timespec="seconds") if values.finished else ''
     return (
         f"Backfill status: {values.status.value}\n"
         f"Start time: {start_time}\n"

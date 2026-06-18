@@ -230,8 +230,8 @@ def test_get_kafka_consumer_groups_returns_replayer_target_groups():
     config = {
         "traffic": {
             "replayers": {
-                "first": {"fromProxy": "p1", "toTarget": "alpha"},
-                "second": {"fromProxy": "p1", "toTarget": "beta"},
+                "first": {"fromCapturedTraffic": "p1", "toTarget": "alpha"},
+                "second": {"fromCapturedTraffic": "p1", "toTarget": "beta"},
             }
         }
     }
@@ -243,8 +243,8 @@ def test_get_kafka_consumer_groups_dedupes_when_replayers_share_target():
     config = {
         "traffic": {
             "replayers": {
-                "r1": {"fromProxy": "p1", "toTarget": "default"},
-                "r2": {"fromProxy": "p2", "toTarget": "default"},
+                "r1": {"fromCapturedTraffic": "p1", "toTarget": "default"},
+                "r2": {"fromCapturedTraffic": "p2", "toTarget": "default"},
             }
         }
     }
@@ -263,9 +263,9 @@ def test_get_kafka_consumer_groups_skips_replayers_missing_totarget():
     config = {
         "traffic": {
             "replayers": {
-                "good": {"fromProxy": "p", "toTarget": "tgt"},
-                "missing": {"fromProxy": "p"},
-                "blank": {"fromProxy": "p", "toTarget": ""},
+                "good": {"fromCapturedTraffic": "p", "toTarget": "tgt"},
+                "missing": {"fromCapturedTraffic": "p"},
+                "blank": {"fromCapturedTraffic": "p", "toTarget": ""},
             }
         }
     }
@@ -282,7 +282,7 @@ def test_from_workflow_config_populates_kafka_consumer_groups(
     mock_store_cls.return_value.load_config.return_value = {
         "traffic": {
             "replayers": {
-                "r": {"fromProxy": "p", "toTarget": "my-target"},
+                "r": {"fromCapturedTraffic": "p", "toTarget": "my-target"},
             }
         }
     }
@@ -319,19 +319,19 @@ def test_from_workflow_config_allow_empty(mock_store_cls, mock_can_use_k8s):
 
 
 @patch('console_link.cli.can_use_k8s_config_store')
-@patch('console_link.environment.Environment.from_workflow_config')
-def test_context_init_with_allow_empty_workflow_config(mock_from_workflow, mock_can_use_k8s):
-    # Test that Context.__init__ passes allow_empty_workflow_config to Environment.from_workflow_config
+@patch('console_link.environment.Environment.from_k8s_resource_catalog')
+def test_context_init_with_allow_empty_workflow_config(mock_from_k8s_catalog, mock_can_use_k8s):
+    # Test that Context.__init__ passes allow_empty_workflow_config to the k8s catalog loader.
     from console_link.cli import Context
 
     # Use k8s environment
     mock_can_use_k8s.return_value = True
     mock_env = MagicMock()
-    mock_from_workflow.return_value = mock_env
+    mock_from_k8s_catalog.return_value = mock_env
 
     # Test with allow_empty_workflow_config=True
     ctx = Context(config_file='/fake/path', allow_empty_workflow_config=True)
 
-    # Verify from_workflow_config was called with allow_empty=True
-    mock_from_workflow.assert_called_once_with(allow_empty=True)
+    # Verify from_k8s_resource_catalog was called with allow_empty=True
+    mock_from_k8s_catalog.assert_called_once_with(allow_empty=True)
     assert ctx.env == mock_env

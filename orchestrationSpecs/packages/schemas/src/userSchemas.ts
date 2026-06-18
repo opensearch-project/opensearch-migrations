@@ -273,8 +273,21 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
+const blankStringAsDisabled = (value: unknown) =>
+    typeof value === "string" && value.trim().length === 0 ? "" : value;
+
+const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+
+const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+
+const optionalEndpointWithDefault = (defaultValue: string) =>
+    z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.default(defaultValue).optional());
+
+const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
+    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");
+
+const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
+    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.");
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -532,7 +545,8 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
@@ -630,7 +644,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -736,6 +751,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -793,12 +810,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
-        .describe("Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). " +
-            "'NONE': fail if multi-type indices are encountered. " +
-            "'UNION': merge all types into a single mapping. " +
-            "'SPLIT': create separate indices for each type."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -913,7 +926,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
@@ -1088,11 +1102,11 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
 );
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
+        .describe("Use an existing Kafka cluster by providing connection details."),
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
-            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
-    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
-        .describe("Use an existing Kafka cluster by providing connection details.")
+            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 
 export const HTTP_AUTH_BASIC = z.object({
@@ -1152,6 +1166,28 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
 
+export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
+    s3Uri: z.string()
+        .regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/.+\.proto\.gz$/)
+        .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
+    awsRegion: z.string()
+        .describe("AWS region of the S3 bucket holding the export."),
+    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
+        .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
+    sourceLabel: z.string()
+        .describe("Label of the source cluster this dump was originally captured from. " +
+            "Used for resource labeling. Does NOT need to match a sourceClusters key " +
+            "(the original source may be long gone by the time the dump is replayed)."),
+}).describe("Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. " +
+    "When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. " +
+    "The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, " +
+    "and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow.");
+
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
         .describe("Name of the source cluster. Must match a key in sourceClusters."),
@@ -1160,28 +1196,79 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
-    fromProxy: z.string()
-        .describe("Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."),
+    fromCapturedTraffic: z.string()
+        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."),
     toTarget: z.string()
         .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters."),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
         .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
-}).describe("Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster.");
+}).describe("Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster.");
 
 export const TRAFFIC_CONFIG = z.object({
-    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG)
-        .describe("Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
+        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
+        .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
+            "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
+            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
-        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster.")
+        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
 }).superRefine((data, ctx) => {
-    for (const [name, rc] of Object.entries(data.replayers)) {
-        if (!(rc.fromProxy in data.proxies)) {
+    const proxies = data.proxies ?? {};
+    const s3Sources = data.s3Sources ?? {};
+    for (const name of Object.keys(s3Sources)) {
+        if (name in proxies) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
-                path: ['replayers', name, 'fromProxy']
+                message: `Name '${name}' is used in both traffic.proxies and traffic.s3Sources. Each captured-traffic source must have a unique name.`,
+                path: ['s3Sources', name]
+            });
+        }
+    }
+    // Two captured-traffic sources cannot land in the same Kafka topic on the
+    // same Kafka cluster. The effective topic is `kafkaTopic ?? sourceName`,
+    // so name collisions across sources, explicit-topic collisions, and any
+    // mix that maps to the same (cluster, topic) tuple all need to be caught.
+    // Without this, two producers would share one topic — any replayer reading
+    // that topic would interleave records from both, with no way to tell them
+    // apart, and `kafkaImport.sh`-style reloads would write into a topic the
+    // proxy is also feeding.
+    type Origin = { kind: 'proxy' | 's3Source'; name: string };
+    const claims = new Map<string, Origin>();
+    const recordClaim = (cluster: string, topic: string, origin: Origin, path: (string | number)[]) => {
+        const key = `${cluster}\0${topic}`;
+        const existing = claims.get(key);
+        if (existing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `traffic.${origin.kind}s['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${existing.kind}s['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
+                path
+            });
+        } else {
+            claims.set(key, origin);
+        }
+    };
+    for (const [name, p] of Object.entries(proxies)) {
+        const cluster = p.kafka ?? "default";
+        const topic = (p.kafkaTopic && p.kafkaTopic !== "") ? p.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
+    }
+    for (const [name, s3] of Object.entries(s3Sources)) {
+        const cluster = s3.kafka ?? "default";
+        const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
+    }
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        const inProxies = rc.fromCapturedTraffic in proxies;
+        const inS3 = rc.fromCapturedTraffic in s3Sources;
+        if (!inProxies && !inS3) {
+            const available = [...Object.keys(proxies), ...Object.keys(s3Sources)];
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown captured-traffic source '${rc.fromCapturedTraffic}'. Available (proxies + s3Sources): ${available.join(', ')}`,
+                path: ['replayers', name, 'fromCapturedTraffic']
             });
         }
     }
@@ -1362,6 +1449,16 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
+        const duplicateClusterNames = Object.keys(data.sourceClusters)
+            .filter(name => name in data.targetClusters);
+        for (const name of duplicateClusterNames) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Cluster name '${name}' is used in both sourceClusters and targetClusters. Source and target cluster names must be unique.`,
+                path: ['targetClusters', name]
+            });
+        }
+
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 
@@ -1397,7 +1494,10 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         }
 
         if (data.traffic) {
-            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+            const proxies = data.traffic.proxies ?? {};
+            const s3Sources = data.traffic.s3Sources ?? {};
+            const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
@@ -1406,12 +1506,21 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
                 const kafkaRef = proxyConfig.kafka;
-                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
                 if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
+                    });
+                }
+            }
+            for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
+                const kafkaRef = s3Config.kafka;
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
             }

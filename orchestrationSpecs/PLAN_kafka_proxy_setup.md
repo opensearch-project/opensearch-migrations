@@ -18,7 +18,7 @@
 
 ### `userSchemas.ts`
 - `KAFKA_CLUSTER_CREATION_CONFIG`: add `replicas`, `version`, `storage` (ephemeral or persistent-claim), `partitions`, `topicReplicas`, `useKraft` removed (always KRaft)
-- `PROXY_OPTIONS`: already has `listenPort`, `podReplicas`, `otelCollectorEndpoint` — no new fields needed
+- `PROXY_OPTIONS`: already has `listenPort`, `podReplicas`, `otelMetricsCollectorEndpoint` — no new fields needed
 
 ### `argoSchemas.ts`
 - `NAMED_KAFKA_CLUSTER_CONFIG`: already carries `config` (typed from `KAFKA_CLUSTER_CREATION_CONFIG`) — no structural change needed, just picks up the new fields automatically

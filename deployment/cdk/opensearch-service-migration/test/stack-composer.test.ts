@@ -18,6 +18,42 @@ describe('Stack Composer Tests', () => {
     jest.restoreAllMocks();
   });
 
+  function getMigrationConsoleOtelContainer(contextOptions: Record<string, unknown>) {
+    const stacks = createStackComposer({
+      vpcEnabled: true,
+      migrationAssistanceEnabled: true,
+      migrationConsoleServiceEnabled: true,
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      ...contextOptions
+    });
+    const migrationConsoleStack = stacks.stacks.find((s) => s instanceof MigrationConsoleStack) as MigrationConsoleStack;
+    const template = Template.fromStack(migrationConsoleStack).toJSON();
+    const taskDefinition = Object.values(template.Resources)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .find((resource: any) => resource.Type === "AWS::ECS::TaskDefinition") as any;
+    return taskDefinition.Properties.ContainerDefinitions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .find((container: any) => container.Name === "otel-collector");
+  }
+
+  test('Default ECS OTEL sidecar uses metrics-only config', () => {
+    const otelContainer = getMigrationConsoleOtelContainer({});
+    expect(otelContainer.Command).toEqual(["--config=/etc/otel-config-aws-metrics.yaml"]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(otelContainer.Environment.map((e: any) => e.Name)).not.toContain("TRACE_SAMPLING_PERCENTAGE");
+  })
+
+  test('Legacy otelCollectorEnabled true keeps metrics and X-Ray trace config', () => {
+    const otelContainer = getMigrationConsoleOtelContainer({otelCollectorEnabled: true});
+    expect(otelContainer.Command).toEqual(["--config=/etc/otel-config-aws.yaml"]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(otelContainer.Environment.map((e: any) => e.Name)).toContain("TRACE_SAMPLING_PERCENTAGE");
+  })
+
   test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
     const contextOptions = {
       domainName: "",

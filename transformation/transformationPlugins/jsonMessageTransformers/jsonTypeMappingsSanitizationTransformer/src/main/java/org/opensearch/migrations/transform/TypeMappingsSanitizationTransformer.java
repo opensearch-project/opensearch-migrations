@@ -33,20 +33,20 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
                 List<Map<String, String>> regexMappingsIncoming) {
         var featureFlags = featureFlagsIncoming != null ? featureFlagsIncoming : Map.of();
         var indexMappings = staticMappingsIncoming != null ? staticMappingsIncoming : Map.of();
-        // Regex  mappings apply if an index is not found in the index mappings
-        // The default is to map each type to its own index, mapping _doc type to the same input index
+        // Regex mappings apply if an index is not found in the static index mappings.
+        // The default unions every type of an index into the index's own name
+        // (index/<anyType> -> index), so a multi-type source index is merged into a
+        // single target index. This matches the legacy IndexMappingTypeRemoval UNION
+        // behavior, which this transformer now supersedes. Callers that need the older
+        // type-splitting behavior (index/<type> -> index_<type>) must pass regexMappings
+        // explicitly.
         var regexMappings = Optional.ofNullable(regexMappingsIncoming)
             .orElse(
                     List.of(
                         Map.of(
                                 "sourceIndexPattern","(.+)",
-                                "sourceTypePattern", "_doc",
-                                "targetIndexPattern", "$1"
-                        ),
-                        Map.of(
-                                "sourceIndexPattern","(.+)",
                                 "sourceTypePattern", "(.+)",
-                                "targetIndexPattern", "$1_$2"
+                                "targetIndexPattern", "$1"
                         )
                     )
             );

@@ -85,7 +85,7 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=ns)
+        wait_for_replayer_consuming(namespace=ns, workflow_name=self.workflow_name)
 
         # Snapshot consumer-group offsets/lag at the start of replay so the log
         # captures what the replayer is about to consume. The end-of-replay

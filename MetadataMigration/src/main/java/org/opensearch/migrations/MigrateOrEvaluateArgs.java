@@ -4,10 +4,8 @@ package org.opensearch.migrations;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
-import org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
@@ -66,16 +64,24 @@ public class MigrateOrEvaluateArgs {
         + " Default: 1 (which does not apply any transformation)")
     public int clusterAwarenessAttributes = 1;
 
-    @Parameter(required = false, names = {
-        "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-            + "forwarded. If no value is provided, metrics will not be forwarded.")
-    String otelCollectorEndpoint;
+    @Parameter(
+        required = false,
+        names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+            "Omit this option to disable trace export.")
+    String otelTraceCollectorEndpoint;
+
+    @Parameter(
+        required = false,
+        names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+            "Omit this option to disable metric export.")
+    String otelMetricsCollectorEndpoint;
 
     @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.", converter = VersionConverter.class)
     public Version sourceVersion = null;
-
-    @ParametersDelegate
-    public MetadataTransformationParams metadataTransformationParams = new MetadataTransformationParams();
 
     @ParametersDelegate
     public TransformerParams metadataCustomTransformationParams = new MetadataCustomTransformationParams();
@@ -115,12 +121,6 @@ public class MigrateOrEvaluateArgs {
 
     @ParametersDelegate
     public VersionStrictness versionStrictness = new VersionStrictness();
-
-    @Getter
-    public static class MetadataTransformationParams implements MetadataTransformerParams {
-        @Parameter(names = {"--multi-type-behavior"}, description = "Define behavior for resolving multi type mappings.")
-        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.NONE;
-    }
 
     @Getter
     public static class MetadataCustomTransformationParams implements TransformerParams {

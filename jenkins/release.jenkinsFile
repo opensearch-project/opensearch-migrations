@@ -1,11 +1,11 @@
-lib = library(identifier: 'jenkins@12.0.0', retriever: modernSCM([
+lib = library(identifier: 'jenkins@13.0.1', retriever: modernSCM([
     $class: 'GitSCMSource',
     remote: 'https://github.com/opensearch-project/opensearch-build-libraries.git',
 ]))
 
 def secret_github_bot = [
     [envVar: 'GITHUB_USER', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-username'],
-    [envVar: 'GITHUB_TOKEN', secretRef: 'op://opensearch-release-secrets/github-bot/opensearch-migrations-release']
+    [envVar: 'GITHUB_TOKEN', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-token']
 ]
 
 pipeline {
@@ -27,7 +27,7 @@ pipeline {
                     [key: 'ref', value: '$.release.tag_name'],
                     [key: 'repository', value: '$.repository.html_url'],
                     [key: 'action', value: '$.action'],
-                    [key: 'isDraft', value: '$.release.draft'],
+                    [key: 'isPreRelease', value: '$.release.prerelease'],
                     [key: 'release_url', value: '$.release.url'],
                     [key: 'assets_url', value: '$.release.assets_url']
                 ],
@@ -121,15 +121,36 @@ pipeline {
         post {
             success {
                 script {
-                    if (release_url != null) {
+                    withSecrets(secrets: secret_github_bot){
+                        def codeOwners = sh(
+                            script: "gh api repos/${repository.replaceAll('https://github.com/', '')}/contents/.github/CODEOWNERS --jq '.content' 2>/dev/null | tr -d '\\n' | base64 -d | grep -oP '@[\\w/-]+' | sort -u | tr '\\n' ' ' || echo ''",
+                            returnStdout: true
+                        ).trim()
+                        def issueBody = "The release workflow for tag `${tag}` completed successfully.\n\nBuild: ${env.BUILD_URL}\n\nPlease publish the release on GitHub by converting the pre-release to a full release.\n\nRelease: ${release_html_url}\n\ncc: ${codeOwners}"
+                        sh """gh issue create --title \"[Release - Action Required] Publish release for tag ${tag}\" --body \"${issueBody}\" --repo ${repository}"""
+                    }
+                }
+            }
+            failure {
+                script {
                         withSecrets(secrets: secret_github_bot){
-                            sh "curl -X PATCH -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${release_url} -d '{\"tag_name\":\"${tag}\",\"draft\":false,\"prerelease\":false}'"
-                        }
+                        def codeOwners = sh(
+                            script: "gh api repos/${repository.replaceAll('https://github.com/', '')}/contents/.github/CODEOWNERS --jq '.content' 2>/dev/null | tr -d '\\n' | base64 -d | grep -oP '@[\\w/-]+' | sort -u | tr '\\n' ' ' || echo ''",
+                            returnStdout: true
+                        ).trim()
+                        def issueBody = "The release workflow for tag `${tag}` failed.\n\nPlease investigate the failure and retry the release.\n\nRelease: ${release_html_url}\n\ncc: ${codeOwners} @opensearch-project/engineering-effectiveness"
+                        sh """gh issue create --title \"[RELEASE] Failed: release for tag ${tag}\" --body \"${issueBody}\" --repo ${repository}"""
                     }
                 }
             }
             always {
                 script {
+                    publishNotification(
+                    icon: currentBuild.currentResult == 'SUCCESS' ? ':white_check_mark:' : ':x:',
+                    message: currentBuild.currentResult == 'SUCCESS' ? "Release ${tag} completed successfully" : "Release ${tag} failed",
+                    extra: "REPOSITORY: ${repository}\nTAG: ${tag}",
+                    credentialsId: 'opensearch-release-notification-webhook'
+                    )
                     postCleanup()
                 }
             }

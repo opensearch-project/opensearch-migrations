@@ -12,7 +12,7 @@ KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s
 set_docker_hosted_defaults
 # In-cluster pulls use the docker-network DNS name; the host's `docker buildx`
 # push goes to the bind-mounted localhost port. Same registry, two URLs.
-LOCAL_REGISTRY="${LOCAL_REGISTRY:-${EXTERNAL_REGISTRY_NAME}:5000}"
+LOCAL_REGISTRY="${LOCAL_REGISTRY:-${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}}"
 BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${KIND_CONTEXT}}"
 
@@ -54,7 +54,7 @@ metadata:
   namespace: kube-public
 data:
   localRegistryHosting.v1: |
-    host: "${EXTERNAL_REGISTRY_NAME}:5000"
+    host: "${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
 fi

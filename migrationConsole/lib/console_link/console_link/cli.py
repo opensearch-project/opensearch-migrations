@@ -5,7 +5,7 @@ import json
 from pprint import pprint
 import sys
 import time
-from typing import Dict
+from typing import Dict, Iterable, Sequence
 import click
 
 # Restore default SIGPIPE handling so piped commands (e.g. `| head`) exit cleanly.
@@ -31,6 +31,7 @@ from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexD
 from console_link.models.step_state import StepStateWithPause
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
+from console_link.k8s_resource_catalog import CLUSTER_RESOURCE_ROLES, ResourceRole, ResourceSelectionError
 from console_link.models.metrics_source import Component, MetricStatistic
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 from console_link.workflow.models.utils import KubernetesConfigNotFoundError
@@ -77,8 +78,8 @@ class Context(object):
         # Even if we _can_ use the k8s config store, we don't if MIGRATION_USE_SERVICES_YAML_CONFIG is set
         # or if `--force-use-config-file` is passed in.
         if can_use_k8s_config_store() and not force_use_config_file:
-            logger.info("Assuming k8s deployment, loading cluster information from workflow config")
-            self.env = Environment.from_workflow_config(allow_empty=allow_empty_workflow_config)
+            logger.info("Assuming k8s deployment, loading console resources from k8s state")
+            self.env = Environment.from_k8s_resource_catalog(allow_empty=allow_empty_workflow_config)
             return
         self.config_file = config_file
         try:
@@ -149,9 +150,232 @@ def main():
 # ##################### CLUSTERS ###################
 
 
+def _resource_catalog(env):
+    return getattr(env, "resources", None)
+
+
+def _complete_catalog_resource(role: ResourceRole):
+    def complete(ctx, _, incomplete):
+        try:
+            env = _get_completion_env(ctx)
+            catalog = _resource_catalog(env)
+            if catalog is None:
+                return []
+            return [
+                CompletionItem(value)
+                for value in catalog.selector_values(role)
+                if value.startswith(incomplete)
+            ]
+        except Exception:
+            return []
+    return complete
+
+
+def _complete_cluster_selector(*roles: ResourceRole):
+    def complete(ctx, _, incomplete):
+        try:
+            env = _get_completion_env(ctx)
+            catalog = _resource_catalog(env)
+            if catalog is not None:
+                values = catalog.cluster_selector_values(roles)
+            else:
+                values = _legacy_cluster_selector_values(env, roles)
+            return [
+                CompletionItem(value)
+                for value in values
+                if value.startswith(incomplete)
+            ]
+        except Exception:
+            return []
+    return complete
+
+
+get_source_resource_completions = _complete_catalog_resource(ResourceRole.SOURCE)
+get_target_resource_completions = _complete_catalog_resource(ResourceRole.TARGET)
+get_proxy_resource_completions = _complete_catalog_resource(ResourceRole.PROXY)
+get_kafka_resource_completions = _complete_catalog_resource(ResourceRole.KAFKA)
+get_cluster_resource_completions = _complete_cluster_selector(*CLUSTER_RESOURCE_ROLES)
+get_source_target_cluster_resource_completions = _complete_cluster_selector(ResourceRole.SOURCE, ResourceRole.TARGET)
+
+ROLE_SELECTOR_FLAGS = {
+    ResourceRole.SOURCE: "--source",
+    ResourceRole.TARGET: "--target",
+    ResourceRole.PROXY: "--proxy",
+    ResourceRole.KAFKA: "--kafka",
+}
+
+
+def _cluster_selector_options(func):
+    func = click.option('--proxy', 'proxy_selector', required=False,
+                        shell_complete=get_proxy_resource_completions,
+                        help='Proxy resource selector when --cluster proxy is used.')(func)
+    func = click.option('--target', 'target_selector', required=False,
+                        shell_complete=get_target_resource_completions,
+                        help='Target cluster resource selector.')(func)
+    func = click.option('--source', 'source_selector', required=False,
+                        shell_complete=get_source_resource_completions,
+                        help='Source cluster resource selector.')(func)
+    return func
+
+
+def _kafka_selector_option(func):
+    return click.option('--kafka', 'kafka_selector', required=False,
+                        shell_complete=get_kafka_resource_completions,
+                        help='Kafka resource selector.')(func)
+
+
+def _selector_for_role(role: ResourceRole, source_selector=None, target_selector=None, proxy_selector=None):
+    if role == ResourceRole.SOURCE:
+        return source_selector
+    if role == ResourceRole.TARGET:
+        return target_selector
+    if role == ResourceRole.PROXY:
+        return proxy_selector
+    return None
+
+
+def _role_selectors(source_selector=None, target_selector=None, proxy_selector=None):
+    return {
+        ResourceRole.SOURCE: source_selector,
+        ResourceRole.TARGET: target_selector,
+        ResourceRole.PROXY: proxy_selector,
+    }
+
+
+def _legacy_cluster_selector_values(env, roles: Iterable[ResourceRole]):
+    values = []
+    for role, attr in {
+        ResourceRole.SOURCE: "source_cluster",
+        ResourceRole.TARGET: "target_cluster",
+        ResourceRole.PROXY: "proxy",
+    }.items():
+        if role in roles and getattr(env, attr, None) is not None:
+            values.append(role.value)
+    return values
+
+
+def _primary_selector_values(catalog, role: ResourceRole):
+    values = []
+    seen = set()
+    for entry in catalog.candidates(role):
+        for value in (entry.ref_name, entry.k8s_name):
+            if value and value not in seen:
+                values.append(value)
+                seen.add(value)
+    return values
+
+
+def _selector_flag_hint(catalog, role: ResourceRole):
+    if len(catalog.candidates(role)) <= 1:
+        return None
+    values = _primary_selector_values(catalog, role)
+    if not values:
+        return None
+    return f"{ROLE_SELECTOR_FLAGS[role]} <{'|'.join(values)}>"
+
+
+def _selector_flag_hints(catalog, roles: Sequence[ResourceRole]):
+    hints = [
+        hint
+        for role in roles
+        for hint in [_selector_flag_hint(catalog, role)]
+        if hint
+    ]
+    return " ".join(hints)
+
+
+def _add_selector_flag_hints(message: str, catalog, roles: Sequence[ResourceRole]):
+    hints = _selector_flag_hints(catalog, roles)
+    if not hints:
+        return message
+    return f"{message}\nSpecify: {hints}."
+
+
+def _role_for_cluster_name(cluster_name: str) -> ResourceRole:
+    return {
+        'source': ResourceRole.SOURCE,
+        'target': ResourceRole.TARGET,
+        'proxy': ResourceRole.PROXY,
+    }[cluster_name.lower()]
+
+
+def _hint_roles_for_cluster_selector(cluster_name: str, allowed_roles: Sequence[ResourceRole]):
+    role_by_name = {role.value: role for role in allowed_roles}
+    role = role_by_name.get(cluster_name.lower())
+    if role:
+        return (role,)
+    return allowed_roles
+
+
+def resolve_cluster_resource(ctx, role: ResourceRole, selector=None, hint_roles=None):
+    catalog = _resource_catalog(ctx.env)
+    if catalog is not None:
+        try:
+            return catalog.resolve_cluster(role, selector, client_options=ctx.env.client_options)
+        except ResourceSelectionError as e:
+            raise click.UsageError(_add_selector_flag_hints(str(e), catalog, hint_roles or (role,)))
+
+    if selector:
+        raise click.UsageError("Resource selectors are only supported for k8s resource catalogs.")
+    cluster_map = {
+        ResourceRole.SOURCE: ('source', ctx.env.source_cluster),
+        ResourceRole.TARGET: ('target', ctx.env.target_cluster),
+        ResourceRole.PROXY: ('proxy', ctx.env.proxy),
+    }
+    attr, cluster_obj = cluster_map[role]
+    if cluster_obj is None:
+        raise click.UsageError(f"No {attr} cluster is defined.")
+    return cluster_obj
+
+
+def resolve_named_cluster(
+    ctx,
+    cluster_name,
+    source_selector=None,
+    target_selector=None,
+    proxy_selector=None,
+    allowed_roles=CLUSTER_RESOURCE_ROLES,
+):
+    catalog = _resource_catalog(ctx.env)
+    if catalog is not None:
+        try:
+            return catalog.resolve_cluster_selector(
+                cluster_name,
+                allowed_roles,
+                role_selectors=_role_selectors(source_selector, target_selector, proxy_selector),
+                client_options=ctx.env.client_options,
+            )
+        except ResourceSelectionError as e:
+            hint_roles = _hint_roles_for_cluster_selector(cluster_name, allowed_roles)
+            raise click.UsageError(_add_selector_flag_hints(str(e), catalog, hint_roles))
+
+    try:
+        role = _role_for_cluster_name(cluster_name)
+    except KeyError:
+        raise click.UsageError(
+            f"No cluster resource matches '{cluster_name}'. Valid selectors: "
+            f"{', '.join(_legacy_cluster_selector_values(ctx.env, allowed_roles)) or '<none>'}."
+        )
+    if role not in allowed_roles:
+        raise click.UsageError(
+            f"Cluster selector '{cluster_name}' is not valid for this command. Valid selectors: "
+            f"{', '.join(_legacy_cluster_selector_values(ctx.env, allowed_roles)) or '<none>'}."
+        )
+    return resolve_cluster_resource(
+        ctx,
+        role,
+        _selector_for_role(role, source_selector, target_selector, proxy_selector),
+    )
+
+
 @click.group(name="clusters", help="Commands to interact with source and target clusters")
 @click.pass_obj
 def cluster_group(ctx):
+    catalog = _resource_catalog(ctx.env)
+    if catalog is not None:
+        if catalog.has_any(ResourceRole.SOURCE, ResourceRole.TARGET, ResourceRole.PROXY):
+            return
+        raise click.UsageError("No cluster resources are configured for this deployment.")
     if ctx.env.source_cluster is None and ctx.env.target_cluster is None:
         raise click.UsageError("Neither source nor target cluster is defined.")
 
@@ -166,38 +390,33 @@ def _cluster_label(name: str, cluster) -> str:
     return name
 
 
-def resolve_named_cluster(ctx, cluster_name):
-    cluster_map = {
-        'source': ('source', ctx.env.source_cluster),
-        'target': ('target', ctx.env.target_cluster),
-        'proxy': ('proxy', ctx.env.proxy),
-    }
-    attr, cluster_obj = cluster_map[cluster_name]
-    if cluster_obj is None:
-        raise click.UsageError(f"No {attr} cluster is defined.")
-    return cluster_obj
-
-
 @cluster_group.command(name="cat-indices")
 @click.option("--refresh", is_flag=True, default=False)
-@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
-              required=False, help='Optional cluster to query instead of the default source+target output')
+@click.option('--cluster',
+              required=False,
+              shell_complete=get_cluster_resource_completions,
+              help='Optional cluster to query instead of the default source+target output')
+@_cluster_selector_options
 @click.pass_obj
-def cat_indices_cmd(ctx, refresh, cluster):
+def cat_indices_cmd(ctx, refresh, cluster, source_selector, target_selector, proxy_selector):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
     if cluster:
-        click.echo(clusters_.cat_indices(resolve_named_cluster(ctx, cluster), refresh=refresh, as_json=ctx.json))
+        selected_cluster = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
+        click.echo(clusters_.cat_indices(selected_cluster, refresh=refresh, as_json=ctx.json))
         return
+    required_roles = (ResourceRole.SOURCE, ResourceRole.TARGET)
+    source_cluster = resolve_cluster_resource(ctx, ResourceRole.SOURCE, source_selector, hint_roles=required_roles)
+    target_cluster = resolve_cluster_resource(ctx, ResourceRole.TARGET, target_selector, hint_roles=required_roles)
     if ctx.json:
         click.echo(
             json.dumps(
                 {
                     "source_cluster": clusters_.cat_indices(
-                        ctx.env.source_cluster, as_json=True, refresh=refresh
-                    ) if ctx.env.source_cluster else None,
+                        source_cluster, as_json=True, refresh=refresh
+                    ),
                     "target_cluster": clusters_.cat_indices(
-                        ctx.env.target_cluster, as_json=True, refresh=refresh
-                    ) if ctx.env.target_cluster else None,
+                        target_cluster, as_json=True, refresh=refresh
+                    ),
                 }
             )
         )
@@ -205,73 +424,83 @@ def cat_indices_cmd(ctx, refresh, cluster):
 
     if not refresh:
         click.echo("\nWARNING: Cluster information may be stale. Use --refresh to update.\n")
-    click.echo(_cluster_label("SOURCE CLUSTER", ctx.env.source_cluster))
-    if ctx.env.source_cluster:
-        click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
-    else:
-        click.echo("No source cluster defined.")
-    click.echo(_cluster_label("TARGET CLUSTER", ctx.env.target_cluster))
-    if ctx.env.target_cluster:
-        click.echo(clusters_.cat_indices(ctx.env.target_cluster, refresh=refresh))
-    else:
-        click.echo("No target cluster defined.")
+    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster))
+    click.echo(clusters_.cat_indices(source_cluster, refresh=refresh))
+    click.echo(_cluster_label("TARGET CLUSTER", target_cluster))
+    click.echo(clusters_.cat_indices(target_cluster, refresh=refresh))
 
 
 @cluster_group.command(name="connection-check")
-@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
-              required=False, help='Optional cluster to query instead of the default source+target output')
+@click.option('--cluster',
+              required=False,
+              shell_complete=get_cluster_resource_completions,
+              help='Optional cluster to query instead of the default source+target output')
+@_cluster_selector_options
 @click.pass_obj
-def connection_check_cmd(ctx, cluster):
+def connection_check_cmd(ctx, cluster, source_selector, target_selector, proxy_selector):
     """Checks if a connection can be established to source and target clusters"""
     if cluster:
-        result = clusters_.connection_check(resolve_named_cluster(ctx, cluster))
+        selected_cluster = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
+        result = clusters_.connection_check(selected_cluster)
         click.echo(result.connection_message)
         return
-    click.echo(_cluster_label("SOURCE CLUSTER", ctx.env.source_cluster))
-    if ctx.env.source_cluster:
-        click.echo(clusters_.connection_check(ctx.env.source_cluster).connection_message)
-    else:
-        click.echo("No source cluster defined.")
-    click.echo(_cluster_label("TARGET CLUSTER", ctx.env.target_cluster))
-    if ctx.env.target_cluster:
-        click.echo(clusters_.connection_check(ctx.env.target_cluster).connection_message)
-    else:
-        click.echo("No target cluster defined.")
+    required_roles = (ResourceRole.SOURCE, ResourceRole.TARGET)
+    source_cluster = resolve_cluster_resource(ctx, ResourceRole.SOURCE, source_selector, hint_roles=required_roles)
+    target_cluster = resolve_cluster_resource(ctx, ResourceRole.TARGET, target_selector, hint_roles=required_roles)
+    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster))
+    click.echo(clusters_.connection_check(source_cluster).connection_message)
+    click.echo(_cluster_label("TARGET CLUSTER", target_cluster))
+    click.echo(clusters_.connection_check(target_cluster).connection_message)
 
 
 @cluster_group.command(name="run-test-benchmarks")
 @click.option('--cluster',
-              type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
               default='source',
+              shell_complete=get_cluster_resource_completions,
               help="Cluster to run benchmarks against (default: source)")
+@_cluster_selector_options
 @click.pass_obj
-def run_test_benchmarks_cmd(ctx, cluster):
+def run_test_benchmarks_cmd(ctx, cluster, source_selector, target_selector, proxy_selector):
     """Run a series of OpenSearch Benchmark workloads against the specified cluster"""
-    click.echo(clusters_.run_test_benchmarks(resolve_named_cluster(ctx, cluster)))
+    click.echo(clusters_.run_test_benchmarks(
+        resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
+    ))
 
 
 @cluster_group.command(name="run-aoss-test-benchmarks")
+@click.option('--source', 'source_selector', required=False,
+              shell_complete=get_source_resource_completions,
+              help='Source cluster resource selector.')
 @click.pass_obj
-def run_aoss_test_benchmarks_cmd(ctx):
+def run_aoss_test_benchmarks_cmd(ctx, source_selector):
     """Run all AOSS OpenSearch Benchmark workloads (search, timeseries, vector) against the source cluster."""
-    if not ctx.env.source_cluster:
-        raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
-    click.echo(clusters_.run_aoss_test_benchmarks(ctx.env.source_cluster))
+    source_cluster = resolve_cluster_resource(ctx, ResourceRole.SOURCE, source_selector)
+    click.echo(clusters_.run_aoss_test_benchmarks(source_cluster))
 
 
 @cluster_group.command(name="clear-indices")
 @click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
               help="Flag to acknowledge risk and skip confirmation")
 @click.option('--cluster',
-              type=click.Choice(['source', 'target'], case_sensitive=False),
               help="Cluster to perform clear indices action on",
+              shell_complete=get_source_target_cluster_resource_completions,
               required=True)
+@click.option('--target', 'target_selector', required=False,
+              shell_complete=get_target_resource_completions,
+              help='Target cluster resource selector.')
+@click.option('--source', 'source_selector', required=False,
+              shell_complete=get_source_resource_completions,
+              help='Source cluster resource selector.')
 @click.pass_obj
-def clear_indices_cmd(ctx, acknowledge_risk, cluster):
+def clear_indices_cmd(ctx, acknowledge_risk, cluster, target_selector, source_selector):
     """[Caution] Clear indices on a source or target cluster"""
-    cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
-    if not cluster_focus:
-        raise click.UsageError(f"No {cluster.lower()} cluster defined.")
+    cluster_focus = resolve_named_cluster(
+        ctx,
+        cluster,
+        source_selector=source_selector,
+        target_selector=target_selector,
+        allowed_roles=(ResourceRole.SOURCE, ResourceRole.TARGET),
+    )
     if acknowledge_risk:
         click.echo("Performing clear indices operation...")
         click.echo(clusters_.clear_indices(cluster_focus))
@@ -296,14 +525,33 @@ def parse_headers(header: str) -> Dict:
 
 
 def _complete_from_command_result(result, incomplete):
+    return [
+        CompletionItem(value)
+        for value in _command_result_values(result)
+        if value.startswith(incomplete)
+    ]
+
+
+def _command_result_values(result) -> list[str]:
     if not result.success or not result.value:
         return []
-
     return [
-        CompletionItem(line.strip())
+        line.strip()
         for line in result.value.splitlines()
-        if line.strip() and line.strip().startswith(incomplete)
+        if line.strip() and not _is_empty_command_success_message(line)
     ]
+
+
+def _is_empty_command_success_message(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("Command for ") and stripped.endswith(" completed successfully.")
+
+
+def _ctx_param(ctx, name, default=None):
+    params = getattr(ctx, "params", {}) or {}
+    if isinstance(params, dict):
+        return params.get(name, default)
+    return default
 
 
 def _get_completion_env(ctx):
@@ -313,16 +561,42 @@ def _get_completion_env(ctx):
     force_use_config_file = params.get('force_use_config_file', False)
 
     if can_use_k8s_config_store() and not force_use_config_file:
-        return Environment.from_workflow_config(allow_empty=True)
+        return Environment.from_k8s_resource_catalog(allow_empty=True)
     return Environment(config_file=config_file, allow_empty=True)
+
+
+def _resolve_kafka_from_env(env, selector=None):
+    catalog = _resource_catalog(env)
+    if catalog is not None:
+        return catalog.resolve_kafka(selector)
+    if selector:
+        raise ResourceSelectionError("Kafka selectors are only supported for k8s resource catalogs.")
+    if env.kafka is None:
+        raise ResourceSelectionError("No kafka resource is configured for this deployment.")
+    return env.kafka
+
+
+def resolve_kafka_resource(ctx, selector=None):
+    try:
+        return _resolve_kafka_from_env(ctx.env, selector)
+    except ResourceSelectionError as e:
+        catalog = _resource_catalog(ctx.env)
+        if catalog is not None:
+            raise click.UsageError(_add_selector_flag_hints(str(e), catalog, (ResourceRole.KAFKA,)))
+        raise click.UsageError(str(e))
+    except Exception as e:
+        raise click.ClickException(f"Unable to resolve kafka resource: {e}")
 
 
 def get_kafka_topic_completions(ctx, _, incomplete):
     try:
         env = _get_completion_env(ctx)
-        if env.kafka is None:
-            return []
-        return _complete_from_command_result(kafka_.list_topics(env.kafka), incomplete)
+        kafka_resource = _resolve_kafka_from_env(env, _ctx_param(ctx, "kafka_selector"))
+        return [
+            CompletionItem(topic)
+            for topic in _non_internal_topics(kafka_.list_topics(kafka_resource))
+            if topic.startswith(incomplete)
+        ]
     except Exception:
         return []
 
@@ -330,9 +604,8 @@ def get_kafka_topic_completions(ctx, _, incomplete):
 def get_kafka_consumer_group_completions(ctx, _, incomplete):
     try:
         env = _get_completion_env(ctx)
-        if env.kafka is None:
-            return []
-        return _complete_from_command_result(kafka_.list_consumer_groups(env.kafka), incomplete)
+        kafka_resource = _resolve_kafka_from_env(env, _ctx_param(ctx, "kafka_selector"))
+        return _complete_from_command_result(kafka_.list_consumer_groups(kafka_resource), incomplete)
     except Exception:
         return []
 
@@ -345,10 +618,12 @@ def get_kafka_consumer_group_completions(ctx, _, incomplete):
 @click.option('--json', 'json_data', help='Send data as JSON.')
 @click.option('--timeout', type=int, default=15, show_default=True,
               help='Request timeout in seconds.')
-@click.argument('cluster', required=True, type=click.Choice(['target', 'source', 'proxy'], case_sensitive=False))
+@_cluster_selector_options
+@click.argument('cluster', required=True, shell_complete=get_cluster_resource_completions)
 @click.argument('path', required=True)
 @click.pass_obj
-def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeout):
+def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeout,
+                     source_selector, target_selector, proxy_selector):
     """This implements a small subset of curl commands.
 
     It is formatted for use against configured source, target, or proxy clusters.
@@ -368,7 +643,7 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeo
         except json.JSONDecodeError:
             raise click.BadParameter("Invalid JSON format.")
 
-    cluster = resolve_named_cluster(ctx, cluster)
+    cluster = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
 
     if path[0] != '/':
         path = '/' + path
@@ -385,15 +660,19 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeo
 
 
 @cluster_group.command(name="generate-data")
-@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
-              required=True, help='Target cluster for data generation')
+@click.option('--cluster',
+              required=True,
+              shell_complete=get_cluster_resource_completions,
+              help='Target cluster for data generation')
+@_cluster_selector_options
 @click.option('--index-name', required=True, help='Name of the index to populate')
 @click.option('--doc-size-bytes', type=int, default=150, help='Approximate size of each document in bytes')
 @click.option('--num-docs', type=int, help='Total number of documents to generate')
 @click.option('--target-size-mb', type=float, help='Target total size in MB (alternative to num-docs)')
 @click.option('--batch-size', type=int, default=100, help='Number of documents per batch request')
 @click.pass_obj
-def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target_size_mb, batch_size):
+def generate_data_cmd(ctx, cluster, source_selector, target_selector, proxy_selector,
+                      index_name, doc_size_bytes, num_docs, target_size_mb, batch_size):
     """Generate bulk test data in the specified cluster and index"""
     
     # Validate arguments
@@ -410,7 +689,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         click.echo(f"Target size: {target_size_mb}MB = ~{num_docs:,} documents")
     
     # Get the cluster object
-    cluster_obj = resolve_named_cluster(ctx, cluster)
+    cluster_obj = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
     
     click.echo(f"Generating {num_docs:,} documents in index '{index_name}' on {cluster}")
     click.echo(f"Document size: ~{doc_size_bytes} bytes, Batch size: {batch_size}")
@@ -897,89 +1176,169 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
 @click.pass_obj
 def kafka_group(ctx):
     """All actions related to Kafka operations"""
+    catalog = _resource_catalog(ctx.env)
+    if catalog is not None:
+        if catalog.has_any(ResourceRole.KAFKA):
+            return
+        raise click.UsageError("No kafka resource is configured for this deployment.")
     if ctx.env.kafka is None:
         raise click.UsageError("Kafka is not set")
 
 
 @kafka_group.command(name="create-topic")
+@_kafka_selector_option
 @click.argument('topic_name', required=False, default="logging-traffic-topic",
                 shell_complete=get_kafka_topic_completions)
 @click.pass_obj
-def create_topic_cmd(ctx, topic_name):
-    result = kafka_.create_topic(ctx.env.kafka, topic_name=topic_name)
+def create_topic_cmd(ctx, kafka_selector, topic_name):
+    result = kafka_.create_topic(resolve_kafka_resource(ctx, kafka_selector), topic_name=topic_name)
     click.echo(result.value)
 
 
 @kafka_group.command(name="list-topics")
+@_kafka_selector_option
 @click.pass_obj
-def list_topics_cmd(ctx):
-    result = kafka_.list_topics(ctx.env.kafka)
+def list_topics_cmd(ctx, kafka_selector):
+    result = kafka_.list_topics(resolve_kafka_resource(ctx, kafka_selector))
     click.echo(result.value)
 
 
 @kafka_group.command(name="delete-topic")
+@_kafka_selector_option
 @click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
               help="Flag to acknowledge risk and skip confirmation")
 @click.argument('topic_name', required=False, default="logging-traffic-topic",
                 shell_complete=get_kafka_topic_completions)
 @click.pass_obj
-def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
+def delete_topic_cmd(ctx, kafka_selector, acknowledge_risk, topic_name):
+    kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
     if acknowledge_risk:
-        result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
+        result = kafka_.delete_topic(kafka_resource, topic_name=topic_name)
         click.echo(result.value)
     else:
         if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
                          'topic. Are you sure you want to continue?'):
             click.echo(f"Performing delete topic operation on {topic_name} topic...")
-            result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
+            result = kafka_.delete_topic(kafka_resource, topic_name=topic_name)
             click.echo(result.value)
         else:
             click.echo("Aborting command.")
 
 
 DEFAULT_LEGACY_CONSUMER_GROUP = "logging-group-default"
+DEFAULT_LEGACY_TOPIC = "logging-traffic-topic"
 
 
-def _resolve_default_consumer_group(env) -> str:
+def _consumer_group_hint(groups: Sequence[str]) -> str:
+    return f"Specify: GROUP_NAME <{'|'.join(groups)}>."
+
+
+def _resolve_default_consumer_group(env, kafka_selector=None) -> str:
     """Pick the consumer group `describe-consumer-group` uses when the caller
     omits the argument.
 
     Workflow-driven deployments (k8s/EKS) set group IDs of the form
     `replayer-<targetLabel>` per fullMigration.ts; the legacy CDK/docker
     deployments and the local dev environment use `logging-group-default`.
-    Prefer the workflow-resolved group when available so CDC integ tests
-    and operators don't have to memorize the deploy-specific name.
+    Infer a workflow group only when the selected kafka has exactly one
+    configured group.
     """
+    catalog = _resource_catalog(env)
+    if catalog is not None and not hasattr(catalog, "_legacy_env"):
+        kafka_name = catalog.resolve(ResourceRole.KAFKA, kafka_selector).ref_name
+        groups = catalog.consumer_group_names(kafka_selector)
+        if len(groups) == 1:
+            return groups[0]
+        if not groups:
+            kafka_arg = f" --kafka {kafka_name}" if kafka_name else ""
+            raise click.UsageError(
+                f"No consumer groups are configured for kafka resource '{kafka_name}'. "
+                "Specify GROUP_NAME explicitly, or run "
+                f"`console kafka list-consumer-groups{kafka_arg}` to inspect Kafka directly."
+            )
+        raise click.UsageError(
+            f"Multiple consumer groups are configured for kafka resource '{kafka_name}': "
+            f"{', '.join(groups)}.\n{_consumer_group_hint(groups)}"
+        )
+
     groups = list(getattr(env, "kafka_consumer_groups", None) or [])
-    if groups:
+    if len(groups) == 1:
         return groups[0]
+    if len(groups) > 1:
+        raise click.UsageError(
+            f"Multiple consumer groups are configured: {', '.join(groups)}.\n{_consumer_group_hint(groups)}"
+        )
     return DEFAULT_LEGACY_CONSUMER_GROUP
 
 
+def _topic_hint(topics: Sequence[str]) -> str:
+    return f"Specify: TOPIC_NAME <{'|'.join(topics)}>."
+
+
+def _non_internal_topics(result) -> list[str]:
+    return [
+        topic
+        for topic in _command_result_values(result)
+        if not topic.startswith("__")
+    ]
+
+
+def _resolve_default_topic_name(env, kafka_selector, kafka_resource) -> str:
+    catalog = _resource_catalog(env)
+    if catalog is None or hasattr(catalog, "_legacy_env"):
+        return DEFAULT_LEGACY_TOPIC
+
+    kafka_name = catalog.resolve(ResourceRole.KAFKA, kafka_selector).ref_name
+    topics_result = kafka_.list_topics(kafka_resource)
+    if not topics_result.success:
+        raise click.UsageError(f"Unable to list topics for kafka resource '{kafka_name}'. Specify TOPIC_NAME.")
+
+    topics = _non_internal_topics(topics_result)
+    if len(topics) == 1:
+        return topics[0]
+    if not topics:
+        raise click.UsageError(
+            f"No non-internal topics are available for kafka resource '{kafka_name}'. "
+            "Specify TOPIC_NAME explicitly, or run "
+            f"`console kafka list-topics --kafka {kafka_name}` to inspect Kafka directly."
+        )
+    raise click.UsageError(
+        f"Multiple topics are available for kafka resource '{kafka_name}': {', '.join(topics)}.\n"
+        f"{_topic_hint(topics)}"
+    )
+
+
 @kafka_group.command(name="describe-consumer-group")
+@_kafka_selector_option
 @click.argument('group_name', required=False, default=None,
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
-def describe_group_command(ctx, group_name):
+def describe_group_command(ctx, kafka_selector, group_name):
+    kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
     if group_name is None:
-        group_name = _resolve_default_consumer_group(ctx.env)
-    result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
+        group_name = _resolve_default_consumer_group(ctx.env, kafka_selector)
+    result = kafka_.describe_consumer_group(kafka_resource, group_name=group_name)
     click.echo(result.value)
 
 
 @kafka_group.command(name="list-consumer-groups")
+@_kafka_selector_option
 @click.pass_obj
-def list_consumer_groups_cmd(ctx):
-    result = kafka_.list_consumer_groups(ctx.env.kafka)
+def list_consumer_groups_cmd(ctx, kafka_selector):
+    result = kafka_.list_consumer_groups(resolve_kafka_resource(ctx, kafka_selector))
     click.echo(result.value)
 
 
 @kafka_group.command(name="describe-topic-records")
-@click.argument('topic_name', required=False, default="logging-traffic-topic",
+@_kafka_selector_option
+@click.argument('topic_name', required=False, default=None,
                 shell_complete=get_kafka_topic_completions)
 @click.pass_obj
-def describe_topic_records_cmd(ctx, topic_name):
-    result = kafka_.describe_topic_records(ctx.env.kafka, topic_name=topic_name)
+def describe_topic_records_cmd(ctx, kafka_selector, topic_name):
+    kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
+    if topic_name is None:
+        topic_name = _resolve_default_topic_name(ctx.env, kafka_selector, kafka_resource)
+    result = kafka_.describe_topic_records(kafka_resource, topic_name=topic_name)
     click.echo(result.value)
 
 

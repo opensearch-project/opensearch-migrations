@@ -172,7 +172,7 @@ public class SolrBackupSource implements DocumentSource {
             log.atInfo().setMessage("Parsed shard mappings for {} shard(s) from {}").addArgument(result.size()).addArgument(metadataDir).log();
             return result;
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to read shard metadata from " + metadataDir, e);
+            throw new SolrBackupReadException("Failed to read shard metadata from " + metadataDir, e);
         }
     }
 
@@ -215,14 +215,14 @@ public class SolrBackupSource implements DocumentSource {
                 .toList();
 
             if (shardDirs.isEmpty()) {
-                throw new IllegalStateException(
+                throw new SolrBackupReadException(
                     "No Lucene segments found in backup directory: " + backupDir
                         + ". Expected segments_N files in the directory or its subdirectories.");
             }
             log.atInfo().setMessage("Discovered {} shard(s) in backup: {}").addArgument(shardDirs.size()).addArgument(backupDir).log();
             return shardDirs;
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list backup directory: " + backupDir, e);
+            throw new SolrBackupReadException("Failed to list backup directory: " + backupDir, e);
         }
     }
 
@@ -231,7 +231,7 @@ public class SolrBackupSource implements DocumentSource {
         try (var stream = Files.list(dir)) {
             return stream.anyMatch(p -> p.getFileName().toString().startsWith(SEGMENTS_FILE_PREFIX));
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list directory: " + dir, e);
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
         }
     }
 
@@ -314,9 +314,9 @@ public class SolrBackupSource implements DocumentSource {
                 .map(p -> p.getFileName().toString())
                 .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No segments_N file found in: " + dir));
+                .orElseThrow(() -> new SolrBackupReadException("No segments_N file found in: " + dir));
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list directory: " + dir, e);
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
         }
     }
 

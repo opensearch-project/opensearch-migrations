@@ -18,6 +18,7 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -167,10 +168,17 @@ public class ShimMain {
             description = "Port for the health check endpoint. If not set, no health server is started.")
         public int healthPort = -1;
 
-        @Parameter(names = {"--otelCollectorEndpoint"},
-            description = "OpenTelemetry Collector endpoint URL (e.g. http://localhost:4317). "
-                + "If not set, instrumentation runs in no-op mode.")
-        public String otelCollectorEndpoint;
+        @Parameter(
+            names = {"--otelTraceCollectorEndpoint", "--otel-trace-collector-endpoint"},
+            description = "OpenTelemetry Collector endpoint URL for traces. " +
+                "If not set, trace export is disabled.")
+        public String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            names = {"--otelMetricsCollectorEndpoint", "--otel-metrics-collector-endpoint"},
+            description = "OpenTelemetry Collector endpoint URL for metrics. " +
+                "If not set, metric export is disabled.")
+        public String otelMetricsCollectorEndpoint;
 
         @Parameter(names = {"--watchTransforms"},
             description = "Watch transform JS files for changes and hot-reload them.")
@@ -229,8 +237,10 @@ public class ShimMain {
         Set<String> activeTargets = parseActiveTargets(params, targets);
         List<ValidationRule> validators = parseValidators(params);
 
-        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(
-            params.otelCollectorEndpoint, "shimProxy", "shim-" + params.listenPort);
+        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+            new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
+            "shimProxy",
+            "shim-" + params.listenPort);
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 

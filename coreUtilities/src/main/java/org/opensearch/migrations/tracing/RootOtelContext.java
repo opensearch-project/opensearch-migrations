@@ -1,5 +1,7 @@
 package org.opensearch.migrations.tracing;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -32,25 +34,24 @@ public class RootOtelContext implements IRootOtelContext {
     @Getter
     private final IContextTracker contextTracker;
 
-    public static OpenTelemetry initializeOpenTelemetryForCollector(
-        @NonNull String collectorEndpoint,
+    public static OpenTelemetry initializeOpenTelemetryForCollectors(
+        @NonNull OtelCollectorEndpoints collectorEndpoints,
         @NonNull String serviceName,
         @NonNull String nodeName
     ) {
-        final var spanProcessor = BatchSpanProcessor.builder(
-            OtlpGrpcSpanExporter.builder().setEndpoint(collectorEndpoint).setTimeout(2, TimeUnit.SECONDS).build()
-        ).build();
-        final var metricReader = PeriodicMetricReader.builder(
-            OtlpGrpcMetricExporter.builder()
-                .setEndpoint(collectorEndpoint)
-                // see https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/prometheus/
-                // "A Prometheus Exporter MUST only support Cumulative Temporality."
-                // .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
-                .build()
-        ).setInterval(Duration.ofMillis(1000)).build();
+        var openTelemetryBuilder = OpenTelemetrySdk.builder();
 
-        var openTelemetrySdk = OpenTelemetrySdk.builder()
-            .setTracerProvider(
+        var normalizedTraceEndpoint = Optional.ofNullable(collectorEndpoints.getTraceEndpoint())
+            .map(endpoint -> normalizeOtlpEndpoint(endpoint, "trace"));
+        if (normalizedTraceEndpoint.isPresent()) {
+            final var spanProcessor = BatchSpanProcessor.builder(
+                OtlpGrpcSpanExporter.builder()
+                    .setEndpoint(normalizedTraceEndpoint.get())
+                    .setTimeout(2, TimeUnit.SECONDS)
+                    .build()
+            ).build();
+
+            openTelemetryBuilder = openTelemetryBuilder.setTracerProvider(
                 SdkTracerProvider.builder()
                     .setResource(Resource.getDefault()
                         .toBuilder()
@@ -59,16 +60,32 @@ public class RootOtelContext implements IRootOtelContext {
                         .build())
                     .addSpanProcessor(spanProcessor)
                     .build()
-            )
-            .setMeterProvider(
+            );
+        }
+
+        var normalizedMetricsEndpoint = Optional.ofNullable(collectorEndpoints.getMetricsEndpoint())
+            .map(endpoint -> normalizeOtlpEndpoint(endpoint, "metrics"));
+        if (normalizedMetricsEndpoint.isPresent()) {
+            final var metricReader = PeriodicMetricReader.builder(
+                OtlpGrpcMetricExporter.builder()
+                    .setEndpoint(normalizedMetricsEndpoint.get())
+                    // see https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/prometheus/
+                    // "A Prometheus Exporter MUST only support Cumulative Temporality."
+                    // .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
+                    .build()
+            ).setInterval(Duration.ofMillis(1000)).build();
+
+            openTelemetryBuilder = openTelemetryBuilder.setMeterProvider(
                 SdkMeterProvider.builder()
                     .setResource(Resource.getDefault()
                         .toBuilder()
                         .put(ResourceAttributes.SERVICE_NAME, serviceName)
                         .build())
                     .registerMetricReader(metricReader).build()
-            )
-            .build();
+            );
+        }
+
+        var openTelemetrySdk = openTelemetryBuilder.build();
 
         // Add hook to close SDK, which flushes logs
         Runtime.getRuntime().addShutdownHook(new Thread(openTelemetrySdk::close));
@@ -79,23 +96,50 @@ public class RootOtelContext implements IRootOtelContext {
         return OpenTelemetrySdk.builder().build();
     }
 
+    static String normalizeOtlpEndpoint(@NonNull String endpoint, @NonNull String signalName) {
+        var trimmedEndpoint = endpoint.trim();
+        if (trimmedEndpoint.isEmpty()) {
+            throw new IllegalArgumentException("OpenTelemetry " + signalName +
+                " endpoint cannot be blank; omit the endpoint option to disable " + signalName + " export");
+        }
+        var normalizedEndpoint = trimmedEndpoint.startsWith("http://") || trimmedEndpoint.startsWith("https://")
+            ? trimmedEndpoint
+            : "http://" + trimmedEndpoint;
+        try {
+            var uri = new URI(normalizedEndpoint);
+            if (!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) {
+                throw new IllegalArgumentException("OpenTelemetry " + signalName +
+                    " endpoint must use http or https: " + endpoint);
+            }
+            if (uri.getHost() == null || uri.getHost().isEmpty()) {
+                throw new IllegalArgumentException("OpenTelemetry " + signalName +
+                    " endpoint must include a host: " + endpoint);
+            }
+            return normalizedEndpoint;
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("OpenTelemetry " + signalName +
+                " endpoint is not a valid URI: " + endpoint, e);
+        }
+    }
+
     /**
-     * Initialize the Otel SDK for a collector if collectorEndpoint != null or setup an empty,
-     * do-nothing SDK when it is null.
-     * @param collectorEndpoint - URL of the otel-collector
+     * Initialize the Otel SDK for collectors when at least one signal endpoint is configured, or setup an empty,
+     * do-nothing SDK when all endpoints are null.
+     * @param collectorEndpoints - URLs of the otel-collectors by signal
      * @param serviceName - name of this service that is sending data to the collector
      * @return a fully initialize OpenTelemetry object capable of producing MeterProviders and TraceProviders
      */
-    public static OpenTelemetry initializeOpenTelemetryWithCollectorOrAsNoop(
-        String collectorEndpoint,
+    public static OpenTelemetry initializeOpenTelemetryWithCollectorsOrAsNoop(
+        OtelCollectorEndpoints collectorEndpoints,
         @NonNull String serviceName,
         @NonNull String instanceName
     ) {
-        return Optional.ofNullable(collectorEndpoint)
-            .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName, instanceName))
+        return Optional.ofNullable(collectorEndpoints)
+            .filter(endpoints -> endpoints.getTraceEndpoint() != null || endpoints.getMetricsEndpoint() != null)
+            .map(endpoints -> initializeOpenTelemetryForCollectors(endpoints, serviceName, instanceName))
             .orElseGet(() -> {
                 if (serviceName != null) {
-                    log.atWarn().setMessage("Collector endpoint=null, so serviceName parameter '{}'" +
+                    log.atWarn().setMessage("Collector endpoints are not configured, so serviceName parameter '{}'" +
                             " is being ignored since a no-op OpenTelemetry object is being created")
                         .addArgument(serviceName).log();
                 }
@@ -123,7 +167,7 @@ public class RootOtelContext implements IRootOtelContext {
                            @NonNull String serviceName,
                            @NonNull String instanceName) {
         this(scopeName, contextTracker,
-            initializeOpenTelemetryWithCollectorOrAsNoop(null, serviceName, instanceName));
+            initializeOpenTelemetryWithCollectorsOrAsNoop(OtelCollectorEndpoints.empty(), serviceName, instanceName));
     }
 
     public RootOtelContext(String scopeName, IContextTracker contextTracker, @NonNull OpenTelemetry sdk) {

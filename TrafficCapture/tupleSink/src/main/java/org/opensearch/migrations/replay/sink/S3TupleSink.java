@@ -11,6 +11,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 import org.opensearch.migrations.s3sink.RotationPolicy;
@@ -52,6 +53,9 @@ public class S3TupleSink implements TupleSink {
     // lock is needed and the Netty event loop is freed from gzip/serialize work. (The async S3 upload
     // and its retries run on SDK / the writer's own scheduler threads.)
     private final ScheduledExecutorService executor;
+    // Set on close() so accept() rejects late writes synchronously (rather than racing the executor
+    // shutdown), preserving the explicit IllegalStateException behavior from the accept-after-close fix.
+    private final AtomicBoolean closeRequested = new AtomicBoolean();
 
     public S3TupleSink(
         S3AsyncClient s3Client,
@@ -114,6 +118,10 @@ public class S3TupleSink implements TupleSink {
 
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
+        if (closeRequested.get()) {
+            future.completeExceptionally(new IllegalStateException("S3TupleSink is closed"));
+            return;
+        }
         // Serialize the tuple on the calling (event-loop) thread so a serialization failure can
         // be reported synchronously and the tupleMap isn't retained across threads. The actual
         // buffer write is marshalled onto the worker thread.
@@ -153,6 +161,7 @@ public class S3TupleSink implements TupleSink {
         // and waits for in-flight uploads (so pending tuple futures complete, triggering Kafka offset
         // commits) before the JVM exits. Without this, the replayer would re-deliver already-processed
         // messages on the next startup.
+        closeRequested.set(true);
         try {
             runAndAwaitOnWorker(writer::close);
         } finally {
