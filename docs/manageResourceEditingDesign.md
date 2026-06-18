@@ -57,6 +57,10 @@ TS does not run on cursor movement, normal manage polling refreshes, or every ke
 
 A long-lived helper remains only a latency optimization. If added, it is a manage-scoped stdio child process with the same JSON contracts, not a cluster service and not a network daemon.
 
+## External Configuration References
+
+External Secret, ConfigMap, image, and cert-manager issuer references are handled as schema-guided edit fields, not as migration CRs. The detailed picker, create-form, and standalone validation design lives in [Manage External Configuration References](manageExternalConfigurationReferencesDesign.md).
+
 ## Resource View Data Model
 
 The resource view combines three projections:
