@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -106,9 +107,7 @@ class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
         // record therefore fails.
         var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {
-                throw new IOException("S3 unavailable");
-            })
+            .uploader((bucket, key, file) -> CompletableFuture.failedFuture(new IOException("S3 unavailable")))
             .build();
         client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var h = harness(client);
@@ -128,7 +127,10 @@ class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
         var uploaded = new CopyOnWriteArrayList<String>();
         var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> uploaded.add(uri))
+            .uploader((bucket, key, file) -> {
+                uploaded.add("s3://" + bucket + "/" + key);
+                return CompletableFuture.completedFuture(null);
+            })
             .build();
         client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var h = harness(client);

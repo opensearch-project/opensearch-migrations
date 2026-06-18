@@ -2,8 +2,8 @@ package org.opensearch.migrations.reindexer.faileddocumentstream;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -11,6 +11,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
+
+import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +23,7 @@ import reactor.test.StepVerifier;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -40,10 +43,24 @@ class S3FailedDocumentStreamSinkTest {
 
     private record CapturedUpload(String s3Uri, byte[] data) {}
 
+    /**
+     * A test {@link RotatingGzipS3ObjectWriter.ObjectUploader} that records the staged gzip object's
+     * URI and bytes (read from the temp file before the writer deletes it on success).
+     */
+    private static RotatingGzipS3ObjectWriter.ObjectUploader capturing(java.util.List<CapturedUpload> captured) {
+        return (bucket, key, file) -> {
+            try {
+                captured.add(new CapturedUpload("s3://" + bucket + "/" + key, Files.readAllBytes(file)));
+            } catch (IOException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return CompletableFuture.completedFuture(null);
+        };
+    }
+
     @Test
     void writesGzippedNdjsonAndIsolatesBySession() throws Exception {
-        var captured = new ArrayList<CapturedUpload>();
-        S3FailedDocumentStreamSink.S3Uploader testUploader = (uri, data, region) -> captured.add(new CapturedUpload(uri, data));
+        var captured = new java.util.ArrayList<CapturedUpload>();
 
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("my-bucket")
@@ -51,7 +68,7 @@ class S3FailedDocumentStreamSinkTest {
             .sessionId("sess-A")
             .workerId("worker-1")
             .region("us-east-1")
-            .uploader(testUploader)
+            .uploader(capturing(captured))
             .build();
 
         var mapper = new ObjectMapper();
@@ -97,10 +114,10 @@ class S3FailedDocumentStreamSinkTest {
     void singleFlushSplitsRecordsIntoOnePerTargetIndex() {
         // Records for different indices buffered before one flush must land in separate
         // S3 objects, each keyed by its own index= segment.
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         sink.write(buildRecordForIndex("movies", "m-1")).subscribe();
@@ -117,10 +134,10 @@ class S3FailedDocumentStreamSinkTest {
     @Test
     void blankTargetIndexFallsBackToUnknownIndex() {
         // Covers the isBlank() branch of sanitizeIndex (the null test short-circuits it).
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         sink.write(buildRecordForIndex("   ", "d-1")).subscribe();
@@ -132,17 +149,22 @@ class S3FailedDocumentStreamSinkTest {
 
     @Test
     void flushUploadFailureMidLoopPropagatesAfterEarlierIndexUploaded() {
-        // Two indices are buffered; the first uploads fine, the second throws.
-        // Verifies the per-index flush loop surfaces the later failure as a Mono error
+        // Two indices are buffered; the first uploads fine, the second fails.
+        // Verifies the per-index flush surfaces the later failure as a Mono error
         // rather than swallowing it after an earlier successful upload.
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {
-                if (uri.contains("index=books/")) {
-                    throw new RuntimeException("second upload failed");
+            .uploader((bucket, key, file) -> {
+                if (key.contains("index=books/")) {
+                    return CompletableFuture.failedFuture(new RuntimeException("second upload failed"));
                 }
-                captured.add(new CapturedUpload(uri, data));
+                try {
+                    captured.add(new CapturedUpload("s3://" + bucket + "/" + key, Files.readAllBytes(file)));
+                } catch (IOException e) {
+                    return CompletableFuture.failedFuture(e);
+                }
+                return CompletableFuture.completedFuture(null);
             })
             .build();
 
@@ -162,10 +184,10 @@ class S3FailedDocumentStreamSinkTest {
 
     @Test
     void recordWithoutTargetIndexFallsBackToUnknownIndex() throws Exception {
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         var mapper = new ObjectMapper();
@@ -184,13 +206,13 @@ class S3FailedDocumentStreamSinkTest {
 
     @Test
     void rotatesMidShardWhenBufferExceedsThresholdAndFlushesRemainder() throws Exception {
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var recBytes = new ObjectMapper().writeValueAsBytes(buildRecordForIndex("idx", "d1")).length + 1;
         // Threshold fits one record but is crossed by the second, forcing a mid-shard rotation.
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
             .maxBufferBytes(recBytes + 1)
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         sink.write(buildRecordForIndex("idx", "d1")).subscribe();
@@ -216,7 +238,7 @@ class S3FailedDocumentStreamSinkTest {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
             .maxBufferBytes(1)   // rotate on every write
-            .uploader((uri, data, region) -> {
+            .uploader((bucket, key, file) -> {
                 throw new RuntimeException("rotate upload failed");
             })
             .build();
@@ -245,7 +267,7 @@ class S3FailedDocumentStreamSinkTest {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
             .maxBufferBytes(2048)   // small cap so rotations also race with writes/flushes
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         int threads = 8;
@@ -291,7 +313,7 @@ class S3FailedDocumentStreamSinkTest {
             .sessionId("sess-XYZ")
             .workerId("w")
             .region("us-east-1")
-            .uploader((uri, data, region) -> {})
+            .uploader((bucket, key, file) -> CompletableFuture.completedFuture(null))
             .build();
         assertThat(sink.getLocation(), equalTo("s3://b/foo/bar/session=sess-XYZ/"));
         assertThat(sink, notNullValue());
@@ -303,7 +325,7 @@ class S3FailedDocumentStreamSinkTest {
         // mandatory "rfs-failed-document-stream/" segment.
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {}).build();
+            .uploader((bucket, key, file) -> CompletableFuture.completedFuture(null)).build();
         assertThat(sink.getLocation(), equalTo("s3://b/session=s/"));
     }
 
@@ -311,7 +333,7 @@ class S3FailedDocumentStreamSinkTest {
     void nullPrefixIsTreatedAsEmpty() {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix(null).sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {}).build();
+            .uploader((bucket, key, file) -> CompletableFuture.completedFuture(null)).build();
         assertThat(sink.getLocation(), equalTo("s3://b/session=s/"));
     }
 
@@ -320,10 +342,10 @@ class S3FailedDocumentStreamSinkTest {
         // The flush contract is "make whatever's buffered durable" — when nothing
         // is buffered, there's nothing to upload and the returned Mono should
         // complete without invoking the uploader.
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         sink.flush().block();
@@ -335,7 +357,7 @@ class S3FailedDocumentStreamSinkTest {
     void writeAfterCloseReturnsError() {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {}).build();
+            .uploader((bucket, key, file) -> CompletableFuture.completedFuture(null)).build();
         sink.close();
 
         // After close, future writes must surface IllegalStateException through
@@ -347,10 +369,10 @@ class S3FailedDocumentStreamSinkTest {
 
     @Test
     void closeIsIdempotent() {
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
         sink.write(buildRecord("doc-1")).subscribe();
         sink.close();
@@ -362,20 +384,20 @@ class S3FailedDocumentStreamSinkTest {
 
     @Test
     void closeWithoutAnyWritesIsSafe() {
-        // Constructor finishes with gzipOut == null; closing here must not NPE.
+        // No writers were ever created; closing here must not NPE.
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {}).build();
+            .uploader((bucket, key, file) -> CompletableFuture.completedFuture(null)).build();
         sink.close();   // no exception
         assertThat(sink.getLocation(), equalTo("s3://b/p/session=s/"));
     }
 
     @Test
     void closeAfterWritesUploadsBufferedData() {
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
         sink.write(buildRecord("doc-1")).subscribe();
         sink.close();
@@ -386,9 +408,8 @@ class S3FailedDocumentStreamSinkTest {
     void uploaderIoExceptionPropagatesAsMonoError() {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {
-                throw new IOException("S3 unreachable");
-            }).build();
+            .uploader((bucket, key, file) ->
+                CompletableFuture.failedFuture(new IOException("S3 unreachable"))).build();
         sink.write(buildRecord("doc-1")).subscribe();
 
         StepVerifier.create(sink.flush())
@@ -401,7 +422,7 @@ class S3FailedDocumentStreamSinkTest {
     void uploaderRuntimeExceptionPropagatesAsMonoError() {
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> {
+            .uploader((bucket, key, file) -> {
                 throw new RuntimeException("auth failure");
             }).build();
         sink.write(buildRecord("doc-1")).subscribe();
@@ -416,10 +437,10 @@ class S3FailedDocumentStreamSinkTest {
     void sequenceCounterIncrementsAcrossFlushes() {
         // The S3 key embeds a monotonically increasing sequence so two flushes
         // produce two distinct objects even within the same wall-clock second.
-        var captured = new ArrayList<CapturedUpload>();
+        var captured = new java.util.ArrayList<CapturedUpload>();
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
-            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .uploader(capturing(captured))
             .build();
 
         sink.write(buildRecord("a")).subscribe();
@@ -436,22 +457,27 @@ class S3FailedDocumentStreamSinkTest {
     }
 
     @Test
-    void s3ClientUploader_parsesUriAndIssuesPutObject() {
-        // Cover the static factory s3ClientUploader: it must parse "s3://bucket/key"
-        // into bucket + key and call S3AsyncClient.putObject with both set.
+    void s3ClientUploader_issuesPutObjectFromStagedFile() throws Exception {
+        // Cover the static factory s3ClientUploader: it must call S3AsyncClient.putObject with the
+        // given bucket/key and a file-backed request body.
         var s3Client = mock(S3AsyncClient.class);
         when(s3Client.putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class)))
-            .thenReturn(CompletableFuture.completedFuture(null));
+            .thenReturn(CompletableFuture.completedFuture(PutObjectResponse.builder().build()));
 
         var uploader = S3FailedDocumentStreamSink.s3ClientUploader(s3Client);
-        assertDoesNotThrow(
-            () -> uploader.upload("s3://my-bucket/path/to/object.gz", new byte[]{1, 2, 3}, "us-west-2"));
+        var tmp = Files.createTempFile("fds-test-", ".gz");
+        try {
+            assertDoesNotThrow(() ->
+                uploader.upload("my-bucket", "path/to/object.gz", tmp).get(2, TimeUnit.SECONDS));
 
-        ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
-        verify(s3Client).putObject(req.capture(), any(AsyncRequestBody.class));
-        assertThat(req.getValue().bucket(), equalTo("my-bucket"));
-        assertThat(req.getValue().key(), equalTo("path/to/object.gz"));
-        assertThat(req.getValue().contentType(), equalTo("application/gzip"));
+            ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
+            verify(s3Client).putObject(req.capture(), any(AsyncRequestBody.class));
+            assertThat(req.getValue().bucket(), equalTo("my-bucket"));
+            assertThat(req.getValue().key(), equalTo("path/to/object.gz"));
+            assertThat(req.getValue().contentType(), equalTo("application/gzip"));
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     private static FailedDocumentStreamRecord buildRecord(String docId) {

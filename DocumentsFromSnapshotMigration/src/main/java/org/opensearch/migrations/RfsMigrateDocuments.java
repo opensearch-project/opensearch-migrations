@@ -921,8 +921,14 @@ public class RfsMigrateDocuments {
 
         var s3ClientBuilder = S3AsyncClient.builder()
             .region(Region.of(region));
-        if (arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null) {
-            s3ClientBuilder.endpointOverride(URI.create(arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint));
+        // Mirror the region fallback above: if no failed-document-stream-specific endpoint was resolved,
+        // fall back to the snapshot's --s3-endpoint so custom-S3 (LocalStack/MinIO) uploads don't silently
+        // go to the default AWS endpoint while snapshot reads use the override.
+        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
+            : arguments.s3Endpoint;
+        if (endpoint != null && !endpoint.isBlank()) {
+            s3ClientBuilder.endpointOverride(URI.create(endpoint));
         }
         var s3Client = s3ClientBuilder.build();
 

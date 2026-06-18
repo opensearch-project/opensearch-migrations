@@ -3,11 +3,13 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.Version;
@@ -22,6 +24,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
+import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -451,13 +454,17 @@ class RfsFailedDocumentStreamIntegrationTest {
     private static class S3Capture {
         private final List<CapturedObject> objects = new ArrayList<>();
 
-        S3FailedDocumentStreamSink.S3Uploader captureUploader() {
-            return (s3Uri, data, region) -> {
-                // Extract the key from s3://bucket/key
-                var key = s3Uri.replaceFirst("s3://[^/]+/", "");
-                synchronized (objects) {
-                    objects.add(new CapturedObject(key, data));
+        RotatingGzipS3ObjectWriter.ObjectUploader captureUploader() {
+            return (bucket, key, file) -> {
+                try {
+                    var data = Files.readAllBytes(file);
+                    synchronized (objects) {
+                        objects.add(new CapturedObject(key, data));
+                    }
+                } catch (IOException e) {
+                    return CompletableFuture.failedFuture(e);
                 }
+                return CompletableFuture.completedFuture(null);
             };
         }
 

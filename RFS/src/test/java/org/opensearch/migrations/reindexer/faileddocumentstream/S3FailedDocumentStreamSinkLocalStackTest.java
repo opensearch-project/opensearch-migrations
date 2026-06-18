@@ -35,9 +35,10 @@ import static org.hamcrest.Matchers.hasSize;
 
 /**
  * Real-S3 round-trip for {@link S3FailedDocumentStreamSink} against LocalStack: exercises the actual
- * {@link S3FailedDocumentStreamSink#s3ClientUploader} → AWS SDK {@code PutObject} path (URI parsing, byte body,
- * content-type) and reads the objects back to confirm key layout and gzipped NDJSON content —
- * none of which the in-process uploader in {@code S3FailedDocumentStreamSinkTest} covers.
+ * {@link S3FailedDocumentStreamSink#s3ClientUploader} → AWS SDK {@code PutObject} path (temp-file
+ * staging via {@code AsyncRequestBody.fromFile}, content-type) and reads the objects back to confirm
+ * key layout and gzipped NDJSON content — none of which the in-process uploader in
+ * {@code S3FailedDocumentStreamSinkTest} covers.
  */
 @Tag("isolatedTest")
 @Testcontainers

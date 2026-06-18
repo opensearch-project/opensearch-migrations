@@ -1,51 +1,47 @@
 package org.opensearch.migrations.reindexer.faileddocumentstream;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.time.Instant;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.zip.GZIPOutputStream;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
+import org.opensearch.migrations.s3sink.RotationPolicy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
-import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
- * failed document stream sink backed by S3. Buffers gzipped NDJSON records in memory and uploads
- * completed objects to S3 on {@link #flush()} and {@link #close()}.
- *
- * <p>For testing, an {@link S3Uploader} can be injected instead of a real
- * {@link S3AsyncClient} to capture uploads in-process.
+ * failed document stream sink backed by S3. Records are split per target index and each index streams
+ * to its own rotating gzip S3 object via the shared {@link RotatingGzipS3ObjectWriter} (the same
+ * durability-sensitive writer used by the replayer's tuple sink). This class adds the
+ * failed-document-stream concerns on top: per-index multiplexing, the {@code session/index/worker} key
+ * layout, and the at-least-once gating contract.
  *
  * <p>S3 key layout:
  * <pre>
  *   s3://&lt;bucket&gt;/&lt;prefix&gt;session=&lt;sessionId&gt;/index=&lt;targetIndex&gt;/worker=&lt;workerId&gt;/failed-document-stream-&lt;ts&gt;-&lt;seq&gt;.ndjson.gz
  * </pre>
  *
- * <p>Records are buffered per target index and one S3 object is uploaded per index on
- * each flush, so the {@code index=&lt;targetIndex&gt;} segment in the key always matches the
- * documents inside that object. {@link #getLocation()} still points at the session prefix
- * ({@code .../session=&lt;sessionId&gt;/}), which contains every index's records for the run.
+ * <p>{@link #getLocation()} points at the session prefix ({@code .../session=&lt;sessionId&gt;/}),
+ * which contains every index's records for the run.
  *
- * <p><b>Memory bounding:</b> to avoid unbounded heap growth when a single shard produces a
- * very large number of terminal failures, each index buffer is rotated to a fresh S3 object
- * once its accumulated <em>uncompressed</em> size crosses {@code maxBufferBytes} (default
- * {@value #DEFAULT_MAX_BUFFER_BYTES} bytes). Rotation uploads inline during {@link #write(FailedDocumentStreamRecord)},
- * so in-memory buffering stays bounded by roughly {@code maxBufferBytes} per active index
- * regardless of how many records fail. The per-shard {@link #flush()} still uploads whatever
- * remains below the threshold, preserving the durability-before-complete contract. If a
- * rotation upload fails mid-shard, the error is retained so the next {@link #flush()} also
- * fails — the work item is not marked complete and a successor reprocesses the partition.
+ * <p><b>Memory bounding:</b> each index's writer stages its gzip to a local temp file and rotates to a
+ * fresh S3 object once its accumulated <em>uncompressed</em> size crosses {@code maxBufferBytes}
+ * (default {@value #DEFAULT_MAX_BUFFER_BYTES} bytes), so heap stays bounded regardless of how many
+ * records fail.
+ *
+ * <p><b>At-least-once gating:</b> the writer is configured fail-fast (no upload retry). A failed
+ * rotation upload makes the gating {@link #flush()} fail too, so the work item is not marked complete
+ * and a successor reprocesses the partition and re-emits the failures (deduped downstream).
  */
 @Slf4j
 public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
@@ -53,10 +49,11 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
-    @FunctionalInterface
-    public interface S3Uploader {
-        void upload(String s3Uri, byte[] data, String region) throws IOException;
-    }
+    /** Default index segment when a record carries no target index. */
+    private static final String UNKNOWN_INDEX = "unknown-index";
+
+    /** Default per-index uncompressed rotation threshold: 64 MiB. */
+    public static final long DEFAULT_MAX_BUFFER_BYTES = 64L * 1024 * 1024;
 
     private final String bucket;
     private final String prefix;
@@ -64,38 +61,17 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
     private final String workerId;
     private final String region;
     private final String location;
-    private final S3Uploader uploader;
-    private final AtomicLong sequenceCounter = new AtomicLong();
-
-    /** Default index segment when a record carries no target index. */
-    private static final String UNKNOWN_INDEX = "unknown-index";
-
-    /** Default per-index in-memory rotation threshold (uncompressed bytes): 64 MiB. */
-    public static final long DEFAULT_MAX_BUFFER_BYTES = 64L * 1024 * 1024;
-
-    /** One in-memory gzip buffer per target index, flushed to a distinct S3 object. */
-    private static final class IndexBuffer {
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        final GZIPOutputStream gzipOut;
-        /** Uncompressed bytes written so far; drives rotation independent of compression ratio. */
-        long uncompressedBytes;
-
-        IndexBuffer() throws IOException {
-            gzipOut = new GZIPOutputStream(buffer);
-        }
-    }
-
-    // Guards buffers/pendingUploadError/closed. Bulk writes run concurrently (batchConcurrency
-    // defaults to 10) and the per-batch flush runs on the pipeline emission thread, so buffer
-    // mutation must be synchronized. S3 uploads are intentionally performed OUTSIDE this lock
-    // (on a buffer already removed from the map) so a slow PutObject never blocks other writers.
-    private final Object lock = new Object();
-    // Keyed by target index, insertion-ordered so flush uploads are deterministic.
-    private final Map<String, IndexBuffer> buffers = new LinkedHashMap<>();
+    private final RotatingGzipS3ObjectWriter.ObjectUploader uploader;
     private final long maxBufferBytes;
-    // First rotation-upload failure, if any. Retained so the gating flush() also fails and
-    // the work item is not marked complete (a successor then reprocesses and re-emits).
-    private Throwable pendingUploadError;
+
+    // Guards the per-index writer map and the closed flag. Bulk writes run concurrently
+    // (batchConcurrency defaults to 10) and the per-batch flush runs on the pipeline emission thread,
+    // so all access to a writer is serialized through this lock (the writer itself is not internally
+    // synchronized). Synchronous uploads happen under the lock; production async uploads return
+    // immediately so a slow PutObject doesn't block other writers.
+    private final Object lock = new Object();
+    private final Map<String, RotatingGzipS3ObjectWriter<FailedDocumentStreamRecord>> writers =
+        new LinkedHashMap<>();
     private boolean closed;
 
     @Builder
@@ -105,7 +81,7 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         String sessionId,
         String workerId,
         String region,
-        S3Uploader uploader,
+        RotatingGzipS3ObjectWriter.ObjectUploader uploader,
         long maxBufferBytes
     ) {
         this.bucket = bucket;
@@ -117,6 +93,8 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         // A non-positive value (including the Lombok default for an unset long) means "use default".
         this.maxBufferBytes = maxBufferBytes > 0 ? maxBufferBytes : DEFAULT_MAX_BUFFER_BYTES;
         this.location = "s3://" + bucket + "/" + this.prefix + "session=" + sessionId + "/";
+        log.atDebug().setMessage("failed document stream sink at {} (region={})")
+            .addArgument(location).addArgument(region).log();
     }
 
     private static String normalizePrefix(String raw) {
@@ -124,48 +102,48 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         return raw.endsWith("/") ? raw : raw + "/";
     }
 
+    private RotatingGzipS3ObjectWriter<FailedDocumentStreamRecord> newWriter(String index) {
+        RotatingGzipS3ObjectWriter.KeyFactory keyFactory = (now, seq) ->
+            prefix + "session=" + sessionId + "/index=" + index + "/worker=" + workerId
+                + "/failed-document-stream-" + TIMESTAMP_FORMAT.format(now) + "-" + seq + ".ndjson.gz";
+        return new RotatingGzipS3ObjectWriter<>(
+            uploader,
+            bucket,
+            keyFactory,
+            MAPPER::writeValueAsBytes,
+            RotationPolicy.ofBytes(maxBufferBytes),
+            Duration.ZERO,   // no retry delay; fail-fast (attempt count 1) below
+            1,               // fail fast: a failed upload blocks the gating flush so a successor reprocesses
+            "fds-");
+    }
+
     @Override
     public Mono<Void> write(FailedDocumentStreamRecord failedDocumentStreamRecord) {
-        // Buffer mutation under the lock; capture a buffer to rotate if the cap is crossed.
-        String rotateIndex = null;
-        IndexBuffer rotateBuffer = null;
+        CompletableFuture<Void> objectFuture;
         synchronized (lock) {
             if (closed) {
                 return Mono.error(new IllegalStateException("S3FailedDocumentStreamSink is closed"));
             }
             try {
                 var index = sanitizeIndex(failedDocumentStreamRecord.getTargetIndex());
-                var indexBuffer = buffers.get(index);
-                if (indexBuffer == null) {
-                    indexBuffer = new IndexBuffer();
-                    buffers.put(index, indexBuffer);
+                var writer = writers.get(index);
+                if (writer == null) {
+                    writer = newWriter(index);
+                    writers.put(index, writer);
                 }
-                byte[] json = MAPPER.writeValueAsBytes(failedDocumentStreamRecord);
-                indexBuffer.gzipOut.write(json);
-                indexBuffer.gzipOut.write('\n');
-                indexBuffer.uncompressedBytes += (long) json.length + 1;
-                // Rotate to a fresh S3 object once this index's buffer crosses the cap, so a
-                // shard with a huge number of failures can't grow the heap without bound.
-                if (indexBuffer.uncompressedBytes >= maxBufferBytes) {
-                    rotateIndex = index;
-                    rotateBuffer = buffers.remove(index);
-                }
-            } catch (IOException e) {
+                objectFuture = writer.write(failedDocumentStreamRecord);
+            } catch (Exception e) {
                 return Mono.error(e);
             }
         }
-        // Upload the rotated object outside the lock (it's been removed from the map, so no
-        // other thread can touch it). A failure is recorded so the gating flush() also fails.
-        if (rotateBuffer != null) {
+        // A synchronous (fail-fast) rotation-upload failure surfaces here immediately; the writer also
+        // retains it so the gating flush() fails once more. A failed serialization/gzip append surfaces
+        // here too but is not retained (no rotation happened), matching per-record error semantics.
+        if (objectFuture.isCompletedExceptionally()) {
             try {
-                uploadBuffer(rotateIndex, rotateBuffer);
-            } catch (Exception e) {
-                synchronized (lock) {
-                    if (pendingUploadError == null) {
-                        pendingUploadError = e;
-                    }
-                }
-                return Mono.error(e);
+                objectFuture.getNow(null);
+            } catch (Throwable t) {
+                return Mono.error(unwrap(t));
             }
         }
         return Mono.empty();
@@ -173,53 +151,15 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
 
     @Override
     public Mono<Void> flush() {
-        // Drain the buffers and any prior rotation error under the lock; a failed upload then
-        // discards those in-memory records (mirroring the prior single-buffer behavior). The
-        // work-item lease then expires and a successor reprocesses the partition, re-emitting
-        // the failures. Uploads run outside the lock so concurrent writes aren't blocked on S3.
-        Map<String, IndexBuffer> pending;
-        Throwable priorError;
+        CompletableFuture<Void> all;
         synchronized (lock) {
-            pending = new LinkedHashMap<>(buffers);
-            buffers.clear();
-            // Consume any prior rotation failure here so it blocks completion exactly once and a
-            // later shard reusing this sink isn't penalized.
-            priorError = pendingUploadError;
-            pendingUploadError = null;
-        }
-
-        for (var entry : pending.entrySet()) {
-            try {
-                uploadBuffer(entry.getKey(), entry.getValue());
-            } catch (Exception e) {
-                return Mono.error(e);
+            var futures = new ArrayList<CompletableFuture<Void>>(writers.size());
+            for (var writer : writers.values()) {
+                futures.add(writer.flush());
             }
+            all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
         }
-        // A rotation upload that failed earlier in this shard must still block completion.
-        if (priorError != null) {
-            return Mono.error(priorError);
-        }
-        return Mono.empty();
-    }
-
-    /**
-     * Finish the gzip stream for one index buffer and upload it as a single S3 object.
-     * Propagates any failure to the caller (gzip {@link IOException} or an uploader error)
-     * after logging it.
-     */
-    private void uploadBuffer(String index, IndexBuffer indexBuffer) throws IOException {
-        indexBuffer.gzipOut.finish();
-        indexBuffer.gzipOut.close();
-        byte[] data = indexBuffer.buffer.toByteArray();
-        var s3Uri = "s3://" + bucket + "/" + buildS3Key(index);
-        try {
-            uploader.upload(s3Uri, data, region);
-        } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Failed to upload failed document stream object {}").addArgument(s3Uri).log();
-            throw e;
-        }
-        log.atInfo().setMessage("failed document stream upload complete: {} ({} bytes)")
-            .addArgument(s3Uri).addArgument(data.length).log();
+        return Mono.fromFuture(all).onErrorMap(S3FailedDocumentStreamSink::unwrap);
     }
 
     @Override
@@ -229,24 +169,23 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
 
     @Override
     public void close() {
-        boolean needsFlush;
+        Map<String, RotatingGzipS3ObjectWriter<FailedDocumentStreamRecord>> toClose;
         synchronized (lock) {
-            if (closed) return;
+            if (closed) {
+                return;
+            }
             closed = true;
-            needsFlush = !buffers.isEmpty() || pendingUploadError != null;
+            toClose = new LinkedHashMap<>(writers);
         }
-        // flush() reacquires the lock; call it outside our critical section to keep the
-        // S3 upload off the lock.
-        if (needsFlush) {
-            flush().block();
+        // close() flushes each writer's remainder and waits for in-flight uploads (durability before
+        // returning). Errors are logged rather than thrown — close is best-effort cleanup.
+        for (var writer : toClose.values()) {
+            try {
+                writer.close();
+            } catch (Exception e) {
+                log.atWarn().setCause(e).setMessage("Error closing a failed-document-stream writer").log();
+            }
         }
-    }
-
-    private String buildS3Key(String index) {
-        var timestamp = TIMESTAMP_FORMAT.format(Instant.now());
-        var seq = sequenceCounter.getAndIncrement();
-        return prefix + "session=" + sessionId + "/index=" + index + "/worker=" + workerId
-            + "/failed-document-stream-" + timestamp + "-" + seq + ".ndjson.gz";
     }
 
     /**
@@ -258,22 +197,19 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         return (index == null || index.isBlank()) ? UNKNOWN_INDEX : index;
     }
 
+    /** Strip the {@link CompletionException} wrapper(s) so callers see the original upload/IO error. */
+    private static Throwable unwrap(Throwable t) {
+        while (t instanceof CompletionException && t.getCause() != null) {
+            t = t.getCause();
+        }
+        return t;
+    }
+
     /**
-     * Creates an {@link S3Uploader} backed by the given {@link S3AsyncClient}.
-     * Parses the {@code s3://bucket/key} URI and issues a blocking PutObject.
+     * Creates an {@link RotatingGzipS3ObjectWriter.ObjectUploader} backed by the given
+     * {@link S3AsyncClient}, streaming the staged temp file with {@code AsyncRequestBody.fromFile}.
      */
-    public static S3Uploader s3ClientUploader(S3AsyncClient s3Client) {
-        return (s3Uri, data, region) -> {
-            var stripped = s3Uri.replaceFirst("^s3://", "");
-            var slashIdx = stripped.indexOf('/');
-            var putBucket = stripped.substring(0, slashIdx);
-            var putKey = stripped.substring(slashIdx + 1);
-            var request = PutObjectRequest.builder()
-                .bucket(putBucket)
-                .key(putKey)
-                .contentType("application/gzip")
-                .build();
-            s3Client.putObject(request, AsyncRequestBody.fromBytes(data)).join();
-        };
+    public static RotatingGzipS3ObjectWriter.ObjectUploader s3ClientUploader(S3AsyncClient s3Client) {
+        return RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client);
     }
 }
