@@ -57,6 +57,9 @@ PATCH_OUTPUT_STEPS = {
     "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
 }
+ENABLE_MOUSE_SEQUENCES = "\x1b[?1000h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
+DISABLE_MOUSE_SEQUENCES = "\x1b[?1000l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1016l"
+DISABLE_MOUSE_PIXELS_SEQUENCE = "\x1b[?1016l"
 
 
 class WorkflowTreeApp(App):
@@ -109,6 +112,8 @@ class WorkflowTreeApp(App):
         self._edit_validation_generation = 0
         self._edit_validation_timer: Optional[Any] = None
         self._edit_validation_delay = 0.4
+        self._mouse_input_enabled = True
+        self._mouse_pixels_was_enabled = False
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
@@ -143,6 +148,7 @@ class WorkflowTreeApp(App):
 
     def on_unmount(self) -> None:
         self.is_exiting = True
+        self._set_mouse_input_enabled(True, notify=False, update_bindings=False)
         try:
             self._workflow_waiter.reset()
         except Exception:
@@ -620,6 +626,11 @@ class WorkflowTreeApp(App):
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "manual_refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
+        self.bind(
+            "m",
+            "toggle_mouse_input",
+            description="Mouse Off" if self._mouse_input_enabled else "Mouse On",
+        )
 
         if self._edit_mode:
             node = selected_edit_node(self.tree_root_widget)
@@ -688,6 +699,58 @@ class WorkflowTreeApp(App):
             self.bind("a", "approve_step", description="Approve")
         elif self._collect_managed_output_refs():
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+
+    def action_toggle_mouse_input(self) -> None:
+        """Temporarily release or restore terminal mouse reporting."""
+        self._set_mouse_input_enabled(not self._mouse_input_enabled)
+
+    def _set_mouse_input_enabled(
+        self,
+        enabled: bool,
+        notify: bool = True,
+        update_bindings: bool = True,
+    ) -> None:
+        if enabled == self._mouse_input_enabled:
+            return
+        driver = getattr(self, "_driver", None)
+        if driver is not None:
+            if not enabled:
+                self.capture_mouse(None)
+                self._mouse_pixels_was_enabled = bool(getattr(driver, "_mouse_pixels", False))
+                self._write_mouse_reporting(driver, enabled=False)
+            else:
+                self._write_mouse_reporting(driver, enabled=True)
+                if self._mouse_pixels_was_enabled and hasattr(driver, "_enable_mouse_pixels"):
+                    driver._enable_mouse_pixels()
+                self._mouse_pixels_was_enabled = False
+
+        self._mouse_input_enabled = enabled
+        if notify:
+            if enabled:
+                self.notify("Mouse handling restored")
+            else:
+                self.notify("Mouse handling disabled; drag to select text, press m to restore")
+        if update_bindings:
+            self._update_dynamic_bindings()
+
+    @staticmethod
+    def _write_mouse_reporting(driver, enabled: bool) -> None:
+        method_name = "_enable_mouse_support" if enabled else "_disable_mouse_support"
+        method = getattr(driver, method_name, None)
+        if callable(method):
+            method()
+            if not enabled and callable(getattr(driver, "write", None)):
+                driver.write(DISABLE_MOUSE_PIXELS_SEQUENCE)
+                flush = getattr(driver, "flush", None)
+                if callable(flush):
+                    flush()
+            return
+        write = getattr(driver, "write", None)
+        if callable(write):
+            write(ENABLE_MOUSE_SEQUENCES if enabled else DISABLE_MOUSE_SEQUENCES)
+            flush = getattr(driver, "flush", None)
+            if callable(flush):
+                flush()
 
     def action_activate_selected_node(self) -> None:
         node = self.current_node_data

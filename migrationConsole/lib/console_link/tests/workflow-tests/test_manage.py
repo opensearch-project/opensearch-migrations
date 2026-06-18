@@ -9,8 +9,13 @@ from unittest.mock import MagicMock, patch
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection, _build_tree_from_raw
 from console_link.workflow.tui.workflow_manage_app import (
+    DISABLE_MOUSE_PIXELS_SEQUENCE,
+    DISABLE_MOUSE_SEQUENCES,
+    ENABLE_MOUSE_SEQUENCES,
     WorkflowTreeApp,
-    copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
+    copy_to_clipboard,
+    PHASE_SUCCEEDED,
+    PHASE_RUNNING,
 )
 from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
 from console_link.workflow.tui.confirm_modal import ConfirmModal
@@ -486,6 +491,107 @@ async def test_resource_view_renders_resources_without_workflow():
                 lambda: "Values: Deployed" in str(app.query_one("#pod-status").content),
             )
             mock_waiter.trigger.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manage_toggles_mouse_reporting_for_text_selection(mock_workflow_with_two_pods):
+    """The manage UI can temporarily release terminal mouse handling for text selection."""
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_two_pods)
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        tree.focus()
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+        disable_mouse = MagicMock()
+        enable_mouse = MagicMock()
+        enable_mouse_pixels = MagicMock()
+        setattr(app._driver, "_mouse_pixels", True)
+
+        with patch.object(app._driver, "_disable_mouse_support", disable_mouse, create=True), \
+                patch.object(app._driver, "_enable_mouse_support", enable_mouse, create=True), \
+                patch.object(app._driver, "_enable_mouse_pixels", enable_mouse_pixels, create=True):
+            assert binding_descriptions(app, "m") == ["Mouse Off"]
+
+            await pilot.press("m")
+            assert await wait_until(
+                pilot,
+                lambda: app._mouse_input_enabled is False
+                and binding_descriptions(app, "m") == ["Mouse On"],
+            )
+            disable_mouse.assert_called_once()
+            enable_mouse.assert_not_called()
+
+            await pilot.press("m")
+            assert await wait_until(
+                pilot,
+                lambda: app._mouse_input_enabled is True
+                and binding_descriptions(app, "m") == ["Mouse Off"],
+            )
+            enable_mouse.assert_called_once()
+            enable_mouse_pixels.assert_called_once()
+
+
+def test_mouse_reporting_falls_back_to_raw_escape_sequences():
+    """Mouse reporting can be toggled even when a driver has no private helper methods."""
+
+    class FakeDriver:
+        def __init__(self):
+            self.writes = []
+            self.flushes = 0
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            self.flushes += 1
+
+    driver = FakeDriver()
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=False)
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=True)
+
+    assert driver.writes == [DISABLE_MOUSE_SEQUENCES, ENABLE_MOUSE_SEQUENCES]
+    assert driver.flushes == 2
+
+
+def test_mouse_reporting_private_disable_also_releases_pixel_mode():
+    """Pixel mouse reporting is disabled explicitly when a driver helper omits that mode."""
+
+    class FakeDriver:
+        def __init__(self):
+            self.disable_mouse = MagicMock()
+            self.writes = []
+            self.flushes = 0
+
+        def _disable_mouse_support(self):
+            self.disable_mouse()
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            self.flushes += 1
+
+    driver = FakeDriver()
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=False)
+
+    driver.disable_mouse.assert_called_once()
+    assert driver.writes == [DISABLE_MOUSE_PIXELS_SEQUENCE]
+    assert driver.flushes == 1
 
 
 @pytest.mark.asyncio

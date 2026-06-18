@@ -205,6 +205,7 @@ Resource view:
 | `e` | Enter config edit mode |
 | `s` | Submit saved workflow config |
 | `v` | Cycle value mode |
+| `m` | Toggle terminal mouse handling so text can be selected, then restore it |
 | `r` | Refresh |
 | `q` | Quit |
 | `Left` / `Right` | Collapse or expand selected tree row |
@@ -221,6 +222,7 @@ Edit mode:
 | `Del` / `Backspace` | Confirm and remove a removable config entry |
 | `v` | Cycle value mode |
 | `t` | Cycle status mode |
+| `m` | Toggle terminal mouse handling so text can be selected, then restore it |
 | `Left` / `Right` | Collapse or expand selected tree row |
 | `Space` | Toggle boolean rows |
 | `?` | Show selected field/resource description |
