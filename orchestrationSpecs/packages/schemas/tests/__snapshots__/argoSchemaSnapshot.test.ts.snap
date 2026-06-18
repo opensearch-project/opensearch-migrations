@@ -6246,6 +6246,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             ],
             "description": "Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster."
           },
+          "default": {},
           "description": "Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.",
           "x-ui-hint": {
             "kind": "record",
@@ -6253,9 +6254,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         }
       },
-      "required": [
-        "replayers"
-      ],
       "description": "Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency."
     }
   },

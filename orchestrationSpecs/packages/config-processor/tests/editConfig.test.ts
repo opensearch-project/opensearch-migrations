@@ -455,6 +455,30 @@ describe("editConfig state", () => {
         expect(addProxy?.label).toContain("[OK] + Add capture proxy");
     });
 
+    it("does not require replay config when traffic capture is configured alone", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const traffic = findNode(state.nodes, "edit:traffic");
+        const replayGroup = findNode(state.nodes, "edit:traffic.replayers");
+        const addReplay = findNode(state.nodes, "edit:traffic.replayers:add");
+
+        expect(state.validation.valid).toBe(true);
+        expect(traffic?.status).toBe("ok");
+        expect(traffic?.label).not.toContain("[REQ");
+        expect(replayGroup?.status).toBe("ok");
+        expect(replayGroup?.label).not.toContain("[REQ");
+        expect(addReplay?.status).toBe("ok");
+    });
+
     it("adds/removes nested traffic resources and switches Kafka mode", () => {
         const config = {
             sourceClusters: {},

@@ -1287,7 +1287,7 @@ export const TRAFFIC_CONFIG = z.object({
             keyPattern: K8S_NAMING_PATTERN.source,
             message: "Use a valid Kubernetes DNS name for the S3 captured traffic source.",
         }),
-    replayers: z.record(z.string(), REPLAYER_CONFIG)
+    replayers: z.record(z.string(), REPLAYER_CONFIG).default({}).optional()
         .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
         .uiHint({
             kind: 'record',
@@ -1338,7 +1338,7 @@ export const TRAFFIC_CONFIG = z.object({
         const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
         recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
     }
-    for (const [name, rc] of Object.entries(data.replayers)) {
+    for (const [name, rc] of Object.entries(data.replayers ?? {})) {
         const inProxies = rc.fromCapturedTraffic in proxies;
         const inS3 = rc.fromCapturedTraffic in s3Sources;
         if (!inProxies && !inS3) {
@@ -1632,7 +1632,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 }
             }
 
-            for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
+            for (const [replayerName, rc] of Object.entries(data.traffic.replayers ?? {})) {
                 if (!(rc.toTarget in data.targetClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,

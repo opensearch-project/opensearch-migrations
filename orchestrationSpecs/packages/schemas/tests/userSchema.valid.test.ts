@@ -15,4 +15,32 @@ describe("valid configs parse successfully", () => {
         }
         expect(result.success).toBe(true);
     });
+
+    it("allows live capture traffic without a replayer", () => {
+        const result = OVERALL_MIGRATION_CONFIG.safeParse({
+            sourceClusters: {
+                source: {
+                    endpoint: "",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            traffic: {
+                proxies: {
+                    capture: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!result.success) {
+            throw new Error(result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("\n"));
+        }
+        expect(result.data.traffic?.replayers).toEqual({});
+    });
 });
