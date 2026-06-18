@@ -49,7 +49,8 @@ def call(Map config = [:]) {
             "migrationAssistanceEnabled": true,
             "replayerOutputEFSRemovalPolicy": "DESTROY",
             "migrationConsoleServiceEnabled": true,
-            "otelCollectorEnabled": true
+            "otelMetricsCollectorEnabled": true,
+            "otelTraceCollectorEnabled": false
           }
         }
     """

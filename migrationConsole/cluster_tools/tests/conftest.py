@@ -30,7 +30,7 @@ def create_opensearch_container(max_attempts=3):
     for attempt in range(max_attempts):
         container = OpenSearchContainer("opensearchproject/opensearch:2.19.1")
         container.with_env("discovery.type", "single-node")
-        container.with_env("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
+        container.with_env("OPENSEARCH_JAVA_OPTS", "-Xms2g -Xmx2g")
         try:
             container.start()
             url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"

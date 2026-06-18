@@ -32,6 +32,8 @@ GET_OFFSET_SHELL_CLASS = 'org.apache.kafka.tools.GetOffsetShell'
 # to derive its timestamp. Kept short because we only ever need one record.
 TIME_LAG_PROBE_TIMEOUT_MS = 5000
 
+DISABLE_JAVA_PERFDATA_OPT = "-XX:-UsePerfData"
+
 MSK_SCHEMA = {
     "nullable": True,
 }
@@ -130,7 +132,13 @@ def resolve_msk_auth_config() -> str:
 
 def get_result_for_command(command: List[str], operation_name: str) -> CommandResult:
     try:
-        cmd_output = subprocess.run(command, capture_output=True, text=True, check=True)
+        cmd_output = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=_kafka_command_env(),
+        )
         output = cmd_output.stdout
         message = f"{operation_name} command completed successfully"
         logger.info(message)
@@ -142,6 +150,14 @@ def get_result_for_command(command: List[str], operation_name: str) -> CommandRe
         logger.info(message)
         output = e.stdout
         return CommandResult(success=False, value=output)
+
+
+def _kafka_command_env() -> dict[str, str]:
+    env = os.environ.copy()
+    kafka_opts = env.get("KAFKA_OPTS", "")
+    if DISABLE_JAVA_PERFDATA_OPT not in kafka_opts.split():
+        env["KAFKA_OPTS"] = f"{kafka_opts} {DISABLE_JAVA_PERFDATA_OPT}".strip()
+    return env
 
 
 def pretty_print_kafka_record_count(data: str) -> str:

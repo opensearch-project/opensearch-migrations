@@ -37,11 +37,8 @@ public class Evaluate extends MigratorEvaluatorBase {
                 .errorMessage("Invalid parameter: " + pe.getMessage())
                 .build();
         } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Unexpected failure").log();
-            evaluateResult
-                .exitCode(UNEXPECTED_FAILURE_CODE)
-                .errorMessage(createUnexpectedErrorMessage(e))
-                .build();
+            var classification = classifyFailure(e);
+            evaluateResult.exitCode(classification.exitCode).errorMessage(classification.errorMessage);
         }
 
         return evaluateResult.build();

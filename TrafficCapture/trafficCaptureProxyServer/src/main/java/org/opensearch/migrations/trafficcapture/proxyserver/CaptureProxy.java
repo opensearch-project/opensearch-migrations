@@ -26,6 +26,7 @@ import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -123,8 +124,9 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--numThreads" },
             arity = 1,
-            description = "How many threads netty should create in its event loop group")
-        public int numThreads = 1;
+            description = "How many threads netty should create in its event loop group. "
+                + "A value of 0 will use the default number of threads (2 * number of available processors).")
+        public int numThreads = 0;
         @Parameter(required = false,
             names = { "--destinationConnectionPoolSize" },
             arity = 1,
@@ -139,12 +141,21 @@ public class CaptureProxy {
                 + "how long after connection should the be recycled "
                 + "(closed with a new connection taking its place)")
         public String destinationConnectionPoolTimeout = "PT30S";
-        @Parameter(required = false,
-            names = { "--otelCollectorEndpoint" },
+        @Parameter(
+            required = false,
+            names = { "--otelTraceCollectorEndpoint", "--otel-trace-collector-endpoint" },
             arity = 1,
-            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
-                + "If this is not provided, metrics will not be sent to a collector.")
-        public String otelCollectorEndpoint;
+            description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+                "Omit this option to disable trace export.")
+        public String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--otelMetricsCollectorEndpoint", "--otel-metrics-collector-endpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+                "Omit this option to disable metric export.")
+        public String otelMetricsCollectorEndpoint;
         @Parameter(required = false,
             names = "--setHeader",
             splitter = NoSplitter.class,
@@ -394,7 +405,9 @@ public class CaptureProxy {
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var ctx = new RootCaptureContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture",
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
+                "capture",
                 ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );

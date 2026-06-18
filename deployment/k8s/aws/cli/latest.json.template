@@ -1,0 +1,22 @@
+{
+  "version": "VERSION",
+  "tarball": "https://github.com/opensearch-project/opensearch-migrations/releases/download/VERSION/migration-assistant-cli-VERSION.tar.gz",
+  "binaries": {
+    "x86_64-linux": {
+      "url": "https://github.com/opensearch-project/opensearch-migrations/releases/download/VERSION/migration-assistant-VERSION-x86_64-unknown-linux-gnu",
+      "sha256": "CHECKSUM"
+    },
+    "aarch64-linux": {
+      "url": "https://github.com/opensearch-project/opensearch-migrations/releases/download/VERSION/migration-assistant-VERSION-aarch64-unknown-linux-gnu",
+      "sha256": "CHECKSUM"
+    },
+    "x86_64-darwin": {
+      "url": "https://github.com/opensearch-project/opensearch-migrations/releases/download/VERSION/migration-assistant-VERSION-x86_64-apple-darwin",
+      "sha256": "CHECKSUM"
+    },
+    "aarch64-darwin": {
+      "url": "https://github.com/opensearch-project/opensearch-migrations/releases/download/VERSION/migration-assistant-VERSION-aarch64-apple-darwin",
+      "sha256": "CHECKSUM"
+    }
+  }
+}

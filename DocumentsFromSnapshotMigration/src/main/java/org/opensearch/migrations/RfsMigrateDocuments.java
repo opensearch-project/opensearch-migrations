@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,6 +33,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
@@ -62,6 +64,7 @@ import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -87,6 +90,8 @@ public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
+    // Keep harmonized with the metadata command's MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE.
+    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -222,12 +227,21 @@ public class RfsMigrateDocuments {
                 "attempt the migration, but with double the amount of time than the last time.  Default: PT10M")
         public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
-        @Parameter(required = false,
-            names = { "--otel-collector-endpoint", "--otelCollectorEndpoint" },
+        @Parameter(
+            required = false,
+            names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
             arity = 1,
-            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-                + "forwarded. If no value is provided, metrics will not be forwarded.")
-        String otelCollectorEndpoint;
+            description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+                "Omit this option to disable trace export.")
+        String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+                "Omit this option to disable metric export.")
+        String otelMetricsCollectorEndpoint;
 
         @Parameter(required = false,
         names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
@@ -652,9 +666,42 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
+            var snapshotReadExitCode = classifySnapshotReadFailure(e, arguments);
+            if (snapshotReadExitCode.isPresent()) {
+                // A non-retriable snapshot read failure (the snapshot's repo/index/shard metadata or
+                // blob data could not be read). The labeled reason/path/context was already logged at
+                // ERROR by classifySnapshotReadFailure so it is visible in the workflow log and
+                // CloudWatch even if the pod is terminated immediately afterward. We exit explicitly
+                // (rather than rethrowing to the JVM uncaught handler) to flush the appenders and return
+                // a deterministic exit code the workflow can branch on.
+                LogManager.shutdown();
+                System.exit(snapshotReadExitCode.getAsInt());
+            }
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    /**
+     * If {@code e} (or a wrapped cause) is a non-retriable snapshot read failure, log a labeled ERROR
+     * line naming the reason, snapshot path, and context, then return the dedicated
+     * {@link #SNAPSHOT_READ_FAILED_EXIT_CODE}; otherwise return empty so the caller rethrows. Extracted
+     * from the {@code runMigration} catch block so the classification/logging is unit-testable without
+     * forking a JVM — the caller performs the actual {@link System#exit}. Mirrors the metadata
+     * command's {@code MigratorEvaluatorBase.classifyFailure}.
+     */
+    static OptionalInt classifySnapshotReadFailure(Exception e, Args arguments) {
+        var snapshotReadFailure = SnapshotReadFailures.find(e);
+        if (snapshotReadFailure == null) {
+            return OptionalInt.empty();
+        }
+        var repo = arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri;
+        log.atError().setCause(e)
+            .setMessage("{}")
+            .addArgument(SnapshotReadFailures.describe(
+                snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
+            .log();
+        return OptionalInt.of(SNAPSHOT_READ_FAILED_EXIT_CODE);
     }
 
     private static MigrationSourceFactory buildElasticsearchSourceFactory(
@@ -1072,8 +1119,8 @@ public class RfsMigrateDocuments {
             new ActiveContextTracker(),
             new ActiveContextTrackerByActivityType()
         );
-        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(
-            arguments.otelCollectorEndpoint,
+        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+            new OtelCollectorEndpoints(arguments.otelTraceCollectorEndpoint, arguments.otelMetricsCollectorEndpoint),
             RootDocumentMigrationContext.SCOPE_NAME,
             workerId
         );

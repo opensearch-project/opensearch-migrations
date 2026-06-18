@@ -1,0 +1,6 @@
+# Trace integration-test overlay for EKS installs.
+# Use with helm upgrade --reuse-values so valuesEks.yaml settings are preserved.
+tracing:
+  enabled: true
+  backend: xray
+  samplingPercentage: "100"

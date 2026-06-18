@@ -21,7 +21,8 @@ FROM_SNAPSHOT_SCHEMA = {
     "nullable": True,
     "schema": {
         "snapshot_name": {"type": "string", "required": True},
-        "otel_endpoint": {"type": "string", "required": False},
+        "otel_trace_endpoint": {"type": "string", "required": False},
+        "otel_metrics_endpoint": {"type": "string", "required": False},
         "local_dir": {"type": "string", "required": False},
         "s3": {
             'type': 'dict',
@@ -47,7 +48,8 @@ FROM_SNAPSHOT_SCHEMA = {
 
 SCHEMA = {
     "from_snapshot": FROM_SNAPSHOT_SCHEMA,
-    "otel_endpoint": {"type": "string", "required": False},
+    "otel_trace_endpoint": {"type": "string", "required": False},
+    "otel_metrics_endpoint": {"type": "string", "required": False},
     "cluster_awareness_attributes": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
@@ -90,14 +92,16 @@ class Metadata:
         self._index_allowlist = config.get("index_allowlist", None)
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
-        self._otel_endpoint = config.get("otel_endpoint", None)
+        self._otel_trace_endpoint = config.get("otel_trace_endpoint", None)
+        self._otel_metrics_endpoint = config.get("otel_metrics_endpoint", None)
         self._transformer_config_base64 = config.get("transformer_config_base64", None)
 
         logger.debug(f"Cluster awareness attributes: {self._awareness_attributes}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
         logger.debug(f"Index template allowlist: {self._index_template_allowlist}")
         logger.debug(f"Component template allowlist: {self._component_template_allowlist}")
-        logger.debug(f"Otel endpoint: {self._otel_endpoint}")
+        logger.debug(f"Otel trace endpoint: {self._otel_trace_endpoint}")
+        logger.debug(f"Otel metrics endpoint: {self._otel_metrics_endpoint}")
         logger.debug(f"Transformation config: {self._transformer_config_base64}")
 
         # If `from_snapshot` is fully specified, use those values to define snapshot params
@@ -185,6 +189,13 @@ class Metadata:
         logger.info("Starting metadata migration")
         return self.migrate_or_evaluate("migrate", extra_args)
 
+    def _add_otel_args(self, command_args: Dict[str, Any]) -> None:
+        otel_args = {
+            "--otel-trace-collector-endpoint": self._otel_trace_endpoint,
+            "--otel-metrics-collector-endpoint": self._otel_metrics_endpoint,
+        }
+        command_args.update({key: value for key, value in otel_args.items() if value})
+
     def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
         if not self._target_cluster:
             raise NoTargetClusterDefinedError()
@@ -193,8 +204,7 @@ class Metadata:
         command_args = {}
 
         # Add any common metadata parameter before the command
-        if self._otel_endpoint:
-            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
+        self._add_otel_args(command_args)
 
         command_args.update({
             command: None,

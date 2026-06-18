@@ -1,0 +1,9 @@
+# Trace integration-test overlay for local Kubernetes installs.
+# Use with helm upgrade --reuse-values so existing local values are preserved.
+conditionalPackageInstalls:
+  jaeger: true
+
+tracing:
+  enabled: true
+  backend: jaeger
+  samplingPercentage: "100"

@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,7 +15,10 @@ import reactor.test.StepVerifier;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 class SolrBackupSourceTest {
 
@@ -131,6 +136,76 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
             () -> source.listPartitions("test"));
+    }
+
+    @Test
+    void hasSegmentsFileSurfacesClassifiedFailureWhenListFails() throws IOException {
+        // An I/O error while listing the backup dir (via hasSegmentsFile) must surface as a classified SolrBackupReadException.
+        Files.createDirectories(tempDir.resolve("backup"));
+        var backupDir = tempDir.resolve("backup");
+        var source = new SolrBackupSource(backupDir, "test", emptySchema(), 8);
+
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(backupDir)).thenThrow(new IOException("simulated I/O error"));
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    @Test
+    void discoverShardDirsSurfacesClassifiedFailureWhenBackupListingFails() throws IOException {
+        // An I/O error while enumerating shard subdirectories must surface as a classified SolrBackupReadException.
+        Files.createDirectories(tempDir.resolve("backup"));
+        var backupDir = tempDir.resolve("backup");
+        var source = new SolrBackupSource(backupDir, "test", emptySchema(), 8);
+
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(backupDir))
+                .thenReturn(java.util.stream.Stream.of())          // hasSegmentsFile probe: no segments
+                .thenThrow(new IOException("simulated I/O error")); // shard enumeration fails
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list backup directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    @Test
+    void findSegmentsFileSurfacesClassifiedFailureWhenListFails() throws IOException {
+        // An I/O error while listing the index dir to locate segments_N must surface as a classified SolrBackupReadException.
+        var indexDir = tempDir.resolve("idx");
+        Files.createDirectories(indexDir);
+        var partition = new SolrShardPartition("test", "shard1", indexDir);
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+
+        try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.list(indexDir)).thenThrow(new IOException("simulated I/O error"));
+
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, 0));
+            assertThat(ex, instanceOf(SnapshotReadFailure.class));
+            assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
+            assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    @Test
+    void throwsClassifiedFailureOnUnreadableShardMetadata() throws IOException {
+        // shard_backup_metadata/ present (so the UUID path is taken) but the metadata JSON is
+        // corrupt: the read failure must surface as a classified SolrBackupReadException, carrying
+        // the underlying cause, rather than an unclassified exception.
+        var metadataDir = tempDir.resolve("shard_backup_metadata");
+        Files.createDirectories(metadataDir);
+        Files.writeString(metadataDir.resolve("md_shard1_0.json"), "{ not valid json");
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+        var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+        assertThat(ex, org.hamcrest.Matchers.instanceOf(
+            org.opensearch.migrations.bulkload.common.SnapshotReadFailure.class));
+        assertThat(ex.getCause() != null, equalTo(true));
     }
 
     @Test
