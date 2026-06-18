@@ -3336,12 +3336,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "compressionEnabled": {
                                   "type": "boolean",
                                   "default": false,
-                                  "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
+                                  "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                  "x-expert": true
                                 },
                                 "includeGlobalState": {
                                   "type": "boolean",
                                   "default": true,
-                                  "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                  "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                  "x-expert": true
                                 }
                               },
                               "description": "Configuration for creating a new snapshot of the source cluster."
@@ -4671,7 +4673,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": "LoadBalancer",
                     "description": "Expert setting controlling how the capture proxy Kubernetes Service is exposed. 'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. 'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.",
                     "changeRestriction": "impossible",
-                    "x-change-restriction": "impossible"
+                    "x-change-restriction": "impossible",
+                    "x-expert": true
                   },
                   "internetFacing": {
                     "type": "boolean",
@@ -5410,7 +5413,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "impossible",
-                    "x-change-restriction": "impossible"
+                    "x-change-restriction": "impossible",
+                    "x-expert": true
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",

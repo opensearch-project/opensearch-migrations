@@ -24,7 +24,7 @@ The config-processor owns:
 
 - user-schema parsing and validation;
 - Zod refinements and unified-schema validation;
-- JSON Schema descriptions, UI hints, and reference options;
+- JSON Schema descriptions, UI hints, expert hints, and reference options;
 - edit-state DTO construction;
 - typed edit operations;
 - strict resource projection for submit and stored `MigrationRun` data;
@@ -192,9 +192,18 @@ The edit DTO carries:
 - union variants;
 - add/remove command metadata.
 
-Schema hints are authored in `userSchemas.ts` with `.uiHint(...)`, exported to JSON Schema as `x-ui-hint`, copied into `EditStateV1.inputHint`, and rendered generically by Python.
+Schema hints are authored in `userSchemas.ts` with `.uiHint(...)`, exported to JSON Schema as `x-ui-hint`, copied into `EditStateV1.inputHint`, and rendered generically by Python. Expert fields are exported as `x-expert` when their authored description is explicitly expert-scoped, currently `[Expert] ...` or `Expert setting ...`.
 
 Reference hints drive picker-style editing for source cluster, target cluster, Kafka cluster, and captured traffic references.
+
+Capture proxy `proxyConfig` rows are generated from `USER_PROXY_WORKFLOW_OPTION_KEYS`, `USER_PROXY_PROCESS_OPTION_KEYS`, and `USER_PROXY_OPTIONS`. That means every schema-owned proxy option has a row in the edit tree, including unset optional fields and expert fields. Required fields such as `listenPort` stay visible even when optional/expert field visibility is reduced.
+
+Edit rows carry field visibility metadata:
+
+- `presence: required | optional`
+- `expert: true` for advanced fields
+
+Python uses those generic flags to filter rows. It does not know capture proxy field names.
 
 ## Key Bindings
 
@@ -218,16 +227,26 @@ Edit mode:
 | `Enter` | Edit scalar, toggle boolean, open union picker, or start command row |
 | `a` | Start selected synthetic add row |
 | `s` / `Ctrl+s` | Save pending YAML |
-| `Esc` | Confirm discard if dirty, otherwise leave edit mode |
+| `Esc` | Leave edit mode; dirty drafts open a discard/save/return dialog |
 | `Del` / `Backspace` | Confirm and remove a removable config entry |
 | `v` | Cycle value mode |
 | `t` | Cycle status mode |
+| `O` / `o` | Show or hide optional fields; optional fields are shown by default |
+| `X` / `x` | Show or hide expert fields; expert fields are hidden by default |
 | `m` | Toggle terminal mouse handling so text can be selected, then restore it |
 | `Left` / `Right` | Collapse or expand selected tree row |
 | `Space` | Toggle boolean rows |
 | `?` | Show selected field/resource description |
 
 Synthetic add rows expose add actions and never expose delete bindings.
+
+The dirty-exit dialog always offers three choices:
+
+- discard edits and leave;
+- save pending YAML and leave;
+- return to the editor.
+
+When validation reports errors or required fields, `Return` is the default focused action. When validation is clean, `Save` is the default focused action. All three choices remain available in both cases.
 
 ## Status and Color Rules
 
@@ -367,11 +386,13 @@ Delete semantics differ:
 
 Adding a new user-facing field:
 
-1. Add the field, description, constraints, refinements, and UI hints in `userSchemas.ts`.
+1. Add the field, description, constraints, refinements, UI hints, and expert description marker if needed in `userSchemas.ts`.
 2. Add or update config transformation logic in `migrationConfigTransformer.ts` only if the workflow-ready config changes.
 3. Add resource projection metadata or explicit resolved-resource mapping if the field affects a migration CR spec.
 4. Add a display-field hint or update the temporary Python `SPEC_DISPLAY_FIELDS` table if the field should be visible before display metadata is generated from TS.
 5. Add TS validation/projection tests and focused Python rendering tests only when the rendered DTO shape changes.
+
+For capture proxy `proxyConfig` fields, no Python change is required. The edit tree discovers proxy fields from the Zod schema key lists and sends `presence`/`expert` metadata with each row.
 
 Adding a new resource type:
 
@@ -403,6 +424,8 @@ Current focused coverage includes:
 - value-mode visibility for pending-only resources;
 - add-row bindings that do not expose delete;
 - scalar/boolean edit interactions;
+- optional/expert edit-row visibility;
+- dirty edit exit defaults for return/save;
 - save and submit wiring.
 
 Useful next tests are:

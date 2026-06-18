@@ -1,6 +1,7 @@
 import {extendZodWithOpenApi, OpenApiGeneratorV3, OpenAPIRegistry} from "@asteasolutions/zod-to-openapi";
 import {z} from "zod";
 import {FieldMeta} from "./userSchemas";
+import {getDescription} from "./schemaUtilities";
 
 extendZodWithOpenApi(z);
 
@@ -46,6 +47,10 @@ function fieldMeta(schema: z.ZodType): FieldMeta | undefined {
     };
 }
 
+function isExpertDescription(description: string | undefined): boolean {
+    return Boolean(description) && (/^\s*\[Expert\]/i.test(description ?? "") || /^\s*Expert\b/i.test(description ?? ""));
+}
+
 /** Walk a generated JSON Schema and inject x- extensions from Zod .meta(). */
 function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
     const unwrapped = unwrapZod(zodSchema);
@@ -59,6 +64,9 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
             if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
             if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
             if (meta?.uiHint) propSchema['x-ui-hint'] = meta.uiHint;
+            if (meta?.expert || isExpertDescription(getDescription(fieldZod as z.ZodTypeAny) ?? String(propSchema.description ?? ""))) {
+                propSchema['x-expert'] = true;
+            }
             injectMetaExtensions(propSchema, fieldZod);
         }
         return;

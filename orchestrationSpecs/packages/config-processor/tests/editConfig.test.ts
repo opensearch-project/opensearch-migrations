@@ -1,4 +1,5 @@
 import {applyEditOperationToObject, buildEditStateFromObject, EditNode} from "../src/editConfig";
+import {USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
 import {parse} from "yaml";
 import {spawnSync} from "child_process";
 import path from "path";
@@ -420,15 +421,33 @@ describe("editConfig state", () => {
         const proxyConfig = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig");
         const listenPort = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.listenPort");
         const kafkaTopic = findNode(state.nodes, "edit:traffic.proxies.cap.kafkaTopic");
+        const podReplicas = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.podReplicas");
+        const serviceType = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.serviceType");
+        const tls = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
+        const setHeader = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.setHeader");
         const addProxy = findNode(state.nodes, "edit:traffic.proxies:add");
 
+        const expectedOptionKeys = [
+            ...USER_PROXY_WORKFLOW_OPTION_KEYS,
+            ...USER_PROXY_PROCESS_OPTION_KEYS,
+        ].map(String);
+        for (const key of expectedOptionKeys) {
+            expect(findNode(state.nodes, `edit:traffic.proxies.cap.proxyConfig.${key}`)).toBeDefined();
+        }
         expect(proxy?.status).toBe("required");
         expect(proxy?.label).toContain("[REQ 1]");
         expect(proxyConfig?.status).toBe("required");
         expect(proxyConfig?.label).toContain("[REQ 1]");
+        expect(proxyConfig?.required).toBe(true);
+        expect(proxyConfig?.presence).toBe("required");
         expect(listenPort?.status).toBe("required");
+        expect(listenPort?.presence).toBe("required");
         expect(listenPort?.valueType).toBe("number");
         expect(listenPort?.label).toContain("listenPort: <required>");
+        expect(podReplicas).toMatchObject({status: "ok", presence: "optional", expert: false, valueType: "number"});
+        expect(serviceType).toMatchObject({status: "ok", presence: "optional", expert: true});
+        expect(tls).toMatchObject({presence: "optional", valueKind: "object"});
+        expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(kafkaTopic?.status).toBe("ok");
         expect(kafkaTopic?.label).toContain("kafkaTopic: <unset>");
         expect(captureGroup?.label).toContain("[REQ 1]");

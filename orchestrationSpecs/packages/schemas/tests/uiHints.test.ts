@@ -45,4 +45,11 @@ describe("workflow schema UI hints", () => {
             sourcePath: ["targetClusters"],
         });
     });
+
+    it("exports expert field hints from authored schema descriptions", () => {
+        const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
+
+        expect(proxyConfig.properties.serviceType["x-expert"]).toBe(true);
+        expect(proxyConfig.properties.podReplicas["x-expert"]).toBeUndefined();
+    });
 });

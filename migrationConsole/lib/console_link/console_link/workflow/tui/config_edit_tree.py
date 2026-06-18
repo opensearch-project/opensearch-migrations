@@ -79,13 +79,15 @@ def render_edit_state(
     edit_state: Dict[str, Any],
     value_mode: str = EDIT_MODE_ALL,
     status_mode: str = EDIT_MODE_ALL,
+    show_optional: bool = True,
+    show_expert: bool = False,
 ) -> None:
     """Render a generic TS-provided EditStateV1 into the manage tree."""
     tree.clear()
     tree.root.set_label(Text("Workflow Config Edit"))
     tree.root.data = {"id": "config-edit-root", "type": EDIT_NODE_TYPE}
     for node in edit_state.get("nodes", []):
-        _add_edit_node(tree.root, node, value_mode, status_mode)
+        _add_edit_node(tree.root, node, value_mode, status_mode, show_optional, show_expert)
     tree.root.expand_all()
 
 
@@ -124,7 +126,15 @@ def _add_edit_node(
     edit_node: Dict[str, Any],
     value_mode: str,
     status_mode: str,
-) -> TreeNode:
+    show_optional: bool,
+    show_expert: bool,
+) -> Optional[TreeNode]:
+    visible_children = [
+        child for child in edit_node.get("children") or []
+        if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+    ]
+    if not _should_render_edit_node(edit_node, status_mode, show_optional, show_expert, visible_children):
+        return None
     node = parent.add(
         _node_label(edit_node, value_mode, status_mode),
         data={
@@ -133,9 +143,43 @@ def _add_edit_node(
             "edit_node": edit_node,
         },
     )
-    for child in edit_node.get("children") or []:
-        _add_edit_node(node, child, value_mode, status_mode)
+    for child in visible_children:
+        _add_edit_node(node, child, value_mode, status_mode, show_optional, show_expert)
     return node
+
+
+def _should_render_edit_node(
+    edit_node: Dict[str, Any],
+    status_mode: str,
+    show_optional: bool,
+    show_expert: bool,
+    visible_children: Optional[list[Dict[str, Any]]] = None,
+) -> bool:
+    if edit_node.get("valueKind") == "command":
+        return True
+    if len(edit_node.get("path") or []) <= 1:
+        return True
+    status, counts = _effective_status(edit_node, status_mode)
+    if (
+        status in {"required", "error", "blocked"}
+        or counts.get("required")
+        or counts.get("errors")
+        or counts.get("blocked")
+    ):
+        return True
+    if visible_children is None:
+        visible_children = [
+            child for child in edit_node.get("children") or []
+            if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+        ]
+    if visible_children:
+        return True
+    is_expert = bool(edit_node.get("expert"))
+    if is_expert and not show_expert:
+        return False
+    if edit_node.get("presence") == "optional" and not show_optional and not is_expert:
+        return False
+    return True
 
 
 def _node_label(edit_node: Dict[str, Any], value_mode: str, status_mode: str) -> Text:

@@ -39,6 +39,8 @@ export interface FieldMeta {
     changeRestriction?: 'impossible' | 'gated';
     /** UI editing hint exported into JSON schema and edit-state DTOs. */
     uiHint?: UiHint;
+    /** Advanced field hint exported into JSON schema. */
+    expert?: boolean;
 }
 
 declare module "zod" {
