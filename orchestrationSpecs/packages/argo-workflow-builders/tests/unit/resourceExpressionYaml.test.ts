@@ -97,9 +97,9 @@ describe("resource expression YAML rendering", () => {
             expect(rendered).toContain("value: {{=toJSON(inputs.parameters.pem)}}");
             // Must be unquoted — toJSON supplies its own quotes/escapes at runtime.
             expect(rendered).not.toContain('value: "{{=toJSON');
-            // Must NOT collapse back to a bare parameter substitution (the renderer's
-            // toJSON(<parameter>) elision would reintroduce the bug); the concat wrapper
-            // prevents that.
+            // Must NOT collapse to a bare parameter substitution: the renderer's
+            // toJSON(<parameter>) optimization would drop the escaping, which the concat
+            // wrapper in yamlSafeString prevents.
             expect(rendered).not.toContain("value: {{inputs.parameters.pem}}");
             expect(rendered).not.toContain('value: "{{inputs.parameters.pem}}"');
         });
