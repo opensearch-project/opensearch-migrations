@@ -1,5 +1,6 @@
 import {InputParamDef, InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
 import {
+    isLiteralExpression,
     REMOVE_NEXT_QUOTE_SENTINEL,
     REMOVE_PREVIOUS_QUOTE_SENTINEL,
     toArgoExpressionString
@@ -10,6 +11,7 @@ import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {
     BaseExpression,
+    expr,
     makeDirectTypeProxy,
     SimpleExpression,
     TemplateExpression,
@@ -173,11 +175,15 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
 
 export function unwrapPlaceholdersAndStringify(obj: any): string {
     const result = toSafeYamlOutput(obj);
-    // in this yaml output, the value won't need to be quoted when it starts with a string -
-    // as long as REMOVE_PREVIOUS_QUOTE_SENTINEL starts with a character, there won't actually be a quote
+    // The sentinels mark a value that must render UNQUOTED (an Argo expression supplies its own
+    // quoting). Usually the value starts with a letter so the YAML emitter leaves it bare and we
+    // only strip the sentinel tokens. But when the expression text contains YAML indicators (e.g.
+    // a ternary's ':' / '?'), the emitter wraps the whole scalar in quotes — so also consume a
+    // single quote character immediately adjacent to each sentinel (the emitter escapes any
+    // genuine inner quote, so an adjacent bare quote is always the wrapper it added).
     return result
-        .replace(new RegExp(`${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
-        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}`, 'g'), '');
+        .replace(new RegExp(`["']?${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
+        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}["']?`, 'g'), '');
 }
 
 function formatBody(body: GenericScope) {
@@ -194,7 +200,7 @@ function formatBody(body: GenericScope) {
             const {manifest, ...rest} = resource;
             return {
                 resource: {
-                    manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest)),
+                    manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest, true)),
                     ...transformExpressionsDeep(rest)
                 },
                 ...transformExpressionsDeep(restOfBody)
@@ -349,11 +355,22 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
 /**
  * Recursively transforms any Expression instances found within records and arrays.
  * Asserts when non-plain objects are found since they shouldn't exist in this model.
+ *
+ * `escapeStringScalars` (set only for resource manifests, which are serialized to a YAML string
+ * that Argo then substitutes into as raw text at runtime) wraps each top-level string-scalar
+ * expression in `expr.yamlSafeString`, so newlines / quotes / the `---` separator (e.g. a PEM
+ * cert) survive YAML re-parsing. Skipped: literals (the YAML emitter already escapes them) and
+ * `UnquotedTypeWrapper` non-string scalars — anything nested inside one renders as a single
+ * `{{=...}}` block and is never revisited here, so composed `sprig.dict(...)` structures are not
+ * double-encoded (which is why escaping must happen here, not at `makeStringTypeProxy`).
  */
-export function transformExpressionsDeep<T>(input: T) {
+export function transformExpressionsDeep<T>(input: T, escapeStringScalars = false) {
     function visit(node: any): any {
         if (node instanceof BaseExpression) {
-            return toArgoExpressionString(node);
+            const needsEscape = escapeStringScalars
+                && !(node instanceof UnquotedTypeWrapper)
+                && !isLiteralExpression(node);
+            return toArgoExpressionString(needsEscape ? expr.yamlSafeString(node) : node);
         }
 
         if (isPrimitiveLiteral(node)) {

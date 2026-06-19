@@ -34,11 +34,6 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         expect(mrs).toBeGreaterThanOrEqual(1);
     }
 
-    function getEnv(container: any, name: string): any {
-        const env = container.env ?? [];
-        expect(Array.isArray(env)).toBe(true);
-        return env.find((entry: any) => entry.name === name);
-    }
 
     it("deployProxyDeployment container has a tcpSocket readinessProbe on listenPort with minReadySeconds", () => {
         const deployment = getResourceManifest(setupCapture, "deployproxydeployment");
@@ -65,14 +60,16 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         assertMinReadySecondsIsSet(deployment);
     });
 
-    it("proxy deployment templates expose inline client CA PEM through the expected env var", () => {
+    it("proxy deployment templates expose inline client CA PEM through the expected env var, YAML-safely (#3108)", () => {
+        // The PEM renders as an unquoted {{=toJSON(...)}}. Assert on the raw manifest string —
+        // the value is an Argo expression that would parse as a YAML flow-mapping — mirroring
+        // the volumeMounts checks below.
         for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
-            const deployment = getResourceManifest(setupCapture, templateName);
-            const container = getFirstContainer(deployment);
-            expect(getEnv(container, "CAPTURE_PROXY_SSL_TRUST_CERT_PEM")).toEqual({
-                name: "CAPTURE_PROXY_SSL_TRUST_CERT_PEM",
-                value: "{{inputs.parameters.sslTrustCertPem}}"
-            });
+            const manifest = getRawManifest(setupCapture, templateName);
+            expect(manifest).toContain("- name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
+            expect(manifest).toContain("value: {{=toJSON(inputs.parameters.sslTrustCertPem)}}");
+            // Guard against regressing to the broken plain (quoted) substitution that #3108 fixed.
+            expect(manifest).not.toContain('value: "{{inputs.parameters.sslTrustCertPem}}"');
         }
     });
 

@@ -32,6 +32,21 @@ export type ArgoFormatted = {
 
 const formattedResult = (text: string, compound = false): ArgoFormatted => ({text, compound});
 
+/**
+ * Escapes a string for embedding inside a SINGLE-QUOTED expr-lang / govaluate string literal.
+ * The engine treats backslash as an escape introducer, so a raw `\` (e.g. the `\.` in a regex)
+ * or an unescaped `'` produces an "invalid char escape" / parse error at runtime. Escape the
+ * backslash first, then the surrounding quote, then the common control characters.
+ */
+function escapeGovaluateStringLiteral(s: string): string {
+    return s
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t");
+}
+
 function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, renderedResult: ArgoFormatted) {
     return (useMarkers && !(isLiteralExpression(expr)))
         ? "{{" + (renderedResult.compound ? "=" : "") + renderedResult.text + "}}" : renderedResult.text;
@@ -68,7 +83,8 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
     if (isLiteralExpression(expr)) {
         const le = expr as LiteralExpression<any>;
         if (typeof le.value === "string") {
-            return top ? formattedResult(le.value) : formattedResult(`'${le.value}'`);
+            // Non-top: emitted as expr-lang source, so quote and escape it. Top: a plain value.
+            return top ? formattedResult(le.value) : formattedResult(`'${escapeGovaluateStringLiteral(le.value)}'`);
         } else if (typeof le.value === "number" || typeof le.value === "boolean") {
             return formattedResult(String(le.value));
         } else if (le.value === null) {

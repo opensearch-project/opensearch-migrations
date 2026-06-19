@@ -683,23 +683,24 @@ class ExprBuilder {
 
     // Regex functions
     regexMatch(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<boolean, ExpressionType, "complicatedExpression">("regexMatch", toExpression(pattern), toExpression(text));
+        return fn<boolean, ExpressionType, "complicatedExpression">("sprig.regexMatch", toExpression(pattern), toExpression(text));
     }
 
     regexFind(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexFind", toExpression(pattern), toExpression(text));
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexFind", toExpression(pattern), toExpression(text));
     }
 
     regexFindAll(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexReplaceAll", toExpression(pattern), toExpression(replacement), toExpression(text));
+        // Sprig's regexReplaceAll arg order is (pattern, input, replacement).
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexReplaceAll", toExpression(pattern), toExpression(text), toExpression(replacement));
     }
 
     regexSplit(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     fillTemplate<T extends string>(
@@ -1027,6 +1028,27 @@ class ExprBuilder {
 
     toBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
         return fn<string,CIn>("toBase64", toExpression(data));
+    }
+
+    /**
+     * Renders a string value as an unquoted `{{=toJSON(<expr>)}}` so it survives substitution
+     * into a resource-manifest YAML scalar: at runtime `toJSON` emits a JSON string (a valid
+     * double-quoted YAML scalar) that kubectl unescapes back to the exact original, keeping
+     * newlines / quotes / the `---` separator (e.g. PEM certs) from breaking the manifest — no
+     * consumer-side decode. The resource-manifest renderer applies this to every string scalar
+     * automatically (see `transformExpressionsDeep`), so direct calls are rarely needed.
+     *
+     * The `concat` wrapper is load-bearing: the renderer elides `toJSON(<bare parameter>)` back
+     * to a plain `{{param}}` (reintroducing the bug), and it keeps literals on the escaped path.
+     */
+    yamlSafeString(
+        value: AllowLiteralOrExpression<string, any>
+    ): BaseExpression<string, "complicatedExpression"> {
+        const jsonEscaped = fn<string, "govaluate", "complicatedExpression">(
+            "toJSON",
+            this.concat(toExpression(value))
+        );
+        return new UnquotedTypeWrapper(jsonEscaped);
     }
 }
 
