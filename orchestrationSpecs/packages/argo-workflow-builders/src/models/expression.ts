@@ -1037,19 +1037,13 @@ class ExprBuilder {
      * newlines / quotes / the `---` separator (e.g. PEM certs) from breaking the manifest — no
      * consumer-side decode. The resource-manifest renderer applies this to every string scalar
      * automatically (see `transformExpressionsDeep`), so direct calls are rarely needed.
-     *
-     * The `concat` wrapper is load-bearing: `toJSON` is applied to `concat(value)` rather than to
-     * `value` directly because the renderer has an optimization that rewrites `toJSON(<bare
-     * parameter>)` to a plain `{{param}}` substitution — which would drop the escaping. Wrapping
-     * in `concat` keeps the argument a non-parameter expression so that rewrite doesn't apply, and
-     * it also routes string literals through the escaped single-quoted code path.
      */
     yamlSafeString(
         value: AllowLiteralOrExpression<string, any>
     ): BaseExpression<string, "complicatedExpression"> {
-        const jsonEscaped = fn<string, "govaluate", "complicatedExpression">(
+        const jsonEscaped = fn<string, "complicatedExpression", "complicatedExpression">(
             "toJSON",
-            this.concat(toExpression(value))
+            toExpression(value)
         );
         return new UnquotedTypeWrapper(jsonEscaped);
     }

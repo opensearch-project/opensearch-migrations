@@ -19,7 +19,7 @@ import {
 } from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
 import * as _ from 'lodash';
-import {toSafeYamlOutput} from "../utils";
+import {RawYaml, toSafeYamlOutput} from "../utils";
 import {SynchronizationConfig} from "../models/synchronization";
 
 function isDefault<T extends PlainObject>(
@@ -173,17 +173,42 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     return result;
 }
 
+// A string fully wrapped in the unquote sentinels — an Argo expression that must render unquoted.
+const SENTINEL_WRAPPED = new RegExp(`^${REMOVE_PREVIOUS_QUOTE_SENTINEL}([\\s\\S]*)${REMOVE_NEXT_QUOTE_SENTINEL}$`);
+
+// Replace sentinel-wrapped strings with RawYaml markers so the YAML emitter writes them unquoted
+// natively (see RawYaml / RAW_YAML_TAG in utils). This is robust where the old approach — strip
+// the sentinels and any adjacent quote from the serialized text — was fragile: whether the emitter
+// quoted a scalar depended on incidental whitespace in the expression (`: ` vs `:`).
+//
+// Subtrees with no sentinel are returned by IDENTITY (not cloned), so shared object references
+// (e.g. reused retry-strategy constants) stay reference-equal and the YAML emitter can still
+// collapse them into anchors/aliases exactly as before.
+function markUnquotedNodes(node: any): any {
+    if (typeof node === "string") {
+        const m = SENTINEL_WRAPPED.exec(node);
+        return m ? new RawYaml(m[1]) : node;
+    }
+    if (Array.isArray(node)) {
+        let changed = false;
+        const out = node.map(v => { const nv = markUnquotedNodes(v); changed ||= nv !== v; return nv; });
+        return changed ? out : node;
+    }
+    if (node !== null && typeof node === "object") {
+        let changed = false;
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(node)) {
+            const nv = markUnquotedNodes(v);
+            changed ||= nv !== v;
+            out[k] = nv;
+        }
+        return changed ? out : node;
+    }
+    return node;
+}
+
 export function unwrapPlaceholdersAndStringify(obj: any): string {
-    const result = toSafeYamlOutput(obj);
-    // The sentinels mark a value that must render UNQUOTED (an Argo expression supplies its own
-    // quoting). Usually the value starts with a letter so the YAML emitter leaves it bare and we
-    // only strip the sentinel tokens. But when the expression text contains YAML indicators (e.g.
-    // a ternary's ':' / '?'), the emitter wraps the whole scalar in quotes — so also consume a
-    // single quote character immediately adjacent to each sentinel (the emitter escapes any
-    // genuine inner quote, so an adjacent bare quote is always the wrapper it added).
-    return result
-        .replace(new RegExp(`["']?${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
-        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}["']?`, 'g'), '');
+    return toSafeYamlOutput(markUnquotedNodes(obj));
 }
 
 function formatBody(body: GenericScope) {

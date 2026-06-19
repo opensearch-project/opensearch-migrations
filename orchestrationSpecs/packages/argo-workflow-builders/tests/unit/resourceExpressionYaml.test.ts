@@ -61,6 +61,17 @@ describe("resource expression YAML rendering", () => {
             expect(rendered).not.toContain('picked: "{{=toJSON(');
         });
 
+        it("emits an unquoted expression even when its text contains a ': ' YAML indicator", () => {
+            // The rendered expr-lang for a ternary contains ' ? ' and ' : ' (with spaces) — the exact
+            // case the YAML emitter force-quotes a normal scalar. The RawYaml tag emits it unquoted
+            // regardless (the value is an Argo template that Argo text-substitutes before kubectl
+            // parses the YAML, so it must not be wrapped in quotes).
+            const t = expr.ternary(expr.equals(param, expr.literal("a")), expr.literal("yes"), expr.literal("no"));
+            const rendered = renderManifest({ data: { picked: makeStringTypeProxy(t) } });
+            expect(rendered).toMatch(/picked: \{\{=toJSON\(\(\(.* \? .* : .*\)\)\)\}\}/);
+            expect(rendered).not.toContain('picked: "');
+        });
+
         it("does NOT double-encode values composed inside a makeDirectTypeProxy expression", () => {
             // A volume list built via concatArrays(templateValue([...])) is one expression; the
             // inner name must NOT be individually toJSON'd (the outer block serializes it once).
@@ -97,9 +108,7 @@ describe("resource expression YAML rendering", () => {
             expect(rendered).toContain("value: {{=toJSON(inputs.parameters.pem)}}");
             // Must be unquoted — toJSON supplies its own quotes/escapes at runtime.
             expect(rendered).not.toContain('value: "{{=toJSON');
-            // Must NOT collapse to a bare parameter substitution: the renderer's
-            // toJSON(<parameter>) optimization would drop the escaping, which the concat
-            // wrapper in yamlSafeString prevents.
+            // Must NOT collapse to a bare parameter substitution (which would drop the escaping).
             expect(rendered).not.toContain("value: {{inputs.parameters.pem}}");
             expect(rendered).not.toContain('value: "{{inputs.parameters.pem}}"');
         });

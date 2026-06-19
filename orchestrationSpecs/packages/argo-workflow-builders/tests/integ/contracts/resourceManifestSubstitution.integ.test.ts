@@ -284,4 +284,43 @@ spec:
 
     expect(result.phase).toBe("Succeeded");
   });
+
+  // This is the shape the builder emits for a string-scalar expression in a manifest: an unquoted
+  // {{=toJSON(...)}} whose *expression text* contains ' ? ' and ' : ' (the YAML indicators the
+  // emitter would otherwise force-quote) AND whose *evaluated result* contains ': '. Both must
+  // survive: the placeholder stays unquoted so Argo evaluates it, and toJSON re-quotes the ': '
+  // result so the substituted manifest is still valid YAML (`picked: "yes: A"`). The RawYaml
+  // emitter keeps the placeholder unquoted deterministically, where the old sentinel/quote-strip
+  // depended on incidental whitespace.
+  test("applies an unquoted toJSON(ternary) whose text and result both contain ': '", async () => {
+    const cmName = `rm-ternary-${runId}`;
+    const manifest = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{inputs.parameters.name}}"
+data:
+  picked: {{=toJSON((inputs.parameters.flag == 'on') ? ('yes: A') : ('no: B'))}}
+`;
+    const workflow = {
+      apiVersion: "argoproj.io/v1alpha1",
+      kind: "Workflow",
+      metadata: { generateName: "rm-ternary-", namespace },
+      spec: {
+        entrypoint: "main",
+        activeDeadlineSeconds: 30,
+        serviceAccountName: getServiceAccountName(),
+        arguments: { parameters: [{ name: "name", value: cmName }, { name: "flag", value: "on" }] },
+        templates: [{
+          name: "main",
+          inputs: { parameters: [{ name: "name" }, { name: "flag" }] },
+          resource: { action: "apply", manifest },
+        }],
+      },
+    };
+    const result = await submitAndWait(workflow);
+    expect(result.phase).toBe("Succeeded");
+    const cm = await coreApi.readNamespacedConfigMap({ name: cmName, namespace });
+    expect(cm.data.picked).toBe("yes: A");
+    await coreApi.deleteNamespacedConfigMap({ name: cmName, namespace }).catch(() => {});
+  });
 });

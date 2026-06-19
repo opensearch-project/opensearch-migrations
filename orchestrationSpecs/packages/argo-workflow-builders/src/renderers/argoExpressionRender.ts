@@ -112,9 +112,9 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
 
     if (isFunctionExpression(expr)) {
         const e = expr as FunctionExpression<any, any>;
-        if (e.functionName === "toJSON" && isParameterExpression(e.args[0] as AnyExpr)) {
-            return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
-        } else if (e.functionName === "fromJSON" && top) {
+        if (e.functionName === "fromJSON" && top) {
+            // A top-level fromJSON(<param>) is elided to the bare parameter: Argo constructs (e.g.
+            // withParam) already receive the raw serialized JSON, so re-parsing it here is redundant.
             return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
         }
         const formattedArgs =
