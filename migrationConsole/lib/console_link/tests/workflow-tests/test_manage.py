@@ -1691,6 +1691,78 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
 
 
 @pytest.mark.asyncio
+async def test_resource_view_collapses_submitted_projection_after_workflow_succeeds():
+    """Submitted projections are rollout state only while the workflow is active."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.7.0", "auth": {"type": "none"}},
+                    }]
+                },
+                "pending": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.8.0", "auth": {"type": "none"}},
+                    }]
+                },
+            }
+
+    workflow = {
+        "metadata": {"name": "migration", "resourceVersion": "123"},
+        "status": {
+            "phase": PHASE_SUCCEEDED,
+            "nodes": {
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": PHASE_SUCCEEDED}
+            },
+        },
+    }
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, workflow),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:default") is not None)
+
+            resource_node = find_tree_node_by_id(tree.root, "resource:default")
+            labels = [get_clean_text_label(child) for child in resource_node.children]
+            assert "version: deployed=3.6.0 | pending=3.6.0 | to-submit=3.8.0" in labels
+
+            await pilot.press("v")
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: any(
+                    get_clean_text_label(child) == "version: pending=3.6.0"
+                    for child in find_tree_node_by_id(tree.root, "resource:default").children
+                ),
+            )
+
+
+@pytest.mark.asyncio
 async def test_resource_view_expands_config_changes_after_edit_exit_without_workflow():
     """Returning from edit mode should reveal changed resource phases even without a workflow."""
 

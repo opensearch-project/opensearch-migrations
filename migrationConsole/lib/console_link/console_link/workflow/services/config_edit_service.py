@@ -150,7 +150,7 @@ class ConfigEditService:
 
     def load_resource_config_snapshots(self, workflow_name: Optional[str] = None) -> Dict[str, Optional[Dict[str, Any]]]:
         """Load resolved resource snapshots for current submitted and saved config."""
-        submitted = self.load_latest_submitted_resolved_config()
+        submitted = self.load_latest_submitted_resolved_config(workflow_name)
         pending = self.load_pending_resolved_config(workflow_name, validation_mode="loose")
         pending_console = (pending or {}).get("consoleResources")
         if pending and pending_console is None and pending.get("workflowConfig"):
@@ -180,8 +180,13 @@ class ConfigEditService:
             validation_mode=validation_mode,
         )
 
-    def load_latest_submitted_resolved_config(self) -> Optional[Dict[str, Any]]:
+    def load_latest_submitted_resolved_config(self, workflow_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         runs = list_resources_full(self.namespace, ["migrationruns"]).get("migrationruns", [])
+        if workflow_name:
+            runs = [
+                run for run in runs
+                if (run.get("spec") or {}).get("workflowName") == workflow_name
+            ]
         if not runs:
             return None
         latest = sorted(runs, key=_migration_run_sort_key, reverse=True)[0]

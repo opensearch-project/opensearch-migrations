@@ -58,6 +58,8 @@ TREE_ROOT_ANCHOR = "workflow-tree"
 NODE_TYPE_POD = "Pod"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
+ACTIVE_WORKFLOW_PHASES = {"Pending", PHASE_RUNNING}
+TERMINAL_WORKFLOW_PHASES = {PHASE_SUCCEEDED, "Failed", "Error"}
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
 DESC_SHOW_OUTPUT = "Show Output"
 PATCH_OUTPUT_STEPS = {
@@ -206,16 +208,33 @@ class WorkflowTreeApp(App):
             service = self._config_edit_service_or_default()
             if hasattr(service, "load_resource_config_snapshots"):
                 snapshots = service.load_resource_config_snapshots(self._workflow_name)
+                submitted_active = self._workflow_has_active_rollout(workflow_data)
                 apply_config_overlays(
                     sections,
-                    submitted_resolved_config=snapshots.get("submitted"),
+                    submitted_resolved_config=snapshots.get("submitted") if submitted_active else None,
                     pending_resolved_config=snapshots.get("pending"),
-                    submitted_console_config=snapshots.get("submitted_console"),
+                    submitted_console_config=snapshots.get("submitted_console") if submitted_active else None,
                     pending_console_config=snapshots.get("pending_console"),
                 )
         except Exception:
             logger.exception("Failed to load resource config change overlays")
         return sections
+
+    @staticmethod
+    def _workflow_has_active_rollout(workflow_data: Dict) -> bool:
+        """Return whether the submitted config still represents an active rollout."""
+        status = (workflow_data or {}).get("status") or {}
+        phase = status.get("phase")
+        if phase in TERMINAL_WORKFLOW_PHASES:
+            return False
+        if phase in ACTIVE_WORKFLOW_PHASES:
+            return True
+
+        nodes = status.get("nodes") or {}
+        return any(
+            (node or {}).get("phase") in ACTIVE_WORKFLOW_PHASES
+            for node in nodes.values()
+        )
 
     @staticmethod
     def _assign_workflow_progress(sections, steps):

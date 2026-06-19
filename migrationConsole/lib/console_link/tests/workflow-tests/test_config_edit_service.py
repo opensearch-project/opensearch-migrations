@@ -62,6 +62,36 @@ def test_load_resource_config_snapshots_uses_loose_pending_projection(_list_reso
     assert args[4:] == ("migration", "--validation-mode", "loose")
 
 
+@patch(
+    "console_link.workflow.services.config_edit_service.list_resources_full",
+    return_value={
+        "migrationruns": [
+            {
+                "metadata": {"name": "other-run-3"},
+                "spec": {
+                    "workflowName": "other",
+                    "runNumber": 3,
+                    "resolvedConfig": {"marker": "wrong-workflow"},
+                },
+            },
+            {
+                "metadata": {"name": "migration-run-2"},
+                "spec": {
+                    "workflowName": "migration",
+                    "runNumber": 2,
+                    "resolvedConfig": {"marker": "selected"},
+                },
+            },
+        ]
+    },
+)
+def test_load_latest_submitted_resolved_config_filters_by_workflow(_list_resources):
+    service = ConfigEditService(namespace="test", store=FakeStore())
+
+    assert service.load_latest_submitted_resolved_config("migration") == {"marker": "selected"}
+    assert service.load_latest_submitted_resolved_config("missing") is None
+
+
 def test_apply_operation_reports_config_processor_stderr():
     runner = MagicMock()
     runner.run_config_processor_node_script.side_effect = subprocess.CalledProcessError(
