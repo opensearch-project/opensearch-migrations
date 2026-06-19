@@ -1,11 +1,15 @@
 """Service boundary for schema-driven workflow config edit state."""
 
+import base64
 import json
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 
 from ..commands.argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from ..commands.crd_utils import list_resources_full
@@ -84,6 +88,65 @@ class ConfigEditService:
     def save_raw_yaml(self, raw_yaml: str) -> str:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
         return store.save_config(WorkflowConfig(raw_yaml=raw_yaml), self.session_name)
+
+    def list_external_resources(
+        self,
+        external_ref: Dict[str, Any],
+        current_value: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        """List Kubernetes resources matching an edit-node externalRef hint."""
+        kind = external_ref.get("kind")
+        if kind == "secret":
+            return self._list_external_secret_rows(external_ref, current_value)
+        if kind == "configMap":
+            return self._list_external_config_map_rows(external_ref, current_value)
+        return []
+
+    def read_external_resource(self, external_ref: Dict[str, Any], name: str) -> Dict[str, Any]:
+        """Read one external resource for descriptor-driven view/update panes."""
+        kind = external_ref.get("kind")
+        if kind == "secret":
+            secret = self._core_v1().read_namespaced_secret(name=name, namespace=self.namespace)
+            values = {
+                key: _decode_k8s_data_value(value)
+                for key, value in (secret.data or {}).items()
+            }
+            return {
+                "kind": "Secret",
+                "name": name,
+                "type": secret.type or "Opaque",
+                "keys": sorted(values.keys()),
+                "values": values,
+            }
+        if kind == "configMap":
+            config_map = self._core_v1().read_namespaced_config_map(name=name, namespace=self.namespace)
+            values = dict(config_map.data or {})
+            return {
+                "kind": "ConfigMap",
+                "name": name,
+                "keys": sorted(values.keys()),
+                "values": values,
+            }
+        raise ValueError(f"External resource kind is not supported: {kind}")
+
+    def save_external_resource(
+        self,
+        external_ref: Dict[str, Any],
+        values: Dict[str, str],
+        existing_name: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Create or update the resource described by an externalRef create descriptor."""
+        create = external_ref.get("create") or {}
+        output = create.get("output") or {}
+        name_field = (create.get("apply") or {}).get("nameField")
+        name = str(values.get(name_field) or existing_name or "").strip()
+        if not name:
+            raise ValueError("External resource name is required")
+        if output.get("kind") == "Secret":
+            return self._save_external_secret(external_ref, output, values, name, existing_name)
+        if output.get("kind") == "ConfigMap":
+            return self._save_external_config_map(external_ref, output, values, name)
+        raise ValueError(f"External resource output kind is not supported: {output.get('kind')}")
 
     def load_resource_config_snapshots(self, workflow_name: Optional[str] = None) -> Dict[str, Optional[Dict[str, Any]]]:
         """Load resolved resource snapshots for current submitted and saved config."""
@@ -212,6 +275,159 @@ class ConfigEditService:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(_format_config_processor_error(e)) from e
 
+    def _core_v1(self):
+        load_k8s_config()
+        api_client = client.ApiClient(client.Configuration.get_default_copy())
+        return client.CoreV1Api(api_client)
+
+    def _list_external_secret_rows(
+        self,
+        external_ref: Dict[str, Any],
+        current_value: Optional[str],
+    ) -> list[Dict[str, Any]]:
+        k8s_hint = external_ref.get("k8s") or {}
+        required_keys = list(k8s_hint.get("requiredKeys") or [])
+        accepted_types = set(k8s_hint.get("acceptedSecretTypes") or [])
+        rows: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+        secrets = self._core_v1().list_namespaced_secret(namespace=self.namespace)
+        for secret in secrets.items:
+            name = getattr(secret.metadata, "name", None)
+            if not name:
+                continue
+            seen.add(name)
+            secret_type = secret.type or "Opaque"
+            keys = sorted((secret.data or {}).keys())
+            status, message = _external_secret_status(secret_type, keys, required_keys, accepted_types)
+            rows.append({
+                "name": name,
+                "kind": "Secret",
+                "type": secret_type,
+                "keys": keys,
+                "status": status,
+                "message": message,
+                "current": name == current_value,
+            })
+        if current_value and current_value not in seen:
+            rows.append({
+                "name": current_value,
+                "kind": "Secret",
+                "type": "<not found>",
+                "keys": [],
+                "status": "warn",
+                "message": "current YAML value was not found in Kubernetes",
+                "current": True,
+            })
+        return _sort_external_rows(rows)
+
+    def _list_external_config_map_rows(
+        self,
+        external_ref: Dict[str, Any],
+        current_value: Optional[str],
+    ) -> list[Dict[str, Any]]:
+        k8s_hint = external_ref.get("k8s") or {}
+        required_keys = list(k8s_hint.get("requiredKeys") or [])
+        rows: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+        config_maps = self._core_v1().list_namespaced_config_map(namespace=self.namespace)
+        for config_map in config_maps.items:
+            name = getattr(config_map.metadata, "name", None)
+            if not name:
+                continue
+            seen.add(name)
+            keys = sorted((config_map.data or {}).keys())
+            missing = [key for key in required_keys if key not in keys]
+            rows.append({
+                "name": name,
+                "kind": "ConfigMap",
+                "keys": keys,
+                "status": "warn" if missing else "matching",
+                "message": f"missing {', '.join(missing)}" if missing else "",
+                "current": name == current_value,
+            })
+        if current_value and current_value not in seen:
+            rows.append({
+                "name": current_value,
+                "kind": "ConfigMap",
+                "keys": [],
+                "status": "warn",
+                "message": "current YAML value was not found in Kubernetes",
+                "current": True,
+            })
+        return _sort_external_rows(rows)
+
+    def _save_external_secret(
+        self,
+        external_ref: Dict[str, Any],
+        output: Dict[str, Any],
+        values: Dict[str, str],
+        name: str,
+        existing_name: Optional[str],
+    ) -> Dict[str, str]:
+        string_data: Dict[str, str] = {}
+        existing_values: Dict[str, str] = {}
+        if existing_name:
+            try:
+                existing_values = self.read_external_resource(external_ref, existing_name).get("values", {})
+            except ApiException as e:
+                if e.status != 404:
+                    raise
+        for key, source in (output.get("stringData") or {}).items():
+            field_name = source.get("fromField")
+            value = values.get(field_name)
+            if value == "" and key in existing_values:
+                continue
+            if value is not None:
+                string_data[key] = value
+        body = client.V1Secret(
+            metadata=client.V1ObjectMeta(
+                name=name,
+                labels=_external_resource_labels(external_ref),
+            ),
+            type=output.get("type") or "Opaque",
+            string_data=string_data,
+        )
+        core = self._core_v1()
+        try:
+            core.patch_namespaced_secret(name=name, namespace=self.namespace, body=body)
+            message = f"Secret updated: {name}"
+        except ApiException as e:
+            if e.status != 404:
+                raise
+            core.create_namespaced_secret(namespace=self.namespace, body=body)
+            message = f"Secret created: {name}"
+        return {"name": name, "message": message}
+
+    def _save_external_config_map(
+        self,
+        external_ref: Dict[str, Any],
+        output: Dict[str, Any],
+        values: Dict[str, str],
+        name: str,
+    ) -> Dict[str, str]:
+        data = {
+            key: values.get(source.get("fromField"), "")
+            for key, source in (output.get("data") or {}).items()
+            if values.get(source.get("fromField")) is not None
+        }
+        body = client.V1ConfigMap(
+            metadata=client.V1ObjectMeta(
+                name=name,
+                labels=_external_resource_labels(external_ref),
+            ),
+            data=data,
+        )
+        core = self._core_v1()
+        try:
+            core.patch_namespaced_config_map(name=name, namespace=self.namespace, body=body)
+            message = f"ConfigMap updated: {name}"
+        except ApiException as e:
+            if e.status != 404:
+                raise
+            core.create_namespaced_config_map(namespace=self.namespace, body=body)
+            message = f"ConfigMap created: {name}"
+        return {"name": name, "message": message}
+
 
 def _migration_run_sort_key(item: Dict[str, Any]):
     spec = item.get("spec", {})
@@ -227,6 +443,43 @@ def _migration_run_sort_key(item: Dict[str, Any]):
         metadata.get("creationTimestamp") or "",
         metadata.get("name") or "",
     )
+
+
+def _decode_k8s_data_value(value: str) -> str:
+    try:
+        return base64.b64decode(value).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def _external_secret_status(
+    secret_type: str,
+    keys: list[str],
+    required_keys: list[str],
+    accepted_types: set[str],
+) -> tuple[str, str]:
+    missing = [key for key in required_keys if key not in keys]
+    messages = []
+    if accepted_types and secret_type not in accepted_types:
+        messages.append(f"type {secret_type} is not one of {', '.join(sorted(accepted_types))}")
+    if missing:
+        messages.append(f"missing {', '.join(missing)}")
+    return ("warn", "; ".join(messages)) if messages else ("matching", "")
+
+
+def _sort_external_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    return sorted(rows, key=lambda row: (0 if row.get("status") == "matching" else 1, row.get("name") or ""))
+
+
+def _external_resource_labels(external_ref: Dict[str, Any]) -> Dict[str, str]:
+    labels = {
+        "app": "migration-assistant",
+        "component": "workflow-external-reference",
+    }
+    purpose = external_ref.get("purpose")
+    if purpose:
+        labels["workflow.opensearch.org/external-ref-purpose"] = str(purpose)
+    return labels
 
 
 def _format_config_processor_error(error: subprocess.CalledProcessError) -> str:

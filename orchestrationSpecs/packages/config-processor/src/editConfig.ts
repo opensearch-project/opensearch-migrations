@@ -2,6 +2,7 @@ import {
     CLUSTER_CONFIG,
     CLUSTER_VERSION_STRING,
     CAPTURE_CONFIG,
+    ExternalRefHint,
     FieldMeta,
     HTTP_ENDPOINT_PATTERN,
     HTTP_AUTH_BASIC,
@@ -86,6 +87,7 @@ export interface EditNode {
         blocked?: number;
     };
     inputHint?: EditInputHint;
+    externalRef?: ExternalRefHint;
     validation?: EditNodeValidation;
     diagnostics?: EditDiagnostic[];
     variants?: {
@@ -177,6 +179,7 @@ const K8S_NAME_INPUT_HINT: EditInputHint = {
 const SOURCE_ENDPOINT_HINT = uiHintAt(CLUSTER_CONFIG, ["endpoint"]) ?? textHint(OPTIONAL_HTTP_ENDPOINT_PATTERN, "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash.", "optional-http-endpoint");
 const TARGET_ENDPOINT_HINT = uiHintAt(TARGET_CLUSTER_CONFIG, ["endpoint"]) ?? textHint(HTTP_ENDPOINT_PATTERN, "Use an http:// or https:// endpoint with an optional port and trailing slash.", "http-endpoint");
 const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]) ?? K8S_NAME_INPUT_HINT;
+const BASIC_SECRET_EXTERNAL_REF = externalRefAt(HTTP_AUTH_BASIC, ["basic", "secretName"]);
 const CAPTURE_SOURCE_HINT = uiHintAt(CAPTURE_CONFIG, ["source"]);
 const CAPTURE_KAFKA_HINT = uiHintAt(CAPTURE_CONFIG, ["kafka"]);
 const CAPTURE_KAFKA_TOPIC_HINT = uiHintAt(CAPTURE_CONFIG, ["kafkaTopic"]) ?? K8S_NAME_INPUT_HINT;
@@ -212,6 +215,14 @@ function uiHintOf(schema: any): EditInputHint | undefined {
     return hint ? {...hint} as EditInputHint : undefined;
 }
 
+function externalRefOf(schema: any): ExternalRefHint | undefined {
+    const direct = schema?.meta?.() as FieldMeta | undefined;
+    const unwrapped = unwrapSchema(schema);
+    const inner = unwrapped === schema ? undefined : unwrapped?.meta?.() as FieldMeta | undefined;
+    const hint = direct?.externalRef ?? inner?.externalRef;
+    return hint ? structuredClone(hint) : undefined;
+}
+
 function uiHintAt(schema: any, path: string[]): EditInputHint | undefined {
     let current = schema;
     for (const part of path) {
@@ -222,6 +233,18 @@ function uiHintAt(schema: any, path: string[]): EditInputHint | undefined {
         }
     }
     return uiHintOf(current);
+}
+
+function externalRefAt(schema: any, path: string[]): ExternalRefHint | undefined {
+    let current = schema;
+    for (const part of path) {
+        const unwrapped = unwrapSchema(current);
+        current = unwrapped?.shape?.[part];
+        if (!current) {
+            return undefined;
+        }
+    }
+    return externalRefOf(current);
 }
 
 function textHint(pattern: string, message: string, format?: UiTextFormat): EditInputHint {
@@ -534,7 +557,8 @@ function scalarNode(
     inputHint?: EditInputHint,
     valueType?: EditNode["valueType"],
     expert = false,
-    presence: EditNode["presence"] = required ? "required" : "optional"
+    presence: EditNode["presence"] = required ? "required" : "optional",
+    externalRef?: ExternalRefHint
 ): EditNode {
     const validation = validationFromHint(inputHint);
     const missing = required && (value === undefined || value === null || value === "");
@@ -564,6 +588,7 @@ function scalarNode(
         description,
         required,
         inputHint,
+        externalRef,
         validation,
         status: missing ? "required" : patternMismatch ? "error" : "ok",
         diagnostics,
@@ -618,7 +643,11 @@ function authChildren(path: string[], variant: ReturnType<typeof authVariant>, a
                 authConfig?.basic?.secretName,
                 "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
                 true,
-                BASIC_SECRET_NAME_HINT
+                BASIC_SECRET_NAME_HINT,
+                "string",
+                false,
+                "required",
+                BASIC_SECRET_EXTERNAL_REF
             ),
         ];
     }
@@ -816,16 +845,17 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
     const hasValue = Object.hasOwn(config, key);
     const value = hasValue ? config[key] : defaultValueForSchema(schema);
     const inputHint = uiHintOf(schema);
+    const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
 
     if (scalarType === "boolean") {
         return booleanNode(path, key, value === true, description, expert, presence);
     }
     if (scalarType === "number") {
-        return scalarNode(path, key, value, description, required, inputHint, "number", expert, presence);
+        return scalarNode(path, key, value, description, required, inputHint, "number", expert, presence, externalRef);
     }
     if (scalarType === "string") {
-        return scalarNode(path, key, value ?? "", description, required, inputHint, "string", expert, presence);
+        return scalarNode(path, key, value ?? "", description, required, inputHint, "string", expert, presence, externalRef);
     }
     if (value === undefined || value === null) {
         const containerKind = schemaContainerKind(schema);
@@ -842,7 +872,7 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
                 status: "ok",
             });
         }
-        return scalarNode(path, key, "", description, required, inputHint, "string", expert, presence);
+        return scalarNode(path, key, "", description, required, inputHint, "string", expert, presence, externalRef);
     }
     return genericDisplayNode(path, key, value, presence, expert, description);
 }

@@ -46,6 +46,18 @@ describe("editConfig state", () => {
         expect(auth?.label).toContain("authConfig: < basic >");
         expect(secretName?.status).toBe("required");
         expect(secretName?.label).toContain("secretName: <required>");
+        expect(secretName?.externalRef).toMatchObject({
+            kind: "secret",
+            purpose: "http-basic-auth",
+            k8s: {
+                resource: "Secret",
+                requiredKeys: ["username", "password"],
+            },
+            create: {
+                label: "HTTP Basic Auth Secret",
+                apply: {target: "scalarName", nameField: "secretName"},
+            },
+        });
     });
 
     it("treats omitted authConfig as a complete none variant", () => {

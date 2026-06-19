@@ -64,6 +64,7 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
             if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
             if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
             if (meta?.uiHint) propSchema['x-ui-hint'] = meta.uiHint;
+            if (meta?.externalRef) propSchema['x-external-ref'] = meta.externalRef;
             if (meta?.expert || isExpertDescription(getDescription(fieldZod as z.ZodTypeAny) ?? String(propSchema.description ?? ""))) {
                 propSchema['x-expert'] = true;
             }
@@ -122,6 +123,7 @@ function removeRawUiHintMetadata(jsonSchema: any): void {
         return;
     }
     delete jsonSchema.uiHint;
+    delete jsonSchema.externalRef;
     safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 

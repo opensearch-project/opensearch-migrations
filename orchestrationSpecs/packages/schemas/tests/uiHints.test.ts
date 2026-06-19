@@ -46,6 +46,28 @@ describe("workflow schema UI hints", () => {
         });
     });
 
+    it("exports external reference hints for HTTP basic auth secrets", () => {
+        const authConfig = schema.properties.sourceClusters.additionalProperties.properties.authConfig;
+        const basicSecret = authConfig.anyOf
+            .find((branch: any) => branch.properties?.basic)
+            .properties.basic.properties.secretName;
+
+        expect(basicSecret["x-external-ref"]).toMatchObject({
+            kind: "secret",
+            purpose: "http-basic-auth",
+            displayName: "HTTP Basic Auth Secret",
+            k8s: {
+                resource: "Secret",
+                acceptedSecretTypes: ["kubernetes.io/basic-auth", "Opaque"],
+                requiredKeys: ["username", "password"],
+            },
+            create: {
+                label: "HTTP Basic Auth Secret",
+                apply: {target: "scalarName", nameField: "secretName"},
+            },
+        });
+    });
+
     it("exports expert field hints from authored schema descriptions", () => {
         const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
 

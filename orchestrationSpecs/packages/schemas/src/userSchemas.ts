@@ -32,6 +32,87 @@ export type UiHint =
         addLabel: string;
     };
 
+export type ExternalRefKind = 'secret' | 'configMap' | 'image' | 'certManagerIssuer';
+export type ExternalRefPurpose =
+    | 'http-basic-auth'
+    | 'http-mtls-client-cert'
+    | 'proxy-server-tls'
+    | 'proxy-client-ca'
+    | 'kafka-scram-password'
+    | 'kafka-ca'
+    | 'log4j-config'
+    | 'transform-entrypoint'
+    | 'transform-context-file'
+    | 'transform-context-directory'
+    | 'cert-manager-issuer';
+
+export type ExternalContentValidationId =
+    | 'non-empty-keys'
+    | 'pem-certificate-chain'
+    | 'pem-private-key'
+    | 'tls-certificate-key-pair'
+    | 'log4j-properties'
+    | 'javascript-syntax'
+    | 'python-syntax'
+    | 'json';
+
+export type ExternalFormValidationId =
+    | 'k8s-name'
+    | 'configmap-key'
+    | 'non-empty'
+    | ExternalContentValidationId;
+
+export interface ExternalResourceFormField {
+    name: string;
+    label: string;
+    input: 'name' | 'text' | 'password' | 'multilineText' | 'secretMultilineText' | 'select';
+    required?: boolean;
+    default?: string;
+    sensitive?: boolean;
+    options?: string[];
+    validationIds?: ExternalFormValidationId[];
+    confirm?: boolean;
+}
+
+export interface ExternalResourceCreateDescriptor {
+    label: string;
+    fields: ExternalResourceFormField[];
+    output:
+        | {
+            kind: 'Secret';
+            type: string;
+            stringData: Record<string, { fromField: string }>;
+        }
+        | {
+            kind: 'ConfigMap';
+            data: Record<string, { fromField: string }>;
+        };
+    apply:
+        | { target: 'scalarName'; nameField: string }
+        | { target: 'fileRefConfigMap'; nameField: string; pathField: string };
+}
+
+export interface ExternalRefHint {
+    kind: ExternalRefKind;
+    purpose: ExternalRefPurpose;
+    displayName: string;
+    description?: string;
+    k8s?: {
+        resource: 'Secret' | 'ConfigMap' | 'Issuer' | 'ClusterIssuer';
+        acceptedSecretTypes?: string[];
+        requiredKeys?: string[];
+        recommendedKeys?: string[];
+        keyPatterns?: string[];
+        contentValidationIds?: ExternalContentValidationId[];
+    };
+    image?: {
+        expects: 'file' | 'directory';
+        recommendedPathPatterns?: string[];
+        contentValidationIds?: ExternalContentValidationId[];
+    };
+    create?: ExternalResourceCreateDescriptor;
+}
+
 export interface FieldMeta {
     /** Which downstream dependencies include this field in their checksum. */
     checksumFor?: ChecksumDependency[];
@@ -39,6 +120,8 @@ export interface FieldMeta {
     changeRestriction?: 'impossible' | 'gated';
     /** UI editing hint exported into JSON schema and edit-state DTOs. */
     uiHint?: UiHint;
+    /** External resource reference hint exported into JSON schema and edit-state DTOs. */
+    externalRef?: ExternalRefHint;
     /** Advanced field hint exported into JSON schema. */
     expert?: boolean;
 }
@@ -48,6 +131,7 @@ declare module "zod" {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
         uiHint(hint: UiHint): this;
+        externalRef(hint: ExternalRefHint): this;
     }
 }
 
@@ -64,6 +148,11 @@ z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'ga
 z.ZodType.prototype.uiHint = function(hint: UiHint) {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, uiHint: hint });
+};
+
+z.ZodType.prototype.externalRef = function(hint: ExternalRefHint) {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, externalRef: hint });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -1135,6 +1224,58 @@ export const HTTP_AUTH_BASIC = z.object({
         secretName: z.string().regex(K8S_NAMING_PATTERN)
             .describe("Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.")
             .uiHint(K8S_NAME_UI_HINT)
+            .externalRef({
+                kind: 'secret',
+                purpose: 'http-basic-auth',
+                displayName: 'HTTP Basic Auth Secret',
+                description: "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                k8s: {
+                    resource: 'Secret',
+                    acceptedSecretTypes: ['kubernetes.io/basic-auth', 'Opaque'],
+                    requiredKeys: ['username', 'password'],
+                    contentValidationIds: ['non-empty-keys'],
+                },
+                create: {
+                    label: 'HTTP Basic Auth Secret',
+                    fields: [
+                        {
+                            name: 'secretName',
+                            label: 'Secret name',
+                            input: 'name',
+                            required: true,
+                            validationIds: ['k8s-name'],
+                        },
+                        {
+                            name: 'username',
+                            label: 'Username',
+                            input: 'text',
+                            required: true,
+                            validationIds: ['non-empty'],
+                        },
+                        {
+                            name: 'password',
+                            label: 'Password',
+                            input: 'password',
+                            required: true,
+                            sensitive: true,
+                            validationIds: ['non-empty'],
+                            confirm: true,
+                        },
+                    ],
+                    output: {
+                        kind: 'Secret',
+                        type: 'kubernetes.io/basic-auth',
+                        stringData: {
+                            username: {fromField: 'username'},
+                            password: {fromField: 'password'},
+                        },
+                    },
+                    apply: {
+                        target: 'scalarName',
+                        nameField: 'secretName',
+                    },
+                },
+            })
     })
 }).describe("HTTP Basic authentication using credentials from a Kubernetes Secret.");
 

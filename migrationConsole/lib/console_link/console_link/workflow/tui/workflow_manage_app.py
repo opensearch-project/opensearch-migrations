@@ -27,6 +27,12 @@ from .config_edit_tree import (
     selected_edit_node,
     update_help_panel,
 )
+from .external_resource_modal import (
+    ExternalResourceFormModal,
+    ExternalResourcePickerModal,
+    ExternalResourceViewModal,
+    values_for_form,
+)
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
@@ -1120,6 +1126,9 @@ class WorkflowTreeApp(App):
                 lambda value: self._handle_add_config_name(node, value),
             )
         elif kind == "scalar":
+            if node.get("externalRef"):
+                self._show_external_resource_picker(node)
+                return
             input_hint = node.get("inputHint") or {}
             options = input_hint.get("options") or []
             if input_hint.get("kind") == "reference" and options:
@@ -1133,20 +1142,7 @@ class WorkflowTreeApp(App):
                     lambda value: self._handle_scalar_config_value(node, value),
                 )
                 return
-            modal = TextInputModal(
-                f"Edit {'.'.join(node.get('path', []))}",
-                str(node.get("value") or ""),
-                documentation=self._edit_node_documentation(node),
-                validation=self._edit_node_validation(node),
-                required=bool(node.get("required")),
-                on_change=lambda value, locally_valid: self._schedule_scalar_config_validation(
-                    node,
-                    value,
-                    modal,
-                    locally_valid,
-                ),
-            )
-            self.push_screen(modal, lambda value: self._handle_scalar_config_value(node, value))
+            self._show_scalar_config_text_input(node)
         elif kind == "boolean":
             self.action_toggle_config_boolean()
         elif kind == "union":
@@ -1158,6 +1154,192 @@ class WorkflowTreeApp(App):
                     tree.cursor_node.collapse()
                 else:
                     tree.cursor_node.expand()
+
+    def _show_scalar_config_text_input(self, node: Dict) -> None:
+        modal = TextInputModal(
+            f"Edit {'.'.join(node.get('path', []))}",
+            str(node.get("value") or ""),
+            documentation=self._edit_node_documentation(node),
+            validation=self._edit_node_validation(node),
+            required=bool(node.get("required")),
+            on_change=lambda value, locally_valid: self._schedule_scalar_config_validation(
+                node,
+                value,
+                modal,
+                locally_valid,
+            ),
+        )
+        self.push_screen(modal, lambda value: self._handle_scalar_config_value(node, value))
+
+    def _show_external_resource_picker(self, node: Dict) -> None:
+        external_ref = node.get("externalRef") or {}
+        self.run_worker(
+            lambda: self._load_external_resource_picker_worker(node, external_ref),
+            thread=True,
+            name="load_external_resource_picker",
+        )
+
+    def _load_external_resource_picker_worker(self, node: Dict, external_ref: Dict) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if not hasattr(service, "list_external_resources"):
+                self.call_from_thread(self._show_scalar_config_text_input, node)
+                return
+            rows = service.list_external_resources(external_ref, str(node.get("value") or "") or None)
+            self.call_from_thread(self._open_external_resource_picker, node, rows)
+        except Exception as e:
+            logger.exception("Failed to list external resources")
+            self.call_from_thread(self.notify, f"External resource picker unavailable: {e}", severity="error")
+
+    def _open_external_resource_picker(self, node: Dict, rows: list[Dict]) -> None:
+        external_ref = node.get("externalRef") or {}
+        title = f"Select {external_ref.get('displayName') or '.'.join(node.get('path', []))}"
+        self.push_screen(
+            ExternalResourcePickerModal(
+                title,
+                rows,
+                node.get("value"),
+                documentation=self._edit_node_documentation(node),
+                can_create=bool(external_ref.get("create")),
+            ),
+            lambda choice: self._handle_external_resource_picker_choice(node, choice),
+        )
+
+    def _handle_external_resource_picker_choice(self, node: Dict, choice: Optional[Dict]) -> None:
+        if not choice:
+            return
+        action = choice.get("action")
+        if action == "manual":
+            self._show_scalar_config_text_input(node)
+            return
+        if action == "create":
+            self._open_external_resource_form(node, "create")
+            return
+        row = choice.get("row") or {}
+        if action == "select":
+            self._select_external_resource_row(node, row)
+        elif action == "view":
+            self._show_external_resource_view(node, row)
+        elif action == "update":
+            self._open_external_resource_form_for_row(node, row)
+
+    def _select_external_resource_row(self, node: Dict, row: Dict) -> None:
+        name = row.get("name")
+        if not name:
+            return
+        if row.get("status") == "warn":
+            message = f"Use {name} anyway?"
+            if row.get("message"):
+                message += f"\n\n{row.get('message')}"
+            self.push_screen(
+                ConfirmModal(message, confirm_label="Use", cancel_label="Cancel", default_confirm=False),
+                lambda confirmed: self._apply_external_resource_value(node, name) if confirmed else None,
+            )
+            return
+        self._apply_external_resource_value(node, name)
+
+    def _apply_external_resource_value(self, node: Dict, name: str) -> None:
+        self._handle_scalar_config_value(node, name)
+
+    def _show_external_resource_view(self, node: Dict, row: Dict) -> None:
+        self.run_worker(
+            lambda: self._read_external_resource_worker(node, row, "view"),
+            thread=True,
+            name="read_external_resource",
+        )
+
+    def _open_external_resource_form_for_row(self, node: Dict, row: Dict) -> None:
+        self.run_worker(
+            lambda: self._read_external_resource_worker(node, row, "update"),
+            thread=True,
+            name="read_external_resource",
+        )
+
+    def _read_external_resource_worker(self, node: Dict, row: Dict, action: str) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if not hasattr(service, "read_external_resource"):
+                raise RuntimeError("reading external resources is not implemented")
+            resource = service.read_external_resource(node.get("externalRef") or {}, str(row.get("name") or ""))
+            if action == "view":
+                self.call_from_thread(self._open_external_resource_view, node, resource)
+            else:
+                self.call_from_thread(self._open_external_resource_form, node, "update", resource)
+        except Exception as e:
+            logger.exception("Failed to read external resource")
+            self.call_from_thread(self.notify, f"External resource read failed: {e}", severity="error")
+
+    def _open_external_resource_view(self, node: Dict, resource: Dict) -> None:
+        self.push_screen(
+            ExternalResourceViewModal(node.get("externalRef") or {}, resource),
+            lambda choice: self._open_external_resource_form(node, "update", resource)
+            if choice and choice.get("action") == "update" else None,
+        )
+
+    def _open_external_resource_form(
+        self,
+        node: Dict,
+        mode: str,
+        resource: Optional[Dict] = None,
+    ) -> None:
+        external_ref = node.get("externalRef") or {}
+        if not external_ref.get("create"):
+            self.notify("Create/update is not available for this reference", severity="warning")
+            return
+        initial_values = values_for_form(external_ref, resource)
+        if mode == "create":
+            name_field = ((external_ref.get("create") or {}).get("apply") or {}).get("nameField")
+            if name_field and node.get("value"):
+                initial_values.setdefault(name_field, str(node.get("value") or ""))
+        self.push_screen(
+            ExternalResourceFormModal(
+                external_ref,
+                mode,
+                initial_values=initial_values,
+                existing_keys=resource.get("keys") if resource else None,
+                documentation=self._edit_node_documentation(node),
+            ),
+            lambda values: self._handle_external_resource_form(node, mode, resource, values),
+        )
+
+    def _handle_external_resource_form(
+        self,
+        node: Dict,
+        mode: str,
+        resource: Optional[Dict],
+        values: Optional[Dict[str, str]],
+    ) -> None:
+        if values is None:
+            return
+        existing_name = resource.get("name") if resource else None
+        self.run_worker(
+            lambda: self._save_external_resource_worker(node, values, existing_name),
+            thread=True,
+            name="save_external_resource",
+        )
+
+    def _save_external_resource_worker(
+        self,
+        node: Dict,
+        values: Dict[str, str],
+        existing_name: Optional[str],
+    ) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if not hasattr(service, "save_external_resource"):
+                raise RuntimeError("saving external resources is not implemented")
+            result = service.save_external_resource(node.get("externalRef") or {}, values, existing_name=existing_name)
+            self.call_from_thread(self._handle_external_resource_saved, node, result)
+        except Exception as e:
+            logger.exception("Failed to save external resource")
+            self.call_from_thread(self.notify, f"External resource save failed: {e}", severity="error")
+
+    def _handle_external_resource_saved(self, node: Dict, result: Dict[str, str]) -> None:
+        name = result.get("name")
+        if result.get("message"):
+            self.notify(result["message"])
+        if name:
+            self._apply_external_resource_value(node, name)
 
     def _show_config_variant_picker(self, node: Dict) -> None:
         variants = node.get("variants") or []
@@ -1407,6 +1589,8 @@ class WorkflowTreeApp(App):
         if kind == "command":
             return "Add"
         if kind == "scalar":
+            if node.get("externalRef"):
+                return "Pick Resource"
             return "Edit Value"
         if kind == "boolean":
             return "Toggle"
