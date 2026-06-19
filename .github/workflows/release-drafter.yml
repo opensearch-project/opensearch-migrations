@@ -10,13 +10,6 @@ on:
 env:
   java-version: '21'
   gradle-version: '8.12.1'
-  MIGRATION_ASSISTANT_CLI_RELEASE_TARGETS: >-
-    linux-amd64=x86_64-unknown-linux-gnu,
-    linux-arm64=aarch64-unknown-linux-gnu,
-    darwin-amd64=x86_64-apple-darwin,
-    darwin-arm64=aarch64-apple-darwin,
-    windows-amd64=x86_64-pc-windows-msvc,
-    windows-arm64=aarch64-pc-windows-msvc
 
 permissions:
   id-token: write
@@ -31,60 +24,10 @@ jobs:
     steps:
       - run: echo "Release approved"
 
-  build-cli-installers:
-    name: Build CLI installers (${{ matrix.name }})
-    needs: approve-release
-    if: ${{ github.event.act || needs.approve-release.result == 'success' }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            runner: ubuntu-22.04
-            targets: linux-amd64=x86_64-unknown-linux-gnu,linux-arm64=aarch64-unknown-linux-gnu
-            force-cross: 'true'
-          - name: macos
-            runner: macos-14
-            targets: darwin-amd64=x86_64-apple-darwin,darwin-arm64=aarch64-apple-darwin
-            force-cross: 'false'
-          - name: windows
-            runner: windows-2022
-            targets: windows-amd64=x86_64-pc-windows-msvc,windows-arm64=aarch64-pc-windows-msvc
-            force-cross: 'false'
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
-        with:
-          java-version: 21
-          distribution: corretto
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-      - id: get_data
-        shell: bash
-        run: |
-          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-      - name: Build platform CLI installers
-        shell: bash
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-        run: |
-          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCliInstallers \
-            -PcliVersion="${{ steps.get_data.outputs.version }}" \
-            -PcliInstallerTargets="${{ matrix.targets }}" \
-            -PcliInstallerForceCross="${{ matrix.force-cross }}" \
-            --no-daemon \
-            --no-continue \
-            --info
-      - name: Upload platform CLI installers
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: migration-assistant-cli-installers-${{ matrix.name }}-${{ steps.get_data.outputs.version }}
-          path: deployment/k8s/aws/build/migrate-cli-dist/installers/*.tar.gz
-
   draft-a-release:
     name: Draft a release
-    needs: [approve-release, build-cli-installers]
-    if: ${{ github.event.act || (needs.approve-release.result == 'success' && needs.build-cli-installers.result == 'success') }}
+    needs: [approve-release]
+    if: ${{ github.event.act || needs.approve-release.result == 'success' }}
     runs-on: ubuntu-22.04
     services:
       registry:
@@ -181,20 +124,6 @@ jobs:
           ./gradlew \
             :deployment:k8s:packageMigrationAssistantHelmChart \
             -PhelmChartVersion="${{ steps.get_data.outputs.version }}"
-      - name: Download Migration Assistant CLI installers
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: migration-assistant-cli-installers-*-${{ steps.get_data.outputs.version }}
-          path: deployment/k8s/aws/build/migrate-cli-dist/release-installers
-          merge-multiple: true
-      - name: Write Migration Assistant CLI installer manifest
-        run: |
-          ./gradlew :deployment:k8s:aws:writeMigrationAssistantCliInstallersManifest \
-            -PcliVersion="${{ steps.get_data.outputs.version }}" \
-            -PcliInstallerManifestTargets="${MIGRATION_ASSISTANT_CLI_RELEASE_TARGETS}"
-          cp deployment/k8s/aws/build/migrate-cli-dist/installers/manifest.json \
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json
-          ls -l deployment/k8s/aws/build/migrate-cli-dist/release-installers
       - name: Build and Push Migration Companion Image
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
@@ -204,9 +133,6 @@ jobs:
             -PregistryEndpoint=opensearchstaging \
             -PpublishStyle='separateRepos' \
             -PimageVersion=${{ steps.get_data.outputs.version }} \
-            -PmigrationAssistantCliInstallersDir="${PWD}/deployment/k8s/aws/build/migrate-cli-dist/release-installers" \
-            -PmigrationAssistantCliInstallersManifest="${PWD}/deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json" \
-            -PmigrationAssistantRequireCompleteInstallerSet=true \
             --no-build-cache \
             --no-daemon \
             --no-continue \
@@ -334,15 +260,6 @@ jobs:
         # This is the file operators run via curl-pipe today.
         run: |
           deployment/k8s/aws/assemble-bootstrap.sh
-      - name: Assemble migration-assistant CLI artifacts (preview)
-        # Preview deploy artifact — the new TUI CLI. Ships alongside the
-        # bootstrap so operators can opt in via curl install.sh, but the
-        # production deploy path remains aws-bootstrap.sh until the TUI
-        # bakes through a few releases. Jenkins runs the TUI by default
-        # on source builds (vars/resolveBootstrap.groovy) for coverage.
-        run: |
-          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
-            -PcliVersion="${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
@@ -358,8 +275,4 @@ jobs:
             deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz,
             workflowMigration.schema.json,
             deployment/k8s/aws/dist/aws-bootstrap.sh,
-            deployment/k8s/aws/build/migrate-cli-dist/install.sh,
-            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz,
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json,
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz,
             **/*.spdx.json
