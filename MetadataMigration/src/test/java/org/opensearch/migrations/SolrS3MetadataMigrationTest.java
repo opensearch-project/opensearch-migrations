@@ -30,6 +30,13 @@ import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -324,6 +331,101 @@ class SolrS3MetadataMigrationTest {
         }
     }
 
+    /**
+     * Externally-managed-snapshot IMPORT path: SolrCloud → CreateSnapshot (CREATE) → S3, then DELETE
+     * the schema config object to simulate a snapshot produced by some external process that did NOT
+     * include the schema (e.g. a raw standalone backup, or a backup taken before this fix). Without
+     * the schema, MetadataMigration produces empty mappings. We then run CreateSnapshot --mode import
+     * (the production import-prepare step, the same one orchestration now invokes for externally-
+     * managed Solr snapshots), which re-fetches the schema from the live source and uploads it; after
+     * that, MetadataMigration must produce the correct, schema-derived mappings.
+     *
+     * <p>This is the end-to-end guard for the whole feature: it proves --mode import bridges
+     * "snapshot exists in S3 but lacks the Solr schema" → "metadata migration yields correct mappings".
+     */
+    @Test
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
+    void externallyManagedSnapshotImportUploadsSchemaForMetadataMigration() throws Exception {
+        var version = SolrClusterContainer.SOLR_8;
+        try (
+            var solr = SolrClusterContainer.withS3Backup(
+                version, Mode.CLOUD, NETWORK, COLLECTION, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
+            var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(solr::start),
+                CompletableFuture.runAsync(target::start)
+            ).join();
+            var targetOps = new ClusterOperations(target);
+
+            var solrUrl = solr.getSolrUrl();
+            createCollectionWithSchema(solr, Mode.CLOUD);
+            indexOneDoc(solr);
+
+            String snapshotName = "meta_s3_snap_import";
+            String subpath = "v-import";
+            String s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+            String schemaKey = subpath + "/" + snapshotName + "/" + COLLECTION
+                + "/zk_backup_0/configs/" + COLLECTION + "/managed-schema.xml";
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+            // 1. Produce the backup data in S3 via a normal CREATE snapshot.
+            var createArgs = baseSolrArgs(solrUrl, snapshotName, s3RepoUri);
+            new CreateSnapshot(createArgs, snapshotContext.createSnapshotCreateContext()).run();
+            log.info("Import-e2e: CREATE snapshot finished at {}/{}", s3RepoUri, snapshotName);
+
+            // 2. Simulate an externally-produced snapshot WITHOUT the schema: delete the schema object
+            //    that SolrCloud BACKUP wrote, then confirm it is gone.
+            try (var s3 = testS3Client()) {
+                s3.deleteObject(DeleteObjectRequest.builder().bucket(BUCKET_NAME).key(schemaKey).build());
+                assertThat("schema object should be deleted to simulate a schema-less external snapshot",
+                    s3ObjectExists(s3, schemaKey), equalTo(false));
+            }
+
+            // 3. Run CreateSnapshot --mode import (the production import-prepare step). It must re-fetch
+            //    the schema from the live source and upload it back to the same key.
+            var importArgs = baseSolrArgs(solrUrl, snapshotName, s3RepoUri);
+            importArgs.mode = "import";
+            new CreateSnapshot(importArgs, snapshotContext.createSnapshotCreateContext()).run();
+            log.info("Import-e2e: --mode import finished");
+
+            try (var s3 = testS3Client()) {
+                assertThat("--mode import must re-upload the schema config to S3",
+                    s3ObjectExists(s3, schemaKey), equalTo(true));
+            }
+
+            // 4. MetadataMigration must now produce the correct, schema-derived mappings.
+            var s3LocalDir = tempDir.toPath().resolve("s3-download-import");
+            Files.createDirectories(s3LocalDir);
+
+            var metaArgs = new MigrateOrEvaluateArgs();
+            metaArgs.sourceVersion = Version.fromString("SOLR " + version.tag());
+            metaArgs.snapshotName = snapshotName;
+            metaArgs.s3RepoUri = s3RepoUri;
+            metaArgs.s3Region = REGION;
+            metaArgs.s3Endpoint = localStackEndpoint();
+            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.targetArgs.host = target.getUrl();
+
+            var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
+            var result = new MetadataMigration().migrate(metaArgs).execute(metadataContext);
+            log.atInfo().setMessage("Import-e2e migration result: {}").addArgument(result.asCliOutput()).log();
+            assertThat("Migration must succeed after --mode import uploaded the schema",
+                result.getExitCode(), equalTo(0));
+
+            var res = targetOps.get("/" + COLLECTION + "/_mapping");
+            assertThat("Target mapping endpoint should return 200", res.getKey(), equalTo(200));
+            var properties = MAPPER.readTree(res.getValue())
+                .path(COLLECTION).path("mappings").path("properties");
+            assertThat("title → keyword", properties.path("title").path("type").asText(), equalTo("keyword"));
+            assertThat("count → integer", properties.path("count").path("type").asText(), equalTo("integer"));
+            assertThat("created → date", properties.path("created").path("type").asText(), equalTo("date"));
+            assertThat("description → text", properties.path("description").path("type").asText(), equalTo("text"));
+            assertThat("active → boolean", properties.path("active").path("type").asText(), equalTo("boolean"));
+        }
+    }
+
     // ---- Solr data setup ----
     //
     // Container construction lives in the shared SolrClusterContainer fixture
@@ -331,6 +433,41 @@ class SolrS3MetadataMigrationTest {
 
     private static String localStackEndpoint() {
         return LOCAL_STACK.getEndpoint().toString();
+    }
+
+    /** Common CreateSnapshot args for a Solr S3 backup against this test's LocalStack + collection. */
+    private static CreateSnapshot.Args baseSolrArgs(String solrUrl, String snapshotName, String s3RepoUri) {
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = solrUrl;
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "s3";
+        args.s3RepoUri = s3RepoUri;
+        args.s3Region = REGION;
+        args.s3Endpoint = localStackEndpoint();
+        args.solrCollections = List.of(COLLECTION);
+        args.noWait = false;
+        return args;
+    }
+
+    private static S3Client testS3Client() {
+        return S3Client.builder()
+            .region(Region.of(REGION))
+            .endpointOverride(LOCAL_STACK.getEndpoint())
+            .credentialsProvider(StaticCredentialsProvider.create(
+                AwsBasicCredentials.create("test", "test")))
+            .forcePathStyle(true)
+            .build();
+    }
+
+    private static boolean s3ObjectExists(S3Client client, String key) {
+        try {
+            client.headObject(HeadObjectRequest.builder().bucket(BUCKET_NAME).key(key).build());
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
+        }
     }
 
     /** Create a SolrCloud collection (standalone core is precreated at startup), then add fields. */

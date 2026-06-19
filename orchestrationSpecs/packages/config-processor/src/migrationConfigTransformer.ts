@@ -587,6 +587,19 @@ function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAP
     return 'createSnapshotConfig' in config;
 }
 
+/**
+ * Solr import-prepare: an externally-managed snapshot that additionally requests the
+ * `--mode import` schema-upload step. Only Solr sources set importConfig (enforced by the
+ * SOURCE_CLUSTER_CONFIG superRefine). Such a snapshot is routed through the snapshot-creation
+ * path (so a DataSnapshot CR is created and the import step runs and patches it Completed),
+ * even though it does not generate a brand-new backup.
+ */
+function isSolrImportSnapshot(config: any): config is z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT> {
+    return 'externallyManagedSnapshotName' in config
+        && 'importConfig' in config
+        && config.importConfig !== undefined;
+}
+
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
     typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
@@ -901,7 +914,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const createConfigs: any[] = [];
 
             for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
-                if (!isGenerateSnapshot(snapshotDef.config)) continue;
+                const snapshotConfig = snapshotDef.config;
+                // Only generate-snapshots and Solr import-prepare snapshots flow through the
+                // snapshot-creation path. A plain externally-managed snapshot (no importConfig)
+                // is handled entirely on the migration side and needs no DataSnapshot CR.
+                if (!isGenerateSnapshot(snapshotConfig) && !isSolrImportSnapshot(snapshotConfig)) continue;
 
                 const repoConfig = snapshotInfo?.repos?.[snapshotDef.repoName];
                 if (!repoConfig) {
@@ -910,26 +927,48 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
-                const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 const semaphore = this.generateSemaphoreConfig(
                     sourceCluster.version,
                     sourceName,
                     snapshotName,
                     snapshotInfo?.serializeSnapshotCreation
                 );
-                createConfigs.push({
-                    label: snapshotName,
-                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
-                    config: {
-                        ...createSnapshotOpts,
-                    },
-                    repo: repoConfig,
-                    ...semaphore,
-                    ...{dependsOnProxySetups: (proxyDeps ?? []).map(name => ({
-                        name,
-                        configChecksum: ''
-                    }))}
-                });
+
+                const dependsOnProxySetups = (proxyDeps ?? []).map(name => ({
+                    name,
+                    configChecksum: ''
+                }));
+
+                if (isGenerateSnapshot(snapshotConfig)) {
+                    const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotConfig.createSnapshotConfig;
+                    createConfigs.push({
+                        label: snapshotName,
+                        snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
+                        config: {
+                            ...createSnapshotOpts,
+                        },
+                        repo: repoConfig,
+                        ...semaphore,
+                        dependsOnProxySetups,
+                    });
+                } else {
+                    // Solr import-prepare. Build a create-config whose `config` carries mode:"import"
+                    // plus the import options, and record the external snapshot name so the workflow
+                    // uses it (instead of a generated name) as the resolved snapshot. No backup runs.
+                    const importConfig = snapshotConfig.importConfig!;
+                    createConfigs.push({
+                        label: snapshotName,
+                        snapshotPrefix: snapshotName,
+                        config: {
+                            ...importConfig,
+                            mode: "import" as const,
+                        },
+                        repo: repoConfig,
+                        importExternalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
+                        ...semaphore,
+                        dependsOnProxySetups,
+                    });
+                }
             }
 
             if (createConfigs.length > 0) {
@@ -990,10 +1029,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
-                const isExternal = 'externallyManagedSnapshotName' in snapshotDef.config;
-                const snapshotNameResolution = isExternal
-                    ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
-                    : { dataSnapshotResourceName: globallyUniqueSnapshotName };
+                const snapshotConfig = snapshotDef.config;
+                let snapshotNameResolution:
+                    | { externalSnapshotName: string }
+                    | { dataSnapshotResourceName: string }
+                    | { dataSnapshotResourceName: string; externalSnapshotName: string };
+                if (isSolrImportSnapshot(snapshotConfig)) {
+                    // Solr import-prepare creates a DataSnapshot CR (so the migration waits for the
+                    // import step to upload the schema), but the snapshot name used is the external,
+                    // pre-existing one — not a workflow-generated name.
+                    snapshotNameResolution = {
+                        dataSnapshotResourceName: globallyUniqueSnapshotName,
+                        externalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
+                    };
+                } else if ('externallyManagedSnapshotName' in snapshotConfig) {
+                    snapshotNameResolution = {
+                        externalSnapshotName: (snapshotConfig as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName,
+                    };
+                } else {
+                    snapshotNameResolution = { dataSnapshotResourceName: globallyUniqueSnapshotName };
+                }
 
                 for (const migration of autoLabelMigrations(migrations)) {
                     const metadataMigrationConfig = prepareMetadataConfig(

@@ -497,6 +497,56 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=DELETE&name=branchcoll&wt=json");
     }
 
+    // ── IMPORT mode fails loudly when the schema cannot be obtained ───────────
+    //
+    // The canonical externally-managed scenario is "snapshot exists, source may be gone." If the
+    // live Solr source is unreachable, IMPORT mode cannot fetch the schema to upload — and silently
+    // continuing would let the downstream metadata migration produce empty/incorrect mappings with a
+    // green exit. IMPORT mode must instead fail loudly (SolrImportSchemaUnavailable). This is the
+    // regression guard for that behavior; it needs no live Solr container (the host is intentionally
+    // unreachable), only LocalStack for the S3 repo.
+
+    @Test
+    void importMode_unreachableSource_throwsInsteadOfSilentlyContinuing() throws Exception {
+        ensureBucket();
+        String snapshotName = "import_unreachable_test";
+        String subpath = "import-unreachable";
+
+        var args = new CreateSnapshot.Args();
+        // Unreachable Solr source: a routable-but-dead loopback port. isSolrCloud degrades to
+        // "assume standalone" without throwing, so run() proceeds to the schema-fetch step.
+        args.sourceArgs.host = "http://127.0.0.1:1";
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.s3Region = REGION;
+        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.mode = "import";
+        // Specify collections explicitly so we skip live-cluster discovery and reach the
+        // schema-fetch-and-upload step (which is what must fail fatally when the source is gone).
+        args.solrCollections = List.of("gonecoll");
+        args.noWait = false;
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+
+        var ex = Assertions.assertThrows(SolrBackupStrategy.SolrImportSchemaUnavailable.class,
+            creator::run,
+            "IMPORT mode must throw when the schema cannot be retrieved from an unreachable source");
+        Assertions.assertTrue(ex.getMessage().contains("gonecoll"),
+            "Exception should name the collection whose schema could not be obtained; got: " + ex.getMessage());
+
+        // And it must NOT have written a schema object to S3 (nothing was fetched to upload).
+        try (var s3 = testS3Client()) {
+            String configKey = subpath + "/" + snapshotName
+                + "/gonecoll/zk_backup_0/configs/gonecoll/managed-schema.xml";
+            Assertions.assertFalse(s3ObjectExists(s3, configKey),
+                "No schema should be uploaded when the source is unreachable");
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static String cloudSolrUrl() {

@@ -74,6 +74,23 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     /**
+     * Thrown when IMPORT mode cannot obtain the source schema for a collection/core and therefore
+     * cannot guarantee that the downstream metadata migration will produce correct mappings.
+     *
+     * <p>IMPORT mode exists precisely to upload the schema into an externally-managed snapshot. If
+     * the schema cannot be fetched (e.g. the live Solr source is unreachable, or the file handler
+     * and Schema API both fail), continuing would leave the snapshot without a schema and the
+     * migration would silently produce empty/wrong mappings with a green exit. Failing loudly here
+     * surfaces the problem at import time instead. (CREATE mode keeps the historical best-effort
+     * behavior, since the backup itself — SolrCloud BACKUP — carries the configs.)
+     */
+    public static class SolrImportSchemaUnavailable extends RuntimeException {
+        public SolrImportSchemaUnavailable(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Unified entry point for Solr backup/import operations.
      *
      * <p>Execution flow:
@@ -156,6 +173,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                     uploadConfigFileToS3IfMissing(s3Client, repoUri, snapshotPrefix, solrUrl, collection, configFile);
                 }
             }
+        } catch (SolrImportSchemaUnavailable e) {
+            // IMPORT mode: schema upload is the whole point of the step, so this is fatal —
+            // never downgrade it to a warning (that would reintroduce the silent-empty-mappings bug).
+            throw e;
         } catch (Exception e) {
             log.warn("Config file check-and-upload failed: {} — migration may see empty mappings", e.getMessage());
         }
@@ -175,6 +196,13 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             configFile, topologyLabel(), collection);
         var content = fetchConfigFile(solrUrl, collection, configFile);
         if (content == null) {
+            if (mode == SnapshotMode.IMPORT) {
+                throw new SolrImportSchemaUnavailable(String.format(
+                    "IMPORT mode could not retrieve required config '%s' for %s '%s' from the Solr source at %s. "
+                        + "The live source must be reachable so its schema can be uploaded into the snapshot; "
+                        + "otherwise the metadata migration would produce empty/incorrect mappings.",
+                    configFile, topologyLabel(), collection, solrUrl));
+            }
             log.warn("Could not retrieve '{}' for {} '{}' from source — "
                 + "downstream migration may see empty mappings",
                 configFile, topologyLabel(), collection);
@@ -226,6 +254,13 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         log.info("Config '{}' missing on filesystem for core '{}', fetching from source", configFile, core);
         var content = fetchConfigFile(solrUrl, core, configFile);
         if (content == null) {
+            if (mode == SnapshotMode.IMPORT) {
+                throw new SolrImportSchemaUnavailable(String.format(
+                    "IMPORT mode could not retrieve required config '%s' for core '%s' from the Solr source at %s. "
+                        + "The live source must be reachable so its schema can be written into the snapshot; "
+                        + "otherwise the metadata migration would produce empty/incorrect mappings.",
+                    configFile, core, solrUrl));
+            }
             log.warn("Could not retrieve '{}' for core '{}' — downstream may see empty mappings",
                 configFile, core);
             return;
@@ -331,14 +366,21 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     /**
-     * IMPORT mode: verify an externally-provided snapshot is accessible and ready for the
-     * downstream migration pipeline. Config files have already been checked/uploaded by
-     * ensureConfigFilesInS3(), so this validates that the snapshot data itself is reachable.
+     * IMPORT mode: prepare an externally-provided snapshot for the downstream migration pipeline.
+     * The required config/schema files have already been fetched from the live Solr source and
+     * uploaded by ensureConfigFilesInS3()/ensureConfigFilesOnFilesystem() — and that step is FATAL
+     * in IMPORT mode (it throws {@link SolrImportSchemaUnavailable} if the schema cannot be
+     * obtained), so by the time we get here the schema is guaranteed present. This method then
+     * validates that the snapshot data itself is reachable.
      *
      * <p>Unlike CREATE mode, no backup operation is performed — the snapshot data must already
      * exist at the configured location (placed there by an external process or prior backup).
      * Both standalone and SolrCloud topologies are handled identically in import mode since
      * the snapshot format is the same once created.
+     *
+     * <p><strong>Live-source requirement:</strong> IMPORT mode fetches the schema from the running
+     * Solr cluster, so the source must be reachable. It is not an offline operation against a
+     * decommissioned source.
      */
     @SuppressWarnings("java:S1172") // solrUrl reserved for future import validation against live cluster
     private void runImportMode(String solrUrl) {

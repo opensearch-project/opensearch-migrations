@@ -133,7 +133,11 @@ public class CreateSnapshot {
         @Parameter(
                 names = {"--mode"},
                 required = false,
-                description = "Snapshot mode: 'create' (default, standard snapshot creation) or 'import' (config retrieval + import workflow)")
+                description = "Snapshot mode (Solr sources): 'create' (default) performs a standard snapshot backup; "
+                    + "'import' performs no backup and instead retrieves each collection/core's schema from the live "
+                    + "Solr source and uploads it into an externally-managed snapshot's repo so metadata migration can "
+                    + "derive mappings. 'import' requires the live Solr source to be reachable and fails if the schema "
+                    + "cannot be obtained.")
         public String mode = "create";
 
         @Parameter(

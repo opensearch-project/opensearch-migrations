@@ -33,6 +33,7 @@ from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
+from .test_cases.solr_import_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
 

@@ -271,7 +271,21 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const SNAPSHOT_NAME_RESOLUTION = z.union([
+    // Solr import-prepare: an externally-managed snapshot that still needs the schema uploaded by
+    // CreateSnapshot --mode import. A DataSnapshot CR (dataSnapshotResourceName) is created so the
+    // migration waits for the import step to finish, but the snapshot name used is the external one
+    // (externalSnapshotName), not a CR-resolved generated name.
+    //
+    // MUST come first: this is a non-discriminated union and Zod object schemas strip unknown keys,
+    // so a combined {dataSnapshotResourceName, externalSnapshotName} object also satisfies the
+    // single-key variants below. First-match-wins means the most-specific (two-key) variant has to
+    // be listed before the subsets or its dataSnapshotResourceName would be silently dropped.
+    z.object({ dataSnapshotResourceName: z.string(), externalSnapshotName: z.string() }),
+    // External snapshot with no workflow-side preparation (ES/OS, or Solr without importConfig):
+    // the migration uses the external name directly and waits on nothing.
     z.object({ externalSnapshotName: z.string() }),
+    // Workflow-generated snapshot: the migration waits on the DataSnapshot CR named here, then
+    // reads the resolved snapshot name from the CR's status.
     z.object({ dataSnapshotResourceName: z.string() })
 ]);
 
@@ -338,6 +352,12 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     })),
     configChecksum: z.string(),
     resourceUid: z.string(),
+    // Solr import-prepare only. When present, this snapshot item does NOT create a new backup;
+    // instead CreateSnapshot runs with `--mode import` against the externally-managed snapshot
+    // named here, uploading the source schema into the repo. `config` carries mode:"import" and
+    // the import options; `importExternalSnapshotName` is the pre-existing snapshot name used as
+    // the resolved snapshot name (instead of a workflow-generated one).
+    importExternalSnapshotName: z.string().optional(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({

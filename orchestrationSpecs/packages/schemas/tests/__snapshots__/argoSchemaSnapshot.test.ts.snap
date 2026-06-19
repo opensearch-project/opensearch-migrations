@@ -280,6 +280,51 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                       "externallyManagedSnapshotName": {
                                         "type": "string",
                                         "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                      },
+                                      "importConfig": {
+                                        "type": "object",
+                                        "properties": {
+                                          "otelTraceCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                          },
+                                          "otelMetricsCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "default": "http://otel-collector:4317",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                          },
+                                          "jvmArgs": {
+                                            "type": "string",
+                                            "default": "",
+                                            "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                          },
+                                          "loggingConfigurationOverrideConfigMap": {
+                                            "type": "string",
+                                            "default": "",
+                                            "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                          }
+                                        },
+                                        "description": "Solr-only: enables the import-prepare step that uploads the source schema into the externally-managed snapshot before metadata migration. Only valid when the source cluster version is a 'SOLR ...' version. Omit for Elasticsearch/OpenSearch sources, where an externally-managed snapshot already carries its own metadata."
                                       }
                                     },
                                     "required": [
@@ -344,7 +389,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                               "import"
                                             ],
                                             "default": "create",
-                                            "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' runs the config retrieval and import workflow."
+                                            "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
                                           },
                                           "indexAllowlist": {
                                             "type": "array",
@@ -1431,6 +1476,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "resourceUid": {
                         "type": "string"
+                      },
+                      "importExternalSnapshotName": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -1593,6 +1641,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "snapshotNameResolution": {
                   "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        },
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName",
+                        "externalSnapshotName"
+                      ]
+                    },
                     {
                       "type": "object",
                       "properties": {
@@ -3250,6 +3313,51 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "externallyManagedSnapshotName": {
                               "type": "string",
                               "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                            },
+                            "importConfig": {
+                              "type": "object",
+                              "properties": {
+                                "otelTraceCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                },
+                                "otelMetricsCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "default": "http://otel-collector:4317",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                },
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": "",
+                                  "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                },
+                                "loggingConfigurationOverrideConfigMap": {
+                                  "type": "string",
+                                  "default": "",
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                }
+                              },
+                              "description": "Solr-only: enables the import-prepare step that uploads the source schema into the externally-managed snapshot before metadata migration. Only valid when the source cluster version is a 'SOLR ...' version. Omit for Elasticsearch/OpenSearch sources, where an externally-managed snapshot already carries its own metadata."
                             }
                           },
                           "required": [
@@ -3314,7 +3422,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "import"
                                   ],
                                   "default": "create",
-                                  "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' runs the config retrieval and import workflow."
+                                  "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
