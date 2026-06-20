@@ -75,7 +75,7 @@ class MigrateTest {
     void migrate_snapshotReadFailureNamesFilesystemRepo() {
         var args = new MigrateArgs();
         args.snapshotName = "snap2";
-        args.fileSystemRepoPath = "/backups/repo";
+        args.repoUri = "/backups/repo";
         var context = mock(RootMetadataMigrationContext.class);
         var meta = new MetadataMigration();
 
