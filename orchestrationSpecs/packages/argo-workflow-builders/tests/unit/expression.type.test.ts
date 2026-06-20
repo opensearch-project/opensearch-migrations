@@ -1,5 +1,5 @@
 import {expectTypeOf} from "expect-type";
-import {BaseExpression, expr, INTERNAL, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
+import {BaseExpression, expr, INTERNAL, makeDirectTypeProxy, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
@@ -20,6 +20,15 @@ describe("expression type contracts", () => {
 
         // @ts-expect-error - nested record literals must use expr.makeDict(...)
         expr.literal([{foo: 2}]);
+    });
+
+    it("makeDirectTypeProxy rejects string expressions", () => {
+        expectTypeOf(makeDirectTypeProxy(expr.literal(5))).toEqualTypeOf<number>();
+        expectTypeOf(makeDirectTypeProxy(expr.makeDict({enabled: true})))
+            .toEqualTypeOf<{ enabled: boolean }>();
+
+        // @ts-expect-error - string expressions must use makeStringTypeProxy / yamlSafeString so manifest rendering can escape them
+        makeDirectTypeProxy(expr.literal("unsafe-string"));
     });
 
     it("expr.literal() rejects bare Argo template delimiters", () => {

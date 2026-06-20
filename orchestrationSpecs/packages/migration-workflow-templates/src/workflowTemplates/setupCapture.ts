@@ -45,8 +45,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "CaptureProxy",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: true,
         blockOwnerDeletion: true,
     }];
@@ -304,7 +304,7 @@ function makeCertificateManifest(args: {
     issuerName: BaseExpression<string>,
     issuerKind: BaseExpression<string>,
     issuerGroup: BaseExpression<string>,
-    dnsNames: BaseExpression<string>,
+    dnsNames: BaseExpression<Serialized<string[]>>,
     duration: BaseExpression<string>,
     renewBefore: BaseExpression<string>,
     ownerName: BaseExpression<string>,
@@ -486,7 +486,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("issuerName", typeToken<string>())
         .addRequiredInput("issuerKind", typeToken<string>())
         .addRequiredInput("issuerGroup", typeToken<string>())
-        .addRequiredInput("dnsNames", typeToken<string>())
+        .addRequiredInput("dnsNames", typeToken<string[]>())
         .addRequiredInput("duration", typeToken<string>())
         .addRequiredInput("renewBefore", typeToken<string>())
         .addRequiredInput("ownerName", typeToken<string>())

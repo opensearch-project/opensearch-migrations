@@ -45,8 +45,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "TrafficReplay",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: true,
         blockOwnerDeletion: true,
     }];
@@ -236,11 +236,11 @@ function getReplayerDeploymentManifest
         apiVersion: "apps/v1",
         kind: "Deployment",
         metadata: {
-            name: makeDirectTypeProxy(args.name),
+            name: makeStringTypeProxy(args.name),
             ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
                 app: "replayer",
-                "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
+                "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
@@ -260,7 +260,7 @@ function getReplayerDeploymentManifest
                 metadata: {
                     labels: {
                         app: "replayer",
-                        "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
+                        "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                         "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),

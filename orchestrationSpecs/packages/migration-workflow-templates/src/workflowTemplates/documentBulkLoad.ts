@@ -153,8 +153,8 @@ function getRfsDeploymentManifest
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "SnapshotMigration",
-        name: makeDirectTypeProxy(args.crdName),
-        uid: makeDirectTypeProxy(args.crdUid),
+        name: makeStringTypeProxy(args.crdName),
+        uid: makeStringTypeProxy(args.crdUid),
         controller: false,
         blockOwnerDeletion: true
     }];

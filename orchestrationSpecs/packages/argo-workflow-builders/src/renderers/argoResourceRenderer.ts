@@ -1,6 +1,11 @@
 import {InputParamDef, InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
 import {
+    isAsStringExpression,
+    isConcatExpression,
+    isFunctionExpression,
     isLiteralExpression,
+    isTemplateExpression,
+    isWorkflowValue,
     REMOVE_NEXT_QUOTE_SENTINEL,
     REMOVE_PREVIOUS_QUOTE_SENTINEL,
     toArgoExpressionString
@@ -12,7 +17,6 @@ import {WorkflowBuilder} from "../models/workflowBuilder";
 import {
     BaseExpression,
     expr,
-    makeDirectTypeProxy,
     SimpleExpression,
     TemplateExpression,
     UnquotedTypeWrapper
@@ -377,6 +381,33 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
     throw new Error(`Expected plain object; got ${Object.prototype.toString.call(v)}`);
 }
 
+const KNOWN_STRING_FUNCTIONS = new Set([
+    "fromBase64",
+    "join",
+    "lower",
+    "sprig.regexFind",
+    "sprig.regexReplaceAll",
+    "string",
+    "toBase64",
+    "toJSON",
+    "upper",
+]);
+
+function isKnownStringExpression(node: BaseExpression<any, any>): boolean {
+    if (isLiteralExpression(node)) {
+        return typeof node.value === "string";
+    }
+    if (
+        isAsStringExpression(node) ||
+        isConcatExpression(node) ||
+        isTemplateExpression(node) ||
+        isWorkflowValue(node)
+    ) {
+        return true;
+    }
+    return isFunctionExpression(node) && KNOWN_STRING_FUNCTIONS.has(node.functionName);
+}
+
 /**
  * Recursively transforms any Expression instances found within records and arrays.
  * Asserts when non-plain objects are found since they shouldn't exist in this model.
@@ -392,6 +423,18 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
 export function transformExpressionsDeep<T>(input: T, escapeStringScalars = false) {
     function visit(node: any): any {
         if (node instanceof BaseExpression) {
+            if (
+                escapeStringScalars &&
+                node instanceof UnquotedTypeWrapper &&
+                node.mode !== "yaml-safe-json" &&
+                isKnownStringExpression(node.value)
+            ) {
+                throw new Error(
+                    "Raw unquoted string expression in a resource manifest. " +
+                    "Use makeStringTypeProxy or expr.yamlSafeString for strings; " +
+                    "makeDirectTypeProxy is only for non-string YAML values."
+                );
+            }
             const needsEscape = escapeStringScalars
                 && !(node instanceof UnquotedTypeWrapper)
                 && !isLiteralExpression(node);

@@ -8,6 +8,7 @@ import {
     Serialized,
     toArgoExpressionString,
     transformExpressionsDeep,
+    UnquotedTypeWrapper,
     unwrapPlaceholdersAndStringify,
 } from "../../src";
 
@@ -54,6 +55,18 @@ describe("resource expression YAML rendering", () => {
             expect(rendered).toContain("pem: {{=toJSON(inputs.parameters.x)}}");
         });
 
+        it("keeps YAML-sensitive dynamic strings valid after Argo substitution", () => {
+            const rendered = renderManifest({ data: { value: makeStringTypeProxy(param) } });
+            const marker = "{{=toJSON(inputs.parameters.x)}}";
+            expect(rendered).toContain(marker);
+
+            for (const value of ["a: b", "---\nvalue", "a'b\\c", "ON", "00123"]) {
+                const substituted = rendered.replace(marker, JSON.stringify(value));
+                const parsed = parseYaml(substituted) as { data: { value: string } };
+                expect(parsed.data.value).toBe(value);
+            }
+        });
+
         it("escapes a ':'-containing string scalar unquoted (ternary)", () => {
             const t = expr.ternary(expr.equals(param, expr.literal("a")), expr.literal("y:1"), expr.literal("n:2"));
             const rendered = renderManifest({ data: { picked: makeStringTypeProxy(t) } });
@@ -92,6 +105,15 @@ describe("resource expression YAML rendering", () => {
             const rendered = renderManifest({ spec: { replicas: makeDirectTypeProxy(num) } });
             expect(rendered).toContain("replicas: {{inputs.parameters.replicas}}");
             expect(rendered).not.toContain("toJSON");
+        });
+
+        it("rejects obvious raw unquoted string wrappers in manifest mode", () => {
+            const rawStringWrapper = new UnquotedTypeWrapper(
+                expr.concat(param, expr.literal("-suffix"))
+            );
+
+            expect(() => renderManifest({ data: { bad: rawStringWrapper } }))
+                .toThrow(/Raw unquoted string expression/);
         });
     });
 
@@ -163,6 +185,15 @@ describe("resource expression YAML rendering", () => {
             expect(toArgoExpressionString(
                 expr.regexReplaceAll(expr.literal("[0-9]"), expr.literal("X"), expr.literal("a1b2"))
             )).toContain("sprig.regexReplaceAll('[0-9]', 'a1b2', 'X')");
+        });
+
+        it("escapes concatWith separators as expr-lang string literals", () => {
+            const rendered = toArgoExpressionString(
+                expr.concatWith("'\\", expr.literal("a"), expr.literal("b"))
+            );
+            expect(rendered).toContain("\\'");
+            expect(rendered).toContain("\\\\");
+            expect(rendered).not.toContain(" + '''");
         });
     });
 });

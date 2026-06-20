@@ -64,8 +64,13 @@ export function widenComplexity<
     return v as BaseExpression<T, C>;
 }
 
+export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
+
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
-    constructor(public readonly value: BaseExpression<T>) {
+    constructor(
+        public readonly value: BaseExpression<T>,
+        public readonly mode: UnquotedWrapperMode = "raw-non-string"
+    ) {
         super("strip_surrounding_quotes_in_serialized_output");
     }
 }
@@ -1045,7 +1050,7 @@ class ExprBuilder {
             "toJSON",
             toExpression(value)
         );
-        return new UnquotedTypeWrapper(jsonEscaped);
+        return new UnquotedTypeWrapper(jsonEscaped, "yaml-safe-json");
     }
 }
 
@@ -1057,8 +1062,9 @@ export default expr;
 // This function and the next tie into the renderer
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<number>>): number;
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>): boolean;
-export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T;
-export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject|Serialized<number>|Serialized<boolean>)>(value: BaseExpression<T>) {
+export function makeDirectTypeProxy<T extends AggregateType>(value: BaseExpression<Serialized<T>>): T;
+export function makeDirectTypeProxy<T extends Exclude<NonSerializedPlainObject, string>>(value: BaseExpression<T>): T;
+export function makeDirectTypeProxy<T extends (Exclude<NonSerializedPlainObject, string>|Serialized<Exclude<NonSerializedPlainObject, string>>)>(value: BaseExpression<T>) {
     return new UnquotedTypeWrapper(value) as any as T;
 }
 

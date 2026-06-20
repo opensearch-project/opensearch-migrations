@@ -10,11 +10,11 @@ import {
     makeDirectTypeProxy,
     makeStringTypeProxy,
     NonSerializedPlainObject,
-    PlainObject,
     selectInputsForRegister,
     Serialized,
     TemplateBuilder,
     typeToken,
+    UnquotedTypeWrapper,
     WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -91,7 +91,7 @@ function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: Bas
         "toJSON",
         [value] as unknown as BaseExpression<NonSerializedPlainObject, any>[]
     );
-    return makeDirectTypeProxy(jsonExpression as unknown as BaseExpression<Record<string, PlainObject>>) as unknown as T;
+    return new UnquotedTypeWrapper(jsonExpression, "yaml-safe-json") as unknown as T;
 }
 
 function buildPatchStatusTemplate<

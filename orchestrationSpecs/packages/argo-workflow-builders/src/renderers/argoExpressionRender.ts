@@ -97,7 +97,8 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
         const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers, scopeType));
-        const text = parts.map(p => p.text).join(ce.separator ? " + '" + ce.separator + "' + " : "+");
+        const separator = ce.separator ? ` + '${escapeGovaluateStringLiteral(ce.separator)}' + ` : "+";
+        const text = parts.map(p => p.text).join(separator);
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
     }
