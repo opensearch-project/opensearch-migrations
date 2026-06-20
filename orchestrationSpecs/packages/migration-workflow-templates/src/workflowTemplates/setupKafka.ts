@@ -125,7 +125,14 @@ function makeDeployKafkaNodePool(args: {
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
             }
         },
-        spec: makeDirectTypeProxy(expr.deserializeRecord(args.nodePoolSpec))
+        // Merge default broker resources UNDER the user's nodePoolSpec so brokers get a
+        // 'Guaranteed' QoS by default (without it they are 'BestEffort' — see
+        // DEFAULT_RESOURCES.KAFKA_BROKER). sprig.merge gives the first arg precedence, so any
+        // user-supplied resources (or other fields) in nodePoolSpec override the default.
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            expr.deserializeRecord(args.nodePoolSpec),
+            expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
+        ))
     };
 }
 

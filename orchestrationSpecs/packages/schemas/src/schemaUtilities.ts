@@ -86,6 +86,25 @@ export const DEFAULT_RESOURCES = {
             memory: "512Mi",
         }
     },
+
+    // Kafka broker/controller node-pool pods (KafkaNodePool.spec.resources). Same hazard as
+    // ENTITY_OPERATOR but worse: with no resources the broker JVM is 'BestEffort', so the
+    // scheduler packs it onto an already-busy node where it competes for CPU and drives the
+    // node's disk past its IOPS ceiling. The broker's own filesystem-health check then stalls
+    // for minutes, KRaft never elects a cluster-manager, and any downstream step waiting on a
+    // readiness deadline (e.g. the RFS coordinator) fails — wedging the migration so the
+    // replayer never starts. Reserve real CPU/memory so the scheduler spreads brokers off
+    // saturated nodes. requests==limits => 'Guaranteed' QoS.
+    KAFKA_BROKER: {
+        limits: {
+            cpu: "1000m",
+            memory: "2048Mi",
+        },
+        requests: {
+            cpu: "1000m",
+            memory: "2048Mi",
+        }
+    },
 } as const;
 
 export function parseK8sQuantity(qty: string): number {
