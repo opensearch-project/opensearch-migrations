@@ -524,6 +524,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "proxyConfig": {
                   "type": "object",
                   "properties": {
+                    "podReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
+                    },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
@@ -539,10 +549,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "internetFacing": {
                       "type": "boolean",
                       "default": false
-                    },
-                    "podReplicas": {
-                      "type": "number",
-                      "default": 1
                     },
                     "resources": {
                       "type": "object",
@@ -1806,8 +1812,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "object",
                   "properties": {
                     "podReplicas": {
-                      "type": "number",
+                      "type": "integer",
+                      "minimum": 0,
                       "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
                     },
                     "jvmArgs": {
                       "type": "string",
@@ -2470,6 +2482,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "replayerConfig": {
                   "type": "object",
                   "properties": {
+                    "podReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
+                    },
                     "jvmArgs": {
                       "type": "string",
                       "default": ""
@@ -2477,10 +2499,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
-                    },
-                    "podReplicas": {
-                      "type": "number",
-                      "default": 1
                     },
                     "useLocalStack": {
                       "type": "boolean",
@@ -3945,9 +3963,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "podReplicas": {
-                        "type": "number",
+                        "type": "integer",
+                        "minimum": 0,
                         "default": 1,
                         "description": "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel — throughput scales linearly up to the total number of source shards."
+                      },
+                      "minPodReplicas": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the RFS document backfill service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
                       },
                       "jvmArgs": {
                         "type": "string",
@@ -4582,6 +4607,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "proxyConfig": {
                 "type": "object",
                 "properties": {
+                  "podReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+                  },
+                  "minPodReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the capture proxy service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
+                  },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
@@ -4602,11 +4639,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": false,
                     "description": "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
                     "changeRestriction": "impossible"
-                  },
-                  "podReplicas": {
-                    "type": "number",
-                    "default": 1,
-                    "description": "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
                   },
                   "resources": {
                     "type": "object",
@@ -5173,6 +5205,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "replayerConfig": {
                 "type": "object",
                 "properties": {
+                  "podReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+                  },
+                  "minPodReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the traffic replayer service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
+                  },
                   "jvmArgs": {
                     "type": "string",
                     "default": "",
@@ -5182,11 +5226,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
-                  },
-                  "podReplicas": {
-                    "type": "number",
-                    "default": 1,
-                    "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
                   },
                   "useLocalStack": {
                     "type": "boolean",

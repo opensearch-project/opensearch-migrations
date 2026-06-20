@@ -189,6 +189,7 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     podReplicas: true,
+    minPodReplicas: true,
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
     useTargetClusterForWorkCoordination: true,
@@ -213,13 +214,14 @@ const PROXY_RESOLVED_FIELDS = {
 } as const;
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
     serviceType: true,
     internetFacing: true,
     podReplicas: true,
+    minPodReplicas: true,
     resources: true,
     tls: true,
     sslTrustCertPem: true,
@@ -253,6 +255,7 @@ export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIO
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
     podReplicas: true,
+    minPodReplicas: true,
     useLocalStack: true,
     resources: true,
     fileSourceVolumes: true,

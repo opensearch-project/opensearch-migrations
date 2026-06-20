@@ -194,6 +194,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -219,6 +220,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
                     topicReplicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
@@ -838,6 +840,11 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         ["podReplicas"],
                         1
+                    ),
+                    minPodReplicas: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
+                        ["minPodReplicas"],
+                        0
                     ),
                     topicPartitions: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),

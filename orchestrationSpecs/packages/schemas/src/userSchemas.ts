@@ -40,10 +40,40 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const MIN_POD_REPLICAS_DESC = "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. " +
+    "This renders a PodDisruptionBudget minAvailable value for the service. " +
+    "The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
+}
+
+function validateMinPodReplicas(
+    ctx: z.RefinementCtx,
+    data: {podReplicas?: number, minPodReplicas?: number}
+) {
+    if (data.minPodReplicas !== undefined && data.podReplicas !== undefined
+        && data.minPodReplicas > data.podReplicas) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
+            path: ["minPodReplicas"]
+        });
+    }
+}
+
+function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
+    return z.object({
+        podReplicas: z.number().int().nonnegative().default(1).optional()
+            .describe(podReplicasDescription),
+        minPodReplicas: z.number().int().nonnegative().default(0).optional()
+            .describe(MIN_POD_REPLICAS_DESC.replace("the service", `the ${serviceName} service`)),
+    });
+}
+
+function withScalableServiceValidation<T extends z.ZodObject<any>>(schema: T): T {
+    return schema.superRefine((data, ctx) => validateMinPodReplicas(ctx, data)) as T;
 }
 class SchemaValidationError extends Error {
     constructor(message: string, public path: string[]) {
@@ -523,7 +553,11 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Explicitly disable TLS termination on the capture proxy."),
 ]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
-export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
+export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "capture proxy",
+        "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+    ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
@@ -534,15 +568,14 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     internetFacing: z.boolean().default(false).optional()
         .describe("When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
         .changeRestriction('impossible'),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Kubernetes resource limits and requests for the capture proxy container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
         .default(DEFAULT_RESOURCES.PROXY),
-}).describe("Kubernetes deployment-level options for the capture proxy.");
+}))
+    .describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
@@ -599,18 +632,21 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = z.object({
+export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}).describe("Process-level and deployment-level configuration options for the capture proxy.");
+}))
+    .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
-export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
+export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "traffic replayer",
+        "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -618,7 +654,8 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
-}).describe("Kubernetes deployment-level options for the traffic replayer.");
+}))
+    .describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
@@ -711,6 +748,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
+    validateMinPodReplicas(ctx, data);
     validatePipelineRawConfigConflict(ctx, data, "requestTransforms", [
         "transformerConfig",
         "transformerConfigEncoded",
@@ -850,10 +888,12 @@ export const USER_METADATA_OPTIONS = z.object({
     ]);
 });
 
-export const USER_RFS_WORKFLOW_OPTIONS = z.object({
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" + 
-            " throughput scales linearly up to the total number of source shards."),
+export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "RFS document backfill",
+        "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" +
+            " throughput scales linearly up to the total number of source shards."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -878,7 +918,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
-}).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+}))
+    .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
@@ -989,6 +1030,7 @@ export const USER_RFS_OPTIONS = z.object({
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .superRefine((data, ctx) => {
+        validateMinPodReplicas(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",

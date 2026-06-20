@@ -278,6 +278,7 @@ function makeCaptureProxyManifest(
         ),
         internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
         podReplicas: expr.dig(proxyOpts, ["podReplicas"], 1),
+        minPodReplicas: expr.dig(proxyOpts, ["minPodReplicas"], 0),
         resources: expr.get(proxyOpts, "resources"),
         tls: expr.dig(proxyOpts, ["tls"], expr.makeDict({})),
     });
@@ -343,6 +344,7 @@ function makeSnapshotMigrationManifest(
             metadataMigrationFileSourceVolumes: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumes"], expr.literal([]))),
             metadataMigrationFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumeMounts"], expr.literal([]))),
             documentBackfillPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "podReplicas"], 1)),
+            documentBackfillMinPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "minPodReplicas"], 0)),
             documentBackfillJvmArgs: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal(""))),
             documentBackfillLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
             documentBackfillUseTargetClusterForWorkCoordination: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useTargetClusterForWorkCoordination"], false)),
@@ -391,6 +393,7 @@ function makeTrafficReplayManifest(
             expr.literal("")
         ),
         podReplicas: expr.dig(opts, ["podReplicas"], 1),
+        minPodReplicas: expr.dig(opts, ["minPodReplicas"], 0),
         resources: expr.get(opts, "resources"),
         fileSourceVolumes: expr.dig(opts, ["fileSourceVolumes"], expr.literal([])),
         fileSourceVolumeMounts: expr.dig(opts, ["fileSourceVolumeMounts"], expr.literal([])),

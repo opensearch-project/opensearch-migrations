@@ -137,6 +137,42 @@
         }
       },
       {
+        "name": "createrfscoordinatorpoddisruptionbudget",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "minPodReplicas"
+            },
+            {
+              "name": "ownerName"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: {{=toJSON(inputs.parameters.clusterName)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: SnapshotMigration\n      name: {{=toJSON(inputs.parameters.ownerName)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: false\n      blockOwnerDeletion: true\n  labels:\n    app: {{=toJSON(inputs.parameters.clusterName)}}\nspec:\n  minAvailable: {{=fromJSON(inputs.parameters.minPodReplicas)}}\n  selector:\n    matchLabels:\n      app: {{=toJSON(inputs.parameters.clusterName)}}\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "createrfscoordinator",
         "inputs": {
           "parameters": [
@@ -151,6 +187,9 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "minPodReplicas"
             },
             {
               "name": "groupName_view",
@@ -201,6 +240,30 @@
                 ]
               },
               "name": "createService"
+            },
+            {
+              "template": "createrfscoordinatorpoddisruptionbudget",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{inputs.parameters.minPodReplicas}}"
+                  },
+                  {
+                    "name": "ownerName",
+                    "value": "{{inputs.parameters.ownerName}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "createPodDisruptionBudget"
             },
             {
               "template": "createrfscoordinatorstatefulset",

@@ -32,6 +32,7 @@ import {
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 import {setupFileSourcesForContainer} from "./commonUtils/containerFragments";
+import {makePodDisruptionBudgetManifest} from "./commonUtils/podDisruptionBudget";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -295,6 +296,27 @@ function makeProxyDeploymentManifest(args: {
     };
 }
 
+function makeProxyPodDisruptionBudgetManifest(args: {
+    proxyName: BaseExpression<string>,
+    minPodReplicas: BaseExpression<number>,
+    ownerUid: BaseExpression<string>,
+    workflowName: BaseExpression<string>,
+    sourceK8sLabel: BaseExpression<string>,
+    taskK8sLabel: BaseExpression<string>,
+}) {
+    return makePodDisruptionBudgetManifest({
+        name: args.proxyName,
+        minAvailable: args.minPodReplicas,
+        matchLabels: {"migrations/proxy": args.proxyName},
+        labels: {
+            "workflows.argoproj.io/workflow": args.workflowName,
+            "migrations.opensearch.org/source": args.sourceK8sLabel,
+            "migrations.opensearch.org/task": args.taskK8sLabel,
+        },
+        ownerReferences: makeOwnerReferences(args.proxyName, args.ownerUid),
+    });
+}
+
 function makeCertificateManifest(args: {
     certName: BaseExpression<string>,
     secretName: BaseExpression<string>,
@@ -361,6 +383,29 @@ export const SetupCapture = WorkflowBuilder.create({
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
                 )
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("deployProxyPodDisruptionBudget", t => t
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addRequiredInput("ownerUid", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "captureProxy")
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeProxyPodDisruptionBudgetManifest({
+                    proxyName: b.inputs.proxyName,
+                    minPodReplicas: expr.deserializeRecord(b.inputs.minPodReplicas),
+                    ownerUid: b.inputs.ownerUid,
+                    workflowName: expr.getWorkflowValue("name"),
+                    sourceK8sLabel: b.inputs.sourceK8sLabel,
+                    taskK8sLabel: b.inputs.taskK8sLabel,
+                })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -556,6 +601,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
@@ -643,6 +689,14 @@ export const SetupCapture = WorkflowBuilder.create({
                     {when: {templateExp: shouldUseScramAuth}}
                 )
                 .addStepGroup(g => g
+                    .addStep("deployProxyPodDisruptionBudget", INTERNAL, "deployProxyPodDisruptionBudget", c =>
+                            c.register({
+                                proxyName: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
+                                minPodReplicas: b.inputs.minPodReplicas,
+                                ownerUid: b.inputs.ownerUid,
+                                sourceK8sLabel: b.inputs.sourceK8sLabel,
+                            })
+                    )
                     .addStep("deployProxyNoTls", INTERNAL, "deployProxyDeployment", c =>
                             c.register({
                                 ...selectInputsForRegister(b, c),
@@ -756,6 +810,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -875,6 +930,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
                     checksumForReplayer: b.inputs.checksumForReplayer,
@@ -899,6 +955,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
                     checksumForReplayer: b.inputs.checksumForReplayer,

@@ -33,10 +33,12 @@ import {
     K8S_RESOURCE_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {makePodDisruptionBudgetManifest} from "./commonUtils/podDisruptionBudget";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
+const REPLAYER_APP_LABEL = "replayer";
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -239,7 +241,7 @@ function getReplayerDeploymentManifest
             name: makeStringTypeProxy(args.name),
             ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
-                app: "replayer",
+                app: REPLAYER_APP_LABEL,
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -253,13 +255,13 @@ function getReplayerDeploymentManifest
             },
             selector: {
                 matchLabels: {
-                    app: "replayer",
+                    app: REPLAYER_APP_LABEL,
                 },
             },
             template: {
                 metadata: {
                     labels: {
-                        app: "replayer",
+                        app: REPLAYER_APP_LABEL,
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -285,6 +287,7 @@ const createDeploymentInputs = {
     kafkaCaSecretName: defineRequiredParam<string>(),
     ownerUid: defineRequiredParam<string>(),
     podReplicas: defineRequiredParam<number>(),
+    minPodReplicas: defineRequiredParam<number>(),
     useLocalStack: defineRequiredParam<boolean>(),
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
@@ -298,12 +301,22 @@ const createDeploymentInputs = {
     resources: defineRequiredParam<ResourceRequirementsType>()
 };
 
+const createPodDisruptionBudgetInputs = {
+    name: defineRequiredParam<string>(),
+    ownerUid: defineRequiredParam<string>(),
+    minPodReplicas: defineRequiredParam<number>(),
+    sourceK8sLabel: defineRequiredParam<string>(),
+    targetK8sLabel: defineRequiredParam<string>(),
+    taskK8sLabel: defineParam<string>({expression: expr.literal("trafficReplayer")}),
+};
+
 const replayerBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "replayer",
     serviceAccountName: "argo-workflow-executor",
 }).addParams(CommonWorkflowParameters);
 
 type CreateDeploymentInputExpressions = InputParamsToExpressions<typeof createDeploymentInputs>;
+type CreatePodDisruptionBudgetInputExpressions = InputParamsToExpressions<typeof createPodDisruptionBudgetInputs>;
 
 function makeReplayerDeploymentDefinition(
     inputs: CreateDeploymentInputExpressions
@@ -340,12 +353,43 @@ function makeReplayerDeploymentDefinition(
     };
 }
 
+function makeReplayerPodDisruptionBudgetDefinition(
+    inputs: CreatePodDisruptionBudgetInputExpressions
+) {
+    const labels = {
+        app: REPLAYER_APP_LABEL,
+        "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
+        "migrations.opensearch.org/source": inputs.sourceK8sLabel,
+        "migrations.opensearch.org/target": inputs.targetK8sLabel,
+        "migrations.opensearch.org/task": inputs.taskK8sLabel,
+    };
+    return {
+        action: "apply" as const,
+        setOwnerReference: false,
+        manifest: makePodDisruptionBudgetManifest({
+            name: inputs.name,
+            minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
+            matchLabels: {app: REPLAYER_APP_LABEL},
+            labels,
+            ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
+        })
+    };
+}
+
 export const Replayer = replayerBaseBuilder
   .addTemplate("createDeployment", (t) =>
     t
       .addInputsFromRecord(createDeploymentInputs)
       .addResourceTask(b => b
           .setDefinition(makeReplayerDeploymentDefinition(b.inputs)))
+      .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+  )
+
+  .addTemplate("createPodDisruptionBudget", (t) =>
+    t
+      .addInputsFromRecord(createPodDisruptionBudgetInputs)
+      .addResourceTask(b => b
+          .setDefinition(makeReplayerPodDisruptionBudgetDefinition(b.inputs)))
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
   )
 
@@ -420,6 +464,19 @@ export const Replayer = replayerBaseBuilder
               }),
               {when: {templateExp: shouldUseScramAuth}}
           )
+          .addStep("createPodDisruptionBudget", INTERNAL, "createPodDisruptionBudget", (c) =>
+            c.register({
+              name: b.inputs.name,
+              ownerUid: b.inputs.ownerUid,
+              minPodReplicas: expr.dig(
+                expr.deserializeRecord(b.inputs.replayerOptions),
+                ["minPodReplicas"],
+                0,
+              ),
+              sourceK8sLabel: b.inputs.sourceLabel,
+              targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+            }),
+          )
           .addStep("deployReplayer", INTERNAL, "createDeployment", (c) =>
             c.register({
               ...selectInputsForRegister(b, c),
@@ -440,6 +497,11 @@ export const Replayer = replayerBaseBuilder
                 expr.deserializeRecord(b.inputs.replayerOptions),
                 ["podReplicas"],
                 1,
+              ),
+              minPodReplicas: expr.dig(
+                expr.deserializeRecord(b.inputs.replayerOptions),
+                ["minPodReplicas"],
+                0,
               ),
               useLocalStack: b.inputs.useLocalStack,
               jvmArgs: expr.dig(

@@ -518,6 +518,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "minPodReplicas"
+            },
+            {
               "name": "topicPartitions"
             },
             {
@@ -588,6 +591,10 @@
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{inputs.parameters.minPodReplicas}}"
                   },
                   {
                     "name": "topicPartitions",
@@ -2258,6 +2265,10 @@
                   {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{=sprig.dig('minPodReplicas', 0, fromJSON(item['proxyConfig']))}}"
                   },
                   {
                     "name": "topicPartitions",
