@@ -41,6 +41,7 @@ import {
     K8S_SECRET_READY_RETRY_STRATEGY,
     K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
+import {prefixedScalableWorkloadFields, scalingFromRecord} from "./commonUtils/scalableWorkload";
 
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
@@ -269,6 +270,7 @@ function makeCaptureProxyManifest(
 ) {
     const config = expr.deserializeRecord(proxyConfig);
     const proxyOpts = expr.get(config, "proxyConfig");
+    const proxyScaling = scalingFromRecord(proxyOpts);
     const workflowSpecFields = expr.makeDict({
         dependsOn: expr.toArray(topicCrName),
         loggingConfigurationOverrideConfigMap: expr.dig(
@@ -277,8 +279,8 @@ function makeCaptureProxyManifest(
             expr.literal("")
         ),
         internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
-        podReplicas: expr.dig(proxyOpts, ["podReplicas"], 1),
-        minPodReplicas: expr.dig(proxyOpts, ["minPodReplicas"], 0),
+        podReplicas: proxyScaling.podReplicas,
+        minPodReplicas: proxyScaling.minPodReplicas,
         resources: expr.get(proxyOpts, "resources"),
         tls: expr.dig(proxyOpts, ["tls"], expr.makeDict({})),
     });
@@ -306,6 +308,10 @@ function makeSnapshotMigrationManifest(
     snapshotMigrationConfig: BaseExpression<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>,
 ) {
     const config = expr.deserializeRecord(snapshotMigrationConfig);
+    const documentBackfillScaling = prefixedScalableWorkloadFields(
+        "documentBackfill",
+        expr.dig(config, ["documentBackfillConfig"], expr.makeDict({}))
+    );
     return {
         apiVersion: CRD_API_VERSION,
         kind: "SnapshotMigration",
@@ -343,8 +349,8 @@ function makeSnapshotMigrationManifest(
             metadataMigrationTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigFile"], expr.literal(""))),
             metadataMigrationFileSourceVolumes: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumes"], expr.literal([]))),
             metadataMigrationFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumeMounts"], expr.literal([]))),
-            documentBackfillPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "podReplicas"], 1)),
-            documentBackfillMinPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "minPodReplicas"], 0)),
+            documentBackfillPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillPodReplicas),
+            documentBackfillMinPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillMinPodReplicas),
             documentBackfillJvmArgs: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal(""))),
             documentBackfillLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
             documentBackfillUseTargetClusterForWorkCoordination: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useTargetClusterForWorkCoordination"], false)),
@@ -384,6 +390,7 @@ function makeTrafficReplayManifest(
     targetLabel: BaseExpression<string>,
 ) {
     const opts = expr.deserializeRecord(replayerOptions);
+    const replayerScaling = scalingFromRecord(opts);
     const workflowSpecFields = expr.makeDict({
         dependsOn: expr.deserializeRecord(dependsOn),
         jvmArgs: expr.dig(opts, ["jvmArgs"], expr.literal("")),
@@ -392,8 +399,8 @@ function makeTrafficReplayManifest(
             ["loggingConfigurationOverrideConfigMap"],
             expr.literal("")
         ),
-        podReplicas: expr.dig(opts, ["podReplicas"], 1),
-        minPodReplicas: expr.dig(opts, ["minPodReplicas"], 0),
+        podReplicas: replayerScaling.podReplicas,
+        minPodReplicas: replayerScaling.minPodReplicas,
         resources: expr.get(opts, "resources"),
         fileSourceVolumes: expr.dig(opts, ["fileSourceVolumes"], expr.literal([])),
         fileSourceVolumeMounts: expr.dig(opts, ["fileSourceVolumeMounts"], expr.literal([])),

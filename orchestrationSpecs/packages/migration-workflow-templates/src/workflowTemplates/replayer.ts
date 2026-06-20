@@ -33,7 +33,8 @@ import {
     K8S_RESOURCE_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
-import {makePodDisruptionBudgetManifest} from "./commonUtils/podDisruptionBudget";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {MIN_POD_REPLICAS_INPUTS, POD_REPLICAS_INPUTS, scalingFromOptions} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -286,8 +287,7 @@ const createDeploymentInputs = {
     kafkaSecretName: defineRequiredParam<string>(),
     kafkaCaSecretName: defineRequiredParam<string>(),
     ownerUid: defineRequiredParam<string>(),
-    podReplicas: defineRequiredParam<number>(),
-    minPodReplicas: defineRequiredParam<number>(),
+    ...POD_REPLICAS_INPUTS,
     useLocalStack: defineRequiredParam<boolean>(),
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
@@ -304,7 +304,7 @@ const createDeploymentInputs = {
 const createPodDisruptionBudgetInputs = {
     name: defineRequiredParam<string>(),
     ownerUid: defineRequiredParam<string>(),
-    minPodReplicas: defineRequiredParam<number>(),
+    ...MIN_POD_REPLICAS_INPUTS,
     sourceK8sLabel: defineRequiredParam<string>(),
     targetK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("trafficReplayer")}),
@@ -363,17 +363,13 @@ function makeReplayerPodDisruptionBudgetDefinition(
         "migrations.opensearch.org/target": inputs.targetK8sLabel,
         "migrations.opensearch.org/task": inputs.taskK8sLabel,
     };
-    return {
-        action: "apply" as const,
-        setOwnerReference: false,
-        manifest: makePodDisruptionBudgetManifest({
-            name: inputs.name,
-            minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
-            matchLabels: {app: REPLAYER_APP_LABEL},
-            labels,
-            ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
-        })
-    };
+    return makePodDisruptionBudgetDefinition({
+        name: inputs.name,
+        minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
+        matchLabels: {app: REPLAYER_APP_LABEL},
+        labels,
+        ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
+    });
 }
 
 export const Replayer = replayerBaseBuilder
@@ -447,6 +443,7 @@ export const Replayer = replayerBaseBuilder
           b.inputs.name,
           expr.literal("-kafka-auth"),
         );
+        const scaling = scalingFromOptions(b.inputs.replayerOptions);
         return b
           .addStep(
             "createKafkaClientConfig",
@@ -468,11 +465,7 @@ export const Replayer = replayerBaseBuilder
             c.register({
               name: b.inputs.name,
               ownerUid: b.inputs.ownerUid,
-              minPodReplicas: expr.dig(
-                expr.deserializeRecord(b.inputs.replayerOptions),
-                ["minPodReplicas"],
-                0,
-              ),
+              minPodReplicas: scaling.minPodReplicas,
               sourceK8sLabel: b.inputs.sourceLabel,
               targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
             }),
@@ -493,16 +486,7 @@ export const Replayer = replayerBaseBuilder
                 expr.literal("empty"),
               ),
               ownerUid: b.inputs.ownerUid,
-              podReplicas: expr.dig(
-                expr.deserializeRecord(b.inputs.replayerOptions),
-                ["podReplicas"],
-                1,
-              ),
-              minPodReplicas: expr.dig(
-                expr.deserializeRecord(b.inputs.replayerOptions),
-                ["minPodReplicas"],
-                0,
-              ),
+              podReplicas: scaling.podReplicas,
               useLocalStack: b.inputs.useLocalStack,
               jvmArgs: expr.dig(
                 expr.deserializeRecord(b.inputs.replayerOptions),

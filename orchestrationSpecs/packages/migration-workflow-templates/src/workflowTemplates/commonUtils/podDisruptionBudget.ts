@@ -2,6 +2,7 @@ import {
     BaseExpression,
     makeDirectTypeProxy,
     makeStringTypeProxy,
+    ResourceWorkflowDefinition,
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 
@@ -51,5 +52,15 @@ export function makePodDisruptionBudgetManifest(args: {
                 matchLabels: stringifyLabels(args.matchLabels),
             },
         },
+    };
+}
+
+export function makePodDisruptionBudgetDefinition(
+    args: Parameters<typeof makePodDisruptionBudgetManifest>[0]
+): ResourceWorkflowDefinition {
+    return {
+        action: "apply",
+        setOwnerReference: false,
+        manifest: makePodDisruptionBudgetManifest(args),
     };
 }

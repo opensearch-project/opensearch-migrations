@@ -61,9 +61,6 @@
               "name": "podReplicas"
             },
             {
-              "name": "minPodReplicas"
-            },
-            {
               "name": "useLocalStack"
             },
             {
@@ -351,10 +348,6 @@
                   {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions))}}"
-                  },
-                  {
-                    "name": "minPodReplicas",
-                    "value": "{{=sprig.dig('minPodReplicas', 0, fromJSON(inputs.parameters.replayerOptions))}}"
                   },
                   {
                     "name": "jvmArgs",

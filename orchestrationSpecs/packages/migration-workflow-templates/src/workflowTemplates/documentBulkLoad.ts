@@ -44,7 +44,12 @@ import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from 
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 import {ResourceManagement} from "./resourceManagement";
-import {makePodDisruptionBudgetManifest} from "./commonUtils/podDisruptionBudget";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {
+    minAvailableForSingleReplicaDependency,
+    SCALABLE_WORKLOAD_INPUTS,
+    scalingFromOptions,
+} from "./commonUtils/scalableWorkload";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -107,8 +112,7 @@ const startHistoricalBackfillInputs = {
     rfsJsonConfig: defineRequiredParam<string>(),
     targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
-    podReplicas: defineRequiredParam<number>(),
-    minPodReplicas: defineRequiredParam<number>(),
+    ...SCALABLE_WORKLOAD_INPUTS,
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
@@ -358,20 +362,16 @@ function makeRfsPodDisruptionBudgetDefinition(
         controller: false,
         blockOwnerDeletion: true
     }];
-    return {
-        action: "apply" as const,
-        setOwnerReference: false,
-        manifest: makePodDisruptionBudgetManifest({
-            name: deploymentName,
-            minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
-            matchLabels: {
-                app: "bulk-loader",
-                "deployment-name": deploymentName
-            },
-            labels,
-            ownerReferences,
-        })
-    };
+    return makePodDisruptionBudgetDefinition({
+        name: deploymentName,
+        minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
+        matchLabels: {
+            app: "bulk-loader",
+            "deployment-name": deploymentName
+        },
+        labels,
+        ownerReferences,
+    });
 }
 
 export const DocumentBulkLoad = documentBulkLoadBaseBuilder
@@ -415,11 +415,12 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
-            .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
-                c.register({
+            .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c => {
+                const scaling = scalingFromOptions(b.inputs.documentBackfillConfig);
+                return c.register({
                     ...selectInputsForRegister(b, c),
-                    podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
-                    minPodReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["minPodReplicas"], 0),
+                    podReplicas: scaling.podReplicas,
+                    minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
@@ -442,8 +443,8 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
-                })
-            )
+                });
+            })
         )
     )
 
@@ -473,6 +474,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                 expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
                 b.inputs.targetConfig
             );
+            const scaling = scalingFromOptions(b.inputs.documentBackfillConfig);
             return b
                 .addStep("setupRfsConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                     c.register({
@@ -505,14 +507,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation,
                             ownerName: b.inputs.crdName,
                             ownerUid: b.inputs.crdUid,
-                            minPodReplicas: expr.ternary(
-                                expr.greaterThan(
-                                    expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["minPodReplicas"], 0),
-                                    expr.literal(0)
-                                ),
-                                expr.literal(1),
-                                expr.literal(0)
-                            )
+                            minPodReplicas: minAvailableForSingleReplicaDependency(scaling.minPodReplicas)
                         }),
                     {when: {templateExp: createRfsCluster}}
                 )

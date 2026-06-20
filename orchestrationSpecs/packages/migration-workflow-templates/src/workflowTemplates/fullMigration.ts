@@ -47,6 +47,7 @@ import {SetupCapture} from "./setupCapture";
 import {S3TrafficLoader} from "./s3TrafficLoader";
 import {Replayer} from "./replayer";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {SCALABLE_WORKLOAD_INPUTS, scalingFromOptions} from "./commonUtils/scalableWorkload";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -193,8 +194,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
-        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -798,8 +798,9 @@ export const FullMigration = WorkflowBuilder.create({
                     when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters")}
                 }
             )
-            .addStep("createProxy", INTERNAL, "setupSingleProxy", c =>
-                c.register({
+            .addStep("createProxy", INTERNAL, "setupSingleProxy", c => {
+                const proxyScaling = scalingFromOptions(expr.get(c.item, "proxyConfig"));
+                return c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
@@ -836,16 +837,8 @@ export const FullMigration = WorkflowBuilder.create({
                         ["listenPort"],
                         9200
                     ),
-                    podReplicas: expr.dig(
-                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
-                        ["podReplicas"],
-                        1
-                    ),
-                    minPodReplicas: expr.dig(
-                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
-                        ["minPodReplicas"],
-                        0
-                    ),
+                    podReplicas: proxyScaling.podReplicas,
+                    minPodReplicas: proxyScaling.minPodReplicas,
                     topicPartitions: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         ["topicSpecOverrides", "partitions"],
@@ -864,7 +857,8 @@ export const FullMigration = WorkflowBuilder.create({
                     groupName_view: expr.get(c.item, "name"),
                     resourceName: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
-                }), {
+                });
+            }, {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
                 }

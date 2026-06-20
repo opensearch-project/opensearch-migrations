@@ -32,7 +32,8 @@ import {
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 import {setupFileSourcesForContainer} from "./commonUtils/containerFragments";
-import {makePodDisruptionBudgetManifest} from "./commonUtils/podDisruptionBudget";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {MIN_POD_REPLICAS_INPUTS, POD_REPLICAS_INPUTS, SCALABLE_WORKLOAD_INPUTS} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -296,27 +297,6 @@ function makeProxyDeploymentManifest(args: {
     };
 }
 
-function makeProxyPodDisruptionBudgetManifest(args: {
-    proxyName: BaseExpression<string>,
-    minPodReplicas: BaseExpression<number>,
-    ownerUid: BaseExpression<string>,
-    workflowName: BaseExpression<string>,
-    sourceK8sLabel: BaseExpression<string>,
-    taskK8sLabel: BaseExpression<string>,
-}) {
-    return makePodDisruptionBudgetManifest({
-        name: args.proxyName,
-        minAvailable: args.minPodReplicas,
-        matchLabels: {"migrations/proxy": args.proxyName},
-        labels: {
-            "workflows.argoproj.io/workflow": args.workflowName,
-            "migrations.opensearch.org/source": args.sourceK8sLabel,
-            "migrations.opensearch.org/task": args.taskK8sLabel,
-        },
-        ownerReferences: makeOwnerReferences(args.proxyName, args.ownerUid),
-    });
-}
-
 function makeCertificateManifest(args: {
     certName: BaseExpression<string>,
     secretName: BaseExpression<string>,
@@ -390,23 +370,23 @@ export const SetupCapture = WorkflowBuilder.create({
 
     .addTemplate("deployProxyPodDisruptionBudget", t => t
         .addRequiredInput("proxyName", typeToken<string>())
-        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addInputsFromRecord(MIN_POD_REPLICAS_INPUTS)
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
         .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: makeProxyPodDisruptionBudgetManifest({
-                    proxyName: b.inputs.proxyName,
-                    minPodReplicas: expr.deserializeRecord(b.inputs.minPodReplicas),
-                    ownerUid: b.inputs.ownerUid,
-                    workflowName: expr.getWorkflowValue("name"),
-                    sourceK8sLabel: b.inputs.sourceK8sLabel,
-                    taskK8sLabel: b.inputs.taskK8sLabel,
-                })
+            .setDefinition(makePodDisruptionBudgetDefinition({
+                name: b.inputs.proxyName,
+                minAvailable: expr.deserializeRecord(b.inputs.minPodReplicas),
+                matchLabels: {"migrations/proxy": b.inputs.proxyName},
+                labels: {
+                    "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
+                    "migrations.opensearch.org/source": b.inputs.sourceK8sLabel,
+                    "migrations.opensearch.org/task": b.inputs.taskK8sLabel,
+                },
+                ownerReferences: makeOwnerReferences(b.inputs.proxyName, b.inputs.ownerUid),
             }))
+        )
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -419,7 +399,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
@@ -468,7 +448,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
@@ -600,8 +580,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
-        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
@@ -809,8 +788,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
-        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
