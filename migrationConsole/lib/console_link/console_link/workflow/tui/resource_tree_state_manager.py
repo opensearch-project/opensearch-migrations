@@ -10,7 +10,7 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step, resource_visible_in_config_mode,
-    format_resource_diagnostics,
+    format_resource_diagnostics, format_virtual_adoption,
 )
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
@@ -83,7 +83,9 @@ class ResourceTreeStateManager:
 
     @classmethod
     def _collect_changed_resource_ids(cls, resource: ResourceNode, expansion_ids: set) -> bool:
-        has_changes = bool(resource.config_diff) or bool(resource.diagnostics)
+        adoption_status = (resource.virtual_adoption or {}).get('status')
+        has_adoption_issue = adoption_status not in (None, 'deployed', 'unknown')
+        has_changes = bool(resource.config_diff) or bool(resource.diagnostics) or has_adoption_issue
         child_has_changes = False
         for child in resource.children:
             if cls._collect_changed_resource_ids(child, expansion_ids):
@@ -240,6 +242,10 @@ class ResourceTreeStateManager:
             style = ResourceTreeStateManager._diagnostic_style(severity)
             label = 'required' if severity == 'required' else severity
             return f' [{style}]({label})[/{style}]'
+        adoption_status = (resource.virtual_adoption or {}).get('status')
+        if adoption_status and adoption_status not in ('deployed', 'unknown'):
+            style = ResourceTreeStateManager._adoption_style(adoption_status)
+            return f' [{style}]({adoption_status})[/{style}]'
         diff = resource.config_diff or {}
         if not diff:
             return ''
@@ -266,6 +272,18 @@ class ResourceTreeStateManager:
         if severity == 'gated':
             return 'magenta'
         return 'yellow'
+
+    @staticmethod
+    def _adoption_style(status: str) -> str:
+        if status == 'error':
+            return 'red'
+        if status in ('partial', 'outdated', 'missing'):
+            return 'yellow'
+        if status == 'pending':
+            return 'grey50'
+        if status == 'deployed':
+            return 'green'
+        return 'dim'
 
     @staticmethod
     def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
@@ -404,6 +422,8 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{field}[/dim]", data=None)
         for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
             resource_node.add(field, data=None)
+        for adoption in format_virtual_adoption(resource, rich_markup=True):
+            resource_node.add(adoption, data=None)
         for diagnostic in format_resource_diagnostics(resource):
             style = self._diagnostic_style(diagnostic.get('severity', 'error'))
             resource_node.add(f"[{style}]{diagnostic['label']}[/{style}]", data=None)

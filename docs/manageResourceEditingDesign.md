@@ -380,6 +380,29 @@ Virtual resources exist so users can see configuration changes that affect consu
 - direct Kafka client changes;
 - workflow-managed Kafka cluster config changes.
 
+The config-processor emits these virtual definitions through `consoleResources`. Each virtual source, target, and Kafka entry may include `consumers`, which are the real migration CRs that use that virtual definition. Consumers carry a real CR kind/name and, when the workflow already computes one, the expected `configChecksum`.
+
+Manage compares those consumers against live CR status:
+
+- `deployed`: every comparable consumer has adopted the expected checksum;
+- `partial`: some consumers have adopted the expected checksum and others have not;
+- `pending`: consumers are still being created or rolled out;
+- `outdated`: consumers are live but still report an older checksum;
+- `error`: at least one consumer is failed or errored;
+- `unknown`: manage can show the relationship but cannot prove adoption from a checksum.
+
+Virtual resource labels use the highest-priority adoption state, so an errored consumer makes the virtual row red even if another consumer has adopted the config. Detail lines list the real consumers, for example:
+
+```text
+✓ source (Deployed Config) (partial)
+├── endpoint: deployed=https://new.example.com | pending=https://new.example.com | to-submit=https://newer.example.com
+├── Adoption: partial (1 deployed, 1 outdated)
+├── uses CaptureProxy cap: deployed (Ready)
+└── uses CaptureProxy c2: outdated (Ready)
+```
+
+When a workflow is terminal, the latest submitted `MigrationRun` supplies the deployed virtual definition. Real deployed CR values still come from live Kubernetes resources. This keeps historical submitted projections from appearing as pending rollout state for real resources, while still giving virtual source/target/Kafka rows a deployed baseline and consumer-adoption summary.
+
 Delete semantics differ:
 
 - deleting an unreferenced source/target/Kafka config removes pending YAML only;
@@ -424,6 +447,7 @@ Current focused coverage includes:
 - loose CLI behavior without non-zero exit on validation errors;
 - pending snapshot loading with `--validation-mode loose`;
 - virtual pending-only resources in non-edit resource view;
+- virtual source/target/Kafka deployed baselines and consumer adoption status;
 - resource diagnostics rendered in the Textual tree;
 - value-mode visibility for pending-only resources;
 - add-row bindings that do not expose delete;

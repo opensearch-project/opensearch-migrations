@@ -1763,6 +1763,62 @@ async def test_resource_view_collapses_submitted_projection_after_workflow_succe
 
 
 @pytest.mark.asyncio
+async def test_resource_view_uses_submitted_console_as_deployed_virtual_config_after_success():
+    """Terminal workflows use the latest submitted console config as the virtual deployed baseline."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted_console": {
+                    "sources": [{
+                        "refName": "source",
+                        "clientConfig": {"endpoint": "https://old.example.com"},
+                    }],
+                },
+                "pending_console": {
+                    "sources": [{
+                        "refName": "source",
+                        "clientConfig": {"endpoint": "https://new.example.com"},
+                    }],
+                },
+            }
+
+    workflow = {
+        "metadata": {"name": "migration", "resourceVersion": "123"},
+        "status": {"phase": PHASE_SUCCEEDED, "nodes": {}},
+    }
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, workflow),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=_build_tree_from_raw({})):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:source") is not None)
+
+            source_node = find_tree_node_by_id(tree.root, "resource:source")
+            assert "Deployed Config" in get_clean_text_label(source_node)
+            labels = [get_clean_text_label(child) for child in source_node.children]
+            assert "endpoint: deployed=https://old.example.com | pending=https://old.example.com | to-submit=https://new.example.com" in labels
+
+
+@pytest.mark.asyncio
 async def test_resource_view_expands_config_changes_after_edit_exit_without_workflow():
     """Returning from edit mode should reveal changed resource phases even without a workflow."""
 

@@ -12,6 +12,7 @@ from console_link.workflow.resource_tree import (
     apply_config_overlays,
     format_config_diff_fields,
     format_resource_diagnostics,
+    format_virtual_adoption,
     resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
@@ -293,6 +294,57 @@ class TestConfigOverlays:
         assert format_config_diff_fields(resource) == [
             'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
         ]
+
+    def test_virtual_source_config_shows_partial_consumer_adoption(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [
+                make_cr('captureproxies', 'cap', 'Ready', status={'configChecksum': 'new'}),
+                make_cr('captureproxies', 'c2', 'Ready', status={'configChecksum': 'old'}),
+            ],
+        })
+        deployed_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {'endpoint': 'https://new.example.com'},
+            'consumers': [
+                {'kind': 'CaptureProxy', 'name': 'cap', 'configChecksum': 'new'},
+                {'kind': 'CaptureProxy', 'name': 'c2', 'configChecksum': 'new'},
+            ],
+        }]}
+
+        apply_config_overlays(sections, deployed_console_config=deployed_console)
+
+        source_group = sections[0].groups[0]
+        resource = source_group.resources[0]
+        assert resource.phase == 'Deployed Config'
+        assert resource.config_presence == {'deployed': True}
+        assert resource.virtual_adoption['status'] == 'partial'
+        assert format_virtual_adoption(resource) == [
+            'Adoption: partial (1 deployed, 1 outdated)',
+            'uses CaptureProxy cap: deployed (Ready)',
+            'uses CaptureProxy c2: outdated (Ready)',
+        ]
+
+    def test_virtual_source_config_prioritizes_errored_consumers(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [
+                make_cr('captureproxies', 'cap', 'Ready', status={'configChecksum': 'new'}),
+                make_cr('captureproxies', 'c2', 'Error', status={'configChecksum': 'old'}),
+            ],
+        })
+        deployed_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {'endpoint': 'https://new.example.com'},
+            'consumers': [
+                {'kind': 'CaptureProxy', 'name': 'cap', 'configChecksum': 'new'},
+                {'kind': 'CaptureProxy', 'name': 'c2', 'configChecksum': 'new'},
+            ],
+        }]}
+
+        apply_config_overlays(sections, deployed_console_config=deployed_console)
+
+        resource = sections[0].groups[0].resources[0]
+        assert resource.virtual_adoption['status'] == 'error'
+        assert format_virtual_adoption(resource)[0] == 'Adoption: error (1 deployed, 1 error)'
 
 
 # --- format_live_status ---

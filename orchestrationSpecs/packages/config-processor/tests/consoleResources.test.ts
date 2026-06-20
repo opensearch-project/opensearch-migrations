@@ -147,6 +147,14 @@ describe("console resources", () => {
                         basic_auth: {k8s_secret_name: "source-a-creds"},
                     }),
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture source",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "sourceB",
@@ -174,6 +182,18 @@ describe("console resources", () => {
                     endpoint: "https://target-x.example.com",
                     basic_auth: {k8s_secret_name: "target-x-creds"},
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "SnapshotMigration",
+                        role: "migration target",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "TrafficReplay",
+                        role: "replay target",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "targetY",
@@ -200,6 +220,26 @@ describe("console resources", () => {
                     usernameSecret: "default-migration-app",
                     caSecret: "default-cluster-ca-cert",
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "KafkaCluster",
+                        name: "default",
+                        role: "managed kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CapturedTraffic",
+                        name: "proxy-a-topic",
+                        role: "capture topic",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "my-kafka",

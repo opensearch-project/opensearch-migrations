@@ -213,6 +213,7 @@ class WorkflowTreeApp(App):
                     sections,
                     submitted_resolved_config=snapshots.get("submitted") if submitted_active else None,
                     pending_resolved_config=snapshots.get("pending"),
+                    deployed_console_config=snapshots.get("submitted_console") if not submitted_active else None,
                     submitted_console_config=snapshots.get("submitted_console") if submitted_active else None,
                     pending_console_config=snapshots.get("pending_console"),
                 )

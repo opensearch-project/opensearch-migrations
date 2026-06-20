@@ -10,10 +10,18 @@ type TargetConfig = WorkflowConfig["trafficReplays"][number]["toTarget"];
 type KafkaClientConfig = WorkflowConfig["proxies"][number]["kafkaConfig"];
 type ProxyConfig = WorkflowConfig["proxies"][number];
 
+export interface ConsoleResourceConsumer {
+    kind: string;
+    name: string;
+    role?: string;
+    configChecksum?: string;
+}
+
 export interface ConsoleClusterResource {
     refName: string;
     aliases: string[];
     clientConfig: Record<string, unknown>;
+    consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
 }
 
@@ -47,6 +55,7 @@ export interface ConsoleKafkaResource {
             caSecretName?: string;
             kafkaUserName?: string;
         };
+    consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
 }
 
@@ -132,14 +141,42 @@ function proxyClientConfig(
     return result;
 }
 
-function uniqueByRef<T extends {refName: string; proxy?: unknown}>(items: T[]): T[] {
+function consumer(kind: string, name: string, role: string, configChecksum?: string): ConsoleResourceConsumer {
+    return {
+        kind,
+        name,
+        role,
+        ...(configChecksum ? {configChecksum} : {}),
+    };
+}
+
+function mergeConsumers(
+    left: ConsoleResourceConsumer[] | undefined,
+    right: ConsoleResourceConsumer[] | undefined
+): ConsoleResourceConsumer[] | undefined {
+    const result = new Map<string, ConsoleResourceConsumer>();
+    for (const item of [...(left ?? []), ...(right ?? [])]) {
+        result.set([item.kind, item.name, item.role ?? ""].join(":"), item);
+    }
+    return result.size > 0
+        ? [...result.values()].sort((a, b) =>
+            [a.kind, a.name, a.role ?? ""].join(":").localeCompare([b.kind, b.name, b.role ?? ""].join(":")))
+        : undefined;
+}
+
+function uniqueByRef<T extends {refName: string; proxy?: unknown; consumers?: ConsoleResourceConsumer[]}>(items: T[]): T[] {
     const byRef = new Map<string, T>();
     for (const item of items) {
         if (!byRef.has(item.refName)) {
             byRef.set(item.refName, item);
-        } else if (!byRef.get(item.refName)!.proxy && item.proxy) {
-            byRef.set(item.refName, {...byRef.get(item.refName)!, proxy: item.proxy});
+            continue;
         }
+        const previous = byRef.get(item.refName)!;
+        byRef.set(item.refName, {
+            ...previous,
+            ...(!previous.proxy && item.proxy ? {proxy: item.proxy} : {}),
+            consumers: mergeConsumers(previous.consumers, item.consumers),
+        });
     }
     return [...byRef.values()].sort((a, b) => a.refName.localeCompare(b.refName));
 }
@@ -157,7 +194,10 @@ function directKafkaClientConfig(kafkaConfig: KafkaClientConfig): Record<string,
     });
 }
 
-function kafkaResource(kafkaConfig: KafkaClientConfig): ConsoleKafkaResource {
+function kafkaResource(
+    kafkaConfig: KafkaClientConfig,
+    consumers: ConsoleResourceConsumer[] = []
+): ConsoleKafkaResource {
     const refName = kafkaConfig.label;
     if (kafkaConfig.managedByWorkflow) {
         return {
@@ -176,6 +216,7 @@ function kafkaResource(kafkaConfig: KafkaClientConfig): ConsoleKafkaResource {
                 caSecret: kafkaConfig.caSecretName || undefined,
                 kafkaUserName: kafkaConfig.kafkaUserName || undefined,
             },
+            ...(consumers.length > 0 ? {consumers} : {}),
         };
     }
     return {
@@ -188,6 +229,7 @@ function kafkaResource(kafkaConfig: KafkaClientConfig): ConsoleKafkaResource {
             caSecretName: kafkaConfig.caSecretName || undefined,
             kafkaUserName: kafkaConfig.kafkaUserName || undefined,
         },
+        ...(consumers.length > 0 ? {consumers} : {}),
     };
 }
 
@@ -201,6 +243,7 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
             refName: sourceConfig.label,
             aliases: [sourceConfig.label],
             clientConfig: clusterClientConfig(sourceConfig),
+            consumers: [consumer("CaptureProxy", proxy.name, "capture source", proxy.configChecksum)],
             proxy: {
                 refName: proxy.name,
                 k8sName: proxy.name,
@@ -225,6 +268,8 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
             refName: sourceConfig.label,
             aliases: [sourceConfig.label],
             clientConfig: clusterClientConfig(sourceConfig),
+            consumers: snapshot.createSnapshotConfig.map(item =>
+                consumer("DataSnapshot", `${sourceConfig.label}-${item.label}`, "snapshot source", item.configChecksum)),
             ...(sourceConfig.proxy ? {
                 proxy: {
                     refName: sourceConfig.proxy.name ?? sourceConfig.label,
@@ -251,6 +296,12 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
                     allow_insecure: migration.sourceAllowInsecure,
                     ...mapAuthConfig(migration.sourceAuth),
                 }),
+                consumers: [consumer(
+                    "SnapshotMigration",
+                    [migration.sourceLabel, migration.targetConfig.label, migration.label, migration.migrationLabel].join("-"),
+                    "migration source",
+                    migration.configChecksum
+                )],
             });
         }
     }
@@ -269,6 +320,12 @@ function targetsFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleClust
             refName: migration.targetConfig.label,
             aliases: [migration.targetConfig.label],
             clientConfig: clusterClientConfig(migration.targetConfig),
+            consumers: [consumer(
+                "SnapshotMigration",
+                [migration.sourceLabel, migration.targetConfig.label, migration.label, migration.migrationLabel].join("-"),
+                "migration target",
+                migration.configChecksum
+            )],
         });
     }
     for (const replay of workflowConfig.trafficReplays ?? []) {
@@ -276,6 +333,7 @@ function targetsFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleClust
             refName: replay.toTarget.label,
             aliases: [replay.toTarget.label],
             clientConfig: clusterClientConfig(replay.toTarget),
+            consumers: [consumer("TrafficReplay", replay.name, "replay target", replay.configChecksum)],
         });
     }
     return uniqueByRef(targets);
@@ -284,33 +342,37 @@ function targetsFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleClust
 function kafkasFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleKafkaResource[] {
     const kafkas: ConsoleKafkaResource[] = [];
     for (const proxy of workflowConfig.proxies ?? []) {
-        kafkas.push(kafkaResource(proxy.kafkaConfig));
+        kafkas.push(kafkaResource(proxy.kafkaConfig, [
+            consumer("CaptureProxy", proxy.name, "capture kafka", proxy.configChecksum),
+            consumer("CapturedTraffic", `${proxy.name}-topic`, "capture topic", proxy.topicConfigChecksum),
+        ]));
     }
     for (const replay of workflowConfig.trafficReplays ?? []) {
-        kafkas.push(kafkaResource(replay.kafkaConfig));
+        kafkas.push(kafkaResource(replay.kafkaConfig, [
+            consumer("TrafficReplay", replay.name, "replay kafka"),
+        ]));
     }
     for (const kafkaCluster of workflowConfig.kafkaClusters ?? []) {
-        if (!kafkas.some(kafka => kafka.refName === kafkaCluster.name)) {
-            const authType = kafkaCluster.config.auth?.type ?? "scram-sha-512";
-            const listenerName = authType === "scram-sha-512" ? "tls" : "plain";
-            kafkas.push({
-                refName: kafkaCluster.name,
-                k8sName: kafkaCluster.name,
-                aliases: [
-                    kafkaCluster.name,
-                    `kafkacluster.${kafkaCluster.name}`,
-                ],
-                runtime: {
-                    type: "strimzi",
-                    clusterName: kafkaCluster.name,
-                    authType,
-                    listenerName,
-                    usernameSecret: authType === "scram-sha-512" ? `${kafkaCluster.name}-migration-app` : undefined,
-                    caSecret: authType === "scram-sha-512" ? `${kafkaCluster.name}-cluster-ca-cert` : undefined,
-                    kafkaUserName: authType === "scram-sha-512" ? `${kafkaCluster.name}-migration-app` : undefined,
-                },
-            });
-        }
+        const authType = kafkaCluster.config.auth?.type ?? "scram-sha-512";
+        const listenerName = authType === "scram-sha-512" ? "tls" : "plain";
+        kafkas.push({
+            refName: kafkaCluster.name,
+            k8sName: kafkaCluster.name,
+            aliases: [
+                kafkaCluster.name,
+                `kafkacluster.${kafkaCluster.name}`,
+            ],
+            runtime: {
+                type: "strimzi",
+                clusterName: kafkaCluster.name,
+                authType,
+                listenerName,
+                usernameSecret: authType === "scram-sha-512" ? `${kafkaCluster.name}-migration-app` : undefined,
+                caSecret: authType === "scram-sha-512" ? `${kafkaCluster.name}-cluster-ca-cert` : undefined,
+                kafkaUserName: authType === "scram-sha-512" ? `${kafkaCluster.name}-migration-app` : undefined,
+            },
+            consumers: [consumer("KafkaCluster", kafkaCluster.name, "managed kafka", kafkaCluster.configChecksum)],
+        });
     }
     return uniqueByRef(kafkas);
 }
