@@ -684,7 +684,7 @@ public class RfsMigrateDocuments {
         if (snapshotReadFailure == null) {
             return OptionalInt.empty();
         }
-        var repo = arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri;
+        var repo = arguments.repoUri;
         log.atError().setCause(e)
             .setMessage("{}")
             .addArgument(SnapshotReadFailures.describe(
