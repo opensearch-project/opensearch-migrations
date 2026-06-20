@@ -15,12 +15,12 @@ PICKER_PAGE_SIZE = 10
 class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourcePickerModal { align: center middle; background: $background 60%; }
-    #dialog { width: 92; max-height: 34; border: thick $primary; background: $surface; padding: 1 2; }
-    #title { text-align: center; margin-bottom: 1; }
-    #rows { height: auto; max-height: 13; overflow-y: auto; }
-    #row-doc { color: gray; margin-top: 1; min-height: 2; }
-    #actions { align: center middle; height: 3; margin-top: 1; }
-    Button { margin: 0 1 1 0; min-width: 7; }
+    #dialog { width: 82; max-height: 22; border: thick $primary; background: $surface; padding: 0 1; }
+    #title { text-align: center; margin-bottom: 0; }
+    #rows { height: auto; max-height: 10; overflow-y: auto; }
+    #row-doc { color: gray; margin-top: 0; min-height: 2; }
+    #actions { align: center middle; height: 1; margin-top: 0; }
+    Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     #rows Button { width: 100%; text-align: left; }
     """
     BINDINGS = [
@@ -66,13 +66,13 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
             yield Static("", id="row-doc")
             with Horizontal(id="actions"):
                 yield Button("Select", id="select")
-                yield Button("Create (c)", id="create", variant="success", disabled=not self.can_create)
-                yield Button("Manual (m)", id="manual")
-                yield Button("View (v)", id="view", disabled=not bool(self.rows))
-                yield Button("Update (u)", id="update", disabled=not bool(self.rows))
-                yield Button("Prev (p)", id="previous-page")
-                yield Button("Next (n)", id="next-page")
-                yield Button("All (a)", id="toggle-show-all")
+                yield Button("c Create", id="create", variant="success", disabled=not self.can_create)
+                yield Button("m Manual", id="manual")
+                yield Button("v View", id="view", disabled=not bool(self.rows))
+                yield Button("u Update", id="update", disabled=not bool(self.rows))
+                yield Button("p Prev", id="previous-page")
+                yield Button("n Next", id="next-page")
+                yield Button("a All", id="toggle-show-all")
                 yield Button("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
@@ -179,12 +179,11 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         requirement = _requirement_hint(self.external_ref)
         if not row:
             pieces = [_empty_picker_hint(self.rows, self._has_hidden_rows()), requirement, summary]
-            self.query_one("#row-doc", Static).update(escape(" ".join(part for part in pieces if part).strip()))
+            self.query_one("#row-doc", Static).update(escape("\n".join(part for part in pieces if part).strip()))
             return
         message = _row_hint(row)
-        current = "Current value. " if row.get("current") else ""
-        pieces = [f"{current}{message}".strip(), requirement, summary]
-        self.query_one("#row-doc", Static).update(escape(" ".join(part for part in pieces if part).strip()))
+        pieces = [message, requirement, summary]
+        self.query_one("#row-doc", Static).update(escape("\n".join(part for part in pieces if part).strip()))
 
     def _visible_rows(self) -> List[Dict[str, Any]]:
         if self.show_all:
@@ -210,7 +209,7 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         for index in range(PICKER_PAGE_SIZE):
             button = self.query_one(f"#row-{index}", Button)
             if index < len(displayed):
-                button.label = _row_label(displayed[index])
+                button.label = _row_label(displayed[index], self.show_all)
                 button.disabled = False
                 button.display = True
             else:
@@ -231,7 +230,7 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         self.query_one("#next-page", Button).disabled = self.page_index >= self._page_count() - 1
         toggle = self.query_one("#toggle-show-all", Button)
         toggle.disabled = not self._has_hidden_rows()
-        toggle.label = "Matches (a)" if self.show_all else "All (a)"
+        toggle.label = "a Matches" if self.show_all else "a All"
 
     def _focus_first_row_or_action(self) -> None:
         if self._displayed_rows():
@@ -246,14 +245,13 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         visible_count = len(self._visible_rows())
         if visible_count == 0:
             hidden_count = len(self.rows)
-            hidden = f" {hidden_count} hidden; press a to show all." if hidden_count and not self.show_all else ""
-            return f"Showing 0 of {len(self.rows)}.{hidden}"
+            hidden = f" {hidden_count} hidden (a all)." if hidden_count and not self.show_all else ""
+            return f"0/{len(self.rows)} shown.{hidden}"
         start = self.page_index * PICKER_PAGE_SIZE + 1
         end = min(start + PICKER_PAGE_SIZE - 1, visible_count)
-        mode = "all" if self.show_all else "matching/current"
         hidden_count = len(self.rows) - visible_count
-        hidden = f" {hidden_count} hidden; press a to show all." if hidden_count and not self.show_all else ""
-        return f"Showing {start}-{end} of {visible_count} {mode}.{hidden}"
+        hidden = f" {hidden_count} hidden (a all)." if hidden_count and not self.show_all else ""
+        return f"{start}-{end}/{visible_count} shown.{hidden}"
 
 
 class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
@@ -430,19 +428,37 @@ class ExternalResourceFormModal(ModalScreen[Optional[Dict[str, str]]]):
         return ((self.external_ref.get("create") or {}).get("apply") or {}).get("nameField")
 
 
-def _row_label(row: Dict[str, Any]) -> str:
+def _row_label(row: Dict[str, Any], show_missing_keys: bool = False) -> str:
     name = str(row.get("name") or "")
     current = " (current)" if row.get("current") else ""
-    return escape(f"{name or '<unnamed>'}{current}")
+    missing = _row_missing_keys(row)
+    missing_text = f" (missing {', '.join(missing)})" if show_missing_keys and missing else ""
+    return escape(f"{name or '<unnamed>'}{current}{missing_text}")
 
 
 def _row_hint(row: Dict[str, Any]) -> str:
     status = str(row.get("status") or "warn")
-    prefix = "Matching:" if status == "matching" else "Warning:"
     message = str(row.get("message") or "")
-    if not message:
-        message = "resource satisfies this reference." if status == "matching" else "resource may not satisfy this reference."
-    return f"{prefix} {message}"
+    missing = _row_missing_keys(row)
+    if missing:
+        return f"Missing keys: {', '.join(missing)}"
+    if message:
+        return message
+    if status == "warn":
+        return "May not satisfy this reference."
+    return ""
+
+
+def _row_missing_keys(row: Dict[str, Any]) -> List[str]:
+    message = str(row.get("message") or "")
+    match = re.search(r"(?:^|;\s*)missing\s+([^.;]+)", message)
+    if not match:
+        return []
+    return [
+        key.strip()
+        for key in re.split(r",\s*|\s+and\s+", match.group(1))
+        if key.strip()
+    ]
 
 
 def _requirement_hint(external_ref: Dict[str, Any]) -> str:
@@ -450,9 +466,9 @@ def _requirement_hint(external_ref: Dict[str, Any]) -> str:
     required_keys = [str(key) for key in k8s_hint.get("requiredKeys") or []]
     recommended_keys = [str(key) for key in k8s_hint.get("recommendedKeys") or []]
     if required_keys:
-        return f"Needs keys: {', '.join(required_keys)}."
+        return f"Keys: {', '.join(required_keys)}."
     if recommended_keys:
-        return f"Recommended keys: {', '.join(recommended_keys)}."
+        return f"Recommended: {', '.join(recommended_keys)}."
     description = str(external_ref.get("description") or "").strip()
     if description:
         return description

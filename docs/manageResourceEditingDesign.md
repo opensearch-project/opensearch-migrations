@@ -149,6 +149,8 @@ Loose output uses the same outer DTO as strict output and may include `consoleRe
 }
 ```
 
+When `resolveMigrationResources` starts from user YAML, resolved resources include `parameterProvenance` entries for each projected leaf value. The presence is `authored`, `defaulted`, `generated`, `inherited`, or `unknown`, with the source YAML path when one exists. Loose output also includes provenance on `consoleResources` for source, target, and Kafka virtual rows. Python uses that metadata for display only: strict validation and submit semantics remain in TS.
+
 Loose projection currently covers:
 
 - workflow-managed Kafka clusters;
@@ -293,6 +295,8 @@ listenPort: deployed=9200 | pending=9201 | to-submit=9202
 
 Pending-only resources disappear in `Deployed` and `Pending` modes, then appear in `To Submit` mode. Resources marked for deletion appear in modes where they still exist and disappear in modes where the projected resource is absent.
 
+Field diff lines include authored values and meaningful phase changes. Values that appear only because the config-processor filled a default or generated a dependency are carried in `parameterProvenance`, but they are not rendered as user edits when the resource is new and the value is absent from deployed/submitted phases. The resource row still appears with `(to submit)` so users can see that a resource will be created without reading every transformer default.
+
 ## Non-Edit Resource View Examples
 
 Loose pending config with missing source endpoint and missing proxy config:
@@ -310,11 +314,7 @@ Migration Status
     │       └── Depends on: cap-topic
     └── Buffer
         └── ○ default (Pending Config) (to submit)
-            ├── version: deployed=<absent> | pending=<absent> | to-submit=4.0.0
             └── ○ cap-topic (Pending Config) (to submit)
-                ├── topicName: deployed=<absent> | pending=<absent> | to-submit=cap
-                ├── partitions: deployed=<absent> | pending=<absent> | to-submit=1
-                └── replicas: deployed=<absent> | pending=<absent> | to-submit=1
 ```
 
 Same saved config in `Deployed` mode:

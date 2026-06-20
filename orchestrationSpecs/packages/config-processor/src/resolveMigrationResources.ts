@@ -95,14 +95,18 @@ export async function main(args = process.argv.slice(2)) {
     }
 
     const inputConfig = await parseInput(userConfigFile ?? workflowConfigFile!);
+    const options = {
+        includeParameterPolicies,
+        ...(userConfigFile ? {includeParameterProvenance: true, sourceConfig: inputConfig} : {}),
+    };
     const resolved = userConfigFile && validationMode === "loose"
-        ? await buildLooseResolvedMigrationResources(inputConfig, workflowName, {includeParameterPolicies})
+        ? await buildLooseResolvedMigrationResources(inputConfig, workflowName, options)
         : buildResolvedMigrationResources(
             userConfigFile
                 ? await new MigrationConfigTransformer().processFromObject(inputConfig)
                 : ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(inputConfig),
             workflowName,
-            {includeParameterPolicies}
+            options
         );
     const contents = JSON.stringify(
         resolved,

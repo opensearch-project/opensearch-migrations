@@ -1208,8 +1208,8 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            assert app.screen.query_one("#create").label.plain == "Create (c)"
-            assert app.screen.query_one("#toggle-show-all").label.plain == "All (a)"
+            assert app.screen.query_one("#create").label.plain == "c Create"
+            assert app.screen.query_one("#toggle-show-all").label.plain == "a All"
             row_labels = [
                 button.label.plain if hasattr(button.label, "plain") else str(button.label)
                 for button in app.screen.query(Button)
@@ -1218,20 +1218,22 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             assert row_labels == ["source-creds"]
             assert "Opaque" not in " ".join(row_labels)
             assert "missing password" not in " ".join(row_labels)
-            assert "Matching:" in str(app.screen.query_one("#row-doc").content)
-            assert "Needs keys: username, password." in str(app.screen.query_one("#row-doc").content)
+            row_doc = str(app.screen.query_one("#row-doc").content)
+            assert "Matching" not in row_doc
+            assert "current value" not in row_doc.lower()
+            assert "Keys: username, password." in row_doc
 
             await pilot.press("a")
             assert await wait_until(
                 pilot,
                 lambda: any(
-                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "admin-creds"
+                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "admin-creds (missing password)"
                     for button in app.screen.query(Button)
                     if button.id and button.id.startswith("row-") and button.display
                 ),
             )
             await pilot.press("down")
-            assert "Warning: missing password" in str(app.screen.query_one("#row-doc").content)
+            assert "Missing keys: password" in str(app.screen.query_one("#row-doc").content)
 
             await pilot.press("c")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))

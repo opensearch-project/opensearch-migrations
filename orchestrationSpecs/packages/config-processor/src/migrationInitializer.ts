@@ -95,7 +95,10 @@ export class MigrationInitializer {
         // Generate ConfigMaps
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
-        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
+        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName, {
+            includeParameterProvenance: true,
+            sourceConfig: userConfig,
+        });
         const customMigrationResources = this.generateCustomMigrationResources(
             workflows,
             workflowName,

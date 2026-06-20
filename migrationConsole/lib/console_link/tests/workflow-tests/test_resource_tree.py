@@ -13,6 +13,7 @@ from console_link.workflow.resource_tree import (
     format_config_diff_fields,
     format_resource_diagnostics,
     format_virtual_adoption,
+    resource_config_change_summary,
     resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
@@ -203,6 +204,48 @@ class TestConfigOverlays:
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_hides_pending_only_defaulted_and_generated_fields(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {
+                'dependsOn': ['capture'],
+                'podReplicas': 1,
+                'speedupFactor': 2,
+            },
+            'parameterProvenance': {
+                'dependsOn': {'path': ['dependsOn'], 'presence': 'generated', 'value': ['capture']},
+                'podReplicas': {'path': ['podReplicas'], 'presence': 'defaulted', 'value': 1, 'defaultValue': 1},
+                'speedupFactor': {'path': ['speedupFactor'], 'presence': 'authored', 'value': 2},
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        resource = sections[1].groups[2].resources[0]
+        assert format_config_diff_fields(resource) == [
+            'speedupFactor: deployed=<absent> | pending=<absent> | to-submit=2'
+        ]
+        assert resource_config_change_summary(sections)['to_submit'] == 1
+
+    def test_counts_default_only_pending_resource_as_to_submit(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {'podReplicas': 1},
+            'parameterProvenance': {
+                'podReplicas': {'path': ['podReplicas'], 'presence': 'defaulted', 'value': 1, 'defaultValue': 1},
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        resource = sections[1].groups[2].resources[0]
+        assert format_config_diff_fields(resource) == []
+        assert resource_config_change_summary(sections) == {'pending': 0, 'to_submit': 1, 'resources': 1}
 
     def test_adds_partial_loose_resource_and_clears_not_configured_placeholder(self):
         sections = _build_tree_from_raw({})

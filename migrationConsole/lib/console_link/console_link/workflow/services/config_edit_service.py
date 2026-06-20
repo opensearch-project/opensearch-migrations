@@ -152,14 +152,16 @@ class ConfigEditService:
         """Load resolved resource snapshots for current submitted and saved config."""
         submitted = self.load_latest_submitted_resolved_config(workflow_name)
         pending = self.load_pending_resolved_config(workflow_name, validation_mode="loose")
+        submitted_console = (submitted or {}).get("consoleResources")
+        if submitted and submitted_console is None and submitted.get("workflowConfig"):
+            submitted_console = self._run_resolve_console_resources(submitted, "--resolved-config")
         pending_console = (pending or {}).get("consoleResources")
         if pending and pending_console is None and pending.get("workflowConfig"):
             pending_console = self._run_resolve_console_resources(pending, "--resolved-config")
         return {
             "submitted": submitted,
             "pending": pending,
-            "submitted_console": self._run_resolve_console_resources(submitted, "--resolved-config")
-            if submitted else None,
+            "submitted_console": submitted_console,
             "pending_console": pending_console,
         }
 

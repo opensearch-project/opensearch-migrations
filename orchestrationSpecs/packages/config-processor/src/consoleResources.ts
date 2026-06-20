@@ -2,7 +2,7 @@ import {
     ARGO_MIGRATION_CONFIG_PRE_ENRICH,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
-import {ResolvedMigrationResources} from "./resolvedMigrationResources";
+import type {ResolvedMigrationResources, ResolvedParameterProvenanceMap} from "./resolvedMigrationResources";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SourceConfig = WorkflowConfig["proxies"][number]["sourceConfig"];
@@ -21,6 +21,7 @@ export interface ConsoleClusterResource {
     refName: string;
     aliases: string[];
     clientConfig: Record<string, unknown>;
+    parameterProvenance?: ResolvedParameterProvenanceMap;
     consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
 }
@@ -55,6 +56,7 @@ export interface ConsoleKafkaResource {
             caSecretName?: string;
             kafkaUserName?: string;
         };
+    parameterProvenance?: ResolvedParameterProvenanceMap;
     consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
 }

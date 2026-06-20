@@ -183,6 +183,53 @@ describe("resolved migration resources", () => {
         ]));
     });
 
+    it("includes parameter provenance when resolving from user config", async () => {
+        const config = sampleConfig();
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+        const resolvedMigrationResources = buildResolvedMigrationResources(
+            workflowConfig,
+            "workflow-a",
+            {includeParameterProvenance: true, sourceConfig: config}
+        );
+
+        const proxy = resolvedMigrationResources.resources.find(resource =>
+            resource.kind === "CaptureProxy" && resource.name === "source-proxy");
+        expect(proxy?.parameterProvenance?.listenPort).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "proxies", "source-proxy", "proxyConfig", "listenPort"],
+            value: 9200,
+        }));
+        expect(proxy?.parameterProvenance?.dependsOn).toEqual(expect.objectContaining({
+            presence: "generated",
+            value: ["source-proxy-topic"],
+        }));
+
+        const topic = resolvedMigrationResources.resources.find(resource =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic");
+        expect(topic?.parameterProvenance?.topicName).toEqual(expect.objectContaining({
+            presence: "defaulted",
+            sourcePath: ["traffic", "proxies", "source-proxy", "kafkaTopic"],
+            value: "source-proxy",
+            defaultValue: "source-proxy",
+        }));
+        expect(topic?.parameterProvenance?.kafkaClusterName).toEqual(expect.objectContaining({
+            presence: "defaulted",
+            sourcePath: ["traffic", "proxies", "source-proxy", "kafka"],
+            value: "default",
+        }));
+
+        const replay = resolvedMigrationResources.resources.find(resource =>
+            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+        expect(replay?.parameterProvenance?.speedupFactor).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "replayers", "replay", "replayerConfig", "speedupFactor"],
+            value: 5,
+        }));
+        expect(replay?.parameterProvenance?.dependsOn).toEqual(expect.objectContaining({
+            presence: "generated",
+        }));
+    });
+
     it("dry-runs VAP-style decisions for safe, gated, impossible, and invariant changes", () => {
         const replayBefore: ResolvedMigrationResource = {
             apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -354,6 +401,32 @@ describe("resolved migration resources", () => {
         }));
     });
 
+    it("loosely projects valid user config with virtual resource provenance", async () => {
+        const resolved = await buildLooseResolvedMigrationResources(sampleConfig(), "workflow-a");
+
+        expect(resolved.projectionMode).toBe("loose");
+        expect(resolved.projectionComplete).toBe(true);
+        expect(resolved.resources.find(resource =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic"
+        )?.parameterProvenance?.topicName).toEqual(expect.objectContaining({
+            presence: "defaulted",
+            value: "source-proxy",
+        }));
+        expect(resolved.consoleResources?.sources).toContainEqual(expect.objectContaining({
+            refName: "source",
+            parameterProvenance: expect.objectContaining({
+                endpoint: expect.objectContaining({
+                    presence: "authored",
+                    sourcePath: ["sourceClusters", "source", "endpoint"],
+                    value: "https://source.example.com",
+                }),
+                no_auth: expect.objectContaining({
+                    presence: "defaulted",
+                }),
+            }),
+        }));
+    });
+
     it("returns best-effort resources from the loose CLI without exiting on validation errors", async () => {
         const config = sampleConfig();
         delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;
@@ -377,6 +450,12 @@ describe("resolved migration resources", () => {
             diagnostics: expect.arrayContaining([
                 expect.objectContaining({path: ["traffic", "proxies", "source-proxy", "proxyConfig"]}),
             ]),
+        }));
+        expect(resolved.resources.find((resource: any) =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic"
+        ).parameterProvenance.topicName).toEqual(expect.objectContaining({
+            presence: "defaulted",
+            value: "source-proxy",
         }));
     });
 });

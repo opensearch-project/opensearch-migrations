@@ -90,7 +90,15 @@ class ResourceTreeStateManager:
         for child in resource.children:
             if cls._collect_changed_resource_ids(child, expansion_ids):
                 child_has_changes = True
+        presence = resource.config_presence or {}
+        pending_presence_changed = False
+        if 'pending' in presence:
+            baseline = presence.get('submitted') if 'submitted' in presence else presence.get('deployed', True)
+            pending_presence_changed = presence.get('pending') != baseline
         if has_changes or child_has_changes:
+            expansion_ids.add(f'{RESOURCE_ID_PREFIX}{resource.name}')
+            return True
+        if pending_presence_changed:
             expansion_ids.add(f'{RESOURCE_ID_PREFIX}{resource.name}')
             return True
         return False

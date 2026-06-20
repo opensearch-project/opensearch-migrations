@@ -277,14 +277,29 @@ def resource_config_change_summary(sections: List[ResourceSection]) -> Dict[str,
     summary = {'pending': 0, 'to_submit': 0, 'resources': 0}
     for node in _iter_resource_nodes(sections):
         diff = node.config_diff or {}
-        if not diff:
+        submitted_presence_changed = _has_submitted_presence_change(node)
+        pending_presence_changed = _has_pending_presence_change(node)
+        if not diff and not submitted_presence_changed and not pending_presence_changed:
             continue
         summary['resources'] += 1
-        if diff.get('has_submitted_changes'):
+        if diff.get('has_submitted_changes') or submitted_presence_changed:
             summary['pending'] += 1
-        if diff.get('has_pending_submit_changes'):
+        if diff.get('has_pending_submit_changes') or pending_presence_changed:
             summary['to_submit'] += 1
     return summary
+
+
+def _has_submitted_presence_change(resource: ResourceNode) -> bool:
+    presence = resource.config_presence or {}
+    return 'submitted' in presence and presence.get('submitted') != presence.get('deployed', True)
+
+
+def _has_pending_presence_change(resource: ResourceNode) -> bool:
+    presence = resource.config_presence or {}
+    if 'pending' not in presence:
+        return False
+    baseline = presence.get('submitted') if 'submitted' in presence else presence.get('deployed', True)
+    return presence.get('pending') != baseline
 
 
 def format_virtual_adoption(resource: ResourceNode, rich_markup: bool = False) -> List[str]:
@@ -390,6 +405,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'SourceConfig',
                 'name': name,
                 'parameters': source.get('clientConfig') or {},
+                'parameterProvenance': source.get('parameterProvenance') or {},
                 'diagnostics': source.get('diagnostics') or [],
                 'consumers': source.get('consumers') or [],
             }
@@ -400,6 +416,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'TargetConfig',
                 'name': name,
                 'parameters': target.get('clientConfig') or {},
+                'parameterProvenance': target.get('parameterProvenance') or {},
                 'diagnostics': target.get('diagnostics') or [],
                 'consumers': target.get('consumers') or [],
             }
@@ -410,6 +427,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'KafkaConfig',
                 'name': name,
                 'parameters': kafka.get('runtime') or {},
+                'parameterProvenance': kafka.get('parameterProvenance') or {},
                 'diagnostics': kafka.get('diagnostics') or [],
                 'consumers': kafka.get('consumers') or [],
             }
@@ -605,8 +623,16 @@ def _build_config_diff(
     for path in paths:
         values = {
             'deployed': _value_state(deployed_parameters, path),
-            'submitted': _value_state(submitted_parameters, path),
-            'pending': _value_state(pending_parameters, path),
+            'submitted': _value_state(
+                submitted_parameters,
+                path,
+                _parameter_provenance(submitted_resource, path),
+            ),
+            'pending': _value_state(
+                pending_parameters,
+                path,
+                _parameter_provenance(pending_resource, path),
+            ),
         }
         submitted_changed = (
             compare_submitted_to_deployed and
@@ -614,6 +640,8 @@ def _build_config_diff(
         )
         pending_submit_changed = not _same_state(values['submitted'], values['pending'])
         if not submitted_changed and not pending_submit_changed:
+            continue
+        if _is_pending_only_auto_filled_change(values):
             continue
         if submitted_changed:
             has_submitted_changes = True
@@ -674,12 +702,33 @@ def _leaf_paths(value: Any, prefix: Optional[List[str]] = None):
         yield prefix
 
 
-def _value_state(source: Optional[Dict[str, Any]], path: List[str]) -> Dict[str, Any]:
+def _value_state(
+    source: Optional[Dict[str, Any]],
+    path: List[str],
+    provenance: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if source is None:
         return {'present': False}
     if not _has_nested(source, path):
         return {'present': False}
-    return {'present': True, 'value': _get_nested(source, '.'.join(path))}
+    result = {'present': True, 'value': _get_nested(source, '.'.join(path))}
+    if provenance:
+        result['provenance'] = provenance
+    return result
+
+
+def _parameter_provenance(resource: Optional[Dict[str, Any]], path: List[str]) -> Optional[Dict[str, Any]]:
+    provenance = (resource or {}).get('parameterProvenance') or {}
+    return provenance.get('.'.join(path))
+
+
+def _is_pending_only_auto_filled_change(values: Dict[str, Dict[str, Any]]) -> bool:
+    if values['deployed'].get('present') or values['submitted'].get('present'):
+        return False
+    if not values['pending'].get('present'):
+        return False
+    presence = (values['pending'].get('provenance') or {}).get('presence')
+    return presence in {'defaulted', 'generated'}
 
 
 def _same_state(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
@@ -884,11 +933,9 @@ def _resource_change_label(resource: ResourceNode) -> str:
         style = _adoption_style(adoption_status)
         return f' [{style}]({escape(str(adoption_status))})[/{style}]'
     diff = resource.config_diff or {}
-    if not diff:
-        return ''
-    if diff.get('has_pending_submit_changes'):
+    if diff.get('has_pending_submit_changes') or _has_pending_presence_change(resource):
         return ' [cyan](to submit)[/cyan]'
-    if diff.get('has_submitted_changes'):
+    if diff.get('has_submitted_changes') or _has_submitted_presence_change(resource):
         return ' [magenta](pending)[/magenta]'
     return ''
 

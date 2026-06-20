@@ -307,7 +307,7 @@ Python maintains a short-lived inventory cache per namespace while manage is ope
 - Secrets: name, type, keys only. Values are not decoded for list rendering.
 - Issuers and ClusterIssuers: name, kind, readiness condition if the cert-manager CRDs are installed and readable.
 
-Pickers stay compact by default. They show matching resources and the current YAML value first, sorted by fit and name, and keep near misses behind an explicit `All (a)` command. This keeps namespaces with many Secrets or ConfigMaps usable while still making questionable resources available when the user needs to inspect stale inventory, RBAC gaps, or near misses. The picker paginates the visible rows with `n` and `p`; pagination is local to the already fetched inventory and does not re-query Kubernetes.
+Pickers stay compact by default. They show matching resources and the current YAML value first, sorted by fit and name, and keep near misses behind an explicit `a All` command. This keeps namespaces with many Secrets or ConfigMaps usable while still making questionable resources available when the user needs to inspect stale inventory, RBAC gaps, or near misses. The picker paginates the visible rows with `n` and `p`; pagination is local to the already fetched inventory and does not re-query Kubernetes.
 
 - `matching`: resource type and required keys match the field.
 - `warn`: the resource is missing, incomplete, unreadable, has a questionable type, has extra keys, or only weakly matches the expected format.
@@ -414,14 +414,15 @@ Picker actions use single-key shortcuts. The footer should include the available
 Select HTTP Basic Auth Secret
 
   source-creds
-  legacy-creds
+  legacy-creds (current)
 
-Matching: resource satisfies this reference. Needs keys: username, password. Showing 1-2 of 2 matching/current. 2 hidden; press a to show all.
+Keys: username, password.
+1-2/2 shown. 2 hidden (a all).
 
-[Select] [Create (c)] [Manual (m)] [View (v)] [Update (u)] [Prev (p)] [Next (n)] [All (a)] [Cancel]
+[Select] [c Create] [m Manual] [v View] [u Update] [p Prev] [n Next] [a All] [Cancel]
 ```
 
-Rows are one line: resource name plus `(current)` when applicable. Match/warn details, required keys, and pagination state live in the bottom hint and update as the user moves through the list. Kubernetes Secret type names such as `Opaque` are inventory metadata, not picker row labels; they remain available in the view pane when they are useful for inspection. Selecting a `matching` row applies the name into YAML. Selecting a `warn` row opens a confirmation with the diagnostic and still lets the user choose it. Creating a Secret creates the Kubernetes Secret first, refreshes inventory, then applies the chosen name to the YAML only after the create succeeds.
+Rows are one line: resource name plus `(current)` when applicable. All mode also annotates incomplete resources inline, for example `admin-creds (missing password)`. Match/warn details, required keys, and pagination state live in the bottom hint and update as the user moves through the list. Missing keys are shown on their own hint line for the selected row. Kubernetes Secret type names such as `Opaque` are inventory metadata, not picker row labels; they remain available in the view pane when they are useful for inspection. Selecting a `matching` row applies the name into YAML. Selecting a `warn` row opens a confirmation with the diagnostic and still lets the user choose it. Creating a Secret creates the Kubernetes Secret first, refreshes inventory, then applies the chosen name to the YAML only after the create succeeds.
 
 ### Example: Secret View
 
