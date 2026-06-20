@@ -12,11 +12,15 @@ import static org.mockito.Mockito.mock;
 public class GcsSnapshotCreatorTest {
 
     private SnapshotCreator createGcsCreator(String gcsUri, Integer maxRate, boolean compress) {
+        return createGcsCreator(gcsUri, maxRate, compress, null);
+    }
+
+    private SnapshotCreator createGcsCreator(String gcsUri, Integer maxRate, boolean compress, String endpoint) {
         return new SnapshotCreator(
             "snap", "repo", mock(OpenSearchClient.class),
             RepoUri.parse(gcsUri),
             List.of(), null, compress, true,
-            null, null, maxRate, null
+            null, endpoint, maxRate, null
         );
     }
 
@@ -71,5 +75,19 @@ public class GcsSnapshotCreatorTest {
 
         assertEquals("40mb", settings.get("max_snapshot_bytes_per_sec").asText());
         assertEquals(false, settings.get("compress").asBoolean());
+    }
+
+    @Test
+    void GetRequestBodyForRegisterRepo_DoesNotForwardEndpoint() {
+        // repository-gcs has no repository-level "endpoint" setting (unlike
+        // repository-s3); a custom endpoint must be configured cluster-side via
+        // gcs.client.<client>.endpoint. Even when an endpoint is supplied, it must
+        // not appear in the repo registration body, where it would be ignored.
+        var creator = createGcsCreator("gs://my-bucket/path", null, false,
+            "http://fake-gcs-server:4443");
+        ObjectNode body = creator.getRequestBodyForRegisterRepo();
+        ObjectNode settings = (ObjectNode) body.get("settings");
+
+        assertNull(settings.get("endpoint"));
     }
 }

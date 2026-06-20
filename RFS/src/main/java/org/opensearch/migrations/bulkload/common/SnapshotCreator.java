@@ -106,6 +106,10 @@ public class SnapshotCreator {
             case RepoUri.GcsRepoUri g -> {
                 var gcsUri = new GcsUri(g.rawUri());
                 putBucketSettings(settings, gcsUri.bucketName, gcsUri.key);
+                // Unlike repository-s3, repository-gcs has no repository-level "endpoint"
+                // setting; a custom endpoint (e.g. fake-gcs-server for testing) must be
+                // configured cluster-side via gcs.client.<client>.endpoint. Setting it here
+                // would be silently ignored, so the endpoint is intentionally not forwarded.
                 body.put("type", "gcs");
             }
         }

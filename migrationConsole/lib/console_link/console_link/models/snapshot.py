@@ -65,6 +65,7 @@ SNAPSHOT_SCHEMA = {
                 'nullable': True,
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True, 'empty': False},
+                    'endpoint': {'type': 'string', 'required': False, 'empty': True},
                 }
             },
             'fs': {
@@ -350,6 +351,7 @@ class GcsSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.gcs_repo_uri = config['gcs']['repo_uri']
+        self.gcs_endpoint = config['gcs'].get('endpoint') or None
 
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
@@ -358,6 +360,8 @@ class GcsSnapshot(Snapshot):
 
         command_args = self._collect_universal_command_args()
         command_args["--repo-uri"] = self.gcs_repo_uri
+        if self.gcs_endpoint:
+            command_args["--endpoint"] = self.gcs_endpoint
 
         if self._is_solr_source():
             collections = self._get_solr_collections()

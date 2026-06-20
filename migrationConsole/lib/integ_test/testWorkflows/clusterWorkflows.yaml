@@ -603,8 +603,15 @@ spec:
             discovery.type: single-node
             xpack.security.enabled: false
             xpack.ml.enabled: false
+            # repository-gcs client settings for local GCS testing. The endpoint
+            # points at fake-gcs-server and token_uri at gcs-token-stub (see the
+            # gcs/ helm templates). These are only consulted when a gcs snapshot
+            # repository is registered, so they are inert for non-GCS tests.
+            gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
+            gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+            sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
 
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
@@ -662,6 +669,8 @@ spec:
                       volumeMounts:
                         - name: elasticsearch-keystore
                           mountPath: /shared
+                        - name: gcs-test-credentials
+                          mountPath: /gcs-credentials
                   containers:
                     - name: elasticsearch
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
@@ -713,6 +722,13 @@ spec:
                       emptyDir: {}
                     - name: elasticsearch-keystore
                       emptyDir: {}
+                    # Optional: present only for local GCS testing (gcs-test-credentials
+                    # ConfigMap is created by the gcs helm templates when fake-gcs-server
+                    # is enabled). optional:true so non-GCS clusters start without it.
+                    - name: gcs-test-credentials
+                      configMap:
+                        name: gcs-test-credentials
+                        optional: true
             ---
             apiVersion: v1
             kind: Service
@@ -780,8 +796,15 @@ spec:
             discovery.type: single-node
             xpack.security.enabled: false
             xpack.ml.enabled: false
+            # repository-gcs client settings for local GCS testing. The endpoint
+            # points at fake-gcs-server and token_uri at gcs-token-stub (see the
+            # gcs/ helm templates). These are only consulted when a gcs snapshot
+            # repository is registered, so they are inert for non-GCS tests.
+            gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
+            gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+            sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
 
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
@@ -840,10 +863,21 @@ spec:
                           echo 'y' | bin/elasticsearch-keystore create
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          # GCS credentials for local fake-gcs-server testing, mounted from the
+                          # gcs-test-credentials ConfigMap (created by the gcs helm templates only
+                          # when fake-gcs-server is enabled). repository-gcs requires service_account
+                          # credentials and signs a JWT with this throwaway key, which grants no real
+                          # access. The mount is optional, so non-GCS test clusters, where the
+                          # ConfigMap is absent, skip this step and are unaffected.
+                          if [ -f /gcs-credentials/gcs-sa.json ]; then
+                            bin/elasticsearch-keystore add-file gcs.client.default.credentials_file /gcs-credentials/gcs-sa.json --force
+                          fi
                           cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
                       volumeMounts:
                         - name: elasticsearch-keystore
                           mountPath: /shared
+                        - name: gcs-test-credentials
+                          mountPath: /gcs-credentials
                   containers:
                     - name: elasticsearch
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
@@ -895,6 +929,13 @@ spec:
                       emptyDir: {}
                     - name: elasticsearch-keystore
                       emptyDir: {}
+                    # Optional: present only for local GCS testing (gcs-test-credentials
+                    # ConfigMap is created by the gcs helm templates when fake-gcs-server
+                    # is enabled). optional:true so non-GCS clusters start without it.
+                    - name: gcs-test-credentials
+                      configMap:
+                        name: gcs-test-credentials
+                        optional: true
             ---
             apiVersion: v1
             kind: Service
@@ -965,8 +1006,15 @@ spec:
             xpack.security.http.ssl.enabled: false
             xpack.security.transport.ssl.enabled: false
             xpack.ml.enabled: false
+            # repository-gcs client settings for local GCS testing. The endpoint
+            # points at fake-gcs-server and token_uri at gcs-token-stub (see the
+            # gcs/ helm templates). These are only consulted when a gcs snapshot
+            # repository is registered, so they are inert for non-GCS tests.
+            gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
+            gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+            sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
 
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
@@ -1025,10 +1073,21 @@ spec:
                           echo 'y' | bin/elasticsearch-keystore create
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          # GCS credentials for local fake-gcs-server testing, mounted from the
+                          # gcs-test-credentials ConfigMap (created by the gcs helm templates only
+                          # when fake-gcs-server is enabled). repository-gcs requires service_account
+                          # credentials and signs a JWT with this throwaway key, which grants no real
+                          # access. The mount is optional, so non-GCS test clusters, where the
+                          # ConfigMap is absent, skip this step and are unaffected.
+                          if [ -f /gcs-credentials/gcs-sa.json ]; then
+                            bin/elasticsearch-keystore add-file gcs.client.default.credentials_file /gcs-credentials/gcs-sa.json --force
+                          fi
                           cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
                       volumeMounts:
                         - name: elasticsearch-keystore
                           mountPath: /shared
+                        - name: gcs-test-credentials
+                          mountPath: /gcs-credentials
                   containers:
                     - name: elasticsearch
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
@@ -1080,6 +1139,13 @@ spec:
                       emptyDir: {}
                     - name: elasticsearch-keystore
                       emptyDir: {}
+                    # Optional: present only for local GCS testing (gcs-test-credentials
+                    # ConfigMap is created by the gcs helm templates when fake-gcs-server
+                    # is enabled). optional:true so non-GCS clusters start without it.
+                    - name: gcs-test-credentials
+                      configMap:
+                        name: gcs-test-credentials
+                        optional: true
             ---
             apiVersion: v1
             kind: Service

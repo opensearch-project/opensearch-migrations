@@ -16,7 +16,7 @@ spec:
 
   arguments:
     parameters:
-      - name: s3-snapshot-configmap
+      - name: snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
@@ -46,26 +46,26 @@ spec:
           - name: tupleS3Region
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: AWS_REGION
           - name: useLocalStack
             default: "false"
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: USE_LOCAL_STACK
                 optional: true
           - name: tupleS3Endpoint
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: ENDPOINT_HTTP
                 optional: true
           - name: tupleS3BucketName
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: BUCKET_NAME
           - name: imageMigrationConsoleLocation
             valueFrom:

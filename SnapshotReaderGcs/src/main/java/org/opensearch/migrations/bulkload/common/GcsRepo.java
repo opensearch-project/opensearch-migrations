@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.cloud.NoCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
@@ -38,6 +39,14 @@ public class GcsRepo implements SourceRepo {
         StorageOptions.Builder builder = StorageOptions.newBuilder();
         if (endpoint != null && !endpoint.isEmpty()) {
             builder.setHost(endpoint);
+            // A custom endpoint means we are talking to a local emulator (e.g.
+            // fake-gcs-server) rather than real GCS. Use NoCredentials so the client
+            // does not attempt to authenticate via Application Default Credentials,
+            // which off-GCE falls back to the GCE metadata server and fails with
+            // "ComputeEngineCredentials cannot find the metadata server". On the real
+            // GCS path (no endpoint override) credentials are left to the default
+            // resolution chain, preserving Workload Identity on GKE.
+            builder.setCredentials(NoCredentials.getInstance());
             log.atInfo().setMessage("Using custom GCS endpoint: {}").addArgument(endpoint).log();
         }
         Storage storage = builder.build().getService();
