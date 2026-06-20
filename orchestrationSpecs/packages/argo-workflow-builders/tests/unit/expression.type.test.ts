@@ -26,6 +26,8 @@ describe("expression type contracts", () => {
         expectTypeOf(makeDirectTypeProxy(expr.literal(5))).toEqualTypeOf<number>();
         expectTypeOf(makeDirectTypeProxy(expr.makeDict({enabled: true})))
             .toEqualTypeOf<{ enabled: boolean }>();
+        expectTypeOf(makeDirectTypeProxy(expr.serialize(expr.makeDict({enabled: true}))))
+            .toEqualTypeOf<{ enabled: boolean }>();
 
         // @ts-expect-error - string expressions must use makeStringTypeProxy / yamlSafeString so manifest rendering can escape them
         makeDirectTypeProxy(expr.literal("unsafe-string"));

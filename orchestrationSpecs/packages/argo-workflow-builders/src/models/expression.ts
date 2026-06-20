@@ -68,7 +68,7 @@ export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
 
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
     constructor(
-        public readonly value: BaseExpression<T>,
+        public readonly value: BaseExpression<PlainObject, ExpressionType>,
         public readonly mode: UnquotedWrapperMode = "raw-non-string"
     ) {
         super("strip_surrounding_quotes_in_serialized_output");
@@ -1060,15 +1060,22 @@ export default expr;
 
 
 // This function and the next tie into the renderer
+function expressionValueProxy<T extends PlainObject>(value: BaseExpression<T>): T {
+    return value as never;
+}
+
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<number>>): number;
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>): boolean;
 export function makeDirectTypeProxy<T extends AggregateType>(value: BaseExpression<Serialized<T>>): T;
 export function makeDirectTypeProxy<T extends Exclude<NonSerializedPlainObject, string>>(value: BaseExpression<T>): T;
 export function makeDirectTypeProxy<T extends (Exclude<NonSerializedPlainObject, string>|Serialized<Exclude<NonSerializedPlainObject, string>>)>(value: BaseExpression<T>) {
-    return new UnquotedTypeWrapper(value) as any as T;
+    const mode = value instanceof FunctionExpression && value.functionName === "toJSON"
+        ? "yaml-safe-json"
+        : "raw-non-string";
+    return expressionValueProxy(new UnquotedTypeWrapper<T>(value, mode));
 }
 
 // This function and the next tie into the renderer
 export function makeStringTypeProxy<T extends string>(value: AllowLiteralOrExpression<T>): T {
-    return value as any as T;
+    return isExpression(value) ? expressionValueProxy(value) : value;
 }

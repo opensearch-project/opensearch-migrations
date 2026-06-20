@@ -115,6 +115,16 @@ describe("resource expression YAML rendering", () => {
             expect(() => renderManifest({ data: { bad: rawStringWrapper } }))
                 .toThrow(/Raw unquoted string expression/);
         });
+
+        it("allows serialized aggregate direct proxies as YAML-safe JSON", () => {
+            const rendered = renderManifest({
+                data: makeDirectTypeProxy(expr.serialize(
+                    expr.makeDict({value: expr.literal("a: b")})
+                )),
+            });
+
+            expect(rendered).toContain("data: {{=toJSON(sprig.dict(");
+        });
     });
 
     describe("yamlSafeString (#3108)", () => {

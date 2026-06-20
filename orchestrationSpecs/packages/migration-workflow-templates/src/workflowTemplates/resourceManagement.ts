@@ -3,6 +3,7 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
+    ExpressionType,
     FunctionExpression,
     INTERNAL,
     InputParamDef,
@@ -84,14 +85,20 @@ function placeholderStatusFields<T extends StringStatusFields>(fields: T): Recor
     return proxied;
 }
 
-function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, any>): T {
+function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, ExpressionType>): T {
     // Resource templates substitute Argo expressions before kubectl parses the YAML.
     // toJSON keeps quote-heavy strings, arrays, and objects valid as YAML literals.
-    const jsonExpression = new FunctionExpression<Serialized<T>, NonSerializedPlainObject, any>(
+    const jsonExpression = new FunctionExpression<
+        Serialized<T>,
+        T,
+        ExpressionType,
+        "complicatedExpression",
+        readonly [BaseExpression<T, ExpressionType>]
+    >(
         "toJSON",
-        [value] as unknown as BaseExpression<NonSerializedPlainObject, any>[]
+        [value] as const
     );
-    return new UnquotedTypeWrapper(jsonExpression, "yaml-safe-json") as unknown as T;
+    return new UnquotedTypeWrapper<T>(jsonExpression, "yaml-safe-json") as never;
 }
 
 function buildPatchStatusTemplate<
@@ -501,7 +508,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     spec: {
                         snapshotPrefix: makeStringTypeProxy(expr.get(snapshotItemConfig, "snapshotPrefix")),
                         indexAllowlist: makeDirectTypeProxy(
-                            expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([])) as any
+                            expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([]))
                         ),
                         maxSnapshotRateMbPerNode: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["maxSnapshotRateMbPerNode"], 0)
