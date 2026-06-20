@@ -8,7 +8,6 @@ import {
     Serialized,
     toArgoExpressionString,
     transformExpressionsDeep,
-    UnquotedTypeWrapper,
     unwrapPlaceholdersAndStringify,
 } from "../../src";
 
@@ -105,15 +104,6 @@ describe("resource expression YAML rendering", () => {
             const rendered = renderManifest({ spec: { replicas: makeDirectTypeProxy(num) } });
             expect(rendered).toContain("replicas: {{inputs.parameters.replicas}}");
             expect(rendered).not.toContain("toJSON");
-        });
-
-        it("rejects obvious raw unquoted string wrappers in manifest mode", () => {
-            const rawStringWrapper = new UnquotedTypeWrapper(
-                expr.concat(param, expr.literal("-suffix"))
-            );
-
-            expect(() => renderManifest({ data: { bad: rawStringWrapper } }))
-                .toThrow(/Raw unquoted string expression/);
         });
 
         it("allows serialized aggregate direct proxies as YAML-safe JSON", () => {

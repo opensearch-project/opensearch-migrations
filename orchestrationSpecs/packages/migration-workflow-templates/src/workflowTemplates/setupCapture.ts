@@ -218,9 +218,6 @@ function makeProxyDeploymentManifest(args: {
             },
             {
                 name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR,
-                // PEM newlines and the "---" in "-----END CERTIFICATE-----" used to break this
-                // manifest (#3108); the renderer now makes every string scalar YAML-safe, so the
-                // proxy receives the exact original PEM with no decode.
                 value: makeStringTypeProxy(args.sslTrustCertPem)
             }
         ],

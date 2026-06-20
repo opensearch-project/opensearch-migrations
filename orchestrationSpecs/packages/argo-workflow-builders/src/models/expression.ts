@@ -65,8 +65,11 @@ export function widenComplexity<
 }
 
 export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
+type RawUnquotedValue = Exclude<NonSerializedPlainObject, string> | Serialized<Exclude<NonSerializedPlainObject, string>>;
 
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
+    constructor(value: BaseExpression<T, ExpressionType> & BaseExpression<RawUnquotedValue, ExpressionType>, mode?: "raw-non-string");
+    constructor(value: BaseExpression<T | Serialized<T>, ExpressionType>, mode: "yaml-safe-json");
     constructor(
         public readonly value: BaseExpression<PlainObject, ExpressionType>,
         public readonly mode: UnquotedWrapperMode = "raw-non-string"
@@ -1050,7 +1053,7 @@ class ExprBuilder {
             "toJSON",
             toExpression(value)
         );
-        return new UnquotedTypeWrapper(jsonEscaped, "yaml-safe-json");
+        return new UnquotedTypeWrapper<string>(jsonEscaped, "yaml-safe-json");
     }
 }
 
@@ -1069,10 +1072,10 @@ export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>):
 export function makeDirectTypeProxy<T extends AggregateType>(value: BaseExpression<Serialized<T>>): T;
 export function makeDirectTypeProxy<T extends Exclude<NonSerializedPlainObject, string>>(value: BaseExpression<T>): T;
 export function makeDirectTypeProxy<T extends (Exclude<NonSerializedPlainObject, string>|Serialized<Exclude<NonSerializedPlainObject, string>>)>(value: BaseExpression<T>) {
-    const mode = value instanceof FunctionExpression && value.functionName === "toJSON"
-        ? "yaml-safe-json"
-        : "raw-non-string";
-    return expressionValueProxy(new UnquotedTypeWrapper<T>(value, mode));
+    if (value instanceof FunctionExpression && value.functionName === "toJSON") {
+        return expressionValueProxy(new UnquotedTypeWrapper<T>(value, "yaml-safe-json"));
+    }
+    return expressionValueProxy(new UnquotedTypeWrapper<T>(value));
 }
 
 // This function and the next tie into the renderer
