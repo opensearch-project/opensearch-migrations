@@ -9,16 +9,18 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
 
+PICKER_PAGE_SIZE = 10
+
+
 class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourcePickerModal { align: center middle; background: $background 60%; }
-    #dialog { width: 92; max-height: 36; border: thick $primary; background: $surface; padding: 1 2; }
+    #dialog { width: 92; max-height: 34; border: thick $primary; background: $surface; padding: 1 2; }
     #title { text-align: center; margin-bottom: 1; }
-    #documentation { color: gray; margin-bottom: 1; }
-    #rows { height: auto; max-height: 20; overflow-y: auto; }
-    #row-doc { color: gray; margin-top: 1; min-height: 1; }
+    #rows { height: auto; max-height: 13; overflow-y: auto; }
+    #row-doc { color: gray; margin-top: 1; min-height: 2; }
     #actions { align: center middle; height: 3; margin-top: 1; }
-    Button { margin: 0 1 1 0; }
+    Button { margin: 0 1 1 0; min-width: 7; }
     #rows Button { width: 100%; text-align: left; }
     """
     BINDINGS = [
@@ -27,6 +29,9 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         Binding("m", "manual", "Manual"),
         Binding("v", "view", "View"),
         Binding("u", "update", "Update"),
+        Binding("a", "toggle_show_all", "Show All"),
+        Binding("n", "next_page", "Next"),
+        Binding("p", "previous_page", "Prev"),
         Binding("up", "focus_previous", "Up", show=False),
         Binding("down", "focus_next", "Down", show=False),
         Binding("escape", "cancel", "Cancel", show=False),
@@ -39,6 +44,7 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         current_value: Any = None,
         documentation: str = "",
         can_create: bool = False,
+        external_ref: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
         self.title_text = title
@@ -46,33 +52,33 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         self.current_value = current_value
         self.documentation = documentation
         self.can_create = can_create
+        self.external_ref = external_ref or {}
+        self.show_all = False
+        self.page_index = 0
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.title_text), id="title")
-            yield Static(escape(self.documentation), id="documentation")
             with Vertical(id="rows"):
-                if self.rows:
-                    for index, row in enumerate(self.rows):
-                        yield Button(_row_label(row), id=f"row-{index}")
-                else:
-                    yield Static("No Kubernetes resources found.", id="empty")
+                for index in range(PICKER_PAGE_SIZE):
+                    yield Button("", id=f"row-{index}")
+                yield Static("", id="empty")
             yield Static("", id="row-doc")
             with Horizontal(id="actions"):
-                yield Button("Select (Enter)", id="select")
+                yield Button("Select", id="select")
                 yield Button("Create (c)", id="create", variant="success", disabled=not self.can_create)
                 yield Button("Manual (m)", id="manual")
                 yield Button("View (v)", id="view", disabled=not bool(self.rows))
                 yield Button("Update (u)", id="update", disabled=not bool(self.rows))
+                yield Button("Prev (p)", id="previous-page")
+                yield Button("Next (n)", id="next-page")
+                yield Button("All (a)", id="toggle-show-all")
                 yield Button("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
-        if self.rows:
-            index = next(
-                (i for i, row in enumerate(self.rows) if row.get("name") == self.current_value),
-                0,
-            )
-            self.query_one(f"#row-{index}", Button).focus()
+        self._render_rows()
+        if self._displayed_rows():
+            self.query_one("#row-0", Button).focus()
         elif self.can_create:
             self.query_one("#create", Button).focus()
         else:
@@ -112,10 +118,33 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         if row:
             self.dismiss({"action": "update", "row": row})
 
+    def action_toggle_show_all(self) -> None:
+        if not self._has_hidden_rows():
+            return
+        self.show_all = not self.show_all
+        self.page_index = 0
+        self._render_rows()
+        self._focus_first_row_or_action()
+
+    def action_next_page(self) -> None:
+        if self.page_index >= self._page_count() - 1:
+            return
+        self.page_index += 1
+        self._render_rows()
+        self._focus_first_row_or_action()
+
+    def action_previous_page(self) -> None:
+        if self.page_index <= 0:
+            return
+        self.page_index -= 1
+        self._render_rows()
+        self._focus_first_row_or_action()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
         if button_id.startswith("row-"):
-            self.dismiss({"action": "select", "row": self.rows[int(button_id.removeprefix("row-"))]})
+            row = self._displayed_rows()[int(button_id.removeprefix("row-"))]
+            self.dismiss({"action": "select", "row": row})
         elif button_id == "select":
             self.action_select()
         elif button_id == "create":
@@ -126,23 +155,105 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.action_view()
         elif button_id == "update":
             self.action_update()
+        elif button_id == "toggle-show-all":
+            self.action_toggle_show_all()
+        elif button_id == "next-page":
+            self.action_next_page()
+        elif button_id == "previous-page":
+            self.action_previous_page()
         elif button_id == "cancel":
             self.dismiss(None)
 
     def _focused_row(self) -> Optional[Dict[str, Any]]:
         focused = self.focused
         if isinstance(focused, Button) and focused.id and focused.id.startswith("row-"):
-            return self.rows[int(focused.id.removeprefix("row-"))]
-        return self.rows[0] if self.rows else None
+            displayed = self._displayed_rows()
+            index = int(focused.id.removeprefix("row-"))
+            return displayed[index] if index < len(displayed) else None
+        displayed = self._displayed_rows()
+        return displayed[0] if displayed else None
 
     def _update_row_doc(self) -> None:
         row = self._focused_row()
+        summary = self._page_summary()
+        requirement = _requirement_hint(self.external_ref)
         if not row:
-            self.query_one("#row-doc", Static).update("")
+            pieces = [_empty_picker_hint(self.rows, self._has_hidden_rows()), requirement, summary]
+            self.query_one("#row-doc", Static).update(escape(" ".join(part for part in pieces if part).strip()))
             return
-        message = str(row.get("message") or "")
+        message = _row_hint(row)
         current = "Current value. " if row.get("current") else ""
-        self.query_one("#row-doc", Static).update(escape(f"{current}{message}".strip()))
+        pieces = [f"{current}{message}".strip(), requirement, summary]
+        self.query_one("#row-doc", Static).update(escape(" ".join(part for part in pieces if part).strip()))
+
+    def _visible_rows(self) -> List[Dict[str, Any]]:
+        if self.show_all:
+            return list(self.rows)
+        return [
+            row for row in self.rows
+            if row.get("status") == "matching" or row.get("current")
+        ]
+
+    def _displayed_rows(self) -> List[Dict[str, Any]]:
+        start = self.page_index * PICKER_PAGE_SIZE
+        return self._visible_rows()[start:start + PICKER_PAGE_SIZE]
+
+    def _page_count(self) -> int:
+        visible = len(self._visible_rows())
+        return max(1, (visible + PICKER_PAGE_SIZE - 1) // PICKER_PAGE_SIZE)
+
+    def _has_hidden_rows(self) -> bool:
+        return len(self._visible_rows()) < len(self.rows) or self.show_all
+
+    def _render_rows(self) -> None:
+        displayed = self._displayed_rows()
+        for index in range(PICKER_PAGE_SIZE):
+            button = self.query_one(f"#row-{index}", Button)
+            if index < len(displayed):
+                button.label = _row_label(displayed[index])
+                button.disabled = False
+                button.display = True
+            else:
+                button.disabled = True
+                button.display = False
+        empty = self.query_one("#empty", Static)
+        empty.update(_empty_picker_text(self.rows, self.show_all))
+        empty.display = not bool(displayed)
+        self._update_action_buttons()
+        self._update_row_doc()
+
+    def _update_action_buttons(self) -> None:
+        has_displayed_rows = bool(self._displayed_rows())
+        self.query_one("#select", Button).disabled = not has_displayed_rows
+        self.query_one("#view", Button).disabled = not has_displayed_rows
+        self.query_one("#update", Button).disabled = not has_displayed_rows
+        self.query_one("#previous-page", Button).disabled = self.page_index <= 0
+        self.query_one("#next-page", Button).disabled = self.page_index >= self._page_count() - 1
+        toggle = self.query_one("#toggle-show-all", Button)
+        toggle.disabled = not self._has_hidden_rows()
+        toggle.label = "Matches (a)" if self.show_all else "All (a)"
+
+    def _focus_first_row_or_action(self) -> None:
+        if self._displayed_rows():
+            self.query_one("#row-0", Button).focus()
+        elif self.can_create:
+            self.query_one("#create", Button).focus()
+        else:
+            self.query_one("#manual", Button).focus()
+        self._update_row_doc()
+
+    def _page_summary(self) -> str:
+        visible_count = len(self._visible_rows())
+        if visible_count == 0:
+            hidden_count = len(self.rows)
+            hidden = f" {hidden_count} hidden; press a to show all." if hidden_count and not self.show_all else ""
+            return f"Showing 0 of {len(self.rows)}.{hidden}"
+        start = self.page_index * PICKER_PAGE_SIZE + 1
+        end = min(start + PICKER_PAGE_SIZE - 1, visible_count)
+        mode = "all" if self.show_all else "matching/current"
+        hidden_count = len(self.rows) - visible_count
+        hidden = f" {hidden_count} hidden; press a to show all." if hidden_count and not self.show_all else ""
+        return f"Showing {start}-{end} of {visible_count} {mode}.{hidden}"
 
 
 class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
@@ -320,13 +431,46 @@ class ExternalResourceFormModal(ModalScreen[Optional[Dict[str, str]]]):
 
 
 def _row_label(row: Dict[str, Any]) -> str:
-    status = str(row.get("status") or "warn")
     name = str(row.get("name") or "")
-    type_name = str(row.get("type") or row.get("kind") or "")
-    keys = ",".join(str(key) for key in row.get("keys") or [])
     current = " (current)" if row.get("current") else ""
-    message = f"  {row.get('message')}" if row.get("message") else ""
-    return escape(f"{status:<9} {name:<28} {type_name:<28} {keys}{current}{message}")
+    return escape(f"{name or '<unnamed>'}{current}")
+
+
+def _row_hint(row: Dict[str, Any]) -> str:
+    status = str(row.get("status") or "warn")
+    prefix = "Matching:" if status == "matching" else "Warning:"
+    message = str(row.get("message") or "")
+    if not message:
+        message = "resource satisfies this reference." if status == "matching" else "resource may not satisfy this reference."
+    return f"{prefix} {message}"
+
+
+def _requirement_hint(external_ref: Dict[str, Any]) -> str:
+    k8s_hint = external_ref.get("k8s") or {}
+    required_keys = [str(key) for key in k8s_hint.get("requiredKeys") or []]
+    recommended_keys = [str(key) for key in k8s_hint.get("recommendedKeys") or []]
+    if required_keys:
+        return f"Needs keys: {', '.join(required_keys)}."
+    if recommended_keys:
+        return f"Recommended keys: {', '.join(recommended_keys)}."
+    description = str(external_ref.get("description") or "").strip()
+    if description:
+        return description
+    return ""
+
+
+def _empty_picker_text(rows: List[Dict[str, Any]], show_all: bool) -> str:
+    if rows and not show_all:
+        return "No matching resources on this page."
+    return "No Kubernetes resources found."
+
+
+def _empty_picker_hint(rows: List[Dict[str, Any]], has_hidden_rows: bool) -> str:
+    if rows and has_hidden_rows:
+        return "No matching resources are shown by default."
+    if rows:
+        return "No resources on this page."
+    return "No Kubernetes resources found."
 
 
 def _resource_view_text(external_ref: Dict[str, Any], resource: Dict[str, Any]) -> str:

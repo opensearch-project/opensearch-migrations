@@ -307,12 +307,12 @@ Python maintains a short-lived inventory cache per namespace while manage is ope
 - Secrets: name, type, keys only. Values are not decoded for list rendering.
 - Issuers and ClusterIssuers: name, kind, readiness condition if the cert-manager CRDs are installed and readable.
 
-Pickers should stay compact. They show all known resources of the appropriate kind in one table with a status column, sorted by fit and name. There is no `Show all` mode because hiding questionable rows makes stale inventory, RBAC gaps, and near misses harder to reason about.
+Pickers stay compact by default. They show matching resources and the current YAML value first, sorted by fit and name, and keep near misses behind an explicit `All (a)` command. This keeps namespaces with many Secrets or ConfigMaps usable while still making questionable resources available when the user needs to inspect stale inventory, RBAC gaps, or near misses. The picker paginates the visible rows with `n` and `p`; pagination is local to the already fetched inventory and does not re-query Kubernetes.
 
 - `matching`: resource type and required keys match the field.
 - `warn`: the resource is missing, incomplete, unreadable, has a questionable type, has extra keys, or only weakly matches the expected format.
 
-If the current YAML value names a resource that is not in inventory, the picker includes a synthetic `warn` row for that value so the user can keep, replace, or inspect the problem in context. Manual entry remains available from the picker footer so users are not blocked by stale inventory or limited RBAC.
+If the current YAML value names a resource that is not in inventory, the picker includes a synthetic `warn` row for that value and keeps it visible in the default view so the user can keep, replace, or inspect the problem in context. Manual entry remains available from the picker footer so users are not blocked by stale inventory or limited RBAC.
 
 ConfigMap values and descriptor-owned non-sensitive Secret fields can be viewed and updated from the picker. Sensitive Secret fields are never shown. Updating a Secret preloads only non-sensitive fields; sensitive fields start blank and mean "leave unchanged" when the key already exists, or become required when the key is missing.
 
@@ -403,7 +403,7 @@ Tests should assert both descriptor-to-model and model-to-rendered-target behavi
 Picker actions use single-key shortcuts. The footer should include the available subset of:
 
 ```text
-[Enter Select] [c Create] [m Manual] [v View] [u Update] [Esc Cancel]
+[Enter Select] [c Create] [m Manual] [v View] [u Update] [p Prev] [n Next] [a All/Matches] [Esc Cancel]
 ```
 
 `c` replaces the picker table with the descriptor-driven create form inside the same modal. `v` and `u` similarly replace the table with a view or update pane. A successful create/update closes the modal and returns directly to the edit tree after the Kubernetes write, inventory refresh, and YAML edit have completed. Cancel from a create/update pane returns to the picker when no write occurred.
@@ -412,17 +412,16 @@ Picker actions use single-key shortcuts. The footer should include the available
 
 ```text
 Select HTTP Basic Auth Secret
-Path: sourceClusters.source.authConfig.basic.secretName
 
-  matching  source-creds   kubernetes.io/basic-auth   username,password
-  matching  legacy-creds   Opaque                     username,password
-  warn      admin-creds    Opaque                     missing password
-  warn      aux-source     <not found>                current YAML value
+  source-creds
+  legacy-creds
 
-[Enter Select] [c Create] [m Manual] [v View] [u Update] [Esc Cancel]
+Matching: resource satisfies this reference. Needs keys: username, password. Showing 1-2 of 2 matching/current. 2 hidden; press a to show all.
+
+[Select] [Create (c)] [Manual (m)] [View (v)] [Update (u)] [Prev (p)] [Next (n)] [All (a)] [Cancel]
 ```
 
-Selecting a `matching` row applies the name into YAML. Selecting a `warn` row opens a confirmation with the diagnostic and still lets the user choose it. Creating a Secret creates the Kubernetes Secret first, refreshes inventory, then applies the chosen name to the YAML only after the create succeeds.
+Rows are one line: resource name plus `(current)` when applicable. Match/warn details, required keys, and pagination state live in the bottom hint and update as the user moves through the list. Kubernetes Secret type names such as `Opaque` are inventory metadata, not picker row labels; they remain available in the view pane when they are useful for inspection. Selecting a `matching` row applies the name into YAML. Selecting a `warn` row opens a confirmation with the diagnostic and still lets the user choose it. Creating a Secret creates the Kubernetes Secret first, refreshes inventory, then applies the chosen name to the YAML only after the create succeeds.
 
 ### Example: Secret View
 

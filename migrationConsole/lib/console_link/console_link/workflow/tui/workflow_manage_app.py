@@ -1221,6 +1221,7 @@ class WorkflowTreeApp(App):
                 node.get("value"),
                 documentation=self._edit_node_documentation(node),
                 can_create=bool(external_ref.get("create")),
+                external_ref=external_ref,
             ),
             lambda choice: self._handle_external_resource_picker_choice(node, choice),
         )

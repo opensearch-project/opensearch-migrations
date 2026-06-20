@@ -25,6 +25,7 @@ from console_link.workflow.tui.external_resource_modal import (
     ExternalResourceFormModal,
     ExternalResourcePickerModal,
     ExternalResourceViewModal,
+    PICKER_PAGE_SIZE,
 )
 from console_link.workflow.tui.text_input_modal import TextInputModal
 from console_link.workflow.tui.manage_injections import (
@@ -165,6 +166,64 @@ def basic_auth_secret_external_ref():
             "apply": {"target": "scalarName", "nameField": "secretName"},
         },
     }
+
+
+def test_external_resource_picker_filters_and_paginates_rows():
+    rows = [
+        {
+            "name": f"matching-{index}",
+            "kind": "Secret",
+            "type": "Opaque",
+            "keys": ["username", "password"],
+            "status": "matching",
+            "message": "",
+            "current": False,
+        }
+        for index in range(PICKER_PAGE_SIZE + 2)
+    ]
+    rows.extend([
+        {
+            "name": "current-but-missing",
+            "kind": "Secret",
+            "type": "Opaque",
+            "keys": ["username"],
+            "status": "warn",
+            "message": "missing password",
+            "current": True,
+        },
+        {
+            "name": "other-missing",
+            "kind": "Secret",
+            "type": "Opaque",
+            "keys": ["username"],
+            "status": "warn",
+            "message": "missing password",
+            "current": False,
+        },
+    ])
+
+    modal = ExternalResourcePickerModal(
+        "Select Secret",
+        rows,
+        current_value="current-but-missing",
+        external_ref=basic_auth_secret_external_ref(),
+    )
+
+    assert [row["name"] for row in modal._visible_rows()][-1] == "current-but-missing"
+    assert "other-missing" not in [row["name"] for row in modal._visible_rows()]
+    assert len(modal._displayed_rows()) == PICKER_PAGE_SIZE
+    assert modal._page_count() == 2
+
+    modal.page_index = 1
+    assert [row["name"] for row in modal._displayed_rows()] == [
+        "matching-10",
+        "matching-11",
+        "current-but-missing",
+    ]
+
+    modal.show_all = True
+    modal.page_index = 1
+    assert modal._displayed_rows()[-1]["name"] == "other-missing"
 
 
 def edit_state_with_missing_basic_auth():
@@ -1149,12 +1208,30 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            button_labels = " ".join(
+            assert app.screen.query_one("#create").label.plain == "Create (c)"
+            assert app.screen.query_one("#toggle-show-all").label.plain == "All (a)"
+            row_labels = [
                 button.label.plain if hasattr(button.label, "plain") else str(button.label)
                 for button in app.screen.query(Button)
+                if button.id and button.id.startswith("row-") and button.display
+            ]
+            assert row_labels == ["source-creds"]
+            assert "Opaque" not in " ".join(row_labels)
+            assert "missing password" not in " ".join(row_labels)
+            assert "Matching:" in str(app.screen.query_one("#row-doc").content)
+            assert "Needs keys: username, password." in str(app.screen.query_one("#row-doc").content)
+
+            await pilot.press("a")
+            assert await wait_until(
+                pilot,
+                lambda: any(
+                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "admin-creds"
+                    for button in app.screen.query(Button)
+                    if button.id and button.id.startswith("row-") and button.display
+                ),
             )
-            assert "Show all" not in button_labels
-            assert app.screen.query_one("#create").label.plain == "Create (c)"
+            await pilot.press("down")
+            assert "Warning: missing password" in str(app.screen.query_one("#row-doc").content)
 
             await pilot.press("c")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
