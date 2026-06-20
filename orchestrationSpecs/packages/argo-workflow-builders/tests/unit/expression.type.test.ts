@@ -7,7 +7,8 @@ import {
     makeParameterLoop,
     typeToken,
     UnquotedTypeWrapper,
-    WorkflowBuilder
+    WorkflowBuilder,
+    YamlPlainSafeString
 } from '../../src';
 
 describe("expression type contracts", () => {
@@ -46,6 +47,9 @@ describe("expression type contracts", () => {
 
         // @ts-expect-error - raw unquoted string wrappers are compile-time rejected
         new UnquotedTypeWrapper(expr.concat(expr.literal("unsafe"), expr.literal("-string")));
+
+        expectTypeOf(expr.toBase64YamlSafe(expr.literal("json")))
+            .toMatchTypeOf<BaseExpression<YamlPlainSafeString>>();
     });
 
     it("expr.literal() rejects bare Argo template delimiters", () => {

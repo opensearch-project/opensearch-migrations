@@ -14,7 +14,8 @@ import {
     expr,
     SimpleExpression,
     TemplateExpression,
-    UnquotedTypeWrapper
+    UnquotedTypeWrapper,
+    YamlPlainSafeStringExpression
 } from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
 import * as _ from 'lodash';
@@ -383,16 +384,18 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
  * `escapeStringScalars` (set only for resource manifests, which are serialized to a YAML string
  * that Argo then substitutes into as raw text at runtime) wraps each top-level string-scalar
  * expression in `expr.yamlSafeString`, so newlines / quotes / the `---` separator (e.g. a PEM
- * cert) survive YAML re-parsing. Skipped: literals (the YAML emitter already escapes them) and
- * `UnquotedTypeWrapper` non-string scalars — anything nested inside one renders as a single
- * `{{=...}}` block and is never revisited here, so composed `sprig.dict(...)` structures are not
- * double-encoded (which is why escaping must happen here, not at `makeStringTypeProxy`).
+ * cert) survive YAML re-parsing. Skipped: literals (the YAML emitter already escapes them),
+ * YAML-plain-safe string expressions, and `UnquotedTypeWrapper` non-string scalars — anything
+ * nested inside one renders as a single `{{=...}}` block and is never revisited here, so composed
+ * `sprig.dict(...)` structures are not double-encoded (which is why escaping must happen here,
+ * not at `makeStringTypeProxy`).
  */
 export function transformExpressionsDeep<T>(input: T, escapeStringScalars = false) {
     function visit(node: any): any {
         if (node instanceof BaseExpression) {
             const needsEscape = escapeStringScalars
                 && !(node instanceof UnquotedTypeWrapper)
+                && !(node instanceof YamlPlainSafeStringExpression)
                 && !isLiteralExpression(node);
             return toArgoExpressionString(needsEscape ? expr.yamlSafeString(node) : node);
         }

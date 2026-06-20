@@ -288,7 +288,7 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 CONSOLE_IMAGE: c.inputs.imageMigrationConsoleLocation,
                 CONSOLE_IMAGE_PULL_POLICY: c.inputs.imageMigrationConsolePullPolicy,
                 FROM_SNAPSHOT_MIGRATION_LABEL: c.inputs.fromSnapshotMigrationK8sLabel,
-                CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(c.inputs.consoleConfigContents)),
+                CONSOLE_CONFIG_BASE64: expr.toBase64YamlSafe(expr.asString(c.inputs.consoleConfigContents)),
                 RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
                 RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
@@ -323,7 +323,7 @@ function makeRfsDeploymentDefinition(
             rfsImageName: inputs.imageReindexFromSnapshotLocation,
             rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64(inputs.rfsJsonConfig),
+            jsonConfig: expr.toBase64YamlSafe(inputs.rfsJsonConfig),
             resources: expr.deserializeRecord(inputs.resources),
             crdName: inputs.crdName,
             crdUid: inputs.crdUid,

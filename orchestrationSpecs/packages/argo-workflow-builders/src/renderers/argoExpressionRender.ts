@@ -16,6 +16,7 @@ import {
     TemplateReplacementExpression,
     TernaryExpression,
     WorkflowValueExpression,
+    YamlPlainSafeStringExpression,
 } from "../models/expression";
 
 export const REMOVE_PREVIOUS_QUOTE_SENTINEL = "REMOVE_PREVIOUS_QUOTE_SENTINEL";
@@ -78,6 +79,10 @@ export function toArgoExpressionString(expr: AnyExpr, useMarkers: MarkerStyle = 
 function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeType: SCOPE_TYPE, top = false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
         return formatExpression(expr.source, useIdentifierMarkers, scopeType, true);
+    }
+
+    if (isYamlPlainSafeStringExpression(expr)) {
+        return formatExpression(expr.source, useIdentifierMarkers, scopeType, top);
     }
 
     if (isLiteralExpression(expr)) {
@@ -300,4 +305,8 @@ export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression {
 
 export function isSpecialStripQuotesDirective(e: AnyExpr): e is UnquotedTypeWrapper<any> {
     return e.kind === "strip_surrounding_quotes_in_serialized_output";
+}
+
+export function isYamlPlainSafeStringExpression(e: AnyExpr): e is YamlPlainSafeStringExpression<BaseExpression<string, any>> {
+    return e.kind === "yaml_plain_safe_string";
 }

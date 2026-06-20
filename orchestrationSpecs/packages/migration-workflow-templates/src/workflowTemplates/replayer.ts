@@ -326,7 +326,7 @@ function makeReplayerDeploymentDefinition(
             replayerImageName: inputs.imageTrafficReplayerLocation,
             replayerImagePullPolicy: inputs.imageTrafficReplayerPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64(inputs.jsonConfig),
+            jsonConfig: expr.toBase64YamlSafe(inputs.jsonConfig),
             resources: expr.deserializeRecord(inputs.resources),
             kafkaAuthConfigMapName: inputs.kafkaAuthConfigMapName,
             kafkaAuthType: inputs.kafkaAuthType,

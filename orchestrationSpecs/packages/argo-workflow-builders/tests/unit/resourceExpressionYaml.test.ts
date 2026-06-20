@@ -115,6 +115,20 @@ describe("resource expression YAML rendering", () => {
 
             expect(rendered).toContain("data: {{=toJSON(sprig.dict(");
         });
+
+        it("does not JSON-wrap strings explicitly marked safe for normal YAML serialization", () => {
+            const rendered = renderManifest({
+                data: { value: makeStringTypeProxy(expr.toBase64YamlSafe(param)) },
+            });
+
+            const marker = "{{=toBase64(inputs.parameters.x)}}";
+            expect(rendered).toContain(`value: "${marker}"`);
+            expect(rendered).not.toContain("toJSON");
+
+            const substituted = rendered.replace(marker, "");
+            const parsed = parseYaml(substituted) as { data: { value: string } };
+            expect(parsed.data.value).toBe("");
+        });
     });
 
     describe("yamlSafeString (#3108)", () => {

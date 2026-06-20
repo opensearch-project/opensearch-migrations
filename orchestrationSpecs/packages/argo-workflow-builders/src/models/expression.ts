@@ -78,6 +78,22 @@ export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T
     }
 }
 
+declare const __yamlPlainSafeStringBrand: unique symbol;
+export type YamlPlainSafeString = string & { readonly [__yamlPlainSafeStringBrand]: true };
+
+/**
+ * Marks an expression whose evaluated string can use normal YAML scalar serialization.
+ * The resource renderer may still quote the placeholder; this only opts out of `toJSON`.
+ */
+export class YamlPlainSafeStringExpression<
+    E extends BaseExpression<string, CE>,
+    CE extends ExpressionType = ExprC<E>
+> extends BaseExpression<YamlPlainSafeString, CE> {
+    constructor(public readonly source: E) {
+        super("yaml_plain_safe_string");
+    }
+}
+
 export class LiteralExpression<T extends PlainObject>
     extends BaseExpression<T, "govaluate"> {
     public readonly value: T;
@@ -1036,6 +1052,12 @@ class ExprBuilder {
 
     toBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
         return fn<string,CIn>("toBase64", toExpression(data));
+    }
+
+    toBase64YamlSafe<CIn extends ExpressionType>(
+        data: AllowLiteralOrExpression<string,CIn>
+    ): BaseExpression<YamlPlainSafeString, CIn> {
+        return new YamlPlainSafeStringExpression(this.toBase64(data));
     }
 
     /**
