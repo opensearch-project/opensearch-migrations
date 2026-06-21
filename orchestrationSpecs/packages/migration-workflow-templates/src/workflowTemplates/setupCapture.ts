@@ -860,7 +860,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.topicConfigChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
-                    checksumForReplayer: b.inputs.checksumForReplayer,
+                    checksumForReplayer: expr.literal(""),
                 }),
                 { when: c => ({templateExp: checksumNotDone(
                     c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum,
@@ -945,6 +945,22 @@ export const SetupCapture = WorkflowBuilder.create({
                     )}),
                     continueOn: {failed: true}
                 }
+            )
+            .addStep("patchCapturedTrafficReplayerReady", ResourceManagement, "patchCapturedTrafficReady", c =>
+                c.register({
+                    resourceName: b.inputs.topicCrName,
+                    phase: expr.literal("Ready"),
+                    configChecksum: b.inputs.topicConfigChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
+                }),
+                {when: c => ({templateExp: expr.or(
+                    expr.equals(c.reconcileCaptureProxyResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
+                    expr.or(
+                        expr.equals(c.setupProxy.status, "Succeeded"),
+                        expr.equals(c.setupProxyWithConfiguredKafka.status, "Succeeded")
+                    )
+                )})}
             )
             .addStep("patchCaptureProxyError", ResourceManagement, "patchCaptureProxyError", c =>
                 c.register({
