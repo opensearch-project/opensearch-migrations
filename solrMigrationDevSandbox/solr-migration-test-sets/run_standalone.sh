@@ -7,13 +7,15 @@
 #   2. creates the `nyc_taxis` core from ./solr_configsets/nyc_taxis_<v>
 #   3. runs solr-orbit to load data
 #   4. backs up the core via the replication handler into ./backups/standalone
-#   5. (v7, v8) reshapes the snapshot into the layout MA expects + stores the schema
-#   6. (v9) also produces a single-segment (optimized) backup
+#      (raw Solr output; no post-processing)
+#   5. (v9) also produces a single-segment (optimized) backup
 #
 # Before running the versions it (optionally) clones + installs apache/solr-orbit and
 # apache/solr-orbit-workloads, pointing solr-orbit at the local workloads clone.
 #
-# Optionally syncs the snapshots up to S3 (step 6 of the doc).
+# When --s3-upload is used, each snapshot is copied from ./backups/standalone/ into
+# ./s3_upload/standalone/, where v7/v8 snapshots are reshaped into the layout MA
+# expects before syncing to S3.
 #
 # Step 7 (Migration Assistant) is interactive (kubectl exec into the console against a
 # live target cluster) and is intentionally NOT automated here.
@@ -36,14 +38,12 @@ AWS_ACCOUNT=""              # required if --s3-upload is used
 CHOWN_BACKUPS=0             # set by --chown-backups; sudo-chown backups for Linux hosts
 AWS_CLI="${AWS_CLI:-aws}"   # the doc uses `aws-cli.aws`; override via AWS_CLI=
 
-# Fork + branch that adds --allow-user-managed so solr-orbit will run against a
-# standalone (user-managed, non-cloud) Solr node. Upstream apache/solr-orbit only
-# supports SolrCloud mode.
-ORBIT_REPO="https://github.com/epugh/solr-orbit"
-ORBIT_BRANCH="allow_standalone_option"
+ORBIT_REPO="https://github.com/apache/solr-orbit"
+ORBIT_BRANCH="main"
 WORKLOADS_REPO="https://github.com/apache/solr-orbit-workloads"
 
 BACKUP_BASE="./backups/standalone"
+S3_UPLOAD_BASE="./s3_upload/standalone"
 CONTAINER="solr-node1"
 SOLR_PORT=8983
 SOLR_URL="http://localhost:${SOLR_PORT}"
@@ -141,8 +141,9 @@ solr_docker_platform() {
 # Prereqs (step 1)
 # ---------------------------------------------------------------------------
 prereqs() {
-    log "Prereqs: creating ${BACKUP_BASE}"
+    log "Prereqs: creating ${BACKUP_BASE} and ${S3_UPLOAD_BASE}"
     mkdir -p "${BACKUP_BASE}"
+    mkdir -p "${S3_UPLOAD_BASE}"
     # Solr in the container runs as uid 8983 and needs to write into /backups.
     # On Docker Desktop (macOS) the file-sharing layer handles this, so we only
     # attempt a plain chown (no sudo). Pass --chown-backups on a Linux host where
@@ -297,7 +298,7 @@ run_orbit() {
         --pipeline=benchmark-only
         --target-host="localhost:${SOLR_PORT}"
         --kill-running-processes
-        --allow-user-managed
+        --allow-unsupported-user-managed
         --workload="${WORKLOAD}"
         --include-tasks="check-cluster-health,index"
     )
@@ -313,8 +314,7 @@ backup_core() {
     # Hard-commit first: the replication handler only snapshots committed segments,
     # and solr-orbit's load may leave docs uncommitted (otherwise the backup is empty).
     curl -fsS "${SOLR_URL}/solr/nyc_taxis/update?commit=true" >/dev/null
-    # Start fresh so re-runs are a clean overwrite (and the v7/v8 reshape isn't
-    # re-applied on top of an already-reshaped snapshot). Delete from *inside* the
+    # Start fresh so re-runs are a clean overwrite. Delete from *inside* the
     # container so Solr's view of the bind mount is immediately consistent.
     docker exec "$CONTAINER" rm -rf "/backups/standalone/snapshot.${name}" 2>/dev/null || true
     log "Backing up core -> ${BACKUP_BASE}/snapshot.${name}"
@@ -349,11 +349,11 @@ stop_solr() {
 }
 
 # ---------------------------------------------------------------------------
-# Snapshot reshaping (v7, v8) — the layout Migration Assistant expects
+# Snapshot reshaping (v7, v8) — operates on the copy in ${S3_UPLOAD_BASE}
 # ---------------------------------------------------------------------------
 reshape_snapshot() {
     local version="$1"
-    local dir="${BACKUP_BASE}/snapshot.nyc_taxis_${version}"
+    local dir="${S3_UPLOAD_BASE}/snapshot.nyc_taxis_${version}"
 
     log "Reshaping snapshot ${dir} into the MA layout"
     mkdir -p "$dir/nyc_taxis/index"
@@ -399,10 +399,6 @@ run_version() {
     fi
 
     stop_solr
-
-    if [[ "$version" == "7" || "$version" == "8" ]]; then
-        reshape_snapshot "$version"
-    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -417,25 +413,45 @@ version_snapshots() {
     esac
 }
 
-# Sync only the snapshots produced by the requested --versions (not everything
-# that happens to be sitting under ${BACKUP_BASE}).
-s3_upload() {
-    local s3_base="s3://migrations-default-${AWS_ACCOUNT}-dev-us-east-1/solr-migration-test-sets/standalone"
-    log "Syncing snapshots for versions ${VERSIONS} to ${s3_base}"
-    local v name snap
+prepare_s3_upload() {
+    log "Preparing ${S3_UPLOAD_BASE} from backups for versions ${VERSIONS}"
+    local v name src dst
     for v in "${VERSION_LIST[@]}"; do
         v="$(echo "$v" | tr -d '[:space:]')"
         [[ -n "$v" ]] || continue
         for name in $(version_snapshots "$v"); do
-            snap="${BACKUP_BASE}/${name}"
-            if [[ ! -d "$snap" ]]; then
-                warn "expected snapshot ${snap} not found; skipping"
+            src="${BACKUP_BASE}/${name}"
+            dst="${S3_UPLOAD_BASE}/${name}"
+            if [[ ! -d "$src" ]]; then
+                warn "expected snapshot ${src} not found; skipping"
                 continue
             fi
-            echo "  $snap -> ${s3_base}/${name}"
-            # --delete: mirror exactly, removing stale objects already in S3 that
-            # are no longer in the local snapshot dir.
-            "$AWS_CLI" s3 sync --delete "$snap" "${s3_base}/${name}"
+            log "Copying ${src} -> ${dst}"
+            rm -rf "$dst"
+            cp -a "$src" "$dst"
+            # v7/v8 snapshots lack the MA-expected layout; reshape in s3_upload, not backups.
+            if [[ "$v" == "7" || "$v" == "8" ]]; then
+                reshape_snapshot "$v"
+            fi
+        done
+    done
+}
+
+s3_upload() {
+    local s3_base="s3://migrations-default-${AWS_ACCOUNT}-dev-us-east-1/solr-migration-test-sets/standalone"
+    log "Syncing ${S3_UPLOAD_BASE} for versions ${VERSIONS} to ${s3_base}"
+    local v name dst
+    for v in "${VERSION_LIST[@]}"; do
+        v="$(echo "$v" | tr -d '[:space:]')"
+        [[ -n "$v" ]] || continue
+        for name in $(version_snapshots "$v"); do
+            dst="${S3_UPLOAD_BASE}/${name}"
+            if [[ ! -d "$dst" ]]; then
+                warn "expected s3_upload dir ${dst} not found; skipping"
+                continue
+            fi
+            echo "  $dst -> ${s3_base}/${name}"
+            "$AWS_CLI" s3 sync --delete "$dst" "${s3_base}/${name}"
         done
     done
 }
@@ -460,11 +476,13 @@ main() {
         run_version "$v"
     done
 
+    prepare_s3_upload
+
     if [[ "$S3_UPLOAD" -eq 1 ]]; then
         s3_upload
     fi
 
-    log "Done. Snapshots are under ${BACKUP_BASE}/"
+    log "Done. Raw snapshots are under ${BACKUP_BASE}/; S3-ready copies under ${S3_UPLOAD_BASE}/"
     log "Step 7 (Migration Assistant) is interactive — see steps_standalone.md."
 }
 
