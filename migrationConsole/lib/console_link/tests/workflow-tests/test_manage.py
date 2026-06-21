@@ -25,7 +25,6 @@ from console_link.workflow.tui.confirm_modal import ConfirmModal
 from console_link.workflow.tui.external_resource_modal import (
     ExternalResourceFormModal,
     ExternalResourcePickerModal,
-    ExternalResourceViewModal,
     PICKER_PAGE_SIZE,
 )
 from console_link.workflow.tui.text_input_modal import TextInputModal
@@ -212,11 +211,12 @@ def test_external_resource_picker_filters_and_paginates_rows():
 
     assert [row["name"] for row in modal._visible_rows()][-1] == "current-but-missing"
     assert "other-missing" not in [row["name"] for row in modal._visible_rows()]
-    assert len(modal._displayed_rows()) == PICKER_PAGE_SIZE
+    assert len(modal._displayed_entries()) == PICKER_PAGE_SIZE
     assert modal._page_count() == 2
 
     modal.page_index = 1
     assert [row["name"] for row in modal._displayed_rows()] == [
+        "matching-9",
         "matching-10",
         "matching-11",
         "current-but-missing",
@@ -263,7 +263,7 @@ async def test_external_resource_picker_auto_pages_at_row_boundaries():
         await pilot.press("down")
         assert picker.page_index == 1
         assert picker.focused.id == "row-0"
-        assert picker._displayed_rows()[0]["name"] == f"matching-{PICKER_PAGE_SIZE}"
+        assert picker._displayed_rows()[0]["name"] == f"matching-{PICKER_PAGE_SIZE - 1}"
 
         await pilot.press("up")
         assert picker.page_index == 0
@@ -1362,13 +1362,12 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            assert app.screen.query_one("#create").label.plain == "Create (c)"
-            assert app.screen.query_one("#create").variant == "default"
             assert app.screen.query_one("#toggle-show-all").label.plain == "All (a)"
+            assert "Required Keys: username, password" in str(app.screen.query_one("#requirement").content)
             await pilot.press("right")
             assert app.screen.focused.id == "select"
             await pilot.press("right")
-            assert app.screen.focused.id == "create"
+            assert app.screen.focused.id == "update"
             await pilot.press("left")
             assert app.screen.focused.id == "select"
             row_labels = [
@@ -1376,24 +1375,27 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
                 for button in app.screen.query(Button)
                 if button.id and button.id.startswith("row-") and button.display
             ]
-            assert row_labels == ["source-creds"]
+            assert row_labels == [
+                "+ Create New (c)",
+                "▼ Matching",
+                "  source-creds",
+                "▶ Non-Matching Secrets",
+            ]
             assert "Opaque" not in " ".join(row_labels)
             assert "missing password" not in " ".join(row_labels)
-            row_doc = str(app.screen.query_one("#row-doc").content)
-            assert "Matching" not in row_doc
-            assert "current value" not in row_doc.lower()
-            assert "Keys: username, password." in row_doc
+            assert not app.screen.query_one("#row-doc").display
 
             await pilot.press("a")
             assert await wait_until(
                 pilot,
                 lambda: any(
-                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "admin-creds (missing password)"
+                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "  admin-creds (missing password)"
                     for button in app.screen.query(Button)
                     if button.id and button.id.startswith("row-") and button.display
                 ),
             )
-            await pilot.press("down")
+            app.screen.set_focus(app.screen.query_one("#row-4", Button))
+            app.screen._update_row_doc()
             assert "Missing keys: password" in str(app.screen.query_one("#row-doc").content)
 
             await pilot.press("c")
@@ -1421,8 +1423,8 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
 
 @pytest.mark.asyncio
-async def test_resource_view_edit_mode_external_secret_view_update_hides_password(mock_workflow_with_two_pods):
-    """Picker view/update panes show non-sensitive values and preserve hidden passwords."""
+async def test_resource_view_edit_mode_external_secret_update_hides_password(mock_workflow_with_two_pods):
+    """Picker update reads non-sensitive values and preserves hidden passwords."""
 
     class FakeConfigEditService:
         def __init__(self):
@@ -1499,22 +1501,11 @@ async def test_resource_view_edit_mode_external_secret_view_update_hides_passwor
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            await pilot.press("v")
-            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceViewModal))
-            view_text = str(app.screen.query_one("#contents").content)
-            assert "username: admin" in view_text
-            assert "password: <hidden>" in view_text
-            assert "super-secret" not in view_text
-            assert app.screen.focused.id == "update"
-            await pilot.press("right")
-            assert app.screen.focused.id == "back"
-            await pilot.press("left")
-            assert app.screen.focused.id == "update"
-
             await pilot.press("u")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
             assert app.screen.query_one("#field-1").value == "admin"
             assert app.screen.query_one("#field-2").value == ""
+            assert "super-secret" not in str(app.screen.query_one("#field-2").value)
             assert isinstance(app.screen.focused, Input)
             await pilot.press("right")
             assert isinstance(app.screen.focused, Input)

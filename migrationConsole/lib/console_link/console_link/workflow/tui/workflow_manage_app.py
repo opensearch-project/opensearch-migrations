@@ -30,7 +30,6 @@ from .config_edit_tree import (
 from .external_resource_modal import (
     ExternalResourceFormModal,
     ExternalResourcePickerModal,
-    ExternalResourceViewModal,
     values_for_form,
 )
 from .live_status_manager import LiveStatusManager
@@ -1225,17 +1224,12 @@ class WorkflowTreeApp(App):
         if not choice:
             return
         action = choice.get("action")
-        if action == "manual":
-            self._show_scalar_config_text_input(node)
-            return
         if action == "create":
             self._open_external_resource_form(node, "create")
             return
         row = choice.get("row") or {}
         if action == "select":
             self._select_external_resource_row(node, row)
-        elif action == "view":
-            self._show_external_resource_view(node, row)
         elif action == "update":
             self._open_external_resource_form_for_row(node, row)
 
@@ -1257,40 +1251,23 @@ class WorkflowTreeApp(App):
     def _apply_external_resource_value(self, node: Dict, name: str) -> None:
         self._handle_scalar_config_value(node, name)
 
-    def _show_external_resource_view(self, node: Dict, row: Dict) -> None:
-        self.run_worker(
-            lambda: self._read_external_resource_worker(node, row, "view"),
-            thread=True,
-            name="read_external_resource",
-        )
-
     def _open_external_resource_form_for_row(self, node: Dict, row: Dict) -> None:
         self.run_worker(
-            lambda: self._read_external_resource_worker(node, row, "update"),
+            lambda: self._read_external_resource_worker(node, row),
             thread=True,
             name="read_external_resource",
         )
 
-    def _read_external_resource_worker(self, node: Dict, row: Dict, action: str) -> None:
+    def _read_external_resource_worker(self, node: Dict, row: Dict) -> None:
         try:
             service = self._config_edit_service_or_default()
             if not hasattr(service, "read_external_resource"):
                 raise RuntimeError("reading external resources is not implemented")
             resource = service.read_external_resource(node.get("externalRef") or {}, str(row.get("name") or ""))
-            if action == "view":
-                self.call_from_thread(self._open_external_resource_view, node, resource)
-            else:
-                self.call_from_thread(self._open_external_resource_form, node, "update", resource)
+            self.call_from_thread(self._open_external_resource_form, node, "update", resource)
         except Exception as e:
             logger.exception("Failed to read external resource")
             self.call_from_thread(self.notify, f"External resource read failed: {e}", severity="error")
-
-    def _open_external_resource_view(self, node: Dict, resource: Dict) -> None:
-        self.push_screen(
-            ExternalResourceViewModal(node.get("externalRef") or {}, resource),
-            lambda choice: self._open_external_resource_form(node, "update", resource)
-            if choice and choice.get("action") == "update" else None,
-        )
 
     def _open_external_resource_form(
         self,
