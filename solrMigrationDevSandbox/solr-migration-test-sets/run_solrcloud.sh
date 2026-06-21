@@ -7,10 +7,14 @@
 #   2. creates the `nyc_taxis` collection (3 shards, RF1) from ./solr_configsets/nyc_taxis_<v>/conf
 #   3. runs solr-orbit to load data
 #   4. backs up the collection via the Collections API into ./backups/solrcloud/<name>
+#      (raw Solr output; no post-processing)
 #      (v8/v9 incremental BACKUP already writes the <name>/<collection>/ layout MA
-#      expects; v6/v7 non-incremental BACKUP omits the <collection>/ level, so it is
-#      reshaped into ./backups/solrcloud/<name>/nyc_taxis/ — see reshape_solrcloud_collection)
+#      expects; v6/v7 non-incremental BACKUP omits the <collection>/ level)
 #   5. (v9) also produces a single-segment (optimized) backup
+#
+# When --s3-upload is used, each backup is copied from ./backups/solrcloud/ into
+# ./s3_upload/solrcloud/, where v6/v7 backups are reshaped (adding the nyc_taxis/
+# collection subdirectory MA expects) before syncing to S3.
 #
 # Before running the versions it (optionally) clones + installs solr-orbit and
 # solr-orbit-workloads, pointing solr-orbit at the local workloads clone.
@@ -38,14 +42,12 @@ AWS_ACCOUNT=""              # required if --s3-upload is used
 CHOWN_BACKUPS=0             # set by --chown-backups; sudo-chown backups for Linux hosts
 AWS_CLI="${AWS_CLI:-aws}"   # the doc uses `aws-cli.aws`; override via AWS_CLI=
 
-# solr-orbit source. The fork is a superset of upstream apache/solr-orbit (it just
-# adds --allow-user-managed, unused here) and is what run_standalone.sh installs, so
-# reuse it to share the same checkout/venv.
-ORBIT_REPO="https://github.com/epugh/solr-orbit"
-ORBIT_BRANCH="allow_standalone_option"
+ORBIT_REPO="https://github.com/apache/solr-orbit"
+ORBIT_BRANCH="main"
 WORKLOADS_REPO="https://github.com/apache/solr-orbit-workloads"
 
 BACKUP_BASE="./backups/solrcloud"
+S3_UPLOAD_BASE="./s3_upload/solrcloud"
 # Host ports for the three cluster nodes (see docker-compose-<v>.yml).
 CLUSTER_PORTS=(8983 8984 8985)
 SOLR_PORT=8983                       # node1 — used for Collections API / orbit target
@@ -114,8 +116,9 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 # Prereqs (step 1)
 # ---------------------------------------------------------------------------
 prereqs() {
-    log "Prereqs: creating ${BACKUP_BASE}"
+    log "Prereqs: creating ${BACKUP_BASE} and ${S3_UPLOAD_BASE}"
     mkdir -p "${BACKUP_BASE}"
+    mkdir -p "${S3_UPLOAD_BASE}"
     # Solr in the containers runs as uid 8983 and needs to write into /backups.
     # On Docker Desktop (macOS) the file-sharing layer handles this, so we only
     # attempt a plain chown (no sudo). Pass --chown-backups on a Linux host where
@@ -324,20 +327,12 @@ backup_collection() {
     warn "backup ${BACKUP_BASE}/${name} did not produce a backup properties file in time"
 }
 
-# v6/v7 only: nest the backup under a `nyc_taxis/` collection directory.
+# v6/v7 only: nest the backup under a `nyc_taxis/` collection directory in s3_upload.
 #
-# The Solr 6/7 (non-incremental) SolrCloud BACKUP writes the collection's backup
-# contents (backup.properties, zk_backup/, snapshot.shardN/) DIRECTLY under
-# <backupName>/, with no collection-name subdirectory. Migration Assistant's
-# collection discovery expects <snapshotRoot>/<collection>/<shards...> (the
-# directory name becomes the OpenSearch index name), so without this nesting MA
-# mistakes each snapshot.shardN/ for a separate collection. Solr 8.9+ incremental
-# backups already write this extra <collection>/ level, so v8/v9 need no reshape.
-#
-# Run this after the cluster is down so we're not racing Solr's view of the mount.
+# Operates on the copy in ${S3_UPLOAD_BASE} (not the raw backup in ${BACKUP_BASE}).
 reshape_solrcloud_collection() {
     local version="$1"
-    local dir="${BACKUP_BASE}/nyc_taxis_${version}"
+    local dir="${S3_UPLOAD_BASE}/nyc_taxis_${version}"
     local coll="${dir}/nyc_taxis"
     [[ -d "$dir" ]] || { warn "backup dir ${dir} not found; skipping reshape"; return; }
     # Idempotent: if the contents are already nested (e.g. a re-run), do nothing.
@@ -386,11 +381,6 @@ run_version() {
     fi
 
     compose_down "$version"
-
-    # v6/v7 non-incremental backups lack the collection-name directory MA expects.
-    if [[ "$version" == "6" || "$version" == "7" ]]; then
-        reshape_solrcloud_collection "$version"
-    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -407,23 +397,46 @@ version_backups() {
 
 # Sync only the backups produced by the requested --versions (not everything
 # that happens to be sitting under ${BACKUP_BASE}).
-s3_upload() {
-    local s3_base="s3://migrations-default-${AWS_ACCOUNT}-dev-us-east-1/solr-migration-test-sets/solrcloud"
-    log "Syncing backups for versions ${VERSIONS} to ${s3_base}"
-    local v name snap
+prepare_s3_upload() {
+    log "Preparing ${S3_UPLOAD_BASE} from backups for versions ${VERSIONS}"
+    local v name src dst
     for v in "${VERSION_LIST[@]}"; do
         v="$(echo "$v" | tr -d '[:space:]')"
         [[ -n "$v" ]] || continue
         for name in $(version_backups "$v"); do
-            snap="${BACKUP_BASE}/${name}"
-            if [[ ! -d "$snap" ]]; then
-                warn "expected backup ${snap} not found; skipping"
+            src="${BACKUP_BASE}/${name}"
+            dst="${S3_UPLOAD_BASE}/${name}"
+            if [[ ! -d "$src" ]]; then
+                warn "expected backup ${src} not found; skipping"
                 continue
             fi
-            echo "  $snap -> ${s3_base}/${name}"
-            # --delete: mirror exactly, removing stale objects (e.g. older backup
-            # revisions) already in S3 that are no longer in the local backup dir.
-            "$AWS_CLI" s3 sync --delete "$snap" "${s3_base}/${name}"
+            log "Copying ${src} -> ${dst}"
+            rm -rf "$dst"
+            cp -a "$src" "$dst"
+            # v6/v7 non-incremental backups lack the collection-name directory MA expects.
+            # Reshape happens here in s3_upload, not in backups.
+            if [[ "$v" == "6" || "$v" == "7" ]]; then
+                reshape_solrcloud_collection "$v"
+            fi
+        done
+    done
+}
+
+s3_upload() {
+    local s3_base="s3://migrations-default-${AWS_ACCOUNT}-dev-us-east-1/solr-migration-test-sets/solrcloud"
+    log "Syncing ${S3_UPLOAD_BASE} for versions ${VERSIONS} to ${s3_base}"
+    local v name dst
+    for v in "${VERSION_LIST[@]}"; do
+        v="$(echo "$v" | tr -d '[:space:]')"
+        [[ -n "$v" ]] || continue
+        for name in $(version_backups "$v"); do
+            dst="${S3_UPLOAD_BASE}/${name}"
+            if [[ ! -d "$dst" ]]; then
+                warn "expected s3_upload dir ${dst} not found; skipping"
+                continue
+            fi
+            echo "  $dst -> ${s3_base}/${name}"
+            "$AWS_CLI" s3 sync --delete "$dst" "${s3_base}/${name}"
         done
     done
 }
@@ -448,11 +461,13 @@ main() {
         run_version "$v"
     done
 
+    prepare_s3_upload
+
     if [[ "$S3_UPLOAD" -eq 1 ]]; then
         s3_upload
     fi
 
-    log "Done. Backups are under ${BACKUP_BASE}/"
+    log "Done. Raw backups are under ${BACKUP_BASE}/; S3-ready copies under ${S3_UPLOAD_BASE}/"
     log "Step 4 (Migration Assistant) is interactive — see steps_solrcloud.md."
 }
 
