@@ -14,14 +14,14 @@ from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigatio
 class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
     CSS = """
     TextInputModal { align: center middle; background: $background 60%; }
-    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
-    #prompt { margin-bottom: 1; }
+    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
+    #prompt { margin-bottom: 0; }
     #documentation { color: gray; margin-bottom: 1; }
-    #value { margin-bottom: 1; }
-    #validation { color: $error; margin-bottom: 1; min-height: 1; }
+    #value { margin-bottom: 0; }
+    #validation { color: $error; margin-bottom: 0; min-height: 1; }
     #remote-validation { margin-bottom: 1; min-height: 1; }
-    #buttons { align: center middle; height: 3; }
-    Button { margin: 0 1; min-width: 12; }
+    #buttons { align: center middle; height: 1; }
+    Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     """
     BUTTON_NAV_SELECTOR = "#buttons Button"
     BINDINGS = [
@@ -56,10 +56,11 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
             yield Static("", id="validation")
             yield Static("", id="remote-validation")
             with Horizontal(id="buttons"):
-                yield ModalButton("Save", id="save", variant="success")
-                yield ModalButton("Cancel", id="cancel", variant="error")
+                yield ModalButton("Save (<Enter>)", id="save", variant="success")
+                yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
+        self.query_one("#documentation", Static).display = bool(self.documentation)
         input_widget = self.query_one("#value", Input)
         input_widget.focus()
         input_widget.cursor_position = len(input_widget.value)

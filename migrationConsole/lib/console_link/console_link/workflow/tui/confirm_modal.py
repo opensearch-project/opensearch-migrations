@@ -11,15 +11,16 @@ from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigatio
 class ConfirmModal(ButtonArrowNavigationMixin, ModalScreen[bool]):
     CSS = """
     ConfirmModal { align: center middle; background: $background 60%; }
-    #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
     #question { text-align: center; margin-bottom: 1; }
-    #buttons { align: center middle; height: 3; }
-    Button { margin: 0 1; min-width: 12; }
+    #buttons { align: center middle; height: 1; }
+    Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     """
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
         Binding("y", "confirm", "Yes"),
         Binding("n", "cancel", "No"),
+        Binding("enter", "submit_focused", "Submit", show=False),
         Binding("escape", "cancel", "No", show=False)
     ]
 
@@ -52,6 +53,11 @@ class ConfirmModal(ButtonArrowNavigationMixin, ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+    def action_submit_focused(self) -> None:
+        focused = self.focused
+        if isinstance(focused, Button):
+            self.dismiss(focused.id == "yes")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")

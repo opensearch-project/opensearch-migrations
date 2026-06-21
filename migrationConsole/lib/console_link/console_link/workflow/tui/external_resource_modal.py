@@ -463,13 +463,13 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
 class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, str]]]):
     CSS = """
     ExternalResourceFormModal { align: center middle; background: $background 60%; }
-    #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
-    #title { text-align: center; margin-bottom: 1; }
+    #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
+    #title { text-align: center; margin-bottom: 0; }
     #documentation { color: gray; margin-bottom: 1; }
-    .field-label { margin-top: 1; }
-    #validation { color: $error; margin: 1 0; min-height: 1; }
-    #actions { align: center middle; height: 3; }
-    Button { margin: 0 1; min-width: 12; }
+    .field-label { margin-top: 0; }
+    #validation { color: $error; margin: 0 0 1 0; min-height: 1; }
+    #actions { align: center middle; height: 1; }
+    Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     Input { width: 100%; }
     """
     BUTTON_NAV_SELECTOR = "#actions Button"
@@ -526,10 +526,11 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
                     )
             yield Static("", id="validation")
             with Horizontal(id="actions"):
-                yield ModalButton(verb, id="save", variant="success")
-                yield ModalButton("Cancel", id="cancel", variant="error")
+                yield ModalButton(f"{verb} (<Enter>)", id="save", variant="success")
+                yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
+        self.query_one("#documentation", Static).display = bool(self.documentation)
         first_id = next(iter(self._field_input_ids.values()), None)
         if first_id:
             first = self.query_one(f"#{first_id}", Input)

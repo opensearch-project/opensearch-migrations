@@ -1060,6 +1060,11 @@ async def test_non_edit_enter_opens_approval_confirmation(mock_workflow_with_pod
 
         await pilot.press("enter")
         assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        assert app.screen.query_one("#yes", Button).label.plain == "Yes (y)"
+        assert app.screen.query_one("#no", Button).label.plain == "No (n)"
+        await pilot.press("enter")
+        await pilot.pause()
+        argo_service.approve_step.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1233,6 +1238,7 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
             assert "Authentication configuration" in str(app.screen.query_one("#documentation").content)
+            assert app.screen.query_one("#cancel", Button).label.plain == "Cancel (Esc)"
             await pilot.press("right")
             assert "AWS SigV4 request signing" in str(app.screen.query_one("#choice-doc").content)
             await pilot.press("left")
@@ -1250,6 +1256,8 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
             )
             assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
             assert "Edit sourceClusters.legacy.authConfig.sigv4.region" in str(app.screen.query_one("#prompt").content)
+            assert app.screen.query_one("#save", Button).label.plain == "Save (<Enter>)"
+            assert app.screen.query_one("#cancel", Button).label.plain == "Cancel (Esc)"
             assert isinstance(app.screen.focused, Input)
             await pilot.press("right")
             assert isinstance(app.screen.focused, Input)
@@ -1467,6 +1475,8 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("c")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
+            assert app.screen.query_one("#save", Button).label.plain == "Create (<Enter>)"
+            assert app.screen.query_one("#cancel", Button).label.plain == "Cancel (Esc)"
             await pilot.press("escape")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
 
@@ -1575,6 +1585,8 @@ async def test_resource_view_edit_mode_external_secret_update_hides_password(moc
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
             await pilot.press("u")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
+            assert app.screen.query_one("#save", Button).label.plain == "Update (<Enter>)"
+            assert app.screen.query_one("#cancel", Button).label.plain == "Cancel (Esc)"
             await pilot.press("escape")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
 
@@ -1664,11 +1676,13 @@ async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            assert app.screen.query_one("#cancel", Button).label.plain == "Cancel (Esc)"
             await pilot.press("down")
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
             assert app._edit_dirty is True
             assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#save", Button).label.plain == "Save (<Enter>)"
             await pilot.press("escape")
             assert await wait_until(
                 pilot,
@@ -1679,6 +1693,9 @@ async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
             assert "Validation still reports" in str(app.screen.query_one("#status").content)
             assert app.screen.focused.id == "return"
+            assert app.screen.query_one("#discard", Button).label.plain == "Discard (d)"
+            assert app.screen.query_one("#save", Button).label.plain == "Save (s)"
+            assert app.screen.query_one("#return", Button).label.plain == "Return (r)"
             await pilot.press("left")
             assert app.screen.focused.id == "save"
             await pilot.press("right")

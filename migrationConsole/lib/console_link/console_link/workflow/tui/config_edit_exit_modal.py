@@ -11,11 +11,11 @@ from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigatio
 class ConfigEditExitModal(ButtonArrowNavigationMixin, ModalScreen[str]):
     CSS = """
     ConfigEditExitModal { align: center middle; background: $background 60%; }
-    #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
     #message { text-align: center; margin-bottom: 1; }
     #status { color: gray; text-align: center; margin-bottom: 1; }
-    #buttons { align: center middle; height: 3; }
-    Button { margin: 0 1; min-width: 14; }
+    #buttons { align: center middle; height: 1; }
+    Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     """
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,

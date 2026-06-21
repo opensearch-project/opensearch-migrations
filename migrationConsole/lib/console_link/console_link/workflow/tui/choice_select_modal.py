@@ -13,12 +13,13 @@ from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigatio
 class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
     CSS = """
     ChoiceSelectModal { align: center middle; background: $background 60%; }
-    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
-    #title { text-align: center; margin-bottom: 1; }
+    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
+    #title { text-align: center; margin-bottom: 0; }
     #documentation { color: gray; margin-bottom: 1; }
-    #choice-doc { color: gray; margin-top: 1; min-height: 1; }
+    #choice-doc { color: gray; margin-top: 0; min-height: 1; }
     #buttons { height: auto; }
-    Button { margin: 0 1 1 0; min-width: 24; }
+    Button { margin: 0 0 0 0; min-width: 24; height: 1; min-height: 1; border: none; padding: 0 1; }
+    #buttons Button { width: 100%; text-align: left; content-align: left middle; }
     """
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
@@ -51,10 +52,11 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
                     if choice.get("value") == self.current_value:
                         label = f"{label} (current)"
                     yield ModalButton(label, id=f"choice-{index}")
-                yield ModalButton("Cancel", id="cancel", variant="error")
+                yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
             yield Static("", id="choice-doc")
 
     def on_mount(self) -> None:
+        self.query_one("#documentation", Static).display = bool(self.documentation)
         choice_index = next(
             (index for index, choice in enumerate(self.choices) if choice.get("value") == self.current_value),
             0,
