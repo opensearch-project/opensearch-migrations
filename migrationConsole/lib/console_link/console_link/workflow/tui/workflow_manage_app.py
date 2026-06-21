@@ -678,14 +678,12 @@ class WorkflowTreeApp(App):
             self.bind("?", "show_config_edit_help", description="Help")
             self.bind("v", "cycle_config_value_mode", description="Value Mode")
             self.bind("t", "cycle_config_status_mode", description="Status Mode")
-            if self._edit_show_optional:
-                self.bind("o", "hide_config_optional_fields", description="Hide Optional")
-            else:
-                self.bind("O", "show_config_optional_fields", description="Show Optional")
-            if self._edit_show_expert:
-                self.bind("x", "hide_config_expert_fields", description="Hide Expert")
-            else:
-                self.bind("X", "show_config_expert_fields", description="Show Expert")
+            optional_description = "Hide Optional" if self._edit_show_optional else "Show Optional"
+            expert_description = "Hide Expert" if self._edit_show_expert else "Show Expert"
+            self.bind("o", "toggle_config_optional_fields", description=optional_description)
+            self.bind("O", "toggle_config_optional_fields", description=optional_description)
+            self.bind("x", "toggle_config_expert_fields", description=expert_description)
+            self.bind("X", "toggle_config_expert_fields", description=expert_description)
             self.bind("i", "edit_selected_config_node", show=False)
             self._bindings.bind(
                 "left",
@@ -1038,20 +1036,12 @@ class WorkflowTreeApp(App):
         self._edit_status_mode = self._next_edit_mode(self._edit_status_mode)
         self._rerender_config_edit_state()
 
-    def action_show_config_optional_fields(self) -> None:
-        self._edit_show_optional = True
+    def action_toggle_config_optional_fields(self) -> None:
+        self._edit_show_optional = not self._edit_show_optional
         self._rerender_config_edit_state()
 
-    def action_hide_config_optional_fields(self) -> None:
-        self._edit_show_optional = False
-        self._rerender_config_edit_state()
-
-    def action_show_config_expert_fields(self) -> None:
-        self._edit_show_expert = True
-        self._rerender_config_edit_state()
-
-    def action_hide_config_expert_fields(self) -> None:
-        self._edit_show_expert = False
+    def action_toggle_config_expert_fields(self) -> None:
+        self._edit_show_expert = not self._edit_show_expert
         self._rerender_config_edit_state()
 
     @staticmethod

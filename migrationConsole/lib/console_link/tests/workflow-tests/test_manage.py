@@ -1824,6 +1824,8 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None
             assert binding_descriptions(app, "o") == ["Hide Optional"]
+            assert binding_descriptions(app, "O") == ["Hide Optional"]
+            assert binding_descriptions(app, "x") == ["Show Expert"]
             assert binding_descriptions(app, "X") == ["Show Expert"]
 
             await pilot.press("o")
@@ -1833,6 +1835,7 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             )
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint") is not None
             assert "optional off" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "o") == ["Show Optional"]
             assert binding_descriptions(app, "O") == ["Show Optional"]
 
             await pilot.press("X")
@@ -1843,13 +1846,14 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is None
             assert "expert on" in str(app.query_one("#pod-status").content)
             assert binding_descriptions(app, "x") == ["Hide Expert"]
+            assert binding_descriptions(app, "X") == ["Hide Expert"]
 
-            await pilot.press("O")
+            await pilot.press("o")
             assert await wait_until(
                 pilot,
                 lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None,
             )
-            await pilot.press("x")
+            await pilot.press("X")
             assert await wait_until(
                 pilot,
                 lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None,
