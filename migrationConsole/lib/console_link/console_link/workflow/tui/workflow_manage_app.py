@@ -1225,13 +1225,13 @@ class WorkflowTreeApp(App):
             return
         action = choice.get("action")
         if action == "create":
-            self._open_external_resource_form(node, "create")
+            self._open_external_resource_form(node, "create", return_to_picker=True)
             return
         row = choice.get("row") or {}
         if action == "select":
             self._select_external_resource_row(node, row)
         elif action == "update":
-            self._open_external_resource_form_for_row(node, row)
+            self._open_external_resource_form_for_row(node, row, return_to_picker=True)
 
     def _select_external_resource_row(self, node: Dict, row: Dict) -> None:
         name = row.get("name")
@@ -1251,20 +1251,20 @@ class WorkflowTreeApp(App):
     def _apply_external_resource_value(self, node: Dict, name: str) -> None:
         self._handle_scalar_config_value(node, name)
 
-    def _open_external_resource_form_for_row(self, node: Dict, row: Dict) -> None:
+    def _open_external_resource_form_for_row(self, node: Dict, row: Dict, return_to_picker: bool = False) -> None:
         self.run_worker(
-            lambda: self._read_external_resource_worker(node, row),
+            lambda: self._read_external_resource_worker(node, row, return_to_picker),
             thread=True,
             name="read_external_resource",
         )
 
-    def _read_external_resource_worker(self, node: Dict, row: Dict) -> None:
+    def _read_external_resource_worker(self, node: Dict, row: Dict, return_to_picker: bool) -> None:
         try:
             service = self._config_edit_service_or_default()
             if not hasattr(service, "read_external_resource"):
                 raise RuntimeError("reading external resources is not implemented")
             resource = service.read_external_resource(node.get("externalRef") or {}, str(row.get("name") or ""))
-            self.call_from_thread(self._open_external_resource_form, node, "update", resource)
+            self.call_from_thread(self._open_external_resource_form, node, "update", resource, return_to_picker)
         except Exception as e:
             logger.exception("Failed to read external resource")
             self.call_from_thread(self.notify, f"External resource read failed: {e}", severity="error")
@@ -1274,6 +1274,7 @@ class WorkflowTreeApp(App):
         node: Dict,
         mode: str,
         resource: Optional[Dict] = None,
+        return_to_picker: bool = False,
     ) -> None:
         external_ref = node.get("externalRef") or {}
         if not external_ref.get("create"):
@@ -1292,7 +1293,7 @@ class WorkflowTreeApp(App):
                 existing_keys=resource.get("keys") if resource else None,
                 documentation=self._edit_node_documentation(node),
             ),
-            lambda values: self._handle_external_resource_form(node, mode, resource, values),
+            lambda values: self._handle_external_resource_form(node, mode, resource, values, return_to_picker),
         )
 
     def _handle_external_resource_form(
@@ -1301,8 +1302,11 @@ class WorkflowTreeApp(App):
         mode: str,
         resource: Optional[Dict],
         values: Optional[Dict[str, str]],
+        return_to_picker: bool = False,
     ) -> None:
         if values is None:
+            if return_to_picker:
+                self._show_external_resource_picker(node)
             return
         existing_name = resource.get("name") if resource else None
         self.run_worker(

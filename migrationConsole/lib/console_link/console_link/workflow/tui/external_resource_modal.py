@@ -27,7 +27,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     #rows { height: auto; max-height: 10; overflow-y: auto; margin-bottom: 1; }
     #row-doc { color: gray; margin-bottom: 1; }
     #actions { height: auto; }
-    .action-row { align: left middle; height: 1; }
+    .action-row { align: center middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     #rows Button { width: 100%; text-align: left; content-align: left middle; }
     """
@@ -72,7 +72,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             yield Static("", id="row-doc")
             with Vertical(id="actions"):
                 with Horizontal(classes="action-row"):
-                    yield MouseOnlyModalButton("Select", id="select", variant="primary")
+                    yield MouseOnlyModalButton("Select (<Enter>)", id="select", variant="primary")
                     yield MouseOnlyModalButton("Update (u)", id="update", disabled=not bool(self.rows))
                     yield MouseOnlyModalButton("Cancel", id="cancel", variant="error")
 

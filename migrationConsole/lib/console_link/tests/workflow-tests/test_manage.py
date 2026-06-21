@@ -319,6 +319,7 @@ async def test_external_resource_picker_action_buttons_click_focused_item_withou
         picker = app.screen
         assert picker.focused.id == "row-1"
         assert picker.query_one("#row-0", Button).label.plain == "Matching"
+        assert picker.query_one("#select", Button).label.plain == "Select (<Enter>)"
         assert not picker.query_one("#select", Button).can_focus
         assert not picker.query_one("#update", Button).can_focus
         assert not picker.query_one("#cancel", Button).can_focus
@@ -1425,6 +1426,7 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
             assert "Required Keys: username, password" in str(app.screen.query_one("#requirement").content)
+            assert app.screen.query_one("#select", Button).label.plain == "Select (<Enter>)"
             assert app.screen.focused.id == "row-2"
             await pilot.press("right")
             assert app.screen.focused.id == "row-2"
@@ -1462,6 +1464,11 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             app.screen.set_focus(app.screen.query_one("#row-4", Button))
             app.screen._update_row_doc()
             assert "Missing keys: password" in str(app.screen.query_one("#row-doc").content)
+
+            await pilot.press("c")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
 
             await pilot.press("c")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
@@ -1566,6 +1573,11 @@ async def test_resource_view_edit_mode_external_secret_update_hides_password(moc
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
+            await pilot.press("u")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
+
             await pilot.press("u")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
             assert app.screen.query_one("#field-1").value == "admin"
