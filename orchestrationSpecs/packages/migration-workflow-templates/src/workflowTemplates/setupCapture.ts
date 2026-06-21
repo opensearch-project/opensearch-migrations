@@ -593,14 +593,11 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
-            // Use dig for ALL tls field accesses so expressions are null-safe.
-            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
-            // so expr.get() on a nil tls block crashes even when the step is guarded.
+            // Argo evaluates step parameters before `when` guards, so tls fields must be null-safe.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
             const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
             const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls);
-            // Secret name: for certManager mode, use <proxyName>-tls; for existingSecret, extract from config
             const certManagerSecretName = expr.concat(b.inputs.proxyName, expr.literal("-tls"));
             const existingSecretName = expr.dig(proxyOpts, ["tls", "secretName"], expr.literal(""));
             const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
@@ -613,7 +610,6 @@ export const SetupCapture = WorkflowBuilder.create({
             );
             const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
-            // Issuer fields for cert provisioning
             const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
             const issuerKind = expr.dig(proxyOpts, ["tls", "issuerRef", "kind"], expr.literal("ClusterIssuer"));
             const issuerGroup = expr.dig(proxyOpts, ["tls", "issuerRef", "group"], expr.literal("cert-manager.io"));
@@ -804,7 +800,6 @@ export const SetupCapture = WorkflowBuilder.create({
             );
 
             return b
-            // ── Phase 1: Topic / CapturedTraffic flow ──────────────────
             .addStep("reconcileCapturedTrafficResource", ResourceManagement, "reconcileCapturedTrafficResource", c =>
                 c.register({
                     topicCrName: b.inputs.topicCrName,
@@ -866,8 +861,6 @@ export const SetupCapture = WorkflowBuilder.create({
                     b.inputs.topicConfigChecksum
                 )}) }
             )
-
-            // ── Phase 2: Proxy / CaptureProxy flow ─────────────────────
             .addStep("reconcileCaptureProxyResource", ResourceManagement, "reconcileCaptureProxyResource", c =>
                 c.register({
                     proxyConfig: b.inputs.proxyConfig,

@@ -431,9 +431,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
-
-    // ── Root resource mutations ──────────────────────────────────────────
-
     .addTemplate("upsertKafkaClusterResource", t => t
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
         .addResourceTask(b => b
@@ -1070,8 +1067,6 @@ export const ResourceManagement = WorkflowBuilder.create({
         configChecksum: ""
     }))
 
-
-    // ── Wait templates (resource get with retry) ─────────────────────────
     // Leaf Kubernetes/Strimzi/cert-manager waits use bounded infra retries.
     // Waits on our own migration status resources can run much longer in a
     // single attempt because another workflow branch is responsible for moving

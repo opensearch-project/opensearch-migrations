@@ -59,7 +59,7 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         assertMinReadySecondsIsSet(deployment);
     });
 
-    it("proxy deployment templates expose inline client CA PEM through the expected env var, YAML-safely (#3108)", () => {
+    it("proxy deployment templates expose inline client CA PEM through the expected env var, YAML-safely", () => {
         for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
             const manifest = getRawManifest(setupCapture, templateName);
             expect(manifest).toContain("- name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM");

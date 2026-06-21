@@ -621,9 +621,6 @@ export const FullMigration = WorkflowBuilder.create({
         })
     )
 
-
-    // ── Section 5: Traffic Replays ───────────────────────────────────────
-
     .addTemplate("runSingleReplay", t => t
         .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())

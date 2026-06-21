@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM"
 
-# Parseable self-signed CA cert. The proxy loads it as a trust store during startup.
 TEST_PEM_CERT = (
     "-----BEGIN CERTIFICATE-----\n"
     "MIIDKzCCAhOgAwIBAgIUEhgPMCTlcEJjJzmaPahjauT/bHwwDQYJKoZIhvcNAQEL\n"
@@ -50,7 +49,7 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(
             user_args=user_args,
-            description="Verify inline clientAuth PEM arrives at the capture proxy intact (#3108).",
+            description="Verify inline clientAuth PEM arrives at the capture proxy intact.",
             migrations_required=[MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )

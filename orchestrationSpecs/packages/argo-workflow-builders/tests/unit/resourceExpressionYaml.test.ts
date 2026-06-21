@@ -41,7 +41,7 @@ describe("resource expression YAML rendering", () => {
         expect(rendered).not.toContain('volumes: "{{=sprig.concat(');
     });
 
-    describe("automatic string-scalar escaping in manifests (#3108)", () => {
+    describe("automatic string-scalar escaping in manifests", () => {
         const param = new FromParameterExpression<string, any>({ kind: "input", parameterName: "x" });
 
         function renderManifest(obj: any): string {
@@ -124,7 +124,7 @@ describe("resource expression YAML rendering", () => {
         });
     });
 
-    describe("yamlSafeString (#3108)", () => {
+    describe("yamlSafeString", () => {
         const param = new FromParameterExpression<string, any>({ kind: "input", parameterName: "pem" });
 
         function renderEnvValue(value: any): string {
