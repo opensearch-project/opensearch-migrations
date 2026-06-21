@@ -2,7 +2,6 @@ import * as yaml from "js-yaml";
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
 import {SetupCapture} from "../src/workflowTemplates/setupCapture";
 
-/** Ensures capture proxy Deployments have a readinessProbe that gates on real init. */
 describe("Capture proxy Deployments declare a readinessProbe", () => {
     const setupCapture = renderWorkflowTemplate(SetupCapture) as any;
 
@@ -61,14 +60,10 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
     });
 
     it("proxy deployment templates expose inline client CA PEM through the expected env var, YAML-safely (#3108)", () => {
-        // The PEM renders as an unquoted {{=toJSON(...)}}. Assert on the raw manifest string —
-        // the value is an Argo expression that would parse as a YAML flow-mapping — mirroring
-        // the volumeMounts checks below.
         for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
             const manifest = getRawManifest(setupCapture, templateName);
             expect(manifest).toContain("- name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
             expect(manifest).toContain("value: {{=toJSON(inputs.parameters.sslTrustCertPem)}}");
-            // Guard against regressing to the broken plain (quoted) substitution that #3108 fixed.
             expect(manifest).not.toContain('value: "{{inputs.parameters.sslTrustCertPem}}"');
         }
     });

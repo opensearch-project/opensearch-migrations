@@ -1175,10 +1175,6 @@
                   {
                     "name": "checksumForSnapshot",
                     "value": "{{inputs.parameters.checksumForSnapshot}}"
-                  },
-                  {
-                    "name": "checksumForReplayer",
-                    "value": ""
                   }
                 ]
               },
@@ -1420,40 +1416,6 @@
               "continueOn": {
                 "failed": true
               }
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchcapturedtrafficready",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.reconcileCaptureProxyResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum || steps.setupProxy.status == 'Succeeded' || steps.setupProxyWithConfiguredKafka.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.topicCrName}}"
-                  },
-                  {
-                    "name": "phase",
-                    "value": "Ready"
-                  },
-                  {
-                    "name": "configChecksum",
-                    "value": "{{inputs.parameters.topicConfigChecksum}}"
-                  },
-                  {
-                    "name": "checksumForSnapshot",
-                    "value": "{{inputs.parameters.checksumForSnapshot}}"
-                  },
-                  {
-                    "name": "checksumForReplayer",
-                    "value": "{{inputs.parameters.checksumForReplayer}}"
-                  }
-                ]
-              },
-              "name": "patchCapturedTrafficReplayerReady"
             }
           ],
           [

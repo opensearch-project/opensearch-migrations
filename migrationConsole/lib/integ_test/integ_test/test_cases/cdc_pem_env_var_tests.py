@@ -1,18 +1,4 @@
-"""E2E test for inline clientAuth PEM cert handling (opensearch-migrations#3108).
-
-A PEM certificate provided via tls.clientAuth.trustedClientCaPem must survive the
-deployProxyWithTls Argo resource step and arrive at the running capture-proxy
-container intact. A PEM contains newlines and the line "-----END CERTIFICATE-----"
-(which has the YAML document separator "---"); the manifest renderer now emits the
-env var as an unquoted {{=toJSON(...)}}, so Argo's runtime substitution + kubectl
-apply unescape it back to the EXACT original PEM with no consumer-side decode.
-
-The test reuses the parameterized CDC workflow templates (cdc-overlay's
-clientAuthPemBase64 input), brings the capture proxy up, prints the proxy pod
-definition for inline inspection, and asserts the env var equals the original PEM.
-
-Test ID: 0035 (CDC range 0031-0039)
-"""
+"""E2E coverage for inline clientAuth PEM cert handling."""
 import base64
 import logging
 
@@ -33,10 +19,7 @@ logger = logging.getLogger(__name__)
 
 PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM"
 
-# A real, valid self-signed CA certificate (openssl req -x509, CN=migrations-test-client-ca,
-# 100-year expiry). It must be a parseable X.509 cert because the capture proxy loads it as a
-# trust store on startup — a structurally-invalid PEM would crash the proxy. Its embedded
-# newlines and the "-----END CERTIFICATE-----" line are exactly what broke YAML parsing in #3108.
+# Parseable self-signed CA cert. The proxy loads it as a trust store during startup.
 TEST_PEM_CERT = (
     "-----BEGIN CERTIFICATE-----\n"
     "MIIDKzCCAhOgAwIBAgIUEhgPMCTlcEJjJzmaPahjauT/bHwwDQYJKoZIhvcNAQEL\n"
@@ -61,14 +44,7 @@ TEST_PEM_CERT = (
 
 
 class Test0035CdcClientAuthPemEnvVar(MATestBase):
-    """Verify an inline clientAuth PEM reaches the capture-proxy env var intact (#3108).
-
-    Brings the capture proxy up via the CDC workflow with proxyConfig.tls.clientAuth.
-    trustedClientCaPem set (required:false, so the proxy is Ready without clients
-    presenting certs), then asserts the proxy pod's env var equals the original PEM.
-    Works in both environments like Test0040: with-clusters (k8s-local) suspends at
-    pause-for-test-data; imported-clusters (EKS) submits the proxy immediately.
-    """
+    """Verify inline clientAuth PEM reaches the capture-proxy env var intact."""
     requires_explicit_selection = True
 
     def __init__(self, user_args: MATestUserArguments):
@@ -87,8 +63,6 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
         )
         self.parameters["pre-snapshot-proxy-submit"] = "true"
         self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
-        # base64 so the PEM's newlines survive Argo's substitution into the overlay's
-        # build script; the overlay decodes it into the (unencoded) trustedClientCaPem.
         self.parameters["client-auth-pem-base64"] = base64.b64encode(
             TEST_PEM_CERT.encode("utf-8")
         ).decode("ascii")
@@ -101,9 +75,6 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
             raise ValueError("Workflow name is not available")
         ns = self.argo_service.namespace
 
-        # with-clusters suspends at pause-for-test-data so the framework can collect
-        # cluster configs; resume past it to deploy Kafka + the capture proxy.
-        # imported-clusters starts the proxy-only submit immediately.
         if not self.imported_clusters:
             logger.info("Resuming workflow past pause-for-test-data to deploy the capture proxy...")
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
@@ -111,13 +82,8 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
         logger.info("Waiting for capture-proxy to be ready (deployProxyWithTls must apply cleanly)...")
         wait_for_proxy_ready(ns, timeout_seconds)
 
-        # The whole point of the test: the inline clientAuth PEM survived deployProxyWithTls
-        # and reached the running proxy intact.
         self._assert_pem_env_var(ns)
 
-        # Drive the workflow to a terminal phase like Test0040, so workflow_finish()'s single
-        # resume reaches the ending phase. with-clusters submits the full migration after a
-        # second suspend; imported-clusters' proxy-only submit needs no further synchronisation.
         if not self.imported_clusters:
             logger.info("Waiting for pause-for-pre-snapshot-data suspend...")
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
@@ -130,10 +96,8 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
     def _assert_pem_env_var(self, namespace: str):
         """Print the proxy pod definition and assert its PEM env var is the raw PEM.
 
-        Reads the env var from the pod's container spec via the K8s API rather than
-        `kubectl exec` — the migration-console service account cannot exec into pods, and
-        the spec value is exactly the manifest scalar #3108 is about: the PEM after Argo
-        substitution + kubectl apply.
+        The migration-console service account cannot exec into pods, so this reads the
+        env var from the pod's container spec via the K8s API.
         """
         load_k8s_config()
         v1 = client.CoreV1Api()
@@ -142,8 +106,6 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
         assert len(pods.items) > 0, "No capture proxy pod found"
         pod = pods.items[0]
 
-        # Print the full proxy pod definition so the env var (and clientAuth wiring) is
-        # visible inline in the test logs for inspection.
         logger.info("Capture proxy pod definition (%s):\n%s", pod.metadata.name, pod)
 
         env_value = next(
@@ -152,9 +114,6 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
         )
         assert env_value is not None, f"{PEM_ENV_VAR} not found in proxy pod env"
 
-        # Transparent: the env var is the RAW PEM, not base64 — the #3108 fix. Normalize
-        # trailing newlines; the internal newlines and the "---" in "-----END CERTIFICATE-----"
-        # (what #3108 was about) are compared exactly.
         assert env_value.rstrip("\n") == TEST_PEM_CERT.rstrip("\n"), (
             "Proxy env var does not match the original PEM after the manifest round-trip.\n"
             f"Expected: {TEST_PEM_CERT!r}\nGot:      {env_value!r}"

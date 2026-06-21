@@ -1875,16 +1875,12 @@
           [
             {
               "templateRef": {
-                "template": "waitindefinitelyforcapturedtraffic",
+                "template": "waitindefinitelyfortrafficsource",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromCapturedTraffic+'-topic'}}"
-                  },
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.fromCapturedTrafficConfigChecksum}}"
@@ -1898,12 +1894,12 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "checksumField",
-                    "value": "checksumForReplayer"
+                    "name": "sourceName",
+                    "value": "{{inputs.parameters.fromCapturedTraffic}}"
                   }
                 ]
               },
-              "name": "waitIndefinitelyForCapturedTraffic"
+              "name": "waitIndefinitelyForTrafficSource"
             }
           ],
           [

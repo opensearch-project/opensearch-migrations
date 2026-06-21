@@ -1663,14 +1663,11 @@
             },
             {
               "name": "checksumForSnapshot"
-            },
-            {
-              "name": "checksumForReplayer"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -2314,6 +2311,139 @@
             "cap": "120"
           }
         },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "readcapturedtrafficsourcekind",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: {{=toJSON(inputs.parameters.resourceName)}}\n",
+          "action": "get"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "sourceKind",
+              "valueFrom": {
+                "jsonPath": "{.spec.sourceKind}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "waitindefinitelyfortrafficsource",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "readcapturedtrafficsourcekind",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.sourceName+'-topic'}}"
+                  }
+                ]
+              },
+              "name": "readCapturedTrafficSourceKind"
+            }
+          ],
+          [
+            {
+              "template": "waitindefinitelyforcaptureproxy",
+              "when": "{{=true && !(steps.readCapturedTrafficSourceKind.outputs.parameters.sourceKind == 's3')}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.sourceName}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForReplayer"
+                  }
+                ]
+              },
+              "name": "waitForCaptureProxy"
+            }
+          ],
+          [
+            {
+              "template": "waitindefinitelyforcapturedtraffic",
+              "when": "{{=true && steps.readCapturedTrafficSourceKind.outputs.parameters.sourceKind == 's3'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.sourceName+'-topic'}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForReplayer"
+                  }
+                ]
+              },
+              "name": "waitForS3CapturedTraffic"
+            }
+          ]
+        ],
         "outputs": {
           "parameters": []
         }

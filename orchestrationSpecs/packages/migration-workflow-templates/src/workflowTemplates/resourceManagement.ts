@@ -1042,8 +1042,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     }))
     .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
         configChecksum: "",
-        checksumForSnapshot: "",
-        checksumForReplayer: ""
+        checksumForSnapshot: ""
     }))
     .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
@@ -1227,6 +1226,64 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }
             })
             .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
+        )
+    )
+
+    .addTemplate("readCapturedTrafficSourceKind", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CapturedTraffic",
+                    metadata: {name: b.inputs.resourceName}
+                }
+            })
+            .addJsonPathOutput("sourceKind", "{.spec.sourceKind}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("waitIndefinitelyForTrafficSource", t => t
+        .addRequiredInput("sourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("readCapturedTrafficSourceKind", INTERNAL, "readCapturedTrafficSourceKind", c =>
+                c.register({
+                    resourceName: expr.concat(b.inputs.sourceName, expr.literal("-topic")),
+                })
+            )
+            .addStep("waitForCaptureProxy", INTERNAL, "waitIndefinitelyForCaptureProxy", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.sourceName,
+                    configChecksum: b.inputs.configChecksum,
+                    checksumField: expr.literal("checksumForReplayer"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.literal(true),
+                    expr.not(expr.equals(
+                        c.readCapturedTrafficSourceKind.outputs.sourceKind,
+                        expr.literal("s3")
+                    ))
+                )})}
+            )
+            .addStep("waitForS3CapturedTraffic", INTERNAL, "waitIndefinitelyForCapturedTraffic", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(b.inputs.sourceName, expr.literal("-topic")),
+                    configChecksum: b.inputs.configChecksum,
+                    checksumField: expr.literal("checksumForReplayer"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.literal(true),
+                    expr.equals(
+                        c.readCapturedTrafficSourceKind.outputs.sourceKind,
+                        expr.literal("s3")
+                    )
+                )})}
+            )
         )
     )
 

@@ -2,21 +2,11 @@ import {PlainObject} from "./models/plainObject";
 import {ExpressionOrConfigMapValue} from "./models/workflowTypes";
 import {stringify as toYaml, Scalar, ScalarTag} from "yaml";
 
-/**
- * Marks a string that must be emitted into YAML completely UNQUOTED and verbatim — used for Argo
- * expression placeholders (`{{...}}` / `{{=...}}`) that must not be wrapped in quotes or the Argo
- * controller won't evaluate them. A plain string can't express this: the YAML emitter quotes any
- * scalar containing `:`/`?`/etc. (and refuses to emit such a scalar unquoted even with type=PLAIN).
- * `RawYaml` is rendered by `RAW_YAML_TAG` below, which writes the text directly.
- */
+/** YAML scalar that must be emitted verbatim, used for Argo expression placeholders. */
 export class RawYaml {
     constructor(public readonly text: string) {}
 }
 
-// Custom yaml tag that emits a RawYaml's text verbatim. It claims the standard string tag with
-// default:true so no `!tag` prefix is emitted (a non-str custom tag would prefix `!raw `, which
-// kubectl rejects). Normal strings still serialize through the bool/number replacer below.
-// `resolve` is unused (we only stringify, never parse) but is required by the ScalarTag shape.
 const RAW_YAML_TAG: ScalarTag = {
     identify: (v: unknown) => v instanceof RawYaml,
     tag: "tag:yaml.org,2002:str",

@@ -375,10 +375,7 @@ export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
     }
 } as const;
 
-// These defaults are resolved during initialization so workflow templates do not
-// need to invent their own Kafka defaults. That keeps default ownership here,
-// even though some workflow templates currently unpack pieces of the resolved
-// Strimzi objects into explicit fields for Argo rendering safety.
+// Keep Kafka auto-create defaults centralized; workflow templates consume the resolved config.
 const DEFAULT_AUTO_CREATE_KAFKA = {
     clusterSpecOverrides: {
         kafka: {
@@ -395,13 +392,6 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                 failureThreshold: 8,
             },
             config: {
-                // RF=3 + minISR=2 on a 3-broker cluster: survives one broker
-                // down (rolling restart, single node loss) without losing
-                // writes or quorum. ISR = replicas fully caught up to the
-                // leader; acks=all blocks until every ISR member has written,
-                // and writes fail (NotEnoughReplicasException) if |ISR|<minISR.
-                // auto.create.topics.enable stays false — all migration topics
-                // are declared explicitly via KafkaTopic CRs.
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 3,
                 "transaction.state.log.replication.factor": 3,
@@ -412,28 +402,15 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
-        // 3-broker, combined (controller+broker) KRaft pool. 3 is the minimum
-        // that satisfies RF=3/minISR=2 above.
         replicas: 3,
         roles: ["controller", "broker"],
         storage: {
             type: "persistent-claim",
-            // Smoke-test size (raised 1Gi → 2Gi with the 1→3 broker bump;
-            // internal topics are now RF=3). Real deployments should override.
             size: "2Gi",
             deleteClaim: true,
         },
         template: {
             pod: {
-                // Spread brokers one-per-node so a single node disruption
-                // (Karpenter consolidation during the RFS scale-up/down churn,
-                // a spot reclaim, a drain) can only ever take ONE broker. With
-                // RF=3/minISR=2 the cluster then survives it as a rolling event
-                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
-                // keeps this soft: on a <3-node dev cluster the brokers must
-                // still schedule (and reschedule during rotation) rather than
-                // wedge Pending. maxSkew=1 means the scheduler only doubles up
-                // on a node once every other node already has one.
                 topologySpreadConstraints: [
                     {
                         maxSkew: 1,

@@ -173,17 +173,9 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     return result;
 }
 
-// A string fully wrapped in the unquote sentinels — an Argo expression that must render unquoted.
+// Argo expression placeholder that must render as an unquoted YAML scalar.
 const SENTINEL_WRAPPED = new RegExp(`^${REMOVE_PREVIOUS_QUOTE_SENTINEL}([\\s\\S]*)${REMOVE_NEXT_QUOTE_SENTINEL}$`);
 
-// Replace sentinel-wrapped strings with RawYaml markers so the YAML emitter writes them unquoted
-// natively (see RawYaml / RAW_YAML_TAG in utils). This is robust where the old approach — strip
-// the sentinels and any adjacent quote from the serialized text — was fragile: whether the emitter
-// quoted a scalar depended on incidental whitespace in the expression (`: ` vs `:`).
-//
-// Subtrees with no sentinel are returned by IDENTITY (not cloned), so shared object references
-// (e.g. reused retry-strategy constants) stay reference-equal and the YAML emitter can still
-// collapse them into anchors/aliases exactly as before.
 function markUnquotedNodes(node: any): any {
     if (typeof node === "string") {
         const m = SENTINEL_WRAPPED.exec(node);
@@ -381,14 +373,8 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
  * Recursively transforms any Expression instances found within records and arrays.
  * Asserts when non-plain objects are found since they shouldn't exist in this model.
  *
- * `escapeStringScalars` (set only for resource manifests, which are serialized to a YAML string
- * that Argo then substitutes into as raw text at runtime) wraps each top-level string-scalar
- * expression in `expr.yamlSafeString`, so newlines / quotes / the `---` separator (e.g. a PEM
- * cert) survive YAML re-parsing. Skipped: literals (the YAML emitter already escapes them),
- * YAML-plain-safe string expressions, and `UnquotedTypeWrapper` non-string scalars — anything
- * nested inside one renders as a single `{{=...}}` block and is never revisited here, so composed
- * `sprig.dict(...)` structures are not double-encoded (which is why escaping must happen here,
- * not at `makeStringTypeProxy`).
+ * In resource manifests, dynamic string scalars are wrapped in `expr.yamlSafeString`
+ * so Argo substitution cannot break the YAML that kubectl parses.
  */
 export function transformExpressionsDeep<T>(input: T, escapeStringScalars = false) {
     function visit(node: any): any {

@@ -35,6 +35,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "kafkaClusterName": "default",
       "partitions": 1,
       "replicas": 3,
+      "sourceKind": "proxy",
       "topicConfig": {
         "retention.ms": 604800000,
         "segment.bytes": 1073741824,

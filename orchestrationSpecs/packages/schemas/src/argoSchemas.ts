@@ -359,9 +359,8 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
     // Captured-traffic source name + checksum: works uniformly across live
-    // proxy and S3 loader paths. The replayer uses these to wait on the
-    // CapturedTraffic CR (whose name is `<fromCapturedTraffic>-topic`) and
-    // re-evaluate when the source's checksum changes.
+    // proxy and S3 loader paths. The replayer uses these to wait on the source's
+    // readiness resource and re-evaluate when the source's checksum changes.
     fromCapturedTraffic: z.string(),
     fromCapturedTrafficConfigChecksum: z.string(),
     kafkaClusterName: z.string(),

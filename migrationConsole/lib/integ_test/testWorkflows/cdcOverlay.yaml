@@ -82,6 +82,7 @@ spec:
                     "proxyConfig": ({
                       "listenPort": 9201,
                       "noCapture": false,
+                      "podReplicas": 2,
                       "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
                     } + (if $otelTraceCollectorEndpoint != "" then {
                       "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
@@ -176,6 +177,7 @@ spec:
                       "proxyConfig": ({
                         "listenPort": 9201,
                         "noCapture": false,
+                        "podReplicas": 2,
                         "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint

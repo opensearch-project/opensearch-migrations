@@ -81,10 +81,7 @@ export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T
 declare const __yamlPlainSafeStringBrand: unique symbol;
 export type YamlPlainSafeString = string & { readonly [__yamlPlainSafeStringBrand]: true };
 
-/**
- * Marks an expression whose evaluated string can use normal YAML scalar serialization.
- * The resource renderer may still quote the placeholder; this only opts out of `toJSON`.
- */
+/** Marks a string expression that is already safe for normal YAML scalar serialization. */
 export class YamlPlainSafeStringExpression<
     E extends BaseExpression<string, CE>,
     CE extends ExpressionType = ExprC<E>
@@ -1060,14 +1057,7 @@ class ExprBuilder {
         return new YamlPlainSafeStringExpression(this.toBase64(data));
     }
 
-    /**
-     * Renders a string value as an unquoted `{{=toJSON(<expr>)}}` so it survives substitution
-     * into a resource-manifest YAML scalar: at runtime `toJSON` emits a JSON string (a valid
-     * double-quoted YAML scalar) that kubectl unescapes back to the exact original, keeping
-     * newlines / quotes / the `---` separator (e.g. PEM certs) from breaking the manifest — no
-     * consumer-side decode. The resource-manifest renderer applies this to every string scalar
-     * automatically (see `transformExpressionsDeep`), so direct calls are rarely needed.
-     */
+    /** Emits a dynamic string as JSON so Argo substitution remains valid YAML. */
     yamlSafeString(
         value: AllowLiteralOrExpression<string, any>
     ): BaseExpression<string, "complicatedExpression"> {

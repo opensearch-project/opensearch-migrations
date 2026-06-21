@@ -45,7 +45,6 @@ describe("resource expression YAML rendering", () => {
         const param = new FromParameterExpression<string, any>({ kind: "input", parameterName: "x" });
 
         function renderManifest(obj: any): string {
-            // `true` = manifest mode (the resource renderer's setting)
             return unwrapPlaceholdersAndStringify(transformExpressionsDeep(obj, true));
         }
 
@@ -74,10 +73,6 @@ describe("resource expression YAML rendering", () => {
         });
 
         it("emits an unquoted expression even when its text contains a ': ' YAML indicator", () => {
-            // The rendered expr-lang for a ternary contains ' ? ' and ' : ' (with spaces) — the exact
-            // case the YAML emitter force-quotes a normal scalar. The RawYaml tag emits it unquoted
-            // regardless (the value is an Argo template that Argo text-substitutes before kubectl
-            // parses the YAML, so it must not be wrapped in quotes).
             const t = expr.ternary(expr.equals(param, expr.literal("a")), expr.literal("yes"), expr.literal("no"));
             const rendered = renderManifest({ data: { picked: makeStringTypeProxy(t) } });
             expect(rendered).toMatch(/picked: \{\{=toJSON\(\(\(.* \? .* : .*\)\)\)\}\}/);
@@ -85,8 +80,6 @@ describe("resource expression YAML rendering", () => {
         });
 
         it("does NOT double-encode values composed inside a makeDirectTypeProxy expression", () => {
-            // A volume list built via concatArrays(templateValue([...])) is one expression; the
-            // inner name must NOT be individually toJSON'd (the outer block serializes it once).
             const rendered = renderManifest({
                 volumes: makeDirectTypeProxy(expr.concatArrays(
                     expr.templateValue([{ name: "cfg", configMap: { name: makeStringTypeProxy(param) } }]),
@@ -142,23 +135,17 @@ describe("resource expression YAML rendering", () => {
         it("renders an unquoted {{=toJSON(...)}} for a parameter expression", () => {
             const rendered = renderEnvValue(expr.yamlSafeString(param));
             expect(rendered).toContain("value: {{=toJSON(inputs.parameters.pem)}}");
-            // Must be unquoted — toJSON supplies its own quotes/escapes at runtime.
             expect(rendered).not.toContain('value: "{{=toJSON');
-            // Must NOT collapse to a bare parameter substitution (which would drop the escaping).
             expect(rendered).not.toContain("value: {{inputs.parameters.pem}}");
             expect(rendered).not.toContain('value: "{{inputs.parameters.pem}}"');
         });
 
         it("emits valid escaped expr-lang source for a string literal too", () => {
-            // A literal with a quote and backslash must be escaped inside toJSON's argument,
-            // not pasted verbatim, so the expr-lang engine doesn't raise "invalid char escape".
             const rendered = renderEnvValue(expr.yamlSafeString("a'b\\c"));
             expect(rendered).toContain("value: {{=toJSON('a\\'b\\\\c')}}");
         });
 
         it("round-trips a PEM through Argo toJSON + YAML parse back to the exact original", () => {
-            // Simulate the runtime path: Argo evaluates toJSON(pem) (== JSON.stringify) and
-            // substitutes the result into the manifest, then kubectl's YAML parser reads it.
             const PEM = [
                 "-----BEGIN CERTIFICATE-----",
                 'MIIBkz/+"x\\y',
@@ -178,8 +165,6 @@ describe("resource expression YAML rendering", () => {
 
     describe("govaluate string literal escaping", () => {
         it("escapes backslashes in a regex literal so expr-lang source is valid", () => {
-            // A regex literal like \. must render as \\. inside the single-quoted expr-lang
-            // string, otherwise Argo raises "invalid char escape" at runtime.
             const rendered = toArgoExpressionString(
                 expr.regexMatch(expr.literal("^a\\.[0-9]+$"), expr.literal("a.5"))
             );
@@ -195,7 +180,6 @@ describe("resource expression YAML rendering", () => {
         it("emits sprig.-prefixed regex helpers (bare names are 'unknown name' at runtime)", () => {
             expect(toArgoExpressionString(expr.regexFind(expr.literal("[0-9]"), expr.literal("a1"))))
                 .toContain("sprig.regexFind(");
-            // regexReplaceAll(pattern, replacement, text) must emit sprig order (pattern, text, replacement)
             expect(toArgoExpressionString(
                 expr.regexReplaceAll(expr.literal("[0-9]"), expr.literal("X"), expr.literal("a1b2"))
             )).toContain("sprig.regexReplaceAll('[0-9]', 'a1b2', 'X')");

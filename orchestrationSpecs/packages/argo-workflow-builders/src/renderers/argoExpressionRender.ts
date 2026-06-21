@@ -33,12 +33,7 @@ export type ArgoFormatted = {
 
 const formattedResult = (text: string, compound = false): ArgoFormatted => ({text, compound});
 
-/**
- * Escapes a string for embedding inside a SINGLE-QUOTED expr-lang / govaluate string literal.
- * The engine treats backslash as an escape introducer, so a raw `\` (e.g. the `\.` in a regex)
- * or an unescaped `'` produces an "invalid char escape" / parse error at runtime. Escape the
- * backslash first, then the surrounding quote, then the common control characters.
- */
+/** Escapes a value for a single-quoted expr-lang / govaluate string literal. */
 function escapeGovaluateStringLiteral(s: string): string {
     return s
         .replace(/\\/g, "\\\\")
@@ -88,7 +83,6 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
     if (isLiteralExpression(expr)) {
         const le = expr as LiteralExpression<any>;
         if (typeof le.value === "string") {
-            // Non-top: emitted as expr-lang source, so quote and escape it. Top: a plain value.
             return top ? formattedResult(le.value) : formattedResult(`'${escapeGovaluateStringLiteral(le.value)}'`);
         } else if (typeof le.value === "number" || typeof le.value === "boolean") {
             return formattedResult(String(le.value));
@@ -119,8 +113,6 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
     if (isFunctionExpression(expr)) {
         const e = expr as FunctionExpression<any, any>;
         if (e.functionName === "fromJSON" && top) {
-            // A top-level fromJSON(<param>) is elided to the bare parameter: Argo constructs (e.g.
-            // withParam) already receive the raw serialized JSON, so re-parsing it here is redundant.
             return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
         }
         const formattedArgs =
@@ -180,8 +172,6 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
             parts.push(`"${k}"`, fv.text);
         }
         const args = parts.join(", ");
-        // Using function-call form for consistency with other sprig.* calls here:
-        // sprig.dict("k1", v1, "k2", v2)
         const text = parts.length ? `sprig.dict(${args})` : `sprig.dict()`;
         return formattedResult(text, true);
     }

@@ -685,17 +685,14 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            // Replayer waits on the CapturedTraffic CR (works uniformly for live
-            // proxy and S3 loader sources). The CR's name pattern is
-            // `<fromCapturedTraffic>-topic` (set up by setupSingleProxy /
-            // setupSingleS3Source). The checksum field threaded through is
-            // checksumForReplayer, which the producer side patches on Ready.
-            .addStep("waitIndefinitelyForCapturedTraffic", ResourceManagement, "waitIndefinitelyForCapturedTraffic", c =>
+            // Replayers consume a Kafka topic, but the readiness owner differs
+            // by source type: live proxy sources are ready when CaptureProxy is
+            // serving; S3 sources are ready when the one-time load completes.
+            .addStep("waitIndefinitelyForTrafficSource", ResourceManagement, "waitIndefinitelyForTrafficSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(b.inputs.fromCapturedTraffic, expr.literal("-topic")),
+                    sourceName: b.inputs.fromCapturedTraffic,
                     configChecksum: b.inputs.fromCapturedTrafficConfigChecksum,
-                    checksumField: expr.literal("checksumForReplayer"),
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
