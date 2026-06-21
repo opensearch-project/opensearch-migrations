@@ -33,7 +33,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         Binding("enter", "select", "Select", show=False, priority=True),
         Binding("c", "create", "Create"),
         Binding("u", "update", "Update"),
-        Binding("a", "toggle_show_all", "Show All"),
         Binding("up", "focus_previous", "Up", show=False),
         Binding("down", "focus_next", "Down", show=False),
         Binding("escape", "cancel", "Cancel", show=False),
@@ -71,7 +70,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
                 with Horizontal(classes="action-row"):
                     yield ModalButton("Select", id="select")
                     yield ModalButton("Update (u)", id="update", disabled=not bool(self.rows))
-                    yield ModalButton("All (a)", id="toggle-show-all")
                     yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
@@ -84,16 +82,22 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self._update_row_doc()
 
     def action_focus_previous(self) -> None:
-        if self._focused_row_index() == 0 and self._show_previous_page():
-            self._focus_row(len(self._displayed_entries()) - 1)
+        row_index = self._focused_row_index()
+        if row_index == 0:
+            if self._show_previous_page():
+                self._focus_row(len(self._displayed_entries()) - 1)
+            else:
+                self._show_last_page()
+                self._focus_row(len(self._displayed_entries()) - 1)
             return
         self.focus_previous()
         self._update_row_doc()
 
     def action_focus_next(self) -> None:
         row_index = self._focused_row_index()
-        if row_index is not None and row_index == len(self._displayed_entries()) - 1 and self._show_next_page():
-            self._focus_row(0)
+        if row_index is not None and row_index == len(self._displayed_entries()) - 1:
+            if not self._show_next_page():
+                self._show_first_page()
             return
         self.focus_next()
         self._update_row_doc()
@@ -111,7 +115,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             self.action_create()
             return
         if entry and entry.get("type") == "group" and entry.get("group") == "nonmatching":
-            self.action_toggle_show_all()
+            self._set_nonmatching_expanded(not self.show_all)
             return
         row = self._selected_resource_row()
         if row:
@@ -125,10 +129,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     def action_toggle_show_all(self) -> None:
         if not self._has_hidden_rows():
             return
-        self.show_all = not self.show_all
-        self.page_index = 0
-        self._render_rows()
-        self._focus_first_row_or_action()
+        self._set_nonmatching_expanded(not self.show_all)
 
     def action_next_page(self) -> None:
         self._show_next_page()
@@ -137,18 +138,24 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self._show_previous_page()
 
     def on_mouse_scroll_down(self, event) -> None:
-        if self._show_next_page():
+        if self._show_next_page() or self._show_first_page():
             event.stop()
 
     def on_mouse_scroll_up(self, event) -> None:
-        if self._show_previous_page():
+        if self._show_previous_page() or self._show_last_page(focus_last=True):
             event.stop()
 
     def action_focus_button_previous(self) -> None:
+        if self._focused_row_index() is not None:
+            self._collapse_focused_tree_entry()
+            return
         super().action_focus_button_previous()
         self._update_row_doc()
 
     def action_focus_button_next(self) -> None:
+        if self._focused_row_index() is not None:
+            self._expand_focused_tree_entry()
+            return
         super().action_focus_button_next()
         self._update_row_doc()
 
@@ -161,7 +168,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             if entry.get("type") == "create":
                 self.action_create()
             elif entry.get("type") == "group" and entry.get("group") == "nonmatching":
-                self.action_toggle_show_all()
+                self._set_nonmatching_expanded(not self.show_all)
             elif entry.get("type") == "resource":
                 self.dismiss({"action": "select", "row": entry.get("row")})
         elif button_id == "select":
@@ -170,8 +177,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             self.action_create()
         elif button_id == "update":
             self.action_update()
-        elif button_id == "toggle-show-all":
-            self.action_toggle_show_all()
         elif button_id == "cancel":
             self.dismiss(None)
 
@@ -216,6 +221,63 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self._focus_first_row_or_action()
         return True
 
+    def _show_first_page(self) -> bool:
+        if self.page_index == 0:
+            if self._displayed_entries():
+                self._focus_row(0)
+                return True
+            return bool(self._displayed_entries())
+        self.page_index = 0
+        self._render_rows()
+        self._focus_first_row_or_action()
+        return True
+
+    def _show_last_page(self, focus_last: bool = False) -> bool:
+        last_page = self._page_count() - 1
+        if self.page_index == last_page:
+            if focus_last and self._displayed_entries():
+                self._focus_row(len(self._displayed_entries()) - 1)
+                return True
+            return bool(self._displayed_entries())
+        self.page_index = last_page
+        self._render_rows()
+        if focus_last:
+            self._focus_row(len(self._displayed_entries()) - 1)
+        else:
+            self._focus_first_row_or_action()
+        return True
+
+    def _set_nonmatching_expanded(self, expanded: bool) -> None:
+        if not self._has_hidden_rows() or self.show_all == expanded:
+            self._update_row_doc()
+            return
+        self.show_all = expanded
+        self._render_rows()
+        self._focus_nonmatching_group()
+
+    def _expand_focused_tree_entry(self) -> None:
+        entry = self._focused_entry()
+        if entry and entry.get("type") == "group" and entry.get("group") == "nonmatching" and not self.show_all:
+            self._set_nonmatching_expanded(True)
+
+    def _collapse_focused_tree_entry(self) -> None:
+        entry = self._focused_entry()
+        if not self.show_all or not entry:
+            return
+        if entry.get("type") == "group" and entry.get("group") == "nonmatching":
+            self._set_nonmatching_expanded(False)
+        elif entry.get("type") == "resource" and self._is_nonmatching_row(entry.get("row")):
+            self._set_nonmatching_expanded(False)
+
+    def _focus_nonmatching_group(self) -> None:
+        for index, entry in enumerate(self._visible_entries()):
+            if entry.get("type") == "group" and entry.get("group") == "nonmatching":
+                self.page_index = index // PICKER_PAGE_SIZE
+                self._render_rows()
+                self._focus_row(index % PICKER_PAGE_SIZE)
+                return
+        self._focus_first_row_or_action()
+
     def _show_previous_page(self) -> bool:
         if self.page_index <= 0:
             return False
@@ -230,7 +292,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         if entry and entry.get("type") == "resource":
             message = _row_hint(entry.get("row") or {})
         elif entry and entry.get("type") == "group" and entry.get("group") == "nonmatching" and self._nonmatching_rows():
-            message = "Press Enter or a to show resources that may not satisfy this reference."
+            message = "Press Enter or Right to show resources that may not satisfy this reference."
         doc = self.query_one("#row-doc", Static)
         doc.update(escape(message))
         doc.display = bool(message)
@@ -283,6 +345,11 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         matching = set(id(row) for row in self._matching_rows())
         return [row for row in self.rows if id(row) not in matching]
 
+    def _is_nonmatching_row(self, row: Optional[Dict[str, Any]]) -> bool:
+        if row is None:
+            return False
+        return id(row) in {id(candidate) for candidate in self._nonmatching_rows()}
+
     def _page_count(self) -> int:
         visible = len(self._visible_entries())
         return max(1, (visible + PICKER_PAGE_SIZE - 1) // PICKER_PAGE_SIZE)
@@ -312,9 +379,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         has_displayed_rows = any(entry.get("type") == "resource" for entry in displayed_entries)
         self.query_one("#select", Button).disabled = not bool(displayed_entries)
         self.query_one("#update", Button).disabled = not has_displayed_rows
-        toggle = self.query_one("#toggle-show-all", Button)
-        toggle.disabled = not self._has_hidden_rows()
-        toggle.label = "Matches (a)" if self.show_all else "All (a)"
 
     def _focus_first_row_or_action(self) -> None:
         if self._displayed_entries():

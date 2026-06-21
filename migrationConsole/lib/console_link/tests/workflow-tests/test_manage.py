@@ -245,6 +245,7 @@ async def test_external_resource_picker_auto_pages_at_row_boundaries():
         "Select Secret",
         rows,
         external_ref=basic_auth_secret_external_ref(),
+        can_create=True,
     )
 
     class PickerHarness(App):
@@ -263,11 +264,17 @@ async def test_external_resource_picker_auto_pages_at_row_boundaries():
         await pilot.press("down")
         assert picker.page_index == 1
         assert picker.focused.id == "row-0"
-        assert picker._displayed_rows()[0]["name"] == f"matching-{PICKER_PAGE_SIZE - 1}"
+        assert picker._displayed_rows()[0]["name"] == f"matching-{PICKER_PAGE_SIZE - 2}"
+
+        picker._focus_row(len(picker._displayed_entries()) - 1)
+        await pilot.press("down")
+        assert picker.page_index == 0
+        assert picker.focused.id == "row-0"
+        assert picker.query_one("#row-0", Button).label.plain == "+ Create New (c)"
 
         await pilot.press("up")
-        assert picker.page_index == 0
-        assert picker.focused.id == f"row-{PICKER_PAGE_SIZE - 1}"
+        assert picker.page_index == picker._page_count() - 1
+        assert picker.focused.id == f"row-{len(picker._displayed_entries()) - 1}"
 
 
 def edit_state_with_missing_basic_auth():
@@ -1362,10 +1369,10 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            assert app.screen.query_one("#toggle-show-all").label.plain == "All (a)"
             assert "Required Keys: username, password" in str(app.screen.query_one("#requirement").content)
             await pilot.press("right")
-            assert app.screen.focused.id == "select"
+            assert app.screen.focused.id == "row-0"
+            app.screen.set_focus(app.screen.query_one("#select", Button))
             await pilot.press("right")
             assert app.screen.focused.id == "update"
             await pilot.press("left")
@@ -1385,7 +1392,8 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             assert "missing password" not in " ".join(row_labels)
             assert not app.screen.query_one("#row-doc").display
 
-            await pilot.press("a")
+            app.screen.set_focus(app.screen.query_one("#row-3", Button))
+            await pilot.press("right")
             assert await wait_until(
                 pilot,
                 lambda: any(
@@ -1394,6 +1402,10 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
                     if button.id and button.id.startswith("row-") and button.display
                 ),
             )
+            assert app.screen.query_one("#row-3", Button).label.plain == "▼ Non-Matching Secrets"
+            await pilot.press("left")
+            assert app.screen.query_one("#row-3", Button).label.plain == "▶ Non-Matching Secrets"
+            await pilot.press("right")
             app.screen.set_focus(app.screen.query_one("#row-4", Button))
             app.screen._update_row_doc()
             assert "Missing keys: password" in str(app.screen.query_one("#row-doc").content)
