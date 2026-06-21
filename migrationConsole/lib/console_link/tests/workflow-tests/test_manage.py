@@ -1362,8 +1362,9 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
-            assert app.screen.query_one("#create").label.plain == "c Create"
-            assert app.screen.query_one("#toggle-show-all").label.plain == "a All"
+            assert app.screen.query_one("#create").label.plain == "Create (c)"
+            assert app.screen.query_one("#create").variant == "default"
+            assert app.screen.query_one("#toggle-show-all").label.plain == "All (a)"
             await pilot.press("right")
             assert app.screen.focused.id == "select"
             await pilot.press("right")

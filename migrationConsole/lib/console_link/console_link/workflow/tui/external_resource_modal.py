@@ -17,13 +17,14 @@ PICKER_PAGE_SIZE = 10
 class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourcePickerModal { align: center middle; background: $background 60%; }
-    #dialog { width: 82; max-height: 22; border: thick $primary; background: $surface; padding: 0 1; }
-    #title { text-align: center; margin-bottom: 0; }
-    #rows { height: auto; max-height: 10; overflow-y: auto; }
-    #row-doc { color: gray; margin-top: 0; min-height: 2; }
-    #actions { align: center middle; height: 1; margin-top: 0; }
+    #dialog { width: 82; height: auto; max-height: 22; border: thick $primary; background: $surface; padding: 0 1; }
+    #title { text-align: center; margin-bottom: 1; }
+    #rows { height: auto; max-height: 10; overflow-y: auto; margin-bottom: 1; }
+    #row-doc { color: gray; min-height: 2; margin-bottom: 1; }
+    #actions { height: auto; }
+    .action-row { align: left middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
-    #rows Button { width: 100%; text-align: left; }
+    #rows Button { width: 100%; text-align: left; content-align: left middle; }
     """
     BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
@@ -68,16 +69,18 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
                     yield ModalButton("", id=f"row-{index}")
                 yield Static("", id="empty")
             yield Static("", id="row-doc")
-            with Horizontal(id="actions"):
-                yield ModalButton("Select", id="select")
-                yield ModalButton("c Create", id="create", variant="success", disabled=not self.can_create)
-                yield ModalButton("m Manual", id="manual")
-                yield ModalButton("v View", id="view", disabled=not bool(self.rows))
-                yield ModalButton("u Update", id="update", disabled=not bool(self.rows))
-                yield ModalButton("p Prev", id="previous-page")
-                yield ModalButton("n Next", id="next-page")
-                yield ModalButton("a All", id="toggle-show-all")
-                yield ModalButton("Cancel", id="cancel", variant="error")
+            with Vertical(id="actions"):
+                with Horizontal(classes="action-row"):
+                    yield ModalButton("Select", id="select")
+                    yield ModalButton("Create (c)", id="create", disabled=not self.can_create)
+                    yield ModalButton("Manual (m)", id="manual")
+                    yield ModalButton("View (v)", id="view", disabled=not bool(self.rows))
+                    yield ModalButton("Update (u)", id="update", disabled=not bool(self.rows))
+                with Horizontal(classes="action-row"):
+                    yield ModalButton("Prev (p)", id="previous-page")
+                    yield ModalButton("Next (n)", id="next-page")
+                    yield ModalButton("All (a)", id="toggle-show-all")
+                    yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         self._render_rows()
@@ -272,7 +275,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self.query_one("#next-page", Button).disabled = self.page_index >= self._page_count() - 1
         toggle = self.query_one("#toggle-show-all", Button)
         toggle.disabled = not self._has_hidden_rows()
-        toggle.label = "a Matches" if self.show_all else "a All"
+        toggle.label = "Matches (a)" if self.show_all else "All (a)"
 
     def _focus_first_row_or_action(self) -> None:
         if self._displayed_rows():
