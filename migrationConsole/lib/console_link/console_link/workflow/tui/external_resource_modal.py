@@ -14,6 +14,10 @@ from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigatio
 PICKER_PAGE_SIZE = 10
 
 
+class MouseOnlyModalButton(ModalButton, can_focus=False):
+    pass
+
+
 class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourcePickerModal { align: center middle; background: $background 60%; }
@@ -26,7 +30,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     .action-row { align: left middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     #rows Button { width: 100%; text-align: left; content-align: left middle; }
-    #rows Button.active-item { text-style: bold; }
     """
     BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
@@ -57,7 +60,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self.external_ref = external_ref or {}
         self.show_all = False
         self.page_index = 0
-        self._active_entry_index: Optional[int] = None
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
@@ -70,9 +72,9 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             yield Static("", id="row-doc")
             with Vertical(id="actions"):
                 with Horizontal(classes="action-row"):
-                    yield ModalButton("Select", id="select", variant="primary")
-                    yield ModalButton("Update (u)", id="update", disabled=not bool(self.rows))
-                    yield ModalButton("Cancel", id="cancel", variant="error")
+                    yield MouseOnlyModalButton("Select", id="select", variant="primary")
+                    yield MouseOnlyModalButton("Update (u)", id="update", disabled=not bool(self.rows))
+                    yield MouseOnlyModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         self.query_one("#requirement", Static).display = bool(_requirement_title(self.external_ref))
@@ -81,7 +83,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         if initial_entry_index is not None:
             self._focus_entry_index(initial_entry_index)
         else:
-            self.set_focus(self.query_one("#cancel", Button))
+            self.set_focus(None)
         self._update_row_doc()
 
     def action_focus_previous(self) -> None:
@@ -106,14 +108,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             self.dismiss({"action": "create"})
 
     def action_select(self) -> None:
-        focused_button_id = self._focused_button_id()
-        if focused_button_id == "update":
-            self.action_update()
-            return
-        if focused_button_id == "cancel":
-            self.action_cancel()
-            return
-        self._select_entry(self._focused_entry() or self._active_entry())
+        self._select_entry(self._focused_entry())
 
     def action_update(self) -> None:
         row = self._selected_resource_row()
@@ -142,16 +137,10 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     def action_focus_button_previous(self) -> None:
         if self._focused_row_index() is not None:
             self._collapse_focused_tree_entry()
-            return
-        super().action_focus_button_previous()
-        self._update_row_doc()
 
     def action_focus_button_next(self) -> None:
         if self._focused_row_index() is not None:
             self._expand_focused_tree_entry()
-            return
-        super().action_focus_button_next()
-        self._update_row_doc()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
@@ -159,10 +148,10 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             entry = self._entry_at_button_id(button_id)
             if not entry:
                 return
-            self._set_active_entry_index(self._absolute_index_for_button_id(button_id))
+            self._focus_entry_index(self._absolute_index_for_button_id(button_id))
             self._select_entry(entry)
         elif button_id == "select":
-            self._select_entry(self._active_entry())
+            self._select_entry(self._focused_entry())
         elif button_id == "create":
             self.action_create()
         elif button_id == "update":
@@ -179,18 +168,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     def _focused_entry(self) -> Optional[Dict[str, Any]]:
         index = self._focused_entry_index()
         return self._entry_at_visible_index(index) if index is not None else None
-
-    def _active_entry(self) -> Optional[Dict[str, Any]]:
-        if self._active_entry_index is None:
-            return None
-        entry = self._entry_at_visible_index(self._active_entry_index)
-        return entry if entry and self._entry_is_focusable(entry) else None
-
-    def _focused_button_id(self) -> Optional[str]:
-        focused = self.app.focused or self.focused
-        if isinstance(focused, Button):
-            return focused.id
-        return None
 
     def _focused_row_index(self) -> Optional[int]:
         focused = self.app.focused or self.focused
@@ -228,7 +205,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             self.dismiss({"action": "select", "row": entry.get("row")})
 
     def _selected_resource_row(self) -> Optional[Dict[str, Any]]:
-        entry = self._active_entry() or self._focused_entry()
+        entry = self._focused_entry()
         if entry and entry.get("type") == "resource":
             return entry.get("row")
         return None
@@ -312,6 +289,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         doc = self.query_one("#row-doc", Static)
         doc.update(escape(message))
         doc.display = bool(message)
+        self._update_action_buttons()
 
     def _visible_rows(self) -> List[Dict[str, Any]]:
         return [
@@ -385,12 +363,10 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             else:
                 button.disabled = True
                 button.display = False
-            button.remove_class("active-item")
         empty = self.query_one("#empty", Static)
         empty.update(_empty_picker_text(self.rows, self.show_all))
         empty.display = not bool(displayed)
         self._update_action_buttons()
-        self._refresh_active_row_styles()
         self._update_row_doc()
 
     def _update_action_buttons(self) -> None:
@@ -419,14 +395,14 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
     def _focus_first_row_or_action(self) -> bool:
         if self._focus_entry_by_visible_index(0, 1):
             return True
-        self.set_focus(self.query_one("#cancel", Button))
+        self.set_focus(None)
         self._update_row_doc()
         return False
 
     def _focus_last_row_or_action(self) -> bool:
         if self._focus_entry_by_visible_index(len(self._visible_entries()) - 1, -1):
             return True
-        self.set_focus(self.query_one("#cancel", Button))
+        self.set_focus(None)
         self._update_row_doc()
         return False
 
@@ -454,8 +430,6 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         if not focusable:
             return False
         current_index = self._focused_entry_index()
-        if current_index is None:
-            current_index = self._active_entry_index
         if current_index in focusable:
             target = focusable[(focusable.index(current_index) + delta) % len(focusable)]
         else:
@@ -482,25 +456,8 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         row_index = index % PICKER_PAGE_SIZE
         if row_index >= len(displayed):
             row_index = len(displayed) - 1
-        self._set_active_entry_index(self.page_index * PICKER_PAGE_SIZE + row_index)
         self.set_focus(self.query_one(f"#row-{row_index}", Button))
         self._update_row_doc()
-
-    def _set_active_entry_index(self, index: int) -> None:
-        entry = self._entry_at_visible_index(index)
-        if entry and self._entry_is_focusable(entry):
-            self._active_entry_index = index
-        self._refresh_active_row_styles()
-        self._update_action_buttons()
-
-    def _refresh_active_row_styles(self) -> None:
-        for index in range(PICKER_PAGE_SIZE):
-            button = self.query_one(f"#row-{index}", Button)
-            absolute_index = self.page_index * PICKER_PAGE_SIZE + index
-            if self._active_entry_index == absolute_index:
-                button.add_class("active-item")
-            else:
-                button.remove_class("active-item")
 
 
 class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, str]]]):

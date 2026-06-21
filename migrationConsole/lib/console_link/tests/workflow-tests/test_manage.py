@@ -278,7 +278,7 @@ async def test_external_resource_picker_auto_pages_at_row_boundaries():
 
 
 @pytest.mark.asyncio
-async def test_external_resource_picker_select_uses_active_item_after_button_focus():
+async def test_external_resource_picker_action_buttons_click_focused_item_without_taking_focus():
     rows = [
         {
             "name": "first-creds",
@@ -319,13 +319,14 @@ async def test_external_resource_picker_select_uses_active_item_after_button_foc
         picker = app.screen
         assert picker.focused.id == "row-1"
         assert picker.query_one("#row-0", Button).label.plain == "Matching"
+        assert not picker.query_one("#select", Button).can_focus
+        assert not picker.query_one("#update", Button).can_focus
+        assert not picker.query_one("#cancel", Button).can_focus
 
         await pilot.press("down")
         assert picker.focused.id == "row-2"
-        assert picker._active_entry()["row"]["name"] == "second-creds"
 
-        picker.set_focus(picker.query_one("#select", Button))
-        await pilot.press("enter")
+        await pilot.click("#select")
 
     assert result["action"] == "select"
     assert result["row"]["name"] == "second-creds"
@@ -1425,11 +1426,10 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
             assert "Required Keys: username, password" in str(app.screen.query_one("#requirement").content)
             assert app.screen.focused.id == "row-2"
-            app.screen.set_focus(app.screen.query_one("#select", Button))
             await pilot.press("right")
-            assert app.screen.focused.id == "update"
+            assert app.screen.focused.id == "row-2"
             await pilot.press("left")
-            assert app.screen.focused.id == "select"
+            assert app.screen.focused.id == "row-2"
             row_labels = [
                 button.label.plain if hasattr(button.label, "plain") else str(button.label)
                 for button in app.screen.query(Button)
