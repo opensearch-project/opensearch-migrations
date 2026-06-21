@@ -7,8 +7,10 @@ from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
-class ChoiceSelectModal(ModalScreen[Any]):
+
+class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
     CSS = """
     ChoiceSelectModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -19,6 +21,7 @@ class ChoiceSelectModal(ModalScreen[Any]):
     Button { margin: 0 1 1 0; min-width: 24; }
     """
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("enter", "submit", "Select", show=False, priority=True),
         Binding("up", "focus_previous", "Up", show=False),
         Binding("down", "focus_next", "Down", show=False),
@@ -47,8 +50,8 @@ class ChoiceSelectModal(ModalScreen[Any]):
                     label = str(choice.get("label") or choice.get("value") or "")
                     if choice.get("value") == self.current_value:
                         label = f"{label} (current)"
-                    yield Button(label, id=f"choice-{index}")
-                yield Button("Cancel", id="cancel", variant="error")
+                    yield ModalButton(label, id=f"choice-{index}")
+                yield ModalButton("Cancel", id="cancel", variant="error")
             yield Static("", id="choice-doc")
 
     def on_mount(self) -> None:
@@ -81,6 +84,14 @@ class ChoiceSelectModal(ModalScreen[Any]):
             event.stop()
             self.action_submit()
 
+    def action_focus_button_previous(self) -> None:
+        super().action_focus_button_previous()
+        self._update_choice_doc()
+
+    def action_focus_button_next(self) -> None:
+        super().action_focus_button_next()
+        self._update_choice_doc()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self._dismiss_button(event.button)
 
@@ -92,7 +103,7 @@ class ChoiceSelectModal(ModalScreen[Any]):
         self.dismiss(self.choices[index].get("value"))
 
     def _update_choice_doc(self) -> None:
-        focused = self.focused
+        focused = self.app.focused or self.focused
         description = ""
         if isinstance(focused, Button) and focused.id and focused.id.startswith("choice-"):
             index = int(str(focused.id).removeprefix("choice-"))

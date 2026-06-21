@@ -5,8 +5,10 @@ from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static, Button
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
-class ContainerSelectModal(ModalScreen[str]):
+
+class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):
     CSS = """
     ContainerSelectModal { align: center middle; background: $background 60%; }
     #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -15,6 +17,7 @@ class ContainerSelectModal(ModalScreen[str]):
     Button { margin: 0 1 1 0; min-width: 20; }
     """
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("up", "focus_previous", "Up", show=False),
         Binding("down", "focus_next", "Down", show=False),
         Binding("escape", "cancel", "Cancel", show=False)
@@ -30,8 +33,8 @@ class ContainerSelectModal(ModalScreen[str]):
             yield Static(f"Select container to follow in pod: {self._pod_name}", id="title")
             with Vertical(id="buttons"):
                 for container in self.containers:
-                    yield Button(container, id=container)
-                yield Button("Cancel", id="cancel", variant="error")
+                    yield ModalButton(container, id=container)
+                yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         if self.containers:

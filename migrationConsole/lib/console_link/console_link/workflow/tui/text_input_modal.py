@@ -8,8 +8,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 from rich.markup import escape
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
-class TextInputModal(ModalScreen[Optional[str]]):
+
+class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
     CSS = """
     TextInputModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -21,7 +23,9 @@ class TextInputModal(ModalScreen[Optional[str]]):
     #buttons { align: center middle; height: 3; }
     Button { margin: 0 1; min-width: 12; }
     """
+    BUTTON_NAV_SELECTOR = "#buttons Button"
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("enter", "submit", "Save", show=False, priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
@@ -52,8 +56,8 @@ class TextInputModal(ModalScreen[Optional[str]]):
             yield Static("", id="validation")
             yield Static("", id="remote-validation")
             with Horizontal(id="buttons"):
-                yield Button("Save", id="save", variant="success")
-                yield Button("Cancel", id="cancel", variant="error")
+                yield ModalButton("Save", id="save", variant="success")
+                yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         input_widget = self.query_one("#value", Input)

@@ -5,8 +5,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 from rich.markup import escape
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
-class ConfigEditExitModal(ModalScreen[str]):
+
+class ConfigEditExitModal(ButtonArrowNavigationMixin, ModalScreen[str]):
     CSS = """
     ConfigEditExitModal { align: center middle; background: $background 60%; }
     #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -16,6 +18,7 @@ class ConfigEditExitModal(ModalScreen[str]):
     Button { margin: 0 1; min-width: 14; }
     """
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("d", "discard", "Discard", show=False),
         Binding("s", "save", "Save", show=False),
         Binding("r", "return_to_editor", "Return", show=False),
@@ -43,9 +46,9 @@ class ConfigEditExitModal(ModalScreen[str]):
             yield Static(escape(self.message), id="message")
             yield Static(escape(self.status_message), id="status")
             with Horizontal(id="buttons"):
-                yield Button(f"{escape(self.discard_label)} (d)", id="discard", variant="error")
-                yield Button(f"{escape(self.save_label)} (s)", id="save", variant="success")
-                yield Button("Return (r)", id="return")
+                yield ModalButton(f"{escape(self.discard_label)} (d)", id="discard", variant="error")
+                yield ModalButton(f"{escape(self.save_label)} (s)", id="save", variant="success")
+                yield ModalButton("Return (r)", id="return")
 
     def on_mount(self) -> None:
         button_id = {

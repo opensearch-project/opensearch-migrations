@@ -584,6 +584,11 @@ class WorkflowTreeApp(App):
         except Exception as e:
             self.notify(f"Error: {e}", severity="error")
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action in {"expand_node", "collapse_node"} and isinstance(self.screen, ModalScreen):
+            return False
+        return super().check_action(action, parameters)
+
     def action_expand_node(self) -> None:
         tree = self.tree_root_widget
         if node := tree.cursor_node:
@@ -1384,7 +1389,7 @@ class WorkflowTreeApp(App):
             "op": "set",
             "path": node.get("path"),
             "value": value,
-        }, selected_id=node.get("id"))
+        }, selected_id=node.get("id"), auto_edit_required_child=True)
 
     def _handle_add_config_name(self, node: Dict, value: Optional[str]) -> None:
         name = (value or "").strip()
@@ -1631,7 +1636,12 @@ class WorkflowTreeApp(App):
             "path": path,
         })
 
-    def _apply_config_edit_operation(self, operation: Dict, selected_id: Optional[str] = None) -> None:
+    def _apply_config_edit_operation(
+        self,
+        operation: Dict,
+        selected_id: Optional[str] = None,
+        auto_edit_required_child: bool = False,
+    ) -> None:
         if self._edit_draft_yaml is None:
             self.notify("No edit draft loaded", severity="error")
             return
@@ -1640,25 +1650,44 @@ class WorkflowTreeApp(App):
             if node and node.data:
                 selected_id = node.data.get("id")
         self.run_worker(
-            lambda: self._apply_config_edit_operation_worker(operation, selected_id),
+            lambda: self._apply_config_edit_operation_worker(operation, selected_id, auto_edit_required_child),
             thread=True,
             name="apply_config_edit_operation",
         )
 
-    def _apply_config_edit_operation_worker(self, operation: Dict, selected_id: Optional[str]) -> None:
+    def _apply_config_edit_operation_worker(
+        self,
+        operation: Dict,
+        selected_id: Optional[str],
+        auto_edit_required_child: bool,
+    ) -> None:
         try:
             service = self._config_edit_service_or_default()
             result = service.apply_operation(self._edit_draft_yaml or "", operation)
-            self.call_from_thread(self._handle_config_edit_apply_result, result, selected_id)
+            self.call_from_thread(
+                self._handle_config_edit_apply_result,
+                result,
+                selected_id,
+                auto_edit_required_child,
+            )
         except Exception as e:
             logger.exception("Failed to apply config edit operation")
             self.call_from_thread(self.notify, f"Edit failed: {e}", severity="error")
 
-    def _handle_config_edit_apply_result(self, result, selected_id: Optional[str]) -> None:
+    def _handle_config_edit_apply_result(
+        self,
+        result,
+        selected_id: Optional[str],
+        auto_edit_required_child: bool = False,
+    ) -> None:
         edit_state = getattr(result, "edit_state", None) or result["edit_state"]
         raw_yaml = getattr(result, "raw_yaml", None)
         if raw_yaml is None:
             raw_yaml = result.get("raw_yaml") or result.get("yaml", "")
+        auto_edit_id = (
+            self._first_required_edit_target_id(edit_state, selected_id)
+            if auto_edit_required_child and selected_id else None
+        )
         self._edit_state = edit_state
         self._edit_draft_yaml = raw_yaml
         self._edit_dirty = True
@@ -1670,7 +1699,9 @@ class WorkflowTreeApp(App):
             self._edit_show_optional,
             self._edit_show_expert,
         )
-        if selected_id:
+        if auto_edit_id:
+            self.call_after_refresh(lambda: self._select_and_edit_config_node(auto_edit_id))
+        elif selected_id:
             self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
         self._update_edit_help()
         self.update_pod_status()
@@ -1691,6 +1722,58 @@ class WorkflowTreeApp(App):
                 self.tree_root_widget.focus()
                 return
             stack.extend(reversed(node.children))
+
+    def _select_and_edit_config_node(self, selected_id: str) -> None:
+        self._select_tree_node_by_id(selected_id)
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+        node = selected_edit_node(self.tree_root_widget)
+        if node:
+            self._edit_config_node(node)
+
+    @classmethod
+    def _first_required_edit_target_id(cls, edit_state: Dict, parent_id: Optional[str]) -> Optional[str]:
+        parent = cls._find_edit_node_by_id(edit_state.get("nodes") or [], parent_id)
+        if not parent:
+            return None
+        candidates = [
+            node.get("id")
+            for node in cls._required_edit_targets(parent.get("children") or [])
+            if node.get("id")
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+
+    @classmethod
+    def _required_edit_targets(cls, nodes) -> list[Dict]:
+        targets = []
+        for node in nodes or []:
+            child_targets = cls._required_edit_targets(node.get("children") or [])
+            if child_targets:
+                targets.extend(child_targets)
+            elif cls._is_required_edit_target(node):
+                targets.append(node)
+        return targets
+
+    @classmethod
+    def _is_required_edit_target(cls, node: Dict) -> bool:
+        if node.get("valueKind") not in {"scalar", "boolean", "union"}:
+            return False
+        if node.get("status") == "required" or node.get("required"):
+            return True
+        return bool((node.get("statusCounts") or {}).get("required"))
+
+    @classmethod
+    def _find_edit_node_by_id(cls, nodes, selected_id: Optional[str]) -> Optional[Dict]:
+        if not selected_id:
+            return None
+        stack = list(nodes or [])
+        while stack:
+            node = stack.pop()
+            if node.get("id") == selected_id:
+                return node
+            stack.extend(node.get("children") or [])
+        return None
 
 
 # --- Utilities ---

@@ -8,11 +8,13 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+
 
 PICKER_PAGE_SIZE = 10
 
 
-class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
+class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourcePickerModal { align: center middle; background: $background 60%; }
     #dialog { width: 82; max-height: 22; border: thick $primary; background: $surface; padding: 0 1; }
@@ -23,7 +25,9 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     #rows Button { width: 100%; text-align: left; }
     """
+    BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("enter", "select", "Select", show=False, priority=True),
         Binding("c", "create", "Create"),
         Binding("m", "manual", "Manual"),
@@ -61,35 +65,42 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
             yield Static(escape(self.title_text), id="title")
             with Vertical(id="rows"):
                 for index in range(PICKER_PAGE_SIZE):
-                    yield Button("", id=f"row-{index}")
+                    yield ModalButton("", id=f"row-{index}")
                 yield Static("", id="empty")
             yield Static("", id="row-doc")
             with Horizontal(id="actions"):
-                yield Button("Select", id="select")
-                yield Button("c Create", id="create", variant="success", disabled=not self.can_create)
-                yield Button("m Manual", id="manual")
-                yield Button("v View", id="view", disabled=not bool(self.rows))
-                yield Button("u Update", id="update", disabled=not bool(self.rows))
-                yield Button("p Prev", id="previous-page")
-                yield Button("n Next", id="next-page")
-                yield Button("a All", id="toggle-show-all")
-                yield Button("Cancel", id="cancel", variant="error")
+                yield ModalButton("Select", id="select")
+                yield ModalButton("c Create", id="create", variant="success", disabled=not self.can_create)
+                yield ModalButton("m Manual", id="manual")
+                yield ModalButton("v View", id="view", disabled=not bool(self.rows))
+                yield ModalButton("u Update", id="update", disabled=not bool(self.rows))
+                yield ModalButton("p Prev", id="previous-page")
+                yield ModalButton("n Next", id="next-page")
+                yield ModalButton("a All", id="toggle-show-all")
+                yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         self._render_rows()
         if self._displayed_rows():
-            self.query_one("#row-0", Button).focus()
+            self._focus_row(0)
         elif self.can_create:
-            self.query_one("#create", Button).focus()
+            self.set_focus(self.query_one("#create", Button))
         else:
-            self.query_one("#manual", Button).focus()
+            self.set_focus(self.query_one("#manual", Button))
         self._update_row_doc()
 
     def action_focus_previous(self) -> None:
+        if self._focused_row_index() == 0 and self._show_previous_page():
+            self._focus_row(len(self._displayed_rows()) - 1)
+            return
         self.focus_previous()
         self._update_row_doc()
 
     def action_focus_next(self) -> None:
+        row_index = self._focused_row_index()
+        if row_index is not None and row_index == len(self._displayed_rows()) - 1 and self._show_next_page():
+            self._focus_row(0)
+            return
         self.focus_next()
         self._update_row_doc()
 
@@ -127,18 +138,26 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         self._focus_first_row_or_action()
 
     def action_next_page(self) -> None:
-        if self.page_index >= self._page_count() - 1:
-            return
-        self.page_index += 1
-        self._render_rows()
-        self._focus_first_row_or_action()
+        self._show_next_page()
 
     def action_previous_page(self) -> None:
-        if self.page_index <= 0:
-            return
-        self.page_index -= 1
-        self._render_rows()
-        self._focus_first_row_or_action()
+        self._show_previous_page()
+
+    def on_mouse_scroll_down(self, event) -> None:
+        if self._show_next_page():
+            event.stop()
+
+    def on_mouse_scroll_up(self, event) -> None:
+        if self._show_previous_page():
+            event.stop()
+
+    def action_focus_button_previous(self) -> None:
+        super().action_focus_button_previous()
+        self._update_row_doc()
+
+    def action_focus_button_next(self) -> None:
+        super().action_focus_button_next()
+        self._update_row_doc()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
@@ -165,13 +184,36 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.dismiss(None)
 
     def _focused_row(self) -> Optional[Dict[str, Any]]:
-        focused = self.focused
+        focused = self.app.focused or self.focused
         if isinstance(focused, Button) and focused.id and focused.id.startswith("row-"):
             displayed = self._displayed_rows()
             index = int(focused.id.removeprefix("row-"))
             return displayed[index] if index < len(displayed) else None
         displayed = self._displayed_rows()
         return displayed[0] if displayed else None
+
+    def _focused_row_index(self) -> Optional[int]:
+        focused = self.app.focused or self.focused
+        if not isinstance(focused, Button) or not focused.id or not focused.id.startswith("row-"):
+            return None
+        index = int(focused.id.removeprefix("row-"))
+        return index if index < len(self._displayed_rows()) else None
+
+    def _show_next_page(self) -> bool:
+        if self.page_index >= self._page_count() - 1:
+            return False
+        self.page_index += 1
+        self._render_rows()
+        self._focus_first_row_or_action()
+        return True
+
+    def _show_previous_page(self) -> bool:
+        if self.page_index <= 0:
+            return False
+        self.page_index -= 1
+        self._render_rows()
+        self._focus_first_row_or_action()
+        return True
 
     def _update_row_doc(self) -> None:
         row = self._focused_row()
@@ -234,11 +276,19 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
 
     def _focus_first_row_or_action(self) -> None:
         if self._displayed_rows():
-            self.query_one("#row-0", Button).focus()
+            self._focus_row(0)
         elif self.can_create:
-            self.query_one("#create", Button).focus()
+            self.set_focus(self.query_one("#create", Button))
         else:
-            self.query_one("#manual", Button).focus()
+            self.set_focus(self.query_one("#manual", Button))
+        self._update_row_doc()
+
+    def _focus_row(self, index: int) -> None:
+        displayed = self._displayed_rows()
+        if not displayed:
+            return
+        index = max(0, min(index, len(displayed) - 1))
+        self.set_focus(self.query_one(f"#row-{index}", Button))
         self._update_row_doc()
 
     def _page_summary(self) -> str:
@@ -254,7 +304,7 @@ class ExternalResourcePickerModal(ModalScreen[Optional[Dict[str, Any]]]):
         return f"{start}-{end}/{visible_count} shown.{hidden}"
 
 
-class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
+class ExternalResourceViewModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, Any]]]):
     CSS = """
     ExternalResourceViewModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -263,7 +313,9 @@ class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
     #actions { align: center middle; height: 3; }
     Button { margin: 0 1; min-width: 12; }
     """
+    BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("u", "update", "Update"),
         Binding("escape", "cancel", "Back", show=False),
     ]
@@ -279,8 +331,8 @@ class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
             yield Static(escape(title), id="title")
             yield Static(_resource_view_text(self.external_ref, self.resource), id="contents")
             with Horizontal(id="actions"):
-                yield Button("Update (u)", id="update", variant="primary")
-                yield Button("Back", id="back")
+                yield ModalButton("Update (u)", id="update", variant="primary")
+                yield ModalButton("Back", id="back")
 
     def on_mount(self) -> None:
         self.query_one("#update", Button).focus()
@@ -298,7 +350,7 @@ class ExternalResourceViewModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.dismiss(None)
 
 
-class ExternalResourceFormModal(ModalScreen[Optional[Dict[str, str]]]):
+class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, str]]]):
     CSS = """
     ExternalResourceFormModal { align: center middle; background: $background 60%; }
     #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -310,7 +362,9 @@ class ExternalResourceFormModal(ModalScreen[Optional[Dict[str, str]]]):
     Button { margin: 0 1; min-width: 12; }
     Input { width: 100%; }
     """
+    BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("enter", "submit", "Save", show=False, priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
@@ -362,8 +416,8 @@ class ExternalResourceFormModal(ModalScreen[Optional[Dict[str, str]]]):
                     )
             yield Static("", id="validation")
             with Horizontal(id="actions"):
-                yield Button(verb, id="save", variant="success")
-                yield Button("Cancel", id="cancel", variant="error")
+                yield ModalButton(verb, id="save", variant="success")
+                yield ModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         first_id = next(iter(self._field_input_ids.values()), None)

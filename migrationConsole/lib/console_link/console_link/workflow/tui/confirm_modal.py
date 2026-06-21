@@ -5,8 +5,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Static, Button
 from rich.markup import escape
 
+from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
-class ConfirmModal(ModalScreen[bool]):
+
+class ConfirmModal(ButtonArrowNavigationMixin, ModalScreen[bool]):
     CSS = """
     ConfirmModal { align: center middle; background: $background 60%; }
     #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -15,6 +17,7 @@ class ConfirmModal(ModalScreen[bool]):
     Button { margin: 0 1; min-width: 12; }
     """
     BINDINGS = [
+        *BUTTON_ARROW_BINDINGS,
         Binding("y", "confirm", "Yes"),
         Binding("n", "cancel", "No"),
         Binding("escape", "cancel", "No", show=False)
@@ -37,8 +40,8 @@ class ConfirmModal(ModalScreen[bool]):
         with Container(id="dialog"):
             yield Static(escape(self.message), id="question")
             with Horizontal(id="buttons"):
-                yield Button(f"{escape(self.confirm_label)} (y)", id="yes", variant="success")
-                yield Button(f"{escape(self.cancel_label)} (n)", id="no", variant="error")
+                yield ModalButton(f"{escape(self.confirm_label)} (y)", id="yes", variant="success")
+                yield ModalButton(f"{escape(self.cancel_label)} (n)", id="no", variant="error")
 
     def on_mount(self) -> None:
         default_button_id = "#yes" if self.default_confirm else "#no"
