@@ -375,6 +375,10 @@ export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
     }
 } as const;
 
+// These defaults are resolved during initialization so workflow templates do not
+// need to invent their own Kafka defaults. That keeps default ownership here,
+// even though some workflow templates currently unpack pieces of the resolved
+// Strimzi objects into explicit fields for Argo rendering safety.
 const DEFAULT_AUTO_CREATE_KAFKA = {
     clusterSpecOverrides: {
         kafka: {
@@ -391,6 +395,10 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                 failureThreshold: 8,
             },
             config: {
+                // RF=3 + minISR=2 on a 3-broker cluster survives one broker down
+                // during a rolling restart, drain, or single-node loss without losing
+                // writes or quorum. auto.create.topics.enable stays false because
+                // migration topics are declared explicitly via KafkaTopic CRs.
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 3,
                 "transaction.state.log.replication.factor": 3,
@@ -401,15 +409,20 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
+        // 3 is the minimum broker count that satisfies RF=3/minISR=2 above.
         replicas: 3,
         roles: ["controller", "broker"],
         storage: {
             type: "persistent-claim",
+            // Smoke-test size. Real deployments should override.
             size: "2Gi",
             deleteClaim: true,
         },
         template: {
             pod: {
+                // Spread brokers one-per-node so a single node disruption can only take
+                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
+                // schedule instead of wedging Pending.
                 topologySpreadConstraints: [
                     {
                         maxSkew: 1,

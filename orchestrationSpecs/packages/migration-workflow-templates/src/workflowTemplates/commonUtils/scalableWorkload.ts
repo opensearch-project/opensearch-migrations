@@ -53,6 +53,10 @@ export function minAvailableForSingleReplicaDependency(
     );
 }
 
+export function workflowParameterAsNumber(value: BaseExpression<Serialized<number>>): BaseExpression<number> {
+    return expr.deserializeRecord(value);
+}
+
 export function prefixedScalableWorkloadFields<Prefix extends string>(
     prefix: Prefix,
     options: BaseExpression<Record<string, any>>

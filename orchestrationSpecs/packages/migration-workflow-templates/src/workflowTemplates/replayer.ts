@@ -34,7 +34,12 @@ import {
 } from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
-import {MIN_POD_REPLICAS_INPUTS, POD_REPLICAS_INPUTS, scalingFromOptions} from "./commonUtils/scalableWorkload";
+import {
+    MIN_POD_REPLICAS_INPUTS,
+    POD_REPLICAS_INPUTS,
+    scalingFromOptions,
+    workflowParameterAsNumber,
+} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -365,7 +370,7 @@ function makeReplayerPodDisruptionBudgetDefinition(
     };
     return makePodDisruptionBudgetDefinition({
         name: inputs.name,
-        minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
+        minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
         matchLabels: {app: REPLAYER_APP_LABEL},
         labels,
         ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),

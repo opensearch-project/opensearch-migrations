@@ -67,14 +67,21 @@ export function widenComplexity<
 export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
 type RawUnquotedValue = Exclude<NonSerializedPlainObject, string> | Serialized<Exclude<NonSerializedPlainObject, string>>;
 
+function isToJsonExpression(value: BaseExpression<PlainObject, ExpressionType>): boolean {
+    return value.kind === "function" && (value as { functionName?: string }).functionName === "toJSON";
+}
+
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
     constructor(value: BaseExpression<T, ExpressionType> & BaseExpression<RawUnquotedValue, ExpressionType>, mode?: "raw-non-string");
     constructor(value: BaseExpression<T | Serialized<T>, ExpressionType>, mode: "yaml-safe-json");
     constructor(
         public readonly value: BaseExpression<PlainObject, ExpressionType>,
-        public readonly mode: UnquotedWrapperMode = "raw-non-string"
+        mode: UnquotedWrapperMode = "raw-non-string"
     ) {
         super("strip_surrounding_quotes_in_serialized_output");
+        if (mode === "yaml-safe-json" && !isToJsonExpression(value)) {
+            throw new Error("yaml-safe-json unquoted wrappers must wrap a toJSON(...) expression");
+        }
     }
 }
 

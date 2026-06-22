@@ -49,6 +49,7 @@ import {
     minAvailableForSingleReplicaDependency,
     SCALABLE_WORKLOAD_INPUTS,
     scalingFromOptions,
+    workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
 
 function shouldCreateRfsWorkCoordinationCluster(
@@ -364,7 +365,7 @@ function makeRfsPodDisruptionBudgetDefinition(
     }];
     return makePodDisruptionBudgetDefinition({
         name: deploymentName,
-        minAvailable: expr.deserializeRecord(inputs.minPodReplicas),
+        minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
         matchLabels: {
             app: "bulk-loader",
             "deployment-name": deploymentName

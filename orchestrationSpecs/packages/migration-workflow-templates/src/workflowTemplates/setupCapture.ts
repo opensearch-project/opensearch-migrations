@@ -33,7 +33,12 @@ import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 import {setupFileSourcesForContainer} from "./commonUtils/containerFragments";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
-import {MIN_POD_REPLICAS_INPUTS, POD_REPLICAS_INPUTS, SCALABLE_WORKLOAD_INPUTS} from "./commonUtils/scalableWorkload";
+import {
+    MIN_POD_REPLICAS_INPUTS,
+    POD_REPLICAS_INPUTS,
+    SCALABLE_WORKLOAD_INPUTS,
+    workflowParameterAsNumber,
+} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -377,7 +382,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition(makePodDisruptionBudgetDefinition({
                 name: b.inputs.proxyName,
-                minAvailable: expr.deserializeRecord(b.inputs.minPodReplicas),
+                minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
                 matchLabels: {"migrations/proxy": b.inputs.proxyName},
                 labels: {
                     "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),

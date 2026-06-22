@@ -14,6 +14,7 @@ import {
     K8S_RESOURCE_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {workflowParameterAsNumber} from "./commonUtils/scalableWorkload";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -327,7 +328,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition(makePodDisruptionBudgetDefinition({
                 name: b.inputs.clusterName,
-                minAvailable: expr.deserializeRecord(b.inputs.minPodReplicas),
+                minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
                 matchLabels: {
                     app: b.inputs.clusterName,
                 },

@@ -68,7 +68,13 @@ export const DEFAULT_RESOURCES = {
         }
     },
 
-    // Strimzi entity-operator sidecars. requests==limits gives Guaranteed QoS.
+    // Strimzi entity-operator sidecars (topic-operator + user-operator), set per container.
+    // These default to no resources at all, which makes them BestEffort and lets the
+    // scheduler pack them onto an already-saturated node. On a busy 2-vCPU node the JVM
+    // cold-start then loses the race against the operator's liveness probe and crash-loops,
+    // and because the user-operator creates the KafkaUser SCRAM secret, that wedges the whole
+    // migration. Reserve real CPU so the scheduler keeps them off saturated nodes.
+    // requests==limits gives Guaranteed QoS. Sized to Strimzi's own operator footprint.
     ENTITY_OPERATOR: {
         limits: {
             cpu: "500m",
