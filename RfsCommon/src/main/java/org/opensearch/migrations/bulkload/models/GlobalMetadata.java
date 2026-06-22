@@ -6,6 +6,7 @@ import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
 import com.fasterxml.jackson.core.JsonPointer;
@@ -89,13 +90,13 @@ public interface GlobalMetadata {
         SnapshotRepo.Provider getRepoDataProvider();
     }
 
-    class CantFindSnapshotInRepo extends RfsException {
+    class CantFindSnapshotInRepo extends RfsException implements SnapshotReadFailure {
         public CantFindSnapshotInRepo(String snapshotName) {
             super("Can't find snapshot in repo: " + snapshotName);
         }
     }
 
-    class CantReadGlobalMetadataFromSnapshot extends RfsException {
+    class CantReadGlobalMetadataFromSnapshot extends RfsException implements SnapshotReadFailure {
         public CantReadGlobalMetadataFromSnapshot(String snapshotName, Throwable cause) {
             super("Can't read the global metadata from snapshot: " + snapshotName, cause);
         }

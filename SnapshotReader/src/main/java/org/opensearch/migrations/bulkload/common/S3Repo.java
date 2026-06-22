@@ -69,7 +69,15 @@ public class S3Repo implements SourceRepo {
                 .key(s3Uri.key)
                 .build();
 
-        s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
+        try {
+            s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
+        } catch (CompletionException e) {
+            // A failed download (missing object, access denied, or a transient S3 error that
+            // exhausted the client's retries) is a non-retriable snapshot read failure. Classify it
+            // so the worker surfaces the snapshot path + cause and exits with the dedicated code
+            // instead of dying with a generic, unlabeled error.
+            throw new CouldNotReadFromS3(s3Uri.bucketName, s3Uri.key, e);
+        }
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, SnapshotFileFinder finder) {
@@ -145,7 +153,7 @@ public class S3Repo implements SourceRepo {
     }
 
 
-    public static class CannotFindSnapshotRepoRoot extends RfsException {
+    public static class CannotFindSnapshotRepoRoot extends RfsException implements SnapshotReadFailure {
         public CannotFindSnapshotRepoRoot(String bucket, String prefix) {
             super("Cannot find the snapshot repository root in S3 bucket: " + bucket + ", prefix: " + prefix);
         }
@@ -234,9 +242,15 @@ public class S3Repo implements SourceRepo {
         return strippedKeys;
     }
 
-    public static class CannotListObjectsInS3 extends RfsException {
+    public static class CannotListObjectsInS3 extends RfsException implements SnapshotReadFailure {
         public CannotListObjectsInS3(String bucket, String prefix, Throwable cause) {
             super("Failed to list objects in S3 bucket: " + bucket + ", prefix: " + prefix, cause);
+        }
+    }
+
+    public static class CouldNotReadFromS3 extends RfsException implements SnapshotReadFailure {
+        public CouldNotReadFromS3(String bucket, String key, Throwable cause) {
+            super("Failed to read object from S3 bucket: " + bucket + ", key: " + key, cause);
         }
     }
 

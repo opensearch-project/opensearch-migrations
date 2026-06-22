@@ -64,4 +64,9 @@ public class Field7 implements LuceneField {
         }
         return null;
     }
+
+    @Override
+    public Number numericValue() {
+        return wrapped.numericValue();
+    }
 }

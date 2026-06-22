@@ -34,7 +34,7 @@ timeout 60 sh -c 'until nc -z localhost 1234 2>/dev/null; do sleep 1; done' \
 
 docker buildx inspect local-remote-builder >/dev/null 2>&1 || docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
-# NOTE: if only testing changes in solr and / or ES, can use flags -PincludeSolr666, -PexcludeESCustomTestImages params respectiv
+# NOTE: if only testing changes in solr and / or ES, can use flags -PincludeSolr666, -PexcludeESCustomTestImages params respectively
 case $(uname -m) in
   aarch64) PLATFORM="arm64" ;;
   x86_64)  PLATFORM="amd64" ;;
@@ -42,7 +42,7 @@ case $(uname -m) in
 esac
 
 echo "Building general and test images"
-../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr660TestImage
+../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
 
 
 echo "Registry contents:"

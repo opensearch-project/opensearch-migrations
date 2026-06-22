@@ -21,15 +21,15 @@
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
-    "ajv": "^8.17.1",
+    "ajv": "^8.20.0",
     "ci": "^2.3.0",
-    "yaml": "^2.8.3",
+    "yaml": "^2.9.0",
     "zod": "^4"
   },
   "devDependencies": {
     "@testcontainers/k3s": "^11.12.0",
     "@types/jest": "*",
-    "@types/node": "^24.0.13",
+    "@types/node": "^24.13.2",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }

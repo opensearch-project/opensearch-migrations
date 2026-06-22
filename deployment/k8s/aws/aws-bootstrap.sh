@@ -134,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (required with --deploy-import-vpc-cfn)."
       echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
       echo "                                            Only valid with --deploy-import-vpc-cfn."
-      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
+      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
@@ -426,7 +426,7 @@ fi
 
 # --- expand --create-vpc-endpoints value ---
 if [[ "$create_vpc_endpoints" == "all" ]]; then
-  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth"
+  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth"
 fi
 
 # --- resolve version once ---
@@ -641,10 +641,11 @@ if [[ "$deploy_cfn" == "true" ]]; then
           ecr)             cfn_params+=("CreateECREndpoint=true") ;;
           ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
           cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          monitoring)      cfn_params+=("CreateCloudWatchMonitoringEndpoint=true") ;;
           efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
           sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
           eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
-          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
+          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth)" >&2 ;;
         esac
       done
     fi
@@ -1059,7 +1060,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
     # from Docker Hub. mirror_images_to_ecr already copied this image above.
     ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/moby/buildkit:buildx-stable-1"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
     setup_build_backend
   fi
 

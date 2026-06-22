@@ -56,7 +56,7 @@ public class SourceRepoAccessor {
         return blobSource.readBlob(path);
     }
 
-    public static class CouldNotLoadRepoFile extends RuntimeException {
+    public static class CouldNotLoadRepoFile extends RuntimeException implements SnapshotReadFailure {
         public CouldNotLoadRepoFile(String message, Throwable cause) {
             super(message, cause);
         }

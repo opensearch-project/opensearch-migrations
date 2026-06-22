@@ -64,7 +64,7 @@ public class FileSystemRepo implements SourceRepo {
         return fileFinder.getBlobFilePath(repoRootDir, indexId, shardId, blobName);
     }
 
-    public static class CantOpenRepoDirectory extends RfsException {
+    public static class CantOpenRepoDirectory extends RfsException implements SnapshotReadFailure {
         public CantOpenRepoDirectory(Path repoRootDir, Throwable cause) {
             super("Failed to open repository directory: " + repoRootDir.toAbsolutePath(), cause);
         }
