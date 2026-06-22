@@ -90,7 +90,12 @@ def test_start_workflow_success(mock_unlink, mock_wait, mock_create_yaml, mock_k
     # Verify
     assert result.success is True
     assert result.value == "test-workflow-123"
-    mock_create_yaml.assert_called_once_with("test-template", {"param1": "value1"})
+    mock_create_yaml.assert_called_once_with(
+        "test-template",
+        {"param1": "value1"},
+        workflow_name=None,
+        service_account_name=None,
+    )
     mock_kubectl.assert_called_once()
     mock_wait.assert_called_once_with(workflow_name="test-workflow-123")
     mock_unlink.assert_called_once_with("/tmp/test-workflow.yaml")
@@ -412,6 +417,7 @@ def test_create_workflow_yaml_without_parameters(argo_service):
             assert workflow_data["apiVersion"] == "argoproj.io/v1alpha1"
             assert workflow_data["kind"] == "Workflow"
             assert workflow_data["metadata"]["generateName"] == "test-template-"
+            assert workflow_data["spec"]["podMetadata"]["annotations"]["karpenter.sh/do-not-disrupt"] == "true"
             assert workflow_data["spec"]["workflowTemplateRef"]["name"] == "test-template"
             assert workflow_data["spec"]["entrypoint"] == "main"
             assert "arguments" not in workflow_data["spec"]
@@ -440,6 +446,7 @@ def test_create_workflow_yaml_with_parameters(argo_service):
             written_content = ''.join(call[0][0] for call in written_calls)
             workflow_data = yaml.safe_load(written_content)
 
+            assert workflow_data["spec"]["podMetadata"]["annotations"]["karpenter.sh/do-not-disrupt"] == "true"
             assert "arguments" in workflow_data["spec"]
             assert "parameters" in workflow_data["spec"]["arguments"]
 
