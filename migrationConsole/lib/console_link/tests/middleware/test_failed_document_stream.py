@@ -408,11 +408,13 @@ class TestSelectSnapshotMigration:
 
     def test_multiple_without_override_raises(self):
         items = [self._sm("a"), self._sm("b")]
-        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="Multiple SnapshotMigration"):
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured,
+                           match="Multiple SnapshotMigration"):
             failed_document_stream._select_snapshot_migration(None, items)
 
     def test_unknown_override_raises(self):
-        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured, match="No SnapshotMigration named"):
+        with pytest.raises(failed_document_stream.FailedDocumentStreamNotConfigured,
+                           match="No SnapshotMigration named"):
             failed_document_stream._select_snapshot_migration("nope", [self._sm("a")])
 
 

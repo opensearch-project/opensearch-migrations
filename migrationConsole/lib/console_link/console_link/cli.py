@@ -943,12 +943,14 @@ def _augment_status_with_failed_document_stream(payload: dict) -> None:
 # ##################### failed document stream (Reindex-from-Snapshot Failed Document Stream) ###################
 
 
-@click.group(name="failed-document-stream", help="Inspect or manage RFS terminal-failure failed document stream records.")
+@click.group(name="failed-document-stream",
+             help="Inspect or manage RFS terminal-failure failed document stream records.")
 def failed_document_stream_group():
     """All actions related to the durable RFS failed document stream for the current session."""
 
 
-@failed_document_stream_group.command(name="location", help="Print the S3 URI of the failed document stream for the current session.")
+@failed_document_stream_group.command(name="location",
+                                      help="Print the S3 URI of the failed document stream for the current session.")
 @click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
 def backfill_failed_document_stream_location_cmd(migration):
     try:
@@ -958,9 +960,10 @@ def backfill_failed_document_stream_location_cmd(migration):
     click.echo(cfg.location_uri)
 
 
-@failed_document_stream_group.command(name="count",
-                   help="Count distinct failed documents in the current session's failed document stream "
-                        "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
+@failed_document_stream_group.command(
+    name="count",
+    help="Count distinct failed documents in the current session's failed document stream "
+         "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
 @click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
 def backfill_failed_document_stream_count_cmd(migration):
     try:
@@ -992,8 +995,9 @@ def backfill_failed_document_stream_list_cmd(ctx, migration, limit):
                    f"{r.get('failureType', '-')}")
 
 
-@backfill_group.command(name="reset",
-                        help="Delete backfill metadata for this session. By default failed document stream records are kept.")
+@backfill_group.command(
+    name="reset",
+    help="Delete backfill metadata for this session. By default failed document stream records are kept.")
 @click.option('--include-failed-document-stream', is_flag=True, default=False,
               help='Also delete the durable failed document stream for this session. Irreversible.')
 @click.option('--yes', is_flag=True, default=False, help='Skip the confirmation prompt.')
@@ -1015,7 +1019,8 @@ def reset_backfill_cmd(ctx, include_failed_document_stream, yes):
         click.echo(f"Backfill working state archived to: {message}")
 
     if not include_failed_document_stream:
-        click.echo("failed document stream records preserved. Re-run with --include-failed-document-stream to delete them.")
+        click.echo("failed document stream records preserved. "
+                   "Re-run with --include-failed-document-stream to delete them.")
         return
 
     try:

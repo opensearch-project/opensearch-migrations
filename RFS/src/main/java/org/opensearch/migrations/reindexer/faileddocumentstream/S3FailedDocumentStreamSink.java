@@ -59,7 +59,6 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
     private final String prefix;
     private final String sessionId;
     private final String workerId;
-    private final String region;
     private final String location;
     private final RotatingGzipS3ObjectWriter.ObjectUploader uploader;
     private final long maxBufferBytes;
@@ -88,7 +87,6 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         this.prefix = normalizePrefix(prefix);
         this.sessionId = sessionId;
         this.workerId = workerId;
-        this.region = region;
         this.uploader = uploader;
         // A non-positive value (including the Lombok default for an unset long) means "use default".
         this.maxBufferBytes = maxBufferBytes > 0 ? maxBufferBytes : DEFAULT_MAX_BUFFER_BYTES;
@@ -142,7 +140,7 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         if (objectFuture.isCompletedExceptionally()) {
             try {
                 objectFuture.getNow(null);
-            } catch (Throwable t) {
+            } catch (Exception t) {
                 return Mono.error(unwrap(t));
             }
         }

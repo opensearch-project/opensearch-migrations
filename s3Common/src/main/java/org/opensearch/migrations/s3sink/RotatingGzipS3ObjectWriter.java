@@ -63,7 +63,7 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
     /** Serializes one record to the bytes appended (followed by a newline) to the gzip stream. */
     @FunctionalInterface
     public interface RecordSerializer<T> {
-        byte[] serialize(T record) throws IOException;
+        byte[] serialize(T item) throws IOException;
     }
 
     /** Produces the S3 object key for a newly opened object. */
@@ -138,14 +138,14 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
      * met. Returns the durability future for the object this record landed in: it completes when that
      * object is uploaded, or exceptionally if the upload terminally fails.
      */
-    public CompletableFuture<Void> write(T record) {
+    public CompletableFuture<Void> write(T item) {
         if (closed) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("RotatingGzipS3ObjectWriter is closed"));
         }
         final byte[] bytes;
         try {
-            bytes = serializer.serialize(record);
+            bytes = serializer.serialize(item);
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
         }
