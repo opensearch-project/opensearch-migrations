@@ -280,8 +280,17 @@ const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.s
 
 const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
 
+// Default is applied in the preprocess step rather than via .default().optional():
+// under zod >=4.4 that ordering no longer applies the default for an absent key,
+// and .optional().default() makes the input type required. Empty/blank strings
+// stay explicit disables, while omitted values default to the collector. The
+// metadata default keeps generated JSON/OpenAPI schemas useful for schema-driven
+// clients such as interactive config viewers.
 const optionalEndpointWithDefault = (defaultValue: string) =>
-    z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.default(defaultValue).optional());
+    z.preprocess(
+        (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
+        OPTIONAL_ENDPOINT.optional()
+    ).meta({default: defaultValue});
 
 const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
     .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");

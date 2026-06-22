@@ -433,7 +433,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -1156,7 +1157,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -2379,7 +2381,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -2951,7 +2954,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "kafkaConnection": {
                     "type": "string",
-                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                    "description": "Sequence of <HOSTNAME:PORT> values delimited by ','."
                   },
                   "kafkaTopic": {
                     "type": "string",
@@ -3351,7 +3355,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "required": [
           "version"
-        ]
+        ],
+        "description": "Connection and snapshot configuration for a source cluster."
       },
       "description": "Source Elasticsearch or OpenSearch clusters to migrate from."
     },
@@ -4540,9 +4545,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
                   }
-                }
+                },
+                "description": "Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided."
               },
-              "minItems": 1
+              "minItems": 1,
+              "description": "List of migrations to execute for a single snapshot.  Each migration must configure metadata migration, document backfill, or both. These migrations will execute concurrently as dependent snapshots finish."
             },
             "description": "Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."
           }
@@ -4551,7 +4558,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "fromSource",
           "toTarget",
           "perSnapshotConfig"
-        ]
+        ],
+        "description": "A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings."
       },
       "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings."
     },
