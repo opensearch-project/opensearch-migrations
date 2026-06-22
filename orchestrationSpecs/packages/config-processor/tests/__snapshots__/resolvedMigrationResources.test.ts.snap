@@ -111,6 +111,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "mode": "create",
       "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "snapshotPrefix": "snap1",
+      "solrCollections": [],
     },
   },
   {
