@@ -10,15 +10,11 @@
 #      (raw Solr output; no post-processing)
 #   5. (v9) also produces a single-segment (optimized) backup
 #
-# Before running the versions it (optionally) clones + installs apache/solr-orbit and
-# apache/solr-orbit-workloads, pointing solr-orbit at the local workloads clone.
-#
 # When --s3-upload is used, each snapshot is copied from ./backups/standalone/ into
 # ./s3_upload/standalone/, where v7/v8 snapshots are reshaped into the layout MA
 # expects before syncing to S3.
 #
-# Step 7 (Migration Assistant) is interactive (kubectl exec into the console against a
-# live target cluster) and is intentionally NOT automated here.
+# Step 7 (Migration Assistant) is interactive and is intentionally NOT automated here.
 
 set -euo pipefail
 
@@ -27,16 +23,16 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-VERSIONS="6,7,8,9"          # which Solr versions to build (comma-delimited)
+VERSIONS="6,7,8,9"
 WORKLOAD="nyc_taxis"
-TEST_MODE=0                 # set by --test-mode; passes --test-mode to solr-orbit
-SKIP_INSTALL=0              # skip cloning/installing solr-orbit + workloads
-TOOLS_DIR="${SOLR_ORBIT_TOOLS_DIR:-$HOME/perf}"   # where the repos get cloned
-PY_VERSION="${PY_VERSION:-3.12}"   # Python version uv installs/uses for the venv
+TEST_MODE=0
+SKIP_INSTALL=0
+TOOLS_DIR="${SOLR_ORBIT_TOOLS_DIR:-$HOME/perf}"
+PY_VERSION="${PY_VERSION:-3.12}"
 S3_UPLOAD=0
-AWS_ACCOUNT=""              # required if --s3-upload is used
-CHOWN_BACKUPS=0             # set by --chown-backups; sudo-chown backups for Linux hosts
-AWS_CLI="${AWS_CLI:-aws}"   # the doc uses `aws-cli.aws`; override via AWS_CLI=
+AWS_ACCOUNT=""
+CHOWN_BACKUPS=0
+AWS_CLI="${AWS_CLI:-aws}"
 
 ORBIT_REPO="https://github.com/apache/solr-orbit"
 ORBIT_BRANCH="main"
@@ -48,27 +44,30 @@ CONTAINER="solr-node1"
 SOLR_PORT=8983
 SOLR_URL="http://localhost:${SOLR_PORT}"
 
+# ---------------------------------------------------------------------------
+# Shared helpers (logging, arg parsing, orbit install)
+# ---------------------------------------------------------------------------
+# shellcheck source=lib/orbit.sh
+source "${SCRIPT_DIR}/lib/orbit.sh"
+
 usage() {
     cat <<'EOF'
 Usage: ./run_standalone.sh [options]
 
 Options:
   --versions=LIST     Comma-delimited Solr versions to build (default: 6,7,8,9)
-                      e.g. --versions=8,9
   --test-mode         Pass --test-mode through to solr-orbit (smaller/faster load)
-  --skip-install      Don't clone/install solr-orbit + workloads (assumes already set up)
+  --skip-install      Don't clone/install solr-orbit + workloads
   --tools-dir=DIR     Where to clone the solr-orbit repos (default: $HOME/perf)
+  --s3-upload         Sync the resulting snapshots to S3 (step 6)
+  --aws-account=NUM   AWS account number for the S3 bucket (required with --s3-upload)
+  --aws-cli=CMD       AWS CLI command to use for S3 sync (default: aws)
+  --chown-backups     sudo chown ./backups to uid 8983 (Linux hosts)
+  -h, --help          Show this help
 
 Environment:
   PY_VERSION=3.12     Python version uv installs/uses for the venv (default: 3.12).
                       Requires uv (https://astral.sh/uv) on PATH.
-  --s3-upload         Sync the resulting snapshots to S3 (step 6)
-  --aws-account=NUM   AWS account number for the S3 bucket (required with --s3-upload)
-  --aws-cli=CMD       AWS CLI command to use for S3 sync (default: aws; the doc uses
-                      aws-cli.aws). Overrides the AWS_CLI env var.
-  --chown-backups     sudo chown ./backups to uid 8983 (Linux hosts; not needed on
-                      Docker Desktop / macOS). Prompts for your password.
-  -h, --help          Show this help
 
 Examples:
   ./run_standalone.sh --versions=9 --test-mode
@@ -77,34 +76,8 @@ Examples:
 EOF
 }
 
-# ---------------------------------------------------------------------------
-# Arg parsing
-# ---------------------------------------------------------------------------
-for arg in "$@"; do
-    case "$arg" in
-        --versions=*)    VERSIONS="${arg#*=}" ;;
-        --test-mode)     TEST_MODE=1 ;;
-        --skip-install)  SKIP_INSTALL=1 ;;
-        --tools-dir=*)   TOOLS_DIR="${arg#*=}" ;;
-        --s3-upload)     S3_UPLOAD=1 ;;
-        --aws-account=*) AWS_ACCOUNT="${arg#*=}" ;;
-        --aws-cli=*)     AWS_CLI="${arg#*=}" ;;
-        --chown-backups) CHOWN_BACKUPS=1 ;;
-        -h|--help)       usage; exit 0 ;;
-        *) echo "Unknown option: $arg" >&2; usage; exit 1 ;;
-    esac
-done
-
-if [[ "$S3_UPLOAD" -eq 1 && -z "$AWS_ACCOUNT" ]]; then
-    echo "ERROR: --s3-upload requires --aws-account=<number>" >&2
-    exit 1
-fi
-
+parse_common_args "$@"
 cd "$SCRIPT_DIR"
-
-log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-warn() { printf '\033[1;33mWARN: %s\033[0m\n' "$*" >&2; }
-die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Per-version configuration (mirrors steps_standalone.md)
@@ -119,7 +92,6 @@ solr_image() {
     esac
 }
 
-# Extra `docker run` flags per version (path allow-listing / jetty host binding).
 solr_docker_extra() {
     case "$1" in
         8) echo "-e SOLR_OPTS=-Dsolr.allowPaths=/backups" ;;
@@ -128,120 +100,11 @@ solr_docker_extra() {
     esac
 }
 
-# Platform override per version. solr:6.6.6 is published amd64-only, so on Apple
-# Silicon it must run under emulation; the flag is a no-op on a native amd64 host.
 solr_docker_platform() {
     case "$1" in
         6) echo "--platform linux/amd64" ;;
         *) echo "" ;;
     esac
-}
-
-# ---------------------------------------------------------------------------
-# Prereqs (step 1)
-# ---------------------------------------------------------------------------
-prereqs() {
-    log "Prereqs: creating ${BACKUP_BASE} and ${S3_UPLOAD_BASE}"
-    mkdir -p "${BACKUP_BASE}"
-    mkdir -p "${S3_UPLOAD_BASE}"
-    # Solr in the container runs as uid 8983 and needs to write into /backups.
-    # On Docker Desktop (macOS) the file-sharing layer handles this, so we only
-    # attempt a plain chown (no sudo). Pass --chown-backups on a Linux host where
-    # the bind mount needs the uid set explicitly.
-    if [[ "$CHOWN_BACKUPS" -eq 1 ]]; then
-        sudo chown -R 8983:8983 backups \
-            || warn "could not chown backups to 8983:8983"
-    else
-        chown -R 8983:8983 backups 2>/dev/null || true
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Clone + install solr-orbit and solr-orbit-workloads
-# ---------------------------------------------------------------------------
-ORBIT_DIR=""
-VENV_ACTIVE=0
-
-# clone_or_update <url> <dest> [branch]
-clone_or_update() {
-    local url="$1" dest="$2" branch="${3:-}"
-    if [[ -d "$dest/.git" ]]; then
-        log "Updating $(basename "$dest") ($dest)"
-        # Make sure the existing checkout tracks the requested remote/branch.
-        git -C "$dest" remote set-url origin "$url"
-        git -C "$dest" fetch origin
-        if [[ -n "$branch" ]]; then
-            git -C "$dest" checkout "$branch"
-            git -C "$dest" pull --ff-only origin "$branch" \
-                || warn "git pull failed for $dest; using existing checkout"
-        else
-            git -C "$dest" pull --ff-only || warn "git pull failed for $dest; using existing checkout"
-        fi
-    else
-        log "Cloning $url${branch:+ (branch $branch)} -> $dest"
-        if [[ -n "$branch" ]]; then
-            git clone -b "$branch" "$url" "$dest"
-        else
-            git clone "$url" "$dest"
-        fi
-    fi
-}
-
-install_orbit() {
-    mkdir -p "$TOOLS_DIR"
-    ORBIT_DIR="$TOOLS_DIR/solr-orbit"
-    local workloads_dir="$TOOLS_DIR/solr-orbit-workloads"
-
-    clone_or_update "$ORBIT_REPO" "$ORBIT_DIR" "$ORBIT_BRANCH"
-    clone_or_update "$WORKLOADS_REPO" "$workloads_dir"
-
-    command -v uv >/dev/null 2>&1 \
-        || die "uv not found. Install it first: https://docs.astral.sh/uv/ (e.g. 'curl -LsSf https://astral.sh/uv/install.sh | sh')"
-    log "Installing solr-orbit into a uv virtualenv (Python ${PY_VERSION})"
-    uv python install "${PY_VERSION}"
-    uv venv --python "${PY_VERSION}" --clear "$ORBIT_DIR/.venv"
-    # shellcheck disable=SC1091
-    source "$ORBIT_DIR/.venv/bin/activate"
-    VENV_ACTIVE=1
-    uv pip install -e "$ORBIT_DIR"
-
-    # Generate ~/.solr-orbit/benchmark.ini from solr-orbit's own template (so the
-    # config.version stays in sync with the installed code), then point the
-    # workloads repo at our local clone so runs are offline/reproducible.
-    local confdir="$HOME/.solr-orbit"
-    local ini="$confdir/benchmark.ini"
-    local template="$ORBIT_DIR/solrorbit/resources/benchmark.ini"
-    log "Generating $ini from template (workloads -> local clone)"
-    mkdir -p "$confdir"
-    [[ -f "$template" ]] || die "solr-orbit config template not found at $template"
-    if [[ -f "$ini" ]]; then
-        cp "$ini" "$ini.bak.$$" && warn "backed up existing config to $ini.bak.$$"
-    fi
-    # Substitute ${CONFIG_DIR} and replace the default workloads URL with the local clone.
-    CONFDIR="$confdir" WL="$workloads_dir" python3 - "$template" "$ini" <<'PY'
-import os, re, sys
-src, dst = sys.argv[1], sys.argv[2]
-text = open(src).read().replace("${CONFIG_DIR}", os.environ["CONFDIR"])
-text = re.sub(r'(?m)^default\.url\s*=.*$', "default.url = " + os.environ["WL"], text, count=1)
-open(dst, "w").write(text)
-PY
-
-    solr-orbit --version || warn "solr-orbit --version failed"
-}
-
-# Ensure the solr-orbit venv is active (used when --skip-install was passed).
-ensure_orbit() {
-    if command -v solr-orbit >/dev/null 2>&1; then
-        return
-    fi
-    local candidate="$TOOLS_DIR/solr-orbit/.venv/bin/activate"
-    if [[ -f "$candidate" ]]; then
-        # shellcheck disable=SC1090
-        source "$candidate"
-        VENV_ACTIVE=1
-    fi
-    command -v solr-orbit >/dev/null 2>&1 \
-        || die "solr-orbit not found. Run without --skip-install, or activate its venv first."
 }
 
 # ---------------------------------------------------------------------------
@@ -271,7 +134,6 @@ start_solr() {
 }
 
 wait_for_solr() {
-    # Up to ~5 min: emulated (amd64-on-arm64) Solr 6 can be slow to start under qemu.
     log "Waiting for Solr to come up..."
     for _ in $(seq 1 150); do
         if curl -fsS "${SOLR_URL}/solr/admin/info/system?wt=json" >/dev/null 2>&1; then
@@ -302,20 +164,13 @@ run_orbit() {
         --workload="${WORKLOAD}"
         --include-tasks="check-cluster-health,index"
     )
-    if [[ "$TEST_MODE" -eq 1 ]]; then
-        args+=(--test-mode)
-    fi
+    if [[ "$TEST_MODE" -eq 1 ]]; then args+=(--test-mode); fi
     solr-orbit "${args[@]}"
 }
 
-# Trigger a replication-handler backup and wait for it to finish (it's async).
 backup_core() {
     local name="$1"
-    # Hard-commit first: the replication handler only snapshots committed segments,
-    # and solr-orbit's load may leave docs uncommitted (otherwise the backup is empty).
     curl -fsS "${SOLR_URL}/solr/nyc_taxis/update?commit=true" >/dev/null
-    # Start fresh so re-runs are a clean overwrite. Delete from *inside* the
-    # container so Solr's view of the bind mount is immediately consistent.
     docker exec "$CONTAINER" rm -rf "/backups/standalone/snapshot.${name}" 2>/dev/null || true
     log "Backing up core -> ${BACKUP_BASE}/snapshot.${name}"
     curl -fsS "${SOLR_URL}/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=${name}&wt=json" >/dev/null
@@ -330,13 +185,10 @@ wait_for_backup() {
         details="$(curl -fsS "${SOLR_URL}/solr/nyc_taxis/replication?command=details&wt=json" 2>/dev/null || true)"
         if echo "$details" | grep -q '"status":"success"' \
            && echo "$details" | grep -q "snapshot.${name}"; then
-            echo "Backup '${name}' complete."
-            return 0
+            echo "Backup '${name}' complete."; return 0
         fi
-        # Fallback: snapshot dir exists and contains a segments file.
         if compgen -G "${BACKUP_BASE}/snapshot.${name}/segments_*" >/dev/null 2>&1; then
-            echo "Backup '${name}' complete (segments present)."
-            return 0
+            echo "Backup '${name}' complete (segments present)."; return 0
         fi
         sleep 2
     done
@@ -357,7 +209,6 @@ reshape_snapshot() {
 
     log "Reshaping snapshot ${dir} into the MA layout"
     mkdir -p "$dir/nyc_taxis/index"
-    # Per-file `mv {} dest/` is portable; GNU's `mv -t` is not available on BSD/macOS.
     find "$dir" -maxdepth 1 -mindepth 1 \
         ! -name nyc_taxis ! -name shard_backup_metadata \
         -exec mv {} "$dir/nyc_taxis/index/" \;
@@ -392,7 +243,6 @@ run_version() {
     backup_core "nyc_taxis_${version}"
 
     if [[ "$version" == "9" ]]; then
-        # v9: also produce a single-segment (optimized) backup.
         log "Optimizing to a single segment"
         curl -fsS "${SOLR_URL}/solr/nyc_taxis/update?optimize=true&maxSegments=1" >/dev/null
         backup_core "nyc_taxis_9_onesegment"
@@ -404,12 +254,11 @@ run_version() {
 # ---------------------------------------------------------------------------
 # S3 upload (step 6)
 # ---------------------------------------------------------------------------
-# The snapshot directory names a given version produces under ${BACKUP_BASE}.
 version_snapshots() {
     local v="$1"
     echo "snapshot.nyc_taxis_${v}"
     case "$v" in
-        9) echo "snapshot.nyc_taxis_9_onesegment" ;;  # v9 single-segment backup
+        9) echo "snapshot.nyc_taxis_9_onesegment" ;;
     esac
 }
 
@@ -423,13 +272,11 @@ prepare_s3_upload() {
             src="${BACKUP_BASE}/${name}"
             dst="${S3_UPLOAD_BASE}/${name}"
             if [[ ! -d "$src" ]]; then
-                warn "expected snapshot ${src} not found; skipping"
-                continue
+                warn "expected snapshot ${src} not found; skipping"; continue
             fi
             log "Copying ${src} -> ${dst}"
             rm -rf "$dst"
             cp -a "$src" "$dst"
-            # v7/v8 snapshots lack the MA-expected layout; reshape in s3_upload, not backups.
             if [[ "$v" == "7" || "$v" == "8" ]]; then
                 reshape_snapshot "$v"
             fi
@@ -447,8 +294,7 @@ s3_upload() {
         for name in $(version_snapshots "$v"); do
             dst="${S3_UPLOAD_BASE}/${name}"
             if [[ ! -d "$dst" ]]; then
-                warn "expected s3_upload dir ${dst} not found; skipping"
-                continue
+                warn "expected s3_upload dir ${dst} not found; skipping"; continue
             fi
             echo "  $dst -> ${s3_base}/${name}"
             "$AWS_CLI" s3 sync --delete "$dst" "${s3_base}/${name}"
