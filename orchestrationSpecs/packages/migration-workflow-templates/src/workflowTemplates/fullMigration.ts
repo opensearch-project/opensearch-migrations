@@ -626,6 +626,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("fromCapturedTraffic", typeToken<string>())
+        .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
         .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
@@ -682,13 +683,11 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            // Replayers consume a Kafka topic, but the readiness owner differs
-            // by source type: live proxy sources are ready when CaptureProxy is
-            // serving; S3 sources are ready when the one-time load completes.
             .addStep("waitIndefinitelyForTrafficSource", ResourceManagement, "waitIndefinitelyForTrafficSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceName: b.inputs.fromCapturedTraffic,
+                    sourceKind: b.inputs.fromCapturedTrafficSourceKind,
                     configChecksum: b.inputs.fromCapturedTrafficConfigChecksum,
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}

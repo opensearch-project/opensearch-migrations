@@ -1739,6 +1739,9 @@
               "name": "fromCapturedTraffic"
             },
             {
+              "name": "fromCapturedTrafficSourceKind"
+            },
+            {
               "name": "fromCapturedTrafficConfigChecksum"
             },
             {
@@ -1896,6 +1899,10 @@
                   {
                     "name": "sourceName",
                     "value": "{{inputs.parameters.fromCapturedTraffic}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.fromCapturedTrafficSourceKind}}"
                   }
                 ]
               },
@@ -2533,6 +2540,10 @@
                   {
                     "name": "fromCapturedTraffic",
                     "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficSourceKind')}}"
                   },
                   {
                     "name": "fromCapturedTrafficConfigChecksum",

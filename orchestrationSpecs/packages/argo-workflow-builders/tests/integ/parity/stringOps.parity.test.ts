@@ -326,7 +326,6 @@ describe("String Operations - regexReplaceAll", () => {
     category: "String Operations",
     name: "regexReplaceAll",
     inputs: { text: "hello123world456" },
-    // Sprig's regexReplaceAll arg order is (pattern, input, replacement).
     argoExpression: "sprig.regexReplaceAll('[0-9]+', inputs.parameters.text, 'X')",
     expectedResult: "helloXworldX",
   };

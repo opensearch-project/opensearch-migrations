@@ -2316,44 +2316,14 @@
         }
       },
       {
-        "name": "readcapturedtrafficsourcekind",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: {{=toJSON(inputs.parameters.resourceName)}}\n",
-          "action": "get"
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": [
-            {
-              "name": "sourceKind",
-              "valueFrom": {
-                "jsonPath": "{.spec.sourceKind}"
-              }
-            }
-          ]
-        }
-      },
-      {
         "name": "waitindefinitelyfortrafficsource",
         "inputs": {
           "parameters": [
             {
               "name": "sourceName"
+            },
+            {
+              "name": "sourceKind"
             },
             {
               "name": "configChecksum"
@@ -2369,22 +2339,8 @@
         "steps": [
           [
             {
-              "template": "readcapturedtrafficsourcekind",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.sourceName+'-topic'}}"
-                  }
-                ]
-              },
-              "name": "readCapturedTrafficSourceKind"
-            }
-          ],
-          [
-            {
               "template": "waitindefinitelyforcaptureproxy",
-              "when": "{{=true && !(steps.readCapturedTrafficSourceKind.outputs.parameters.sourceKind == 's3')}}",
+              "when": "{{=!(inputs.parameters.sourceKind == 's3')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -2415,7 +2371,7 @@
           [
             {
               "template": "waitindefinitelyforcapturedtraffic",
-              "when": "{{=true && steps.readCapturedTrafficSourceKind.outputs.parameters.sourceKind == 's3'}}",
+              "when": "{{=inputs.parameters.sourceKind == 's3'}}",
               "arguments": {
                 "parameters": [
                   {

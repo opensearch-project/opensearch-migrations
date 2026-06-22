@@ -375,7 +375,6 @@ export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
     }
 } as const;
 
-// Keep Kafka auto-create defaults centralized; workflow templates consume the resolved config.
 const DEFAULT_AUTO_CREATE_KAFKA = {
     clusterSpecOverrides: {
         kafka: {

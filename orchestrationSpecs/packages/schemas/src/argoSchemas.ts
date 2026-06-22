@@ -358,10 +358,8 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     sourceLabel: z.string(),
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
-    // Captured-traffic source name + checksum: works uniformly across live
-    // proxy and S3 loader paths. The replayer uses these to wait on the source's
-    // readiness resource and re-evaluate when the source's checksum changes.
     fromCapturedTraffic: z.string(),
+    fromCapturedTrafficSourceKind: z.enum(["proxy", "s3"]),
     fromCapturedTrafficConfigChecksum: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,

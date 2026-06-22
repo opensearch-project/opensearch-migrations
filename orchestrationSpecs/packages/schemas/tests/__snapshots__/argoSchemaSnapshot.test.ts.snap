@@ -2376,6 +2376,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "fromCapturedTraffic": {
                   "type": "string"
                 },
+                "fromCapturedTrafficSourceKind": {
+                  "type": "string",
+                  "enum": [
+                    "proxy",
+                    "s3"
+                  ]
+                },
                 "fromCapturedTrafficConfigChecksum": {
                   "type": "string"
                 },
@@ -2923,6 +2930,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "dependsOn",
                 "dependsOnSnapshotMigrations",
                 "fromCapturedTraffic",
+                "fromCapturedTrafficSourceKind",
                 "fromCapturedTrafficConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
