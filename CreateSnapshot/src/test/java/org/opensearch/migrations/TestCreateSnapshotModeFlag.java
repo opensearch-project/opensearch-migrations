@@ -1,6 +1,8 @@
 package org.opensearch.migrations;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
@@ -11,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -394,7 +397,7 @@ public class TestCreateSnapshotModeFlag {
     }
 
     @Test
-    void standalone_usesUnifiedCreateSnapshotPath_importMode() throws Exception {
+    void standalone_usesUnifiedCreateSnapshotPath_importMode(@TempDir Path tempRepo) throws Exception {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
@@ -404,7 +407,7 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = "standalone_import_test";
         args.snapshotRepoName = "test";
-        args.fileSystemRepoPath = "/var/solr/data";
+        args.fileSystemRepoPath = tempRepo.toString();
         args.mode = "import";
         args.noWait = false;
 
@@ -428,6 +431,13 @@ public class TestCreateSnapshotModeFlag {
                 .anyMatch(m -> m.contains("replication API backup"));
             Assertions.assertFalse(backupTriggered,
                 "IMPORT mode on standalone should NOT trigger replication backup");
+
+            var schemaFile = tempRepo.resolve(Path.of(
+                args.snapshotName, "dummy", "zk_backup_0", "configs", "dummy", "managed-schema.xml"));
+            Assertions.assertTrue(Files.exists(schemaFile),
+                "IMPORT mode should write the standalone schema into the filesystem snapshot layout");
+            Assertions.assertFalse(Files.readString(schemaFile).isBlank(),
+                "Written standalone schema should not be empty");
         }
     }
 
