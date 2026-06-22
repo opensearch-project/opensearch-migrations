@@ -334,6 +334,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                 "type": "string"
                                               }
                                             ],
+                                            "default": "http://otel-collector:4317",
                                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                           },
                                           "indexAllowlist": {
@@ -641,6 +642,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "type": "string"
                         }
                       ],
+                      "default": "http://otel-collector:4317",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "setHeader": {
@@ -1325,6 +1327,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "type": "string"
                               }
                             ],
+                            "default": "http://otel-collector:4317",
                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                           },
                           "indexAllowlist": {
@@ -1668,6 +1671,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "type": "string"
                         }
                       ],
+                      "default": "http://otel-collector:4317",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "output": {
@@ -1959,6 +1963,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "type": "string"
                         }
                       ],
+                      "default": "http://otel-collector:4317",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "serverGeneratedIds": {
@@ -2603,6 +2608,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "type": "string"
                         }
                       ],
+                      "default": "http://otel-collector:4317",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "quiescentPeriodMs": {
@@ -3285,6 +3291,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "type": "string"
                                     }
                                   ],
+                                  "default": "http://otel-collector:4317",
                                   "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                 },
                                 "indexAllowlist": {
@@ -3569,6 +3576,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string"
                           }
                         ],
+                        "default": "http://otel-collector:4317",
                         "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "output": {
@@ -4457,6 +4465,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string"
                           }
                         ],
+                        "default": "http://otel-collector:4317",
                         "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "serverGeneratedIds": {
@@ -4704,6 +4713,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string"
                       }
                     ],
+                    "default": "http://otel-collector:4317",
                     "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "setHeader": {
@@ -5316,6 +5326,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string"
                       }
                     ],
+                    "default": "http://otel-collector:4317",
                     "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "quiescentPeriodMs": {
