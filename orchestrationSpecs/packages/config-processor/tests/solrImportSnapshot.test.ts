@@ -1,6 +1,4 @@
 import {describe, expect, it} from "@jest/globals";
-import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
-import {z} from "zod";
 import {InputValidationError, MigrationConfigTransformer} from "../src";
 
 /**
@@ -13,8 +11,19 @@ import {InputValidationError, MigrationConfigTransformer} from "../src";
  * behavior (no DataSnapshot CR; pure external-name resolution).
  */
 
-function solrImportConfig(opts: {withImportConfig: boolean; version?: string}): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
-    const externalConfig: any = {externallyManagedSnapshotName: "preexisting-solr-snap"};
+type TestExternalSnapshotConfig = {
+    externallyManagedSnapshotName: string;
+    importConfig?: Record<string, never>;
+};
+
+function solrImportConfig(opts: {
+    withImportConfig: boolean;
+    version?: string;
+    externalSnapshotName?: string;
+}): Record<string, unknown> {
+    const externalConfig: TestExternalSnapshotConfig = {
+        externallyManagedSnapshotName: opts.externalSnapshotName ?? "preexisting-solr-snap"
+    };
     if (opts.withImportConfig) {
         externalConfig.importConfig = {};
     }
@@ -55,7 +64,7 @@ function solrImportConfig(opts: {withImportConfig: boolean; version?: string}): 
                 }],
             },
         }],
-    } as any;
+    };
 }
 
 describe("Solr externally-managed snapshot import path", () => {
@@ -66,13 +75,14 @@ describe("Solr externally-managed snapshot import path", () => {
         // A snapshot-creation group must be produced for the Solr source (a plain external snapshot
         // would produce none).
         expect(workflowConfig.snapshots).toBeDefined();
-        const createGroups = workflowConfig.snapshots!.filter(
-            (s: any) => s.sourceConfig.label === "solrSource");
+        const createGroups = workflowConfig.snapshots.filter(
+            s => s.sourceConfig.label === "solrSource");
         expect(createGroups).toHaveLength(1);
 
         const item = createGroups[0].createSnapshotConfig[0];
         // The create-config carries mode:"import" so runCreateSnapshot emits --mode import...
         expect(item.config.mode).toBe("import");
+        expect(item.config.solrCollections).toEqual([]);
         // ...and records the pre-existing external snapshot name for the workflow to use verbatim.
         expect(item.importExternalSnapshotName).toBe("preexisting-solr-snap");
     });
@@ -82,11 +92,29 @@ describe("Solr externally-managed snapshot import path", () => {
             .processFromObject(solrImportConfig({withImportConfig: true}));
 
         expect(workflowConfig.snapshotMigrations).toHaveLength(1);
-        const resolution = (workflowConfig.snapshotMigrations as any[])[0].snapshotNameResolution;
+        const resolution = workflowConfig.snapshotMigrations[0].snapshotNameResolution;
         // Both keys present: the migration waits on the DataSnapshot CR (so it blocks until the
         // import step finishes) AND uses the external name (not a generated one).
-        expect(resolution.dataSnapshotResourceName).toBe("solrSource-solrSnap");
-        expect(resolution.externalSnapshotName).toBe("preexisting-solr-snap");
+        expect(resolution).toEqual({
+            dataSnapshotResourceName: "solrSource-solrSnap",
+            externalSnapshotName: "preexisting-solr-snap",
+        });
+    });
+
+    it("includes the external snapshot name in the import DataSnapshot checksum", async () => {
+        const transformer = new MigrationConfigTransformer();
+        const first = await transformer.processFromObject(solrImportConfig({
+            withImportConfig: true,
+            externalSnapshotName: "preexisting-solr-snap"
+        }));
+        const second = await transformer.processFromObject(solrImportConfig({
+            withImportConfig: true,
+            externalSnapshotName: "replacement-solr-snap"
+        }));
+
+        const firstItem = first.snapshots[0].createSnapshotConfig[0];
+        const secondItem = second.snapshots[0].createSnapshotConfig[0];
+        expect(firstItem.configChecksum).not.toBe(secondItem.configChecksum);
     });
 
     it("keeps a plain externally-managed Solr snapshot (no importConfig) on the external-only path", async () => {
@@ -94,13 +122,13 @@ describe("Solr externally-managed snapshot import path", () => {
             .processFromObject(solrImportConfig({withImportConfig: false}));
 
         // No DataSnapshot create-config group for this source.
-        const createGroups = (workflowConfig.snapshots ?? []).filter(
-            (s: any) => s.sourceConfig.label === "solrSource");
+        const createGroups = workflowConfig.snapshots.filter(
+            s => s.sourceConfig.label === "solrSource");
         expect(createGroups).toHaveLength(0);
 
         // Resolution is external-name-only (no CR to wait on).
-        const resolution = (workflowConfig.snapshotMigrations as any[])[0].snapshotNameResolution;
-        expect(resolution.externalSnapshotName).toBe("preexisting-solr-snap");
+        const resolution = workflowConfig.snapshotMigrations[0].snapshotNameResolution;
+        expect(resolution).toEqual({externalSnapshotName: "preexisting-solr-snap"});
         expect("dataSnapshotResourceName" in resolution).toBe(false);
     });
 

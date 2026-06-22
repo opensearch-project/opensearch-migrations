@@ -739,6 +739,10 @@ export const USER_REPLAYER_OPTIONS = z.object({
     }
 });
 
+const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional()
+    .describe("Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. " +
+        "For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections.");
+
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
@@ -755,6 +759,7 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     mode: z.enum(["create", "import"]).default("create").optional()
         .describe("Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."),
+    solrCollections: SOLR_COLLECTIONS_OPTION,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -1244,6 +1249,7 @@ export const TRAFFIC_CONFIG = z.object({
 export const USER_SOLR_IMPORT_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    solrCollections: SOLR_COLLECTIONS_OPTION,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()

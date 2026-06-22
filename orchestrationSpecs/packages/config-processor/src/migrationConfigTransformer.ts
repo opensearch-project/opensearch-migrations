@@ -9,6 +9,7 @@ import {
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    SNAPSHOT_NAME_CONFIG,
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
@@ -583,7 +584,12 @@ function buildKafkaClientConfig(
     };
 }
 
-function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAPSHOT> {
+type SnapshotNameConfig = z.infer<typeof SNAPSHOT_NAME_CONFIG>;
+type SolrImportSnapshotConfig = z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT> & {
+    importConfig: NonNullable<z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>["importConfig"]>;
+};
+
+function isGenerateSnapshot(config: SnapshotNameConfig): config is z.infer<typeof GENERATE_SNAPSHOT> {
     return 'createSnapshotConfig' in config;
 }
 
@@ -594,7 +600,7 @@ function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAP
  * path (so a DataSnapshot CR is created and the import step runs and patches it Completed),
  * even though it does not generate a brand-new backup.
  */
-function isSolrImportSnapshot(config: any): config is z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT> {
+function isSolrImportSnapshot(config: SnapshotNameConfig): config is SolrImportSnapshotConfig {
     return 'externallyManagedSnapshotName' in config
         && 'importConfig' in config
         && config.importConfig !== undefined;
@@ -706,6 +712,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     configChecksum: cs(
                         sourceConnectionIdentity,
                         item.config,
+                        item.importExternalSnapshotName ?? '',
                         item.repo,
                         ...enrichedDeps.map(d => d.configChecksum)
                     ),
@@ -955,7 +962,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     // Solr import-prepare. Build a create-config whose `config` carries mode:"import"
                     // plus the import options, and record the external snapshot name so the workflow
                     // uses it (instead of a generated name) as the resolved snapshot. No backup runs.
-                    const importConfig = snapshotConfig.importConfig!;
+                    const importConfig = snapshotConfig.importConfig;
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,

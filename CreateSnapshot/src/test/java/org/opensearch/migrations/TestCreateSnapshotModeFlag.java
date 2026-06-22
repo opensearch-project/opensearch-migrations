@@ -136,6 +136,7 @@ public class TestCreateSnapshotModeFlag {
         Assertions.assertEquals(SnapshotMode.IMPORT, SnapshotMode.fromString("import"));
         Assertions.assertEquals(SnapshotMode.IMPORT, SnapshotMode.fromString("IMPORT"));
         Assertions.assertEquals(SnapshotMode.IMPORT, SnapshotMode.fromString("Import"));
+        Assertions.assertEquals(SnapshotMode.IMPORT, SnapshotMode.fromString(" import "));
     }
 
     @Test

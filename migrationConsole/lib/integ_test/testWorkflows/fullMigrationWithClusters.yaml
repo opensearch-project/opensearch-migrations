@@ -297,6 +297,9 @@ spec:
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].snapshotConfig.snapshotNameConfig // {"createSnapshotConfig": {}}
+            ')
             
             # Build snapshot repo config
             SNAPSHOT_REPO=$(jq -n \
@@ -315,14 +318,14 @@ spec:
               SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
             fi
             
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" --argjson snapshotNameConfig "$SNAPSHOT_NAME_CONFIG" '
               # Add snapshotInfo with repo and snapshot definition
               . + {"snapshotInfo": {
                 "repos": {"default": $repo},
                 "snapshots": {
                   "testsnapshot": {
                     "repoName": "default",
-                    "config": {"createSnapshotConfig": {}}
+                    "config": $snapshotNameConfig
                   }
                 }
               }}

@@ -313,6 +313,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": "http://otel-collector:4317",
                                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                           },
+                                          "solrCollections": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "default": [],
+                                            "description": "Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections."
+                                          },
                                           "jvmArgs": {
                                             "type": "string",
                                             "default": "",
@@ -390,6 +398,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             ],
                                             "default": "create",
                                             "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
+                                          },
+                                          "solrCollections": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "default": [],
+                                            "description": "Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections."
                                           },
                                           "indexAllowlist": {
                                             "type": "array",
@@ -1390,6 +1406,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             ],
                             "default": "create"
                           },
+                          "solrCollections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
                           "indexAllowlist": {
                             "type": "array",
                             "items": {
@@ -1654,7 +1677,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "required": [
                         "dataSnapshotResourceName",
                         "externalSnapshotName"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -1665,7 +1689,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "required": [
                         "externalSnapshotName"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -1676,7 +1701,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "required": [
                         "dataSnapshotResourceName"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -3346,6 +3372,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "default": "http://otel-collector:4317",
                                   "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                 },
+                                "solrCollections": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "default": [],
+                                  "description": "Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections."
+                                },
                                 "jvmArgs": {
                                   "type": "string",
                                   "default": "",
@@ -3423,6 +3457,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   ],
                                   "default": "create",
                                   "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
+                                },
+                                "solrCollections": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "default": [],
+                                  "description": "Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",

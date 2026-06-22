@@ -88,6 +88,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         public SolrImportSchemaUnavailable(String message) {
             super(message);
         }
+
+        public SolrImportSchemaUnavailable(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     /**
@@ -178,6 +182,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             // never downgrade it to a warning (that would reintroduce the silent-empty-mappings bug).
             throw e;
         } catch (Exception e) {
+            if (mode == SnapshotMode.IMPORT) {
+                throw new SolrImportSchemaUnavailable(
+                    "IMPORT mode could not ensure required Solr config files in S3: " + e.getMessage(), e);
+            }
             log.warn("Config file check-and-upload failed: {} — migration may see empty mappings", e.getMessage());
         }
     }
@@ -271,6 +279,11 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             Files.writeString(targetFile, content);
             log.info("Wrote '{}' for core '{}' to {}", configFile, core, targetFile);
         } catch (IOException e) {
+            if (mode == SnapshotMode.IMPORT) {
+                throw new SolrImportSchemaUnavailable(
+                    "IMPORT mode could not write required Solr config file to " + targetFile + ": " + e.getMessage(),
+                    e);
+            }
             log.warn("Failed to write config file {}: {}", targetFile, e.getMessage());
         }
     }
