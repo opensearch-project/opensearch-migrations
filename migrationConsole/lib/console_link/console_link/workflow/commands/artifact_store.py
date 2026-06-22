@@ -95,42 +95,39 @@ def artifact_uri(prefix_or_key: str) -> str:
     return f"{uri}/{prefix_or_key}" if uri else prefix_or_key
 
 
-def list_artifacts(prefix: str) -> List[Dict[str, object]]:
-    """List artifact objects under a prefix."""
-    uri = _artifact_uri()
-    if uri:
-        scheme, bucket = _parse_bucket_uri(uri)
+def _list_artifacts_s3(bucket: str, prefix: str) -> List[Dict[str, object]]:
+    try:
+        s3 = _s3_client()
+        paginator = s3.get_paginator("list_objects_v2")
+        objects = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get("Contents", []):
+                objects.append({
+                    "key": item["Key"],
+                    "last_modified": item.get("LastModified"),
+                    "size": item.get("Size", 0),
+                })
+        return objects
+    except (BotoCoreError, ClientError) as e:
+        raise ArtifactStoreError(f"could not list s3://{bucket}/{prefix}: {e}") from e
 
-        if scheme == "s3":
-            try:
-                s3 = _s3_client()
-                paginator = s3.get_paginator("list_objects_v2")
-                objects = []
-                for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                    for item in page.get("Contents", []):
-                        objects.append({
-                            "key": item["Key"],
-                            "last_modified": item.get("LastModified"),
-                            "size": item.get("Size", 0),
-                        })
-                return objects
-            except (BotoCoreError, ClientError) as e:
-                raise ArtifactStoreError(f"could not list s3://{bucket}/{prefix}: {e}") from e
 
-        elif scheme == "gs":
-            try:
-                blobs = _gcs_client().list_blobs(bucket, prefix=prefix)
-                return [
-                    {
-                        "key": blob.name,
-                        "last_modified": blob.updated,
-                        "size": blob.size,
-                    }
-                    for blob in blobs
-                ]
-            except Exception as e:
-                raise ArtifactStoreError(f"could not list gs://{bucket}/{prefix}: {e}") from e
+def _list_artifacts_gcs(bucket: str, prefix: str) -> List[Dict[str, object]]:
+    try:
+        blobs = _gcs_client().list_blobs(bucket, prefix=prefix)
+        return [
+            {
+                "key": blob.name,
+                "last_modified": blob.updated,
+                "size": blob.size,
+            }
+            for blob in blobs
+        ]
+    except Exception as e:
+        raise ArtifactStoreError(f"could not list gs://{bucket}/{prefix}: {e}") from e
 
+
+def _list_artifacts_mounted(prefix: str) -> List[Dict[str, object]]:
     mounted_prefix = _mounted_artifact_path(prefix)
     if not mounted_prefix.exists():
         return []
@@ -145,6 +142,46 @@ def list_artifacts(prefix: str) -> List[Dict[str, object]]:
     ]
 
 
+def list_artifacts(prefix: str) -> List[Dict[str, object]]:
+    """List artifact objects under a prefix."""
+    uri = _artifact_uri()
+    if uri:
+        scheme, bucket = _parse_bucket_uri(uri)
+        if scheme == "s3":
+            return _list_artifacts_s3(bucket, prefix)
+        if scheme == "gs":
+            return _list_artifacts_gcs(bucket, prefix)
+
+    return _list_artifacts_mounted(prefix)
+
+
+def _delete_artifact_prefix_s3(bucket: str, prefix: str) -> int:
+    try:
+        s3 = _s3_client()
+        paginator = s3.get_paginator("list_objects_v2")
+        deleted = 0
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            objects = [{"Key": item["Key"]} for item in page.get("Contents", [])]
+            for start in range(0, len(objects), 1000):
+                chunk = objects[start:start + 1000]
+                if chunk:
+                    s3.delete_objects(Bucket=bucket, Delete={"Objects": chunk})
+                    deleted += len(chunk)
+        return deleted
+    except (BotoCoreError, ClientError) as e:
+        raise ArtifactStoreError(f"could not delete s3://{bucket}/{prefix}: {e}") from e
+
+
+def _delete_artifact_prefix_gcs(bucket: str, prefix: str) -> int:
+    try:
+        client = _gcs_client()
+        blobs = list(client.list_blobs(bucket, prefix=prefix))
+        client.bucket(bucket).delete_blobs(blobs)
+        return len(blobs)
+    except Exception as e:
+        raise ArtifactStoreError(f"could not delete gs://{bucket}/{prefix}: {e}") from e
+
+
 def delete_artifact_prefix(prefix: str) -> int:
     """Delete all objects under a prefix. Returns the number of deleted keys."""
     uri = _artifact_uri()
@@ -153,30 +190,9 @@ def delete_artifact_prefix(prefix: str) -> int:
         return 0
 
     scheme, bucket = _parse_bucket_uri(uri)
-
     if scheme == "s3":
-        try:
-            s3 = _s3_client()
-            paginator = s3.get_paginator("list_objects_v2")
-            deleted = 0
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                objects = [{"Key": item["Key"]} for item in page.get("Contents", [])]
-                for start in range(0, len(objects), 1000):
-                    chunk = objects[start:start + 1000]
-                    if chunk:
-                        s3.delete_objects(Bucket=bucket, Delete={"Objects": chunk})
-                        deleted += len(chunk)
-            return deleted
-        except (BotoCoreError, ClientError) as e:
-            raise ArtifactStoreError(f"could not delete s3://{bucket}/{prefix}: {e}") from e
-
-    elif scheme == "gs":
-        try:
-            client = _gcs_client()
-            blobs = list(client.list_blobs(bucket, prefix=prefix))
-            client.bucket(bucket).delete_blobs(blobs)
-            return len(blobs)
-        except Exception as e:
-            raise ArtifactStoreError(f"could not delete gs://{bucket}/{prefix}: {e}") from e
+        return _delete_artifact_prefix_s3(bucket, prefix)
+    if scheme == "gs":
+        return _delete_artifact_prefix_gcs(bucket, prefix)
 
     raise ArtifactStoreError(f"unsupported URI scheme: {uri}")

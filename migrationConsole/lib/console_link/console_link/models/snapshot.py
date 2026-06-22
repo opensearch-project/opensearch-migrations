@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available."
 SOLR_LIST_COLLECTIONS_API = "/solr/admin/collections?action=LIST&wt=json"
+SOLR_NO_SNAPSHOT_REPO_MSG = "Solr does not use snapshot repositories."
+CREATE_SNAPSHOT_COMMAND = "/root/createSnapshot/bin/CreateSnapshot"
 
 
 # Define the models first to avoid forward reference issues
@@ -215,7 +217,7 @@ class S3Snapshot(Snapshot):
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
-        base_command = "/root/createSnapshot/bin/CreateSnapshot"
+        base_command = CREATE_SNAPSHOT_COMMAND
 
         command_args = self._collect_universal_command_args()
         command_args["--repo-uri"] = self.s3_repo_uri
@@ -277,7 +279,7 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr does not use snapshot repositories."
+            return SOLR_NO_SNAPSHOT_REPO_MSG
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -289,7 +291,7 @@ class FileSystemSnapshot(Snapshot):
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
-        base_command = "/root/createSnapshot/bin/CreateSnapshot"
+        base_command = CREATE_SNAPSHOT_COMMAND
 
         command_args = self._collect_universal_command_args()
         command_args["--repo-uri"] = f"file://{self.repo_path}"
@@ -343,7 +345,7 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr does not use snapshot repositories."
+            return SOLR_NO_SNAPSHOT_REPO_MSG
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -356,7 +358,7 @@ class GcsSnapshot(Snapshot):
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
-        base_command = "/root/createSnapshot/bin/CreateSnapshot"
+        base_command = CREATE_SNAPSHOT_COMMAND
 
         command_args = self._collect_universal_command_args()
         command_args["--repo-uri"] = self.gcs_repo_uri
@@ -415,7 +417,7 @@ class GcsSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr does not use snapshot repositories."
+            return SOLR_NO_SNAPSHOT_REPO_MSG
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 

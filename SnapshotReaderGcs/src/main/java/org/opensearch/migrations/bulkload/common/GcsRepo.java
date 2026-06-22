@@ -138,7 +138,7 @@ public class GcsRepo implements SourceRepo {
 
         Blob blob = storageClient.get(BlobId.of(gcsUri.bucketName, gcsUri.key));
         if (blob == null) {
-            throw new RuntimeException("Failed to get blob from GCS: " + gcsUri.uri);
+            throw new CouldNotReadFromGcs(gcsUri.bucketName, gcsUri.key);
         }
         blob.downloadTo(localPath);
     }
@@ -236,6 +236,12 @@ public class GcsRepo implements SourceRepo {
     public static class CannotListObjects extends RfsException {
         public CannotListObjects(String bucket, String prefix, Throwable cause) {
             super("Failed to list objects in GCS bucket: " + bucket + ", prefix: " + prefix, cause);
+        }
+    }
+
+    public static class CouldNotReadFromGcs extends RfsException implements SnapshotReadFailure {
+        public CouldNotReadFromGcs(String bucket, String key) {
+            super("Failed to read object from GCS bucket: " + bucket + ", key: " + key);
         }
     }
 }
