@@ -112,6 +112,7 @@ def _iter_matching_metric_dimensions(
     pages = paginator.paginate(
         Namespace=CW_NAMESPACE,
         MetricName=metric_name,
+        Dimensions=[{"Name": name, "Value": value} for name, value in required_dimensions.items()],
         RecentlyActive="PT3H"
     )
     for page in pages:
@@ -185,7 +186,7 @@ def _any_candidate_has_recent_data(
 def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
         namespace: str = "ma",
         lookback_minutes: int = 20,
-        attempts: int = 5,
+        attempts: int = 16,
         wait_seconds: int = 60):
     aws_metadata = _load_aws_metadata(namespace)
     if not aws_metadata:
@@ -232,5 +233,6 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
 
     raise AssertionError(
         "Expected CloudWatch workflow app metrics were not found in namespace "
-        f"{CW_NAMESPACE} for qualifier {qualifier} within the last {lookback_minutes} minutes"
+        f"{CW_NAMESPACE} for qualifier {qualifier} within the last {lookback_minutes} minutes "
+        f"after polling for up to {(attempts - 1) * wait_seconds} seconds"
     )

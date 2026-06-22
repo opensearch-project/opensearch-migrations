@@ -27,6 +27,10 @@ def _metric(dimensions):
     return {"Dimensions": dimensions}
 
 
+def _dimension_filters(**values):
+    return [{"Name": name, "Value": value} for name, value in values.items()]
+
+
 class _FakePaginator:
     def __init__(self, client):
         self.client = client
@@ -85,6 +89,7 @@ def test_any_candidate_scans_later_list_metrics_pages():
         {
             "Namespace": CW_NAMESPACE,
             "MetricName": "pipelineDocsMigrated",
+            "Dimensions": _dimension_filters(qualifier="eksint-p1039", OTelLib="documentMigration"),
             "RecentlyActive": "PT3H",
         }
     ]
