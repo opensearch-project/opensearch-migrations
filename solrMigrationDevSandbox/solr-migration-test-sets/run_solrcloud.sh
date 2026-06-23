@@ -12,6 +12,12 @@
 #      expects; v6/v7 non-incremental BACKUP omits the <collection>/ level)
 #   5. (v9) also produces a single-segment (optimized) backup
 #
+# --increments=N repeats steps 3-4 N times (default 1): N index+backup cycles
+# against the same collection, each ingesting 0.006*cycle of the workload. Each
+# cycle re-runs the backup to the same name, so the retained backup reflects the
+# cumulative state after the final cycle. Mutually exclusive with --test-mode;
+# when neither is given, a single cycle ingests the full dataset.
+#
 # When --s3-upload is used, each backup is copied from ./backups/solrcloud/ into
 # ./s3_upload/solrcloud/, where v6/v7 backups are reshaped (adding the nyc_taxis/
 # collection subdirectory MA expects) before syncing to S3.
@@ -27,6 +33,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 VERSIONS="6,7,8,9"
 WORKLOAD="nyc_taxis"
+INCREMENTS=1                # number of index+backup cycles per version (--increments)
+INCREMENTS_SET=0            # 1 once --increments is explicitly passed
 TEST_MODE=0
 SKIP_INSTALL=0
 TOOLS_DIR="${SOLR_ORBIT_TOOLS_DIR:-$HOME/perf}"
@@ -66,7 +74,12 @@ Usage: ./run_solrcloud.sh [options]
 Options:
   --versions=LIST     Comma-delimited Solr versions to build (default: 6,7,8,9)
                       e.g. --versions=8,9
-  --test-mode         Pass --test-mode through to solr-orbit (smaller/faster load)
+  --increments=N      Index+backup cycles per version; each cycle ingests
+                      0.006*cycle of the workload (mutually exclusive with
+                      --test-mode). When omitted (and not --test-mode), one cycle
+                      ingests the full dataset (ingest_percentage=100).
+  --test-mode         solr-orbit's tiny/fast load; forces a single cycle
+                      (mutually exclusive with --increments)
   --skip-install      Don't clone/install solr-orbit + workloads (assumes already set up)
   --tools-dir=DIR     Where to clone the solr-orbit repos (default: $HOME/perf)
   --s3-upload         Sync the resulting backups to S3 (step 3)
@@ -89,6 +102,14 @@ EOF
 }
 
 parse_common_args "$@"
+# --test-mode and --increments are mutually exclusive: test-mode forces a single
+# cycle (INCREMENTS=1) and a tiny solr-orbit --test-mode load.
+if [[ "$TEST_MODE" -eq 1 && "$INCREMENTS_SET" -eq 1 ]]; then
+    die "--test-mode and --increments cannot be used together"
+fi
+[[ "$TEST_MODE" -eq 1 ]] && INCREMENTS=1
+[[ "$INCREMENTS" =~ ^[1-9][0-9]*$ ]] \
+    || die "--increments must be a positive integer (got: '${INCREMENTS}')"
 cd "$SCRIPT_DIR"
 
 # ---------------------------------------------------------------------------
@@ -152,7 +173,7 @@ create_collection() {
 }
 
 run_orbit() {
-    log "Running solr-orbit to load data (workload=${WORKLOAD})"
+    local increment="${1:-1}"
     local args=(
         run
         --pipeline=benchmark-only
@@ -161,7 +182,23 @@ run_orbit() {
         --workload="${WORKLOAD}"
         --include-tasks="check-cluster-health,index"
     )
-    if [[ "$TEST_MODE" -eq 1 ]]; then args+=(--test-mode); fi
+    if [[ "$TEST_MODE" -eq 1 ]]; then
+        # --test-mode: solr-orbit's own tiny/fast load (no ingest_percentage).
+        log "Running solr-orbit to load data (workload=${WORKLOAD}, test-mode)"
+        args+=(--test-mode)
+    else
+        local ingest_percentage
+        if [[ "$INCREMENTS_SET" -eq 1 ]]; then
+            # --increments given: scale the load with the cycle number, 0.0006 per
+            # increment (cycle 1 -> 0.0006, cycle 2 -> 0.0012, ...). awk handles the float.
+            ingest_percentage="$(awk -v i="$increment" 'BEGIN { printf "%g", 0.0006 * i }')"
+        else
+            # Neither --increments nor --test-mode: ingest the full dataset (100%).
+            ingest_percentage=100
+        fi
+        log "Running solr-orbit to load data (workload=${WORKLOAD}, ingest_percentage=${ingest_percentage})"
+        args+=(--workload-params="ingest_percentage:${ingest_percentage}")
+    fi
     solr-orbit "${args[@]}"
 }
 
@@ -239,8 +276,16 @@ run_version() {
 
     compose_up "$version"
     create_collection "$version"
-    run_orbit
-    backup_collection "nyc_taxis_${version}"
+
+    # Run INCREMENTS index+backup cycles against the same collection. Each cycle
+    # adds another round of indexing; backup_collection overwrites the same backup
+    # name, so the retained backup reflects the cumulative state after the last cycle.
+    local i
+    for (( i = 1; i <= INCREMENTS; i++ )); do
+        [[ "$INCREMENTS" -gt 1 ]] && log "Index + backup cycle ${i}/${INCREMENTS}"
+        run_orbit "$i"
+        backup_collection "nyc_taxis_${version}"
+    done
 
     if [[ "$version" == "9" ]]; then
         log "Optimizing to a single segment"

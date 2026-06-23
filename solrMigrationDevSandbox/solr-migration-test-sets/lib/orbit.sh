@@ -18,6 +18,7 @@ parse_common_args() {
     for arg in "$@"; do
         case "$arg" in
             --versions=*)    VERSIONS="${arg#*=}" ;;
+            --increments=*)  INCREMENTS="${arg#*=}"; INCREMENTS_SET=1 ;;
             --test-mode)     TEST_MODE=1 ;;
             --skip-install)  SKIP_INSTALL=1 ;;
             --tools-dir=*)   TOOLS_DIR="${arg#*=}" ;;
@@ -120,9 +121,8 @@ PY
 }
 
 ensure_orbit() {
-    if command -v solr-orbit >/dev/null 2>&1; then
-        return
-    fi
+    # Prefer the local venv over anything already on PATH (e.g. an older system
+    # install via asdf/pipx), so --skip-install always uses the expected version.
     local candidate="$TOOLS_DIR/solr-orbit/.venv/bin/activate"
     if [[ -f "$candidate" ]]; then
         # shellcheck disable=SC1090
