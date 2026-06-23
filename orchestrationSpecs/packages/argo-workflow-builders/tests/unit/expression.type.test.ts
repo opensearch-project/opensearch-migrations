@@ -45,6 +45,9 @@ describe("expression type contracts", () => {
         new UnquotedTypeWrapper(expr.literal(5));
         new UnquotedTypeWrapper(expr.serialize(expr.makeDict({enabled: true})), "yaml-safe-json");
 
+        // @ts-expect-error - yaml-safe-json wrappers must wrap a toJSON expression
+        new UnquotedTypeWrapper(expr.literal(5), "yaml-safe-json");
+
         // @ts-expect-error - raw unquoted string wrappers are compile-time rejected
         new UnquotedTypeWrapper(expr.concat(expr.literal("unsafe"), expr.literal("-string")));
 

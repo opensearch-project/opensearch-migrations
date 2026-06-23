@@ -14,6 +14,7 @@ import {
     selectInputsForRegister,
     Serialized,
     TemplateBuilder,
+    ToJsonExpression,
     typeToken,
     UnquotedTypeWrapper,
     WorkflowAndTemplatesScope,
@@ -98,7 +99,7 @@ function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: Bas
     >(
         "toJSON",
         [value] as const
-    );
+    ) as unknown as ToJsonExpression<Serialized<T>, "complicatedExpression">;
     return new UnquotedTypeWrapper<T>(jsonExpression, "yaml-safe-json") as never;
 }
 

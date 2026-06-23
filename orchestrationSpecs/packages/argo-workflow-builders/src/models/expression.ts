@@ -67,21 +67,22 @@ export function widenComplexity<
 export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
 type RawUnquotedValue = Exclude<NonSerializedPlainObject, string> | Serialized<Exclude<NonSerializedPlainObject, string>>;
 
-function isToJsonExpression(value: BaseExpression<PlainObject, ExpressionType>): boolean {
+declare const __toJsonExpressionBrand: unique symbol;
+export type ToJsonExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    BaseExpression<T, C> & { readonly [__toJsonExpressionBrand]: true };
+
+function isToJsonExpression(value: BaseExpression<PlainObject, ExpressionType>): value is ToJsonExpression<any, any> {
     return value.kind === "function" && (value as { functionName?: string }).functionName === "toJSON";
 }
 
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
     constructor(value: BaseExpression<T, ExpressionType> & BaseExpression<RawUnquotedValue, ExpressionType>, mode?: "raw-non-string");
-    constructor(value: BaseExpression<T | Serialized<T>, ExpressionType>, mode: "yaml-safe-json");
+    constructor(value: ToJsonExpression<T | Serialized<T>, ExpressionType>, mode: "yaml-safe-json");
     constructor(
         public readonly value: BaseExpression<PlainObject, ExpressionType>,
-        mode: UnquotedWrapperMode = "raw-non-string"
+        _mode: UnquotedWrapperMode = "raw-non-string"
     ) {
         super("strip_surrounding_quotes_in_serialized_output");
-        if (mode === "yaml-safe-json" && !isToJsonExpression(value)) {
-            throw new Error("yaml-safe-json unquoted wrappers must wrap a toJSON(...) expression");
-        }
     }
 }
 
@@ -476,6 +477,8 @@ type NormalizeSerializedForToBoundary<T extends PlainObject> =
                         T[K] extends PlainObject ? NormalizeSerializedForToBoundary<T[K]> : never
                     }
                     : T;
+type SerializedBoundaryResult<R extends PlainObject> =
+    Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>;
 
 type RejectWithParamHybridForSerialize<T extends PlainObject> =
     T extends ArgoWithParamHybridBrand ? never : T;
@@ -948,8 +951,11 @@ class ExprBuilder {
     }
 
 
-    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>) {
-        return fn<Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>,CIn,"complicatedExpression">("toJSON", data);
+    serialize<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>
+    ): ToJsonExpression<SerializedBoundaryResult<R>, "complicatedExpression"> {
+        const toJson = fn<SerializedBoundaryResult<R>,CIn,"complicatedExpression">("toJSON", data);
+        return toJson as unknown as ToJsonExpression<SerializedBoundaryResult<R>, "complicatedExpression">;
     }
 
     toString<
@@ -968,7 +974,9 @@ class ExprBuilder {
 
     recordToString<T extends AggregateType, CIn extends ExpressionType>(
         data: AllowLiteralOrExpression<T, CIn>
-    ): BaseExpression<string, "complicatedExpression"> & BaseExpression<Serialized<T>, "complicatedExpression"> {
+    ): BaseExpression<string, "complicatedExpression">
+        & BaseExpression<Serialized<T>, "complicatedExpression">
+        & ToJsonExpression<Serialized<T>, "complicatedExpression"> {
         return fn<Serialized<T>,CIn,"complicatedExpression">("toJSON", toExpression(data)) as any;
     }
 
@@ -1071,7 +1079,7 @@ class ExprBuilder {
         const jsonEscaped = fn<string, "complicatedExpression", "complicatedExpression">(
             "toJSON",
             toExpression(value)
-        );
+        ) as unknown as ToJsonExpression<string, "complicatedExpression">;
         return new UnquotedTypeWrapper<string>(jsonEscaped, "yaml-safe-json");
     }
 }
@@ -1091,7 +1099,7 @@ export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>):
 export function makeDirectTypeProxy<T extends AggregateType>(value: BaseExpression<Serialized<T>>): T;
 export function makeDirectTypeProxy<T extends Exclude<NonSerializedPlainObject, string>>(value: BaseExpression<T>): T;
 export function makeDirectTypeProxy<T extends (Exclude<NonSerializedPlainObject, string>|Serialized<Exclude<NonSerializedPlainObject, string>>)>(value: BaseExpression<T>) {
-    if (value instanceof FunctionExpression && value.functionName === "toJSON") {
+    if (isToJsonExpression(value)) {
         return expressionValueProxy(new UnquotedTypeWrapper<T>(value, "yaml-safe-json"));
     }
     return expressionValueProxy(new UnquotedTypeWrapper<T>(value));
