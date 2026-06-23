@@ -9,11 +9,13 @@
 #        (workflow configure edit --stdin)
 #   3. deletes any pre-existing target index so the migration starts clean
 #        (DELETE <target-endpoint>/<index>, run from inside the console pod)
-#   4. submits the migration workflow and polls it to completion, reporting
-#        SUCCESS or FAILURE (we poll the real Argo `migration-workflow` object
-#        and the SnapshotMigration resource rather than `workflow submit --wait`,
+#   4. submits the migration workflow and polls it to completion (we poll the real
+#        Argo `migration-workflow` object rather than `workflow submit --wait`,
 #        whose --wait path watches a run-name that doesn't match the CRD)
-#   5. reports the document count in the target index
+#   5. reports the document count in the target index, then declares SUCCESS only
+#        if all three hold: workflow phase=Succeeded, every SnapshotMigration
+#        .status.phase=Completed, and the index holds the expected docs
+#        (== --expect-docs if given, else > 0)
 #
 # Why the reset (step 1): the migration is gated on the SnapshotMigration
 # resource's state, not on whether the target index exists. If a prior run left
@@ -34,6 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CONFIG=""                       # required: path to an ma_configs/.../*.json file
 INDEX="nyc_taxis"               # target index to DELETE before / count after
+EXPECT_DOCS=""                  # optional: assert target doc count == this (else just >0)
 NAMESPACE="ma"                  # kubernetes namespace
 POD="migration-console-0"       # migration console pod name
 WORKFLOW_NAME="migration-workflow"  # Argo workflow object name (workflow submit default)
@@ -57,6 +60,9 @@ Arguments:
 
 Options:
   --index=NAME        Target index to DELETE before / count after (default: nyc_taxis)
+  --expect-docs=N     Require the target index to hold exactly N docs for success
+                      (source-vs-target check). When omitted, success only requires
+                      a non-empty index (> 0 docs).
   --namespace=NS      Kubernetes namespace (default: ma)
   --pod=NAME          Migration console pod name (default: migration-console-0)
   --workflow-name=NM  Argo workflow object name to poll (default: migration-workflow)
@@ -69,6 +75,7 @@ Options:
 
 Examples:
   ./run_ma.sh ./ma_configs/solrcloud/nyc_taxis_8_ma_config.json
+  ./run_ma.sh --expect-docs=1000 ./ma_configs/solrcloud/nyc_taxis_8_ma_config.json
   ./run_ma.sh --timeout=3600 ./ma_configs/standalone/nyc_taxis_8_ma_config.json
   ./run_ma.sh --no-submit ./ma_configs/solrcloud/nyc_taxis_9_ma_config.json
 EOF
@@ -80,6 +87,7 @@ EOF
 for arg in "$@"; do
     case "$arg" in
         --index=*)          INDEX="${arg#*=}" ;;
+        --expect-docs=*)    EXPECT_DOCS="${arg#*=}" ;;
         --namespace=*)      NAMESPACE="${arg#*=}" ;;
         --pod=*)            POD="${arg#*=}" ;;
         --workflow-name=*)  WORKFLOW_NAME="${arg#*=}" ;;
@@ -103,6 +111,10 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 [[ -n "$CONFIG" ]] || { usage; die "no config file given"; }
 [[ -f "$CONFIG" ]] || die "config file not found: $CONFIG"
 command -v kubectl >/dev/null 2>&1 || die "kubectl not found on PATH"
+if [[ -n "$EXPECT_DOCS" ]]; then
+    [[ "$EXPECT_DOCS" =~ ^[0-9]+$ ]] \
+        || die "--expect-docs must be a non-negative integer (got: '${EXPECT_DOCS}')"
+fi
 
 # ---------------------------------------------------------------------------
 # Pull the target endpoint out of the config (first targetClusters entry).
@@ -195,21 +207,30 @@ poll_workflow() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 4c — report the SnapshotMigration backfill summary (the real signal for
-# how many docs/shards actually migrated).
+# Step 4c — report the SnapshotMigration summary (the real signal for what
+# actually migrated) and set SNAPSHOT_MIGRATION_OK: 1 iff at least one
+# SnapshotMigration exists and ALL of them report .status.phase == Completed.
 # ---------------------------------------------------------------------------
+SNAPSHOT_MIGRATION_OK=0
 report_backfill() {
     local crs
     crs="$(kubectl get snapshotmigration -n "$NAMESPACE" -o name 2>/dev/null || true)"
-    [[ -n "$crs" ]] || { warn "no SnapshotMigration resources found to report"; return; }
-    local cr phase migrated total pct
+    if [[ -z "$crs" ]]; then
+        warn "no SnapshotMigration resources found to report"
+        SNAPSHOT_MIGRATION_OK=0
+        return
+    fi
+    local cr status_phase bf_phase migrated total pct all_ok=1
     for cr in $crs; do
-        phase="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.documentBackfill.phase}' 2>/dev/null || true)"
+        status_phase="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+        bf_phase="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.documentBackfill.phase}' 2>/dev/null || true)"
         migrated="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.documentBackfill.summary.shardsMigrated}' 2>/dev/null || true)"
         total="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.documentBackfill.summary.shardsTotal}' 2>/dev/null || true)"
         pct="$(kubectl get "$cr" -n "$NAMESPACE" -o jsonpath='{.status.documentBackfill.summary.percentageCompleted}' 2>/dev/null || true)"
-        log "Backfill [${cr##*/}]: phase=${phase:-?} shards=${migrated:-?}/${total:-?} (${pct:-?}%)"
+        log "SnapshotMigration [${cr##*/}]: status.phase=${status_phase:-?} backfill.phase=${bf_phase:-?} shards=${migrated:-?}/${total:-?} (${pct:-?}%)"
+        [[ "$status_phase" == "Completed" ]] || all_ok=0
     done
+    SNAPSHOT_MIGRATION_OK="$all_ok"
 }
 
 # ---------------------------------------------------------------------------
@@ -262,23 +283,40 @@ main() {
     report_backfill
     count_documents "$endpoint"
 
-    # Success requires the workflow to have Succeeded AND the index to hold docs.
-    # (A "Succeeded" workflow with 0 docs is the classic no-op symptom.)
-    local count_ok=0
-    [[ "${DOC_COUNT:-}" =~ ^[0-9]+$ ]] && (( DOC_COUNT > 0 )) && count_ok=1
+    # Success requires three independent checks to pass:
+    #   1. the Argo workflow reached phase=Succeeded
+    #   2. every SnapshotMigration resource reached .status.phase=Completed
+    #   3. the target index holds the expected docs (== --expect-docs if given,
+    #      else just > 0; a "Succeeded" workflow with 0 docs is the classic no-op)
+    local phase_ok=0 count_ok=0 count_desc
+    [[ "$WORKFLOW_PHASE" == "Succeeded" ]] && phase_ok=1
 
-    if [[ "$WORKFLOW_PHASE" == "Succeeded" && "$count_ok" -eq 1 ]]; then
-        log "✅ Migration SUCCEEDED — phase=${WORKFLOW_PHASE}, '${INDEX}' has ${DOC_COUNT} docs"
-        return 0
-    elif [[ "$WORKFLOW_PHASE" == "Succeeded" ]]; then
-        warn "⚠️  Workflow phase=Succeeded but '${INDEX}' has ${DOC_COUNT:-0} docs — likely a no-op run."
-        warn "    Re-run (reset is on by default), or inspect: kubectl get snapshotmigration -n ${NAMESPACE}"
-        return 1
+    if [[ -n "$EXPECT_DOCS" ]]; then
+        count_desc="${DOC_COUNT:-0}/${EXPECT_DOCS} expected"
+        [[ "${DOC_COUNT:-}" =~ ^[0-9]+$ ]] && (( DOC_COUNT == EXPECT_DOCS )) && count_ok=1
     else
-        warn "❌ Migration did NOT succeed (phase: ${WORKFLOW_PHASE})"
-        warn "    Inspect it with: kubectl exec -it ${POD} -n ${NAMESPACE} -- workflow status --all"
-        return 1
+        count_desc="${DOC_COUNT:-0} docs"
+        [[ "${DOC_COUNT:-}" =~ ^[0-9]+$ ]] && (( DOC_COUNT > 0 )) && count_ok=1
     fi
+
+    if [[ "$phase_ok" -eq 1 && "$SNAPSHOT_MIGRATION_OK" -eq 1 && "$count_ok" -eq 1 ]]; then
+        log "✅ Migration SUCCEEDED — workflow=Succeeded, SnapshotMigration=Completed, '${INDEX}' ${count_desc}"
+        return 0
+    fi
+
+    warn "❌ Migration did NOT fully succeed — failing check(s):"
+    [[ "$phase_ok" -eq 1 ]] \
+        && warn "    • workflow phase: ${WORKFLOW_PHASE} (ok)" \
+        || warn "    • workflow phase: ${WORKFLOW_PHASE} (expected Succeeded)"
+    [[ "$SNAPSHOT_MIGRATION_OK" -eq 1 ]] \
+        && warn "    • SnapshotMigration phase: Completed (ok)" \
+        || warn "    • SnapshotMigration phase: not all Completed (expected Completed)"
+    [[ "$count_ok" -eq 1 ]] \
+        && warn "    • doc count: ${count_desc} (ok)" \
+        || warn "    • doc count: ${count_desc}"
+    warn "    Inspect: kubectl exec -it ${POD} -n ${NAMESPACE} -- workflow status --all"
+    warn "         or: kubectl get snapshotmigration -n ${NAMESPACE}"
+    return 1
 }
 
 main
