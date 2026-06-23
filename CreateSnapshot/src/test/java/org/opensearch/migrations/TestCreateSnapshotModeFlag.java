@@ -36,7 +36,8 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * <ol>
  *   <li>SnapshotMode enum parsing and defaults</li>
  *   <li>CreateSnapshot accepts and respects the mode flag</li>
- *   <li>Config file check-and-upload runs in both CREATE and IMPORT modes</li>
+ *   <li>Synthetic config check-and-upload runs only for standalone Solr (both modes);
+ *       SolrCloud is skipped because its BACKUP carries zk_backup_0/configs itself</li>
  *   <li>Existing configs in S3 are not re-uploaded</li>
  *   <li>IMPORT mode does not perform backup operations</li>
  *   <li>Standalone Solr clusters use the unified CreateSnapshot path</li>
@@ -210,10 +211,19 @@ public class TestCreateSnapshotModeFlag {
         }
     }
 
-    // ── Config file check runs in IMPORT mode ─────────────────────────────────
+    // ── SolrCloud IMPORT mode must NOT pre-upload a synthetic config ──────────
+    //
+    // Regression guard for the crash-loop fixed alongside this test: SolrCloud's
+    // Collections API BACKUP writes its data (and zk_backup_0/configs) two levels deep
+    // under <snapshot>/<collection>/<collection>/. If IMPORT mode pre-uploaded a synthetic
+    // schema at the shallow <snapshot>/<collection>/zk_backup_0/ path, the downstream RFS
+    // reader's resolveCollectionDataPrefix would match that shallow zk_backup first and
+    // never descend to the real backup data — failing with "No Lucene segments found in
+    // backup directory" and stalling the migration. So for SolrCloud the synthetic upload
+    // must be skipped in BOTH modes; the real schema travels inside the backup itself.
 
     @Test
-    void importMode_configFilesUploadedToS3WhenMissing() throws Exception {
+    void importMode_solrCloud_doesNotPreUploadShadowingConfig() throws Exception {
         ensureBucket();
         String snapshotName = "cfg_import_test";
         String subpath = "cfg-import";
@@ -238,13 +248,15 @@ public class TestCreateSnapshotModeFlag {
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
-        creator.run();  // IMPORT mode should succeed (no backup, just config check + validation)
+        creator.run();  // IMPORT mode should succeed (no backup, just validation)
 
-        // Verify config file was uploaded in IMPORT mode too
-        String expectedKey = subpath + "/" + snapshotName + "/importcoll/zk_backup_0/configs/importcoll/managed-schema.xml";
+        // The shallow synthetic schema key must NOT exist — uploading it would shadow the
+        // real two-level SolrCloud backup layout from the downstream reader.
+        String shadowKey = subpath + "/" + snapshotName + "/importcoll/zk_backup_0/configs/importcoll/managed-schema.xml";
         try (var s3 = testS3Client()) {
-            Assertions.assertTrue(s3ObjectExists(s3, expectedKey),
-                "Config file should be uploaded to S3 in IMPORT mode at: " + expectedKey);
+            Assertions.assertFalse(s3ObjectExists(s3, shadowKey),
+                "SolrCloud IMPORT mode must NOT pre-upload a synthetic config at the shallow path "
+                    + shadowKey + " — it shadows the real backup layout and stalls the migration");
         }
 
         // Clean up
@@ -259,12 +271,9 @@ public class TestCreateSnapshotModeFlag {
         ensureBucket();
         String snapshotName = "cfg_existing_test";
         String subpath = "cfg-existing";
-        String collection = "existcoll";
-
-        // Create a collection
-        CLOUD_SOLR.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/admin/collections?action=CREATE"
-                + "&name=" + collection + "&numShards=1&replicationFactor=1&wt=json");
+        // Standalone core: SolrCloud skips the synthetic upload entirely (its BACKUP carries
+        // configs), so the "don't re-upload an existing config" logic only runs for standalone.
+        String collection = "dummy";
 
         // Pre-upload a sentinel config file to S3
         String configKey = subpath + "/" + snapshotName + "/" + collection
@@ -276,9 +285,9 @@ public class TestCreateSnapshotModeFlag {
                 RequestBody.fromString(sentinelContent, StandardCharsets.UTF_8));
         }
 
-        // Run in IMPORT mode
+        // Run in IMPORT mode against standalone Solr
         var args = new CreateSnapshot.Args();
-        args.sourceArgs.host = cloudSolrUrl();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
@@ -299,10 +308,6 @@ public class TestCreateSnapshotModeFlag {
             Assertions.assertEquals(sentinelContent, actual,
                 "Pre-existing config in S3 must NOT be re-uploaded; content should be preserved");
         }
-
-        // Clean up
-        CLOUD_SOLR.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/admin/collections?action=DELETE&name=" + collection + "&wt=json");
     }
 
     // ── IMPORT mode does NOT perform backup ───────────────────────────────────

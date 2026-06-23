@@ -117,11 +117,20 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         // ── Shared steps (both modes) ──────────────────────────────────────────
         resolveCollections(solrUrl);
 
-        // Config upload runs BEFORE backup only for standalone or IMPORT mode.
-        // SolrCloud CREATE mode: Solr's BACKUP command writes zk_backup_0/configs/
-        // from ZooKeeper itself — pre-uploading would create a partial directory
-        // structure that the downstream RFS reader finds before actual backup data lands.
-        if (!isCloud || mode != SnapshotMode.CREATE) {
+        // Synthetic config upload runs only for standalone Solr, in BOTH modes.
+        // Standalone replication backups write only Lucene index data (no ZooKeeper
+        // configs), so we must fetch the schema from the live source and place it in the
+        // synthetic zk_backup_0/configs/ structure the downstream RFS reader expects.
+        //
+        // SolrCloud is skipped in BOTH CREATE and IMPORT modes: the Collections API
+        // BACKUP writes zk_backup_0/configs/ from ZooKeeper itself, two levels deep
+        // (<snapshot>/<collection>/<collection>/zk_backup_0/...). Pre-uploading a
+        // synthetic schema at the shallow <snapshot>/<collection>/zk_backup_0/ path
+        // would shadow that real layout: SolrBackupLayout.resolveCollectionDataPrefix
+        // matches the shallow zk_backup first and never descends to the real data, so
+        // the RFS worker finds the schema but no shard_backup_metadata/index and fails
+        // with "No Lucene segments found in backup directory".
+        if (!isCloud) {
             ensureConfigFilesInS3(solrUrl);
             ensureConfigFilesOnFilesystem(solrUrl);
         }
