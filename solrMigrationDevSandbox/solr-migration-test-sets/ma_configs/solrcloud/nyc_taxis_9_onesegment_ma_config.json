@@ -3,19 +3,19 @@
     "sourceClusters": {
       "source": {
         "endpoint": "http://chorus.dev.o19s.com:8983",
-        "version": "SOLR 7.7.3",
+        "version": "SOLR 9.10.0",
         "snapshotInfo": {
           "repos": {
             "migration-repo": {
               "awsRegion": "us-east-1",
-              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/standalone"
+              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/solrcloud"
             }
           },
           "snapshots": {
-            "snapshot": {
+            "main-snapshot": {
               "repoName": "migration-repo",
               "config": {
-                "externallyManagedSnapshotName": "snapshot.nyc_taxis_7"
+                "externallyManagedSnapshotName": "nyc_taxis_9_onesegment"
               }
             }
           }
@@ -32,7 +32,7 @@
         "fromSource": "source",
         "toTarget": "target",
         "perSnapshotConfig": {
-          "snapshot": [
+          "main-snapshot": [
             {
               "metadataMigrationConfig": {},
               "documentBackfillConfig": {
