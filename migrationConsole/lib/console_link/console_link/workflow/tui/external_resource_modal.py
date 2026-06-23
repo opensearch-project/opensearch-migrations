@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Dict, List, Optional
 
@@ -6,7 +7,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Static
+from textual.widget import Widget
+from textual.widgets import Button, Input, Static, TextArea
 
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 
@@ -471,6 +473,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
     #actions { align: center middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     Input { width: 100%; }
+    TextArea { width: 100%; height: 5; }
     """
     BUTTON_NAV_SELECTOR = "#actions Button"
     BINDINGS = [
@@ -507,23 +510,12 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
                 field_id = f"field-{index}"
                 self._field_input_ids[field["name"]] = field_id
                 yield Static(escape(str(field.get("label") or field["name"])), classes="field-label")
-                yield Input(
-                    value=self._initial_value_for_field(field),
-                    id=field_id,
-                    password=_field_is_sensitive(field),
-                    placeholder=self._placeholder_for_field(field),
-                    disabled=self.mode == "update" and field["name"] == self._name_field(),
-                )
+                yield self._input_widget_for_field(field, field_id)
                 if field.get("confirm"):
                     confirm_id = f"field-{index}-confirm"
                     self._confirm_input_ids[field["name"]] = confirm_id
                     yield Static(escape(f"Confirm {field.get('label') or field['name']}"), classes="field-label")
-                    yield Input(
-                        value="",
-                        id=confirm_id,
-                        password=True,
-                        placeholder=self._placeholder_for_field(field),
-                    )
+                    yield self._input_widget_for_field(field, confirm_id, confirm=True)
             yield Static("", id="validation")
             with Horizontal(id="actions"):
                 yield ModalButton(f"{verb} (<Enter>)", id="save", variant="success")
@@ -533,8 +525,8 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         self.query_one("#documentation", Static).display = bool(self.documentation)
         first_id = next(iter(self._field_input_ids.values()), None)
         if first_id:
-            first = self.query_one(f"#{first_id}", Input)
-            if first.disabled:
+            first = self.query_one(f"#{first_id}")
+            if getattr(first, "disabled", False):
                 self.focus_next()
             else:
                 first.focus()
@@ -544,7 +536,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
 
     def action_submit(self) -> None:
         values = {
-            field["name"]: self.query_one(f"#{self._field_input_ids[field['name']]}", Input).value
+            field["name"]: self._field_value(self._field_input_ids[field["name"]])
             for field in self.fields
         }
         message = self._validation_message(values)
@@ -569,14 +561,44 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
                     continue
             if field.get("required") and not value.strip():
                 return f"{field.get('label') or name} is required."
-            if "k8s-name" in (field.get("validationIds") or []) and value and not _is_k8s_name(value):
-                return f"{field.get('label') or name} must be a valid Kubernetes DNS name."
+            validation_message = _field_validation_message(field, value)
+            if validation_message:
+                return validation_message
             confirm_id = self._confirm_input_ids.get(name)
             if confirm_id:
-                confirm_value = self.query_one(f"#{confirm_id}", Input).value
+                confirm_value = self._field_value(confirm_id)
                 if value != confirm_value:
                     return f"{field.get('label') or name} and confirmation do not match."
         return None
+
+    def _input_widget_for_field(self, field: Dict[str, Any], field_id: str, confirm: bool = False) -> Widget:
+        placeholder = self._placeholder_for_field(field)
+        disabled = self.mode == "update" and field["name"] == self._name_field()
+        value = "" if confirm else self._initial_value_for_field(field)
+        if _field_is_multiline(field):
+            return TextArea(
+                value,
+                id=field_id,
+                placeholder=placeholder,
+                disabled=disabled,
+                show_line_numbers=False,
+                tab_behavior="focus",
+            )
+        return Input(
+            value=value,
+            id=field_id,
+            password=_field_is_sensitive(field),
+            placeholder=placeholder,
+            disabled=disabled,
+        )
+
+    def _field_value(self, field_id: str) -> str:
+        widget = self.query_one(f"#{field_id}")
+        if isinstance(widget, Input):
+            return widget.value
+        if isinstance(widget, TextArea):
+            return widget.text
+        return ""
 
     def _initial_value_for_field(self, field: Dict[str, Any]) -> str:
         if self.mode == "update" and _field_is_sensitive(field):
@@ -689,5 +711,53 @@ def _field_is_sensitive(field: Dict[str, Any]) -> bool:
     return field.get("input") in {"password", "secretMultilineText"}
 
 
+def _field_is_multiline(field: Dict[str, Any]) -> bool:
+    return field.get("input") in {"multilineText", "secretMultilineText"}
+
+
+def _field_validation_message(field: Dict[str, Any], value: str) -> Optional[str]:
+    label = str(field.get("label") or field.get("name") or "Value")
+    for validation_id in field.get("validationIds") or []:
+        if validation_id == "non-empty" and not value.strip():
+            return f"{label} is required."
+        if validation_id == "k8s-name" and value and not _is_k8s_name(value):
+            return f"{label} must be a valid Kubernetes DNS name."
+        if validation_id == "configmap-key" and value and not _is_config_map_key(value):
+            return f"{label} must be a valid ConfigMap key."
+        if validation_id == "pem-certificate-chain" and value and not _looks_like_pem_certificate_chain(value):
+            return f"{label} must include at least one PEM CERTIFICATE block."
+        if validation_id == "pem-private-key" and value and not _looks_like_pem_private_key(value):
+            return f"{label} must include a PEM PRIVATE KEY block."
+        if validation_id == "log4j-properties" and value and not _looks_like_log4j_properties(value):
+            return f"{label} must include at least one Log4j2 property assignment."
+        if validation_id == "json" and value:
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as e:
+                return f"{label} must be valid JSON: {e.msg}."
+    return None
+
+
 def _is_k8s_name(value: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*", value))
+
+
+def _is_config_map_key(value: str) -> bool:
+    return bool(re.fullmatch(r"(?!\.{1,2}$)(?!\.\.)[A-Za-z0-9._-]+", value))
+
+
+def _looks_like_pem_certificate_chain(value: str) -> bool:
+    return bool(re.search(r"-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----", value.strip()))
+
+
+def _looks_like_pem_private_key(value: str) -> bool:
+    return bool(re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----", value.strip()))
+
+
+def _looks_like_log4j_properties(value: str) -> bool:
+    lines = [
+        line.strip()
+        for line in value.splitlines()
+        if line.strip() and not line.lstrip().startswith(("#", "!"))
+    ]
+    return bool(lines) and any("=" in line for line in lines)

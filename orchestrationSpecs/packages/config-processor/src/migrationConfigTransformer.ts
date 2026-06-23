@@ -446,6 +446,24 @@ function prepareProxyConfig(
     });
 }
 
+function proxyDeploymentChecksumConfig(config: Record<string, unknown>): Record<string, unknown> {
+    const result = {...config};
+    const tls = result.tls;
+    if (tls && typeof tls === "object" && !Array.isArray(tls)) {
+        const tlsRecord = tls as Record<string, unknown>;
+        const clientAuth = tlsRecord.clientAuth;
+        if (clientAuth && typeof clientAuth === "object" && !Array.isArray(clientAuth)) {
+            const clientAuthRecord = {...clientAuth as Record<string, unknown>};
+            delete clientAuthRecord.consoleClientSecretName;
+            result.tls = {
+                ...tlsRecord,
+                clientAuth: clientAuthRecord,
+            };
+        }
+    }
+    return result;
+}
+
 function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
     // Drop user-schema sentinel placeholders that are equivalent to omission so
     // AJV validates the canonical user config rather than Zod's empty-string defaults.
@@ -651,14 +669,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
         const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
 
-        const proxiesWithChecksums = proxies.map(p => ({
-            ...p,
-            kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
-            configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
-            topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
-        }));
+        const proxiesWithChecksums = proxies.map(p => {
+            const proxyChecksumConfig = proxyDeploymentChecksumConfig(p.proxyConfig as Record<string, unknown>);
+            return {
+                ...p,
+                kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
+                configChecksum: cs(proxyChecksumConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+                topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
+                checksumForSnapshot: csDep(PROXY_SCHEMA, proxyChecksumConfig, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
+                checksumForReplayer: csDep(PROXY_SCHEMA, proxyChecksumConfig, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
+            };
+        });
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));

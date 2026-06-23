@@ -816,6 +816,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   "minLength": 1,
                                   "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
                                 },
+                                "consoleClientSecretName": {
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                                },
                                 "required": {
                                   "type": "boolean",
                                   "default": true,
@@ -909,6 +913,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   "type": "string",
                                   "minLength": 1,
                                   "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                                },
+                                "consoleClientSecretName": {
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
                                 },
                                 "required": {
                                   "type": "boolean",
@@ -3128,6 +3136,76 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "format": "k8s-name",
                           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                           "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        },
+                        "x-external-ref": {
+                          "kind": "secret",
+                          "purpose": "http-basic-auth",
+                          "displayName": "HTTP Basic Auth Secret",
+                          "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                          "k8s": {
+                            "resource": "Secret",
+                            "acceptedSecretTypes": [
+                              "kubernetes.io/basic-auth",
+                              "Opaque"
+                            ],
+                            "requiredKeys": [
+                              "username",
+                              "password"
+                            ],
+                            "contentValidationIds": [
+                              "non-empty-keys"
+                            ]
+                          },
+                          "create": {
+                            "label": "HTTP Basic Auth Secret",
+                            "fields": [
+                              {
+                                "name": "secretName",
+                                "label": "Secret name",
+                                "input": "name",
+                                "required": true,
+                                "validationIds": [
+                                  "k8s-name"
+                                ]
+                              },
+                              {
+                                "name": "username",
+                                "label": "Username",
+                                "input": "text",
+                                "required": true,
+                                "validationIds": [
+                                  "non-empty"
+                                ]
+                              },
+                              {
+                                "name": "password",
+                                "label": "Password",
+                                "input": "password",
+                                "required": true,
+                                "sensitive": true,
+                                "validationIds": [
+                                  "non-empty"
+                                ],
+                                "confirm": true
+                              }
+                            ],
+                            "output": {
+                              "kind": "Secret",
+                              "type": "kubernetes.io/basic-auth",
+                              "stringData": {
+                                "username": {
+                                  "fromField": "username"
+                                },
+                                "password": {
+                                  "fromField": "password"
+                                }
+                              }
+                            },
+                            "apply": {
+                              "target": "scalarName",
+                              "nameField": "secretName"
+                            }
+                          }
                         }
                       }
                     },
@@ -3179,7 +3257,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "clientSecretName": {
                         "type": "string",
-                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        }
                       }
                     },
                     "required": [
@@ -3289,7 +3373,64 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "configMap",
+                                    "purpose": "log4j-config",
+                                    "displayName": "Log4j2 ConfigMap",
+                                    "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                                    "k8s": {
+                                      "resource": "ConfigMap",
+                                      "requiredKeys": [
+                                        "log4j2.properties"
+                                      ],
+                                      "contentValidationIds": [
+                                        "log4j-properties"
+                                      ]
+                                    },
+                                    "create": {
+                                      "label": "Log4j2 ConfigMap",
+                                      "fields": [
+                                        {
+                                          "name": "configMapName",
+                                          "label": "ConfigMap name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "properties",
+                                          "label": "log4j2.properties",
+                                          "input": "multilineText",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty",
+                                            "log4j-properties"
+                                          ]
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "ConfigMap",
+                                        "data": {
+                                          "log4j2.properties": {
+                                            "fromField": "properties"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "configMapName"
+                                      }
+                                    }
+                                  }
                                 },
                                 "otelTraceCollectorEndpoint": {
                                   "anyOf": [
@@ -3429,6 +3570,76 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "format": "k8s-name",
                           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                           "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        },
+                        "x-external-ref": {
+                          "kind": "secret",
+                          "purpose": "http-basic-auth",
+                          "displayName": "HTTP Basic Auth Secret",
+                          "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                          "k8s": {
+                            "resource": "Secret",
+                            "acceptedSecretTypes": [
+                              "kubernetes.io/basic-auth",
+                              "Opaque"
+                            ],
+                            "requiredKeys": [
+                              "username",
+                              "password"
+                            ],
+                            "contentValidationIds": [
+                              "non-empty-keys"
+                            ]
+                          },
+                          "create": {
+                            "label": "HTTP Basic Auth Secret",
+                            "fields": [
+                              {
+                                "name": "secretName",
+                                "label": "Secret name",
+                                "input": "name",
+                                "required": true,
+                                "validationIds": [
+                                  "k8s-name"
+                                ]
+                              },
+                              {
+                                "name": "username",
+                                "label": "Username",
+                                "input": "text",
+                                "required": true,
+                                "validationIds": [
+                                  "non-empty"
+                                ]
+                              },
+                              {
+                                "name": "password",
+                                "label": "Password",
+                                "input": "password",
+                                "required": true,
+                                "sensitive": true,
+                                "validationIds": [
+                                  "non-empty"
+                                ],
+                                "confirm": true
+                              }
+                            ],
+                            "output": {
+                              "kind": "Secret",
+                              "type": "kubernetes.io/basic-auth",
+                              "stringData": {
+                                "username": {
+                                  "fromField": "username"
+                                },
+                                "password": {
+                                  "fromField": "password"
+                                }
+                              }
+                            },
+                            "apply": {
+                              "target": "scalarName",
+                              "nameField": "secretName"
+                            }
+                          }
                         }
                       }
                     },
@@ -3480,7 +3691,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "clientSecretName": {
                         "type": "string",
-                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        }
                       }
                     },
                     "required": [
@@ -4662,7 +4879,64 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                    "x-ui-hint": {
+                      "kind": "text",
+                      "format": "k8s-name",
+                      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                    },
+                    "x-external-ref": {
+                      "kind": "configMap",
+                      "purpose": "log4j-config",
+                      "displayName": "Log4j2 ConfigMap",
+                      "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                      "k8s": {
+                        "resource": "ConfigMap",
+                        "requiredKeys": [
+                          "log4j2.properties"
+                        ],
+                        "contentValidationIds": [
+                          "log4j-properties"
+                        ]
+                      },
+                      "create": {
+                        "label": "Log4j2 ConfigMap",
+                        "fields": [
+                          {
+                            "name": "configMapName",
+                            "label": "ConfigMap name",
+                            "input": "name",
+                            "required": true,
+                            "validationIds": [
+                              "k8s-name"
+                            ]
+                          },
+                          {
+                            "name": "properties",
+                            "label": "log4j2.properties",
+                            "input": "multilineText",
+                            "required": true,
+                            "validationIds": [
+                              "non-empty",
+                              "log4j-properties"
+                            ]
+                          }
+                        ],
+                        "output": {
+                          "kind": "ConfigMap",
+                          "data": {
+                            "log4j2.properties": {
+                              "fromField": "properties"
+                            }
+                          }
+                        },
+                        "apply": {
+                          "target": "scalarName",
+                          "nameField": "configMapName"
+                        }
+                      }
+                    }
                   },
                   "serviceType": {
                     "type": "string",
@@ -4988,6 +5262,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "minLength": 1,
                                 "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
                               },
+                              "consoleClientSecretName": {
+                                "type": "string",
+                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                              },
                               "required": {
                                 "type": "boolean",
                                 "default": true,
@@ -5081,6 +5359,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "minLength": 1,
                                 "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                              },
+                              "consoleClientSecretName": {
+                                "type": "string",
+                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
                               },
                               "required": {
                                 "type": "boolean",
@@ -5329,7 +5611,64 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                    "x-ui-hint": {
+                      "kind": "text",
+                      "format": "k8s-name",
+                      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                    },
+                    "x-external-ref": {
+                      "kind": "configMap",
+                      "purpose": "log4j-config",
+                      "displayName": "Log4j2 ConfigMap",
+                      "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                      "k8s": {
+                        "resource": "ConfigMap",
+                        "requiredKeys": [
+                          "log4j2.properties"
+                        ],
+                        "contentValidationIds": [
+                          "log4j-properties"
+                        ]
+                      },
+                      "create": {
+                        "label": "Log4j2 ConfigMap",
+                        "fields": [
+                          {
+                            "name": "configMapName",
+                            "label": "ConfigMap name",
+                            "input": "name",
+                            "required": true,
+                            "validationIds": [
+                              "k8s-name"
+                            ]
+                          },
+                          {
+                            "name": "properties",
+                            "label": "log4j2.properties",
+                            "input": "multilineText",
+                            "required": true,
+                            "validationIds": [
+                              "non-empty",
+                              "log4j-properties"
+                            ]
+                          }
+                        ],
+                        "output": {
+                          "kind": "ConfigMap",
+                          "data": {
+                            "log4j2.properties": {
+                              "fromField": "properties"
+                            }
+                          }
+                        },
+                        "apply": {
+                          "target": "scalarName",
+                          "nameField": "configMapName"
+                        }
+                      }
+                    }
                   },
                   "podReplicas": {
                     "type": "number",

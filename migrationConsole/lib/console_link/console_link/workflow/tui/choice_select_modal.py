@@ -3,11 +3,15 @@ from typing import Any, Dict, List
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+
+
+class MouseOnlyModalButton(ModalButton, can_focus=False):
+    pass
 
 
 class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
@@ -18,8 +22,10 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
     #documentation { color: gray; margin-bottom: 1; }
     #choice-doc { color: gray; margin-top: 0; min-height: 1; }
     #buttons { height: auto; }
+    #actions { align: center middle; height: 1; margin-top: 1; }
     Button { margin: 0 0 0 0; min-width: 24; height: 1; min-height: 1; border: none; padding: 0 1; }
     #buttons Button { width: 100%; text-align: left; content-align: left middle; }
+    #actions Button { margin: 0 1 0 0; min-width: 5; width: auto; text-align: center; content-align: center middle; }
     """
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
@@ -52,8 +58,10 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
                     if choice.get("value") == self.current_value:
                         label = f"{label} (current)"
                     yield ModalButton(label, id=f"choice-{index}")
-                yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
             yield Static("", id="choice-doc")
+            with Horizontal(id="actions"):
+                yield MouseOnlyModalButton("OK (<Enter>)", id="ok", variant="primary")
+                yield MouseOnlyModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         self.query_one("#documentation", Static).display = bool(self.documentation)
@@ -95,7 +103,10 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
         self._update_choice_doc()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self._dismiss_button(event.button)
+        if event.button.id == "ok":
+            self.action_submit()
+        else:
+            self._dismiss_button(event.button)
 
     def _dismiss_button(self, button: Button) -> None:
         if button.id == "cancel":

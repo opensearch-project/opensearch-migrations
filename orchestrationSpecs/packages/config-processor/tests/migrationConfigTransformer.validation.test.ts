@@ -606,7 +606,8 @@ describe('MigrationConfigTransformer validation', () => {
                 trustedClientCaFile: {
                     configMap: "trusted-client-roots",
                     path: "ca.crt"
-                }
+                },
+                consoleClientSecretName: "console-client-cert"
             }
         };
 
@@ -614,8 +615,8 @@ describe('MigrationConfigTransformer validation', () => {
         const proxyConfig = result.proxies[0].proxyConfig;
         const mountPath = proxyConfig.fileSourceVolumeMounts![0].mountPath;
 
-        // clientAuth is retained in tls (rides into the gated CR spec.tls); the
-        // flat fields below are the Deployment/Java-process projection of it.
+        // clientAuth stays in the resolved workflow config so console-resource
+        // projection can configure migration-console proxy clients.
         expect(proxyConfig.tls).toEqual({
             mode: "existingSecret",
             secretName: "proxy-tls",
@@ -624,7 +625,8 @@ describe('MigrationConfigTransformer validation', () => {
                 trustedClientCaFile: {
                     configMap: "trusted-client-roots",
                     path: "ca.crt"
-                }
+                },
+                consoleClientSecretName: "console-client-cert",
             }
         });
         expect(proxyConfig.sslTrustCertFile).toBe(`${mountPath}/ca.crt`);

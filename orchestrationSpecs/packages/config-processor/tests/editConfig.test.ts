@@ -458,7 +458,7 @@ describe("editConfig state", () => {
         expect(listenPort?.label).toContain("listenPort: <required>");
         expect(podReplicas).toMatchObject({status: "ok", presence: "optional", expert: false, valueType: "number"});
         expect(serviceType).toMatchObject({status: "ok", presence: "optional", expert: true});
-        expect(tls).toMatchObject({presence: "optional", valueKind: "object"});
+        expect(tls).toMatchObject({presence: "optional", valueKind: "union", value: "unset"});
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(kafkaTopic?.status).toBe("ok");
         expect(kafkaTopic?.label).toContain("kafkaTopic: <unset>");
@@ -489,6 +489,167 @@ describe("editConfig state", () => {
         expect(replayGroup?.status).toBe("ok");
         expect(replayGroup?.label).not.toContain("[REQ");
         expect(addReplay?.status).toBe("ok");
+    });
+
+    it("renders proxy TLS existingSecret with an external Secret reference", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            tls: {mode: "existingSecret"},
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const tls = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
+        const secretName = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.secretName");
+
+        expect(tls).toMatchObject({valueKind: "union", value: "existingSecret", status: "required"});
+        expect(tls?.variants?.map(variant => variant.value)).toEqual([
+            "unset",
+            "existingSecret",
+            "certManager",
+            "plaintext",
+        ]);
+        expect(secretName).toMatchObject({
+            valueKind: "scalar",
+            required: true,
+            status: "required",
+            externalRef: {
+                kind: "secret",
+                purpose: "proxy-server-tls",
+                k8s: {
+                    resource: "Secret",
+                    requiredKeys: ["tls.crt", "tls.key"],
+                },
+                create: {
+                    label: "TLS Certificate Secret",
+                    apply: {target: "scalarName", nameField: "secretName"},
+                },
+            },
+        });
+    });
+
+    it("applies proxy TLS mode changes and refreshes required children", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                },
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls"],
+            value: "existingSecret",
+        });
+
+        const tls = findNode(result.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
+        const secretName = findNode(result.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.secretName");
+
+        expect(result.yaml).toContain("mode: existingSecret");
+        expect(result.yaml).toContain("secretName: \"\"");
+        expect(tls?.label).toContain("tls: < existingSecret >");
+        expect(secretName?.status).toBe("required");
+    });
+
+    it("renders proxy clientAuth with console client certificate Secret reference", () => {
+        const pem = [
+            "-----BEGIN CERTIFICATE-----",
+            "abc",
+            "-----END CERTIFICATE-----",
+        ].join("\n");
+        const state = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            tls: {
+                                mode: "existingSecret",
+                                secretName: "proxy-tls",
+                                clientAuth: {
+                                    trustedClientCaPem: pem,
+                                    consoleClientSecretName: "console-client-cert",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const clientAuth = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth");
+        const consoleSecret = findNode(
+            state.nodes,
+            "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.consoleClientSecretName"
+        );
+
+        expect(clientAuth).toMatchObject({valueKind: "union", value: "enabled", status: "ok"});
+        expect(clientAuth?.variants?.map(variant => variant.value)).toEqual(["disabled", "enabled"]);
+        expect(consoleSecret).toMatchObject({
+            valueKind: "scalar",
+            value: "console-client-cert",
+            presence: "optional",
+            externalRef: {
+                kind: "secret",
+                purpose: "proxy-console-client-tls",
+                k8s: {
+                    resource: "Secret",
+                    requiredKeys: ["tls.crt", "tls.key"],
+                },
+                create: {
+                    label: "Proxy Client Certificate Secret",
+                    apply: {target: "scalarName", nameField: "secretName"},
+                },
+            },
+        });
+    });
+
+    it("applies proxy clientAuth mode changes without dropping the TLS mode", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            tls: {mode: "existingSecret", secretName: "proxy-tls"},
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth"],
+            value: "enabled",
+        });
+
+        const tls = findNode(result.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
+        const clientAuth = findNode(result.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth");
+
+        expect(result.yaml).toContain("mode: existingSecret");
+        expect(result.yaml).toContain("clientAuth:");
+        expect(result.yaml).toContain("required: true");
+        expect(tls?.label).toContain("tls: < existingSecret >");
+        expect(clientAuth).toMatchObject({valueKind: "union", value: "enabled"});
     });
 
     it("adds/removes nested traffic resources and switches Kafka mode", () => {

@@ -14,6 +14,8 @@ import {
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     OPTIONAL_HTTP_ENDPOINT_PATTERN,
     OVERALL_MIGRATION_CONFIG,
+    PROXY_TLS_CLIENT_AUTH_CONFIG,
+    PROXY_TLS_CONFIG,
     REPLAYER_CONFIG,
     S3_CAPTURED_TRAFFIC_SOURCE,
     SOURCE_CLUSTER_CONFIG,
@@ -180,6 +182,14 @@ const SOURCE_ENDPOINT_HINT = uiHintAt(CLUSTER_CONFIG, ["endpoint"]) ?? textHint(
 const TARGET_ENDPOINT_HINT = uiHintAt(TARGET_CLUSTER_CONFIG, ["endpoint"]) ?? textHint(HTTP_ENDPOINT_PATTERN, "Use an http:// or https:// endpoint with an optional port and trailing slash.", "http-endpoint");
 const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]) ?? K8S_NAME_INPUT_HINT;
 const BASIC_SECRET_EXTERNAL_REF = externalRefAt(HTTP_AUTH_BASIC, ["basic", "secretName"]);
+const MTLS_CLIENT_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_MTLS, ["mtls", "clientSecretName"]) ?? K8S_NAME_INPUT_HINT;
+const PROXY_TLS_CERT_MANAGER_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "certManager");
+const PROXY_TLS_EXISTING_SECRET_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "existingSecret");
+const PROXY_TLS_PLAINTEXT_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "plaintext");
+const PROXY_TLS_SECRET_NAME_HINT = uiHintAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]) ?? K8S_NAME_INPUT_HINT;
+const PROXY_TLS_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]);
+const PROXY_CLIENT_AUTH_CONSOLE_SECRET_HINT = uiHintAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]) ?? K8S_NAME_INPUT_HINT;
+const PROXY_CLIENT_AUTH_CONSOLE_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]);
 const CAPTURE_SOURCE_HINT = uiHintAt(CAPTURE_CONFIG, ["source"]);
 const CAPTURE_KAFKA_HINT = uiHintAt(CAPTURE_CONFIG, ["kafka"]);
 const CAPTURE_KAFKA_TOPIC_HINT = uiHintAt(CAPTURE_CONFIG, ["kafkaTopic"]) ?? K8S_NAME_INPUT_HINT;
@@ -245,6 +255,26 @@ function externalRefAt(schema: any, path: string[]): ExternalRefHint | undefined
         }
     }
     return externalRefOf(current);
+}
+
+function discriminatedUnionOption(schema: any, discriminator: string, value: unknown): any | undefined {
+    const unwrapped = unwrapSchema(schema);
+    const options = Array.isArray(unwrapped?.options) ? unwrapped.options : [];
+    return options.find((option: any) => {
+        const shape = unwrapSchema(option)?.shape ?? {};
+        return literalValues(shape[discriminator]).has(value);
+    });
+}
+
+function literalValues(schema: any): Set<unknown> {
+    const literal = unwrapSchema(schema);
+    if (literal?.values instanceof Set) {
+        return literal.values;
+    }
+    if (Object.hasOwn(literal ?? {}, "value")) {
+        return new Set([literal.value]);
+    }
+    return new Set();
 }
 
 function textHint(pattern: string, message: string, format?: UiTextFormat): EditInputHint {
@@ -660,7 +690,17 @@ function authChildren(path: string[], variant: ReturnType<typeof authVariant>, a
     if (variant === "mtls") {
         return [
             scalarNode([...path, "mtls", "caCert"], "caCert", authConfig?.mtls?.caCert, "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate.", true),
-            scalarNode([...path, "mtls", "clientSecretName"], "clientSecretName", authConfig?.mtls?.clientSecretName, "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.", true, K8S_NAME_INPUT_HINT),
+            scalarNode(
+                [...path, "mtls", "clientSecretName"],
+                "clientSecretName",
+                authConfig?.mtls?.clientSecretName,
+                "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                true,
+                MTLS_CLIENT_SECRET_NAME_HINT,
+                "string",
+                false,
+                "required"
+            ),
         ];
     }
     return [];
@@ -689,6 +729,182 @@ function authNode(path: string[], authConfig: unknown): EditNode {
             {label: "mtls", value: "mtls", description: descriptionOf(HTTP_AUTH_MTLS)},
         ],
         children: authChildren(path, variant, authConfig),
+    });
+}
+
+function proxyTlsMode(config: unknown): "unset" | "certManager" | "existingSecret" | "plaintext" | "unknown" {
+    if (!config || typeof config !== "object") {
+        return "unset";
+    }
+    const mode = (config as Record<string, unknown>).mode;
+    if (mode === "certManager" || mode === "existingSecret" || mode === "plaintext") {
+        return mode;
+    }
+    return "unknown";
+}
+
+function proxyClientAuthMode(config: unknown): "disabled" | "enabled" | "unknown" {
+    if (config === undefined || config === null) {
+        return "disabled";
+    }
+    if (isPlainObject(config)) {
+        return "enabled";
+    }
+    return "unknown";
+}
+
+function proxyClientAuthNode(path: string[], config: unknown): EditNode {
+    const mode = proxyClientAuthMode(config);
+    const clientAuth = isPlainObject(config) ? config as Record<string, unknown> : {};
+    const diagnostics: EditDiagnostic[] = mode === "unknown"
+        ? [{severity: "error", message: "Unknown clientAuth value. Expected an object or omission.", path}]
+        : [];
+    const description = descriptionOf(PROXY_TLS_CLIENT_AUTH_CONFIG)
+        ?? "Optional mutual TLS client-authentication configuration for the capture proxy listener.";
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `clientAuth: < ${mode} >`,
+        value: mode,
+        valueKind: "union",
+        presence: "optional",
+        description,
+        descriptionShort: description,
+        status: mode === "unknown" ? "error" : "ok",
+        diagnostics,
+        variants: [
+            {
+                label: "disabled",
+                value: "disabled",
+                description: "Do not require client certificates when console commands connect to the proxy.",
+            },
+            {
+                label: "enabled",
+                value: "enabled",
+                description: "Require client certificates signed by the configured trusted client CA.",
+            },
+        ],
+        children: mode === "enabled"
+            ? [
+                genericDisplayNode(
+                    [...path, "trustedClientCaFile"],
+                    "trustedClientCaFile",
+                    clientAuth.trustedClientCaFile,
+                    "optional",
+                    false,
+                    "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy.",
+                ),
+                scalarNode(
+                    [...path, "trustedClientCaPem"],
+                    "trustedClientCaPem",
+                    clientAuth.trustedClientCaPem ?? "",
+                    "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy.",
+                    false,
+                    undefined,
+                    "string",
+                ),
+                scalarNode(
+                    [...path, "consoleClientSecretName"],
+                    "consoleClientSecretName",
+                    clientAuth.consoleClientSecretName,
+                    "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                    false,
+                    PROXY_CLIENT_AUTH_CONSOLE_SECRET_HINT,
+                    "string",
+                    false,
+                    "optional",
+                    PROXY_CLIENT_AUTH_CONSOLE_SECRET_EXTERNAL_REF,
+                ),
+                booleanNode(
+                    [...path, "required"],
+                    "required",
+                    clientAuth.required ?? true,
+                    "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.",
+                ),
+            ]
+            : mode === "unknown" ? objectChildrenFromValue(path, config) : [],
+    });
+}
+
+function proxyTlsChildren(path: string[], mode: ReturnType<typeof proxyTlsMode>, config: any): EditNode[] {
+    if (mode === "existingSecret") {
+        return [
+            scalarNode(
+                [...path, "secretName"],
+                "secretName",
+                config?.secretName,
+                "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/.",
+                true,
+                PROXY_TLS_SECRET_NAME_HINT,
+                "string",
+                false,
+                "required",
+                PROXY_TLS_SECRET_EXTERNAL_REF
+            ),
+            proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
+        ];
+    }
+    if (mode === "certManager") {
+        return [
+            genericDisplayNode([...path, "issuerRef"], "issuerRef", config?.issuerRef, "required", false, "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."),
+            genericDisplayNode([...path, "dnsNames"], "dnsNames", config?.dnsNames, "required", false, "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name."),
+            scalarNode([...path, "commonName"], "commonName", config?.commonName ?? "", "Optional common name (CN) for the TLS certificate subject."),
+            scalarNode([...path, "duration"], "duration", config?.duration ?? "2160h", "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
+            scalarNode([...path, "renewBefore"], "renewBefore", config?.renewBefore ?? "360h", "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
+            proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
+        ];
+    }
+    if (mode === "unknown") {
+        return objectChildrenFromValue(path, config);
+    }
+    return [];
+}
+
+function proxyTlsNode(
+    path: string[],
+    value: unknown,
+    description: string,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode {
+    const mode = proxyTlsMode(value);
+    const diagnostics: EditDiagnostic[] = mode === "unknown"
+        ? [{severity: "error", message: "Unknown TLS mode. Expected certManager, existingSecret, plaintext, or omitted.", path}]
+        : [];
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `tls: < ${mode === "unset" ? "default" : mode} >`,
+        value: mode,
+        valueKind: "union",
+        presence,
+        expert,
+        description,
+        status: mode === "unknown" ? "error" : "ok",
+        diagnostics,
+        variants: [
+            {
+                label: "default",
+                value: "unset",
+                description: "Use the workflow's secure-by-default proxy TLS behavior.",
+            },
+            {
+                label: "existingSecret",
+                value: "existingSecret",
+                description: descriptionOf(PROXY_TLS_EXISTING_SECRET_SCHEMA),
+            },
+            {
+                label: "certManager",
+                value: "certManager",
+                description: descriptionOf(PROXY_TLS_CERT_MANAGER_SCHEMA),
+            },
+            {
+                label: "plaintext",
+                value: "plaintext",
+                description: descriptionOf(PROXY_TLS_PLAINTEXT_SCHEMA),
+            },
+        ],
+        children: proxyTlsChildren(path, mode, value),
     });
 }
 
@@ -848,6 +1064,9 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
 
+    if (key === "tls" && schema === unwrapSchema(USER_PROXY_OPTIONS).shape?.tls) {
+        return proxyTlsNode(path, value, description, expert, presence);
+    }
     if (scalarType === "boolean") {
         return booleanNode(path, key, value === true, description, expert, presence);
     }
@@ -1275,6 +1494,44 @@ function kafkaConfigForVariant(existing: any, variant: unknown): unknown {
     throw new Error(`Unknown Kafka cluster variant: ${String(variant)}`);
 }
 
+function proxyTlsConfigForVariant(existing: any, variant: unknown): unknown {
+    if (variant === "unset" || variant === null || variant === undefined || variant === "") {
+        return undefined;
+    }
+    if (variant === "existingSecret") {
+        return {
+            mode: "existingSecret",
+            secretName: existing?.secretName ?? "",
+            ...(existing?.clientAuth ? {clientAuth: existing.clientAuth} : {}),
+        };
+    }
+    if (variant === "certManager") {
+        return {
+            mode: "certManager",
+            issuerRef: existing?.issuerRef ?? {},
+            dnsNames: existing?.dnsNames ?? [],
+            ...(existing?.commonName ? {commonName: existing.commonName} : {}),
+            ...(existing?.duration ? {duration: existing.duration} : {}),
+            ...(existing?.renewBefore ? {renewBefore: existing.renewBefore} : {}),
+            ...(existing?.clientAuth ? {clientAuth: existing.clientAuth} : {}),
+        };
+    }
+    if (variant === "plaintext") {
+        return {mode: "plaintext"};
+    }
+    throw new Error(`Unknown proxy TLS mode: ${String(variant)}`);
+}
+
+function proxyClientAuthForVariant(existing: any, variant: unknown): unknown {
+    if (variant === "disabled" || variant === null || variant === undefined || variant === "") {
+        return undefined;
+    }
+    if (variant === "enabled") {
+        return isPlainObject(existing) ? existing : {required: true};
+    }
+    throw new Error(`Unknown proxy clientAuth mode: ${String(variant)}`);
+}
+
 function setAtPath(config: any, path: string[], value: unknown): void {
     const {parent, key} = parentAtPath(config, path);
     if (key === "authConfig") {
@@ -1292,6 +1549,24 @@ function setAtPath(config: any, path: string[], value: unknown): void {
             delete parent[existingKey];
         }
         Object.assign(parent, replacement);
+        return;
+    }
+    if (key === "tls" && path[path.length - 2] === "proxyConfig") {
+        const next = proxyTlsConfigForVariant(parent[key], value);
+        if (next === undefined) {
+            delete parent[key];
+        } else {
+            parent[key] = next;
+        }
+        return;
+    }
+    if (key === "clientAuth" && path[path.length - 2] === "tls") {
+        const next = proxyClientAuthForVariant(parent[key], value);
+        if (next === undefined) {
+            delete parent[key];
+        } else {
+            parent[key] = next;
+        }
         return;
     }
     parent[key] = value;

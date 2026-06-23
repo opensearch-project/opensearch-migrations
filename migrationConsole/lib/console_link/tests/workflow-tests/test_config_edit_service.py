@@ -1,4 +1,6 @@
+import base64
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +20,14 @@ class FakeStore:
     def save_config(self, config, session_name="default"):
         self.saved.append((session_name, config.raw_yaml))
         return "saved"
+
+
+def encoded(value):
+    return base64.b64encode(value.encode("utf-8")).decode("utf-8")
+
+
+def fake_k8s_item(name, **kwargs):
+    return SimpleNamespace(metadata=SimpleNamespace(name=name), **kwargs)
 
 
 def test_load_pending_resolved_config_uses_config_processor():
@@ -60,6 +70,84 @@ def test_load_resource_config_snapshots_uses_loose_pending_projection(_list_reso
     args = runner.run_config_processor_node_script.call_args.args
     assert args[:4] == ("resolveMigrationResources", "--user-config", args[2], "--workflow-name")
     assert args[4:] == ("migration", "--validation-mode", "loose")
+
+
+def test_list_external_resources_uses_tls_content_validation_hints():
+    service = ConfigEditService(namespace="test", store=FakeStore())
+    core = MagicMock()
+    core.list_namespaced_secret.return_value = SimpleNamespace(items=[
+        fake_k8s_item(
+            "valid-tls",
+            type="kubernetes.io/tls",
+            data={
+                "tls.crt": encoded("-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n"),
+                "tls.key": encoded("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n"),
+            },
+        ),
+        fake_k8s_item(
+            "bad-tls",
+            type="kubernetes.io/tls",
+            data={
+                "tls.crt": encoded("not a cert"),
+                "tls.key": encoded("not a key"),
+            },
+        ),
+    ])
+    external_ref = {
+        "kind": "secret",
+        "k8s": {
+            "resource": "Secret",
+            "acceptedSecretTypes": ["kubernetes.io/tls", "Opaque"],
+            "requiredKeys": ["tls.crt", "tls.key"],
+            "contentValidationIds": ["tls-certificate-key-pair"],
+        },
+    }
+
+    with patch.object(service, "_core_v1", return_value=core):
+        rows = service.list_external_resources(external_ref)
+
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["valid-tls"]["status"] == "matching"
+    assert by_name["bad-tls"]["status"] == "warn"
+    assert "tls.crt is not a PEM certificate" in by_name["bad-tls"]["message"]
+    assert "tls.key is not a PEM private key" in by_name["bad-tls"]["message"]
+
+
+def test_list_external_resources_uses_config_map_content_validation_hints():
+    service = ConfigEditService(namespace="test", store=FakeStore())
+    core = MagicMock()
+    core.list_namespaced_config_map.return_value = SimpleNamespace(items=[
+        fake_k8s_item(
+            "valid-log4j",
+            data={"log4j2.properties": "status = warn\nrootLogger.level = info\n"},
+        ),
+        fake_k8s_item(
+            "bad-log4j",
+            data={"log4j2.properties": "not properties"},
+        ),
+        fake_k8s_item(
+            "missing-log4j",
+            data={"application.properties": "x = y"},
+        ),
+    ])
+    external_ref = {
+        "kind": "configMap",
+        "k8s": {
+            "resource": "ConfigMap",
+            "requiredKeys": ["log4j2.properties"],
+            "contentValidationIds": ["log4j-properties"],
+        },
+    }
+
+    with patch.object(service, "_core_v1", return_value=core):
+        rows = service.list_external_resources(external_ref)
+
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["valid-log4j"]["status"] == "matching"
+    assert by_name["bad-log4j"]["status"] == "warn"
+    assert "does not look like Log4j2 properties" in by_name["bad-log4j"]["message"]
+    assert by_name["missing-log4j"]["status"] == "warn"
+    assert by_name["missing-log4j"]["message"] == "missing log4j2.properties"
 
 
 @patch(

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -304,8 +305,17 @@ class ConfigEditService:
                 continue
             seen.add(name)
             secret_type = secret.type or "Opaque"
-            keys = sorted((secret.data or {}).keys())
+            values = {
+                key: _decode_k8s_data_value(value)
+                for key, value in (secret.data or {}).items()
+            }
+            keys = sorted(values.keys())
             status, message = _external_secret_status(secret_type, keys, required_keys, accepted_types)
+            status, message = _merge_external_status(
+                status,
+                message,
+                _external_content_validation_messages(k8s_hint, values),
+            )
             rows.append({
                 "name": name,
                 "kind": "Secret",
@@ -342,14 +352,17 @@ class ConfigEditService:
             if not name:
                 continue
             seen.add(name)
-            keys = sorted((config_map.data or {}).keys())
+            values = dict(config_map.data or {})
+            keys = sorted(values.keys())
             missing = [key for key in required_keys if key not in keys]
+            content_messages = _external_content_validation_messages(k8s_hint, values)
+            messages = ([f"missing {', '.join(missing)}"] if missing else []) + content_messages
             rows.append({
                 "name": name,
                 "kind": "ConfigMap",
                 "keys": keys,
-                "status": "warn" if missing else "matching",
-                "message": f"missing {', '.join(missing)}" if missing else "",
+                "status": "warn" if messages else "matching",
+                "message": "; ".join(messages),
                 "current": name == current_value,
             })
         if current_value and current_value not in seen:
@@ -472,6 +485,51 @@ def _external_secret_status(
     if missing:
         messages.append(f"missing {', '.join(missing)}")
     return ("warn", "; ".join(messages)) if messages else ("matching", "")
+
+
+def _merge_external_status(status: str, message: str, extra_messages: list[str]) -> tuple[str, str]:
+    messages = [message] if message else []
+    messages.extend(extra_messages)
+    return ("warn", "; ".join(messages)) if messages else (status, "")
+
+
+def _external_content_validation_messages(k8s_hint: Dict[str, Any], values: Dict[str, str]) -> list[str]:
+    validation_ids = set(k8s_hint.get("contentValidationIds") or [])
+    required_keys = [str(key) for key in k8s_hint.get("requiredKeys") or []]
+    messages: list[str] = []
+    if "non-empty-keys" in validation_ids:
+        empty = [key for key in required_keys if key in values and not str(values.get(key) or "").strip()]
+        if empty:
+            messages.append(f"empty {', '.join(empty)}")
+    if "tls-certificate-key-pair" in validation_ids:
+        certificate = values.get("tls.crt")
+        private_key = values.get("tls.key")
+        if certificate and not _looks_like_pem_certificate_chain(certificate):
+            messages.append("tls.crt is not a PEM certificate")
+        if private_key and not _looks_like_pem_private_key(private_key):
+            messages.append("tls.key is not a PEM private key")
+    if "log4j-properties" in validation_ids:
+        properties = values.get("log4j2.properties")
+        if properties is not None and not _looks_like_log4j_properties(properties):
+            messages.append("log4j2.properties does not look like Log4j2 properties")
+    return messages
+
+
+def _looks_like_pem_certificate_chain(value: str) -> bool:
+    return bool(re.search(r"-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----", value.strip()))
+
+
+def _looks_like_pem_private_key(value: str) -> bool:
+    return bool(re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----", value.strip()))
+
+
+def _looks_like_log4j_properties(value: str) -> bool:
+    lines = [
+        line.strip()
+        for line in value.splitlines()
+        if line.strip() and not line.lstrip().startswith(("#", "!"))
+    ]
+    return bool(lines) and any("=" in line for line in lines)
 
 
 def _sort_external_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:

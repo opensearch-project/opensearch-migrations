@@ -93,6 +93,14 @@ function multiResourceConfig() {
                     source: "sourceA",
                     proxyConfig: {
                         listenPort: 9201,
+                        tls: {
+                            mode: "existingSecret",
+                            secretName: "proxy-a-tls",
+                            clientAuth: {
+                                trustedClientCaPem: "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
+                                consoleClientSecretName: "proxy-a-console-client",
+                            },
+                        },
                     },
                 },
                 "proxy-b": {
@@ -145,6 +153,7 @@ describe("console resources", () => {
                         endpoint: "https://proxy-a:9201",
                         allow_insecure: true,
                         basic_auth: {k8s_secret_name: "source-a-creds"},
+                        client_cert: {k8s_secret_name: "proxy-a-console-client"},
                     }),
                 }),
                 consumers: expect.arrayContaining([

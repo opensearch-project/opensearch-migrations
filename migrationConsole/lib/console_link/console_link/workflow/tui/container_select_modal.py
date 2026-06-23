@@ -1,11 +1,15 @@
 from typing import List
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static, Button
 
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+
+
+class MouseOnlyModalButton(ModalButton, can_focus=False):
+    pass
 
 
 class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):
@@ -14,8 +18,10 @@ class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):
     #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
     #title { text-align: center; margin-bottom: 0; }
     #buttons { height: auto; }
+    #actions { align: center middle; height: 1; margin-top: 1; }
     Button { margin: 0 0 0 0; min-width: 20; height: 1; min-height: 1; border: none; padding: 0 1; }
     #buttons Button { width: 100%; text-align: left; content-align: left middle; }
+    #actions Button { margin: 0 1 0 0; min-width: 5; width: auto; text-align: center; content-align: center middle; }
     """
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
@@ -36,7 +42,9 @@ class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):
             with Vertical(id="buttons"):
                 for container in self.containers:
                     yield ModalButton(container, id=container)
-                yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
+            with Horizontal(id="actions"):
+                yield MouseOnlyModalButton("OK (<Enter>)", id="ok", variant="primary")
+                yield MouseOnlyModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
         if self.containers:
@@ -57,7 +65,9 @@ class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):
             self.dismiss(None if focused.id == "cancel" else focused.id)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel":
+        if event.button.id == "ok":
+            self.action_submit_focused()
+        elif event.button.id == "cancel":
             self.dismiss(None)
         else:
             self.dismiss(event.button.id)

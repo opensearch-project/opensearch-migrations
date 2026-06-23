@@ -311,11 +311,16 @@ class Environment:
 
         tls = proxy_options.get("tls")
         has_tls = not (isinstance(tls, dict) and tls.get("mode") == "plaintext")
-        return {
+        result = {
             "name": proxy_name,
             "endpoint": f"{'https' if has_tls else 'http'}://{proxy_name}:{listen_port}",
             "allow_insecure": has_tls,
         }
+        client_auth = tls.get("clientAuth") if isinstance(tls, dict) else None
+        console_client_secret = client_auth.get("consoleClientSecretName") if isinstance(client_auth, dict) else None
+        if console_client_secret:
+            result["client_cert"] = {"k8s_secret_name": console_client_secret}
+        return result
 
     @staticmethod
     def _resolve_strimzi_bootstrap(cluster_name: str, listener_name: str, namespace: str = 'ma') -> str:

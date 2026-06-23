@@ -204,6 +204,24 @@ function omitFields(source: Record<string, unknown>, fields: readonly string[]):
     return result;
 }
 
+function captureProxyResourceConfig(source: Record<string, unknown>): Record<string, unknown> {
+    const result = omitFields(source, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS);
+    const tls = result.tls;
+    if (tls && typeof tls === "object" && !Array.isArray(tls)) {
+        const tlsRecord = tls as Record<string, unknown>;
+        const clientAuth = tlsRecord.clientAuth;
+        if (clientAuth && typeof clientAuth === "object" && !Array.isArray(clientAuth)) {
+            const clientAuthRecord = {...clientAuth as Record<string, unknown>};
+            delete clientAuthRecord.consoleClientSecretName;
+            result.tls = {
+                ...tlsRecord,
+                clientAuth: clientAuthRecord,
+            };
+        }
+    }
+    return result;
+}
+
 function isNonEmptyTraceValue(value: unknown): boolean {
     if (value === undefined) {
         return false;
@@ -324,7 +342,7 @@ function s3CapturedTrafficParameters(loader: S3TrafficLoaderConfig): Record<stri
 
 function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
     return {
-        ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
+        ...captureProxyResourceConfig(proxy.proxyConfig as Record<string, unknown>),
         dependsOn: [`${proxy.name}-topic`],
     };
 }
@@ -1031,7 +1049,7 @@ function looseS3CapturedTrafficParameters(
 
 function looseCaptureProxyParameters(proxyName: string, proxy: Record<string, unknown>): Record<string, unknown> {
     return {
-        ...omitFields(asRecord(proxy.proxyConfig), CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
+        ...captureProxyResourceConfig(asRecord(proxy.proxyConfig)),
         dependsOn: [`${proxyName}-topic`],
     };
 }

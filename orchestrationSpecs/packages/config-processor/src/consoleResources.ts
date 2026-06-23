@@ -126,6 +126,7 @@ function clusterClientConfig(cluster: SourceConfig | TargetConfig): Record<strin
 
 function proxyClientConfig(
     sourceConfig: SourceConfig,
+    proxyConfig: ProxyConfig["proxyConfig"],
     proxyName: string,
     listenPort: number,
     hasTls: boolean,
@@ -139,6 +140,12 @@ function proxyClientConfig(
     };
     if ("sigv4" in baseConfig) {
         result[SIGV4_SIGNING_ENDPOINT_KEY] = sourceConfig.endpoint;
+    }
+    const clientAuth = proxyConfig.tls && "clientAuth" in proxyConfig.tls
+        ? proxyConfig.tls.clientAuth
+        : undefined;
+    if (clientAuth?.consoleClientSecretName) {
+        result.client_cert = {k8s_secret_name: clientAuth.consoleClientSecretName};
     }
     return result;
 }
@@ -255,6 +262,7 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
                 ],
                 clientConfig: proxyClientConfig(
                     sourceConfig,
+                    proxy.proxyConfig,
                     proxy.name,
                     proxy.proxyConfig.listenPort,
                     hasTls,

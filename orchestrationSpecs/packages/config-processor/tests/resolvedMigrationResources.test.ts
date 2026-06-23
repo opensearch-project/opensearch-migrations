@@ -105,11 +105,17 @@ describe("resolved migration resources", () => {
                     configMap: "trusted-client-roots",
                     path: "ca.crt",
                 },
+                consoleClientSecretName: "proxy-client-cert",
             },
         };
 
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
         const transformedProxyConfig = workflowConfig.proxies![0].proxyConfig;
+        expect(transformedProxyConfig.tls).toEqual(expect.objectContaining({
+            clientAuth: expect.objectContaining({
+                consoleClientSecretName: "proxy-client-cert",
+            }),
+        }));
         expect(transformedProxyConfig.fileSourceVolumes).toHaveLength(1);
         expect(transformedProxyConfig.fileSourceVolumeMounts).toHaveLength(1);
         expect(transformedProxyConfig.sslTrustCertFile).toMatch(/\/ca\.crt$/);
@@ -127,8 +133,8 @@ describe("resolved migration resources", () => {
                 paths: ["ca.crt"],
             }]),
         }));
-        // clientAuth stays inside spec.tls (gated subtree); only the flat resolved
-        // bridge fields are stripped from the custom resource.
+        // clientAuth stays inside spec.tls (gated subtree); flat resolved bridge
+        // fields and console-only client material are stripped from the custom resource.
         expect(proxyResource?.parameters).toEqual(expect.objectContaining({
             dependsOn: ["source-proxy-topic"],
             tls: {
@@ -143,6 +149,7 @@ describe("resolved migration resources", () => {
                 },
             },
         }));
+        expect((proxyResource?.parameters.tls as any).clientAuth.consoleClientSecretName).toBeUndefined();
         expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumes");
         expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumeMounts");
         expect(proxyResource?.parameters).not.toHaveProperty("sslTrustCertFile");

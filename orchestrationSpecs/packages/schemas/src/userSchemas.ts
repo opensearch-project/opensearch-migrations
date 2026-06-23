@@ -35,8 +35,8 @@ export type UiHint =
 export type ExternalRefKind = 'secret' | 'configMap' | 'image' | 'certManagerIssuer';
 export type ExternalRefPurpose =
     | 'http-basic-auth'
-    | 'http-mtls-client-cert'
     | 'proxy-server-tls'
+    | 'proxy-console-client-tls'
     | 'proxy-client-ca'
     | 'kafka-scram-password'
     | 'kafka-ca'
@@ -166,6 +166,108 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const LOGGING_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = {
+    kind: 'configMap',
+    purpose: 'log4j-config',
+    displayName: 'Log4j2 ConfigMap',
+    description: 'Kubernetes ConfigMap containing a Log4j2 properties file.',
+    k8s: {
+        resource: 'ConfigMap',
+        requiredKeys: ['log4j2.properties'],
+        contentValidationIds: ['log4j-properties'],
+    },
+    create: {
+        label: 'Log4j2 ConfigMap',
+        fields: [
+            {
+                name: 'configMapName',
+                label: 'ConfigMap name',
+                input: 'name',
+                required: true,
+                validationIds: ['k8s-name'],
+            },
+            {
+                name: 'properties',
+                label: 'log4j2.properties',
+                input: 'multilineText',
+                required: true,
+                validationIds: ['non-empty', 'log4j-properties'],
+            },
+        ],
+        output: {
+            kind: 'ConfigMap',
+            data: {
+                'log4j2.properties': {fromField: 'properties'},
+            },
+        },
+        apply: {
+            target: 'scalarName',
+            nameField: 'configMapName',
+        },
+    },
+};
+const TLS_SECRET_EXTERNAL_REF: ExternalRefHint = {
+    kind: 'secret',
+    purpose: 'proxy-server-tls',
+    displayName: 'TLS Certificate Secret',
+    description: "Kubernetes TLS Secret containing 'tls.crt' and 'tls.key' entries.",
+    k8s: {
+        resource: 'Secret',
+        acceptedSecretTypes: ['kubernetes.io/tls', 'Opaque'],
+        requiredKeys: ['tls.crt', 'tls.key'],
+        contentValidationIds: ['tls-certificate-key-pair'],
+    },
+    create: {
+        label: 'TLS Certificate Secret',
+        fields: [
+            {
+                name: 'secretName',
+                label: 'Secret name',
+                input: 'name',
+                required: true,
+                validationIds: ['k8s-name'],
+            },
+            {
+                name: 'certificate',
+                label: 'Certificate PEM',
+                input: 'multilineText',
+                required: true,
+                validationIds: ['non-empty', 'pem-certificate-chain'],
+            },
+            {
+                name: 'privateKey',
+                label: 'Private key PEM',
+                input: 'secretMultilineText',
+                required: true,
+                sensitive: true,
+                validationIds: ['non-empty', 'pem-private-key'],
+                confirm: true,
+            },
+        ],
+        output: {
+            kind: 'Secret',
+            type: 'kubernetes.io/tls',
+            stringData: {
+                'tls.crt': {fromField: 'certificate'},
+                'tls.key': {fromField: 'privateKey'},
+            },
+        },
+        apply: {
+            target: 'scalarName',
+            nameField: 'secretName',
+        },
+    },
+};
+const PROXY_CONSOLE_CLIENT_TLS_EXTERNAL_REF: ExternalRefHint = {
+    ...TLS_SECRET_EXTERNAL_REF,
+    purpose: 'proxy-console-client-tls',
+    displayName: 'Proxy Client Certificate Secret',
+    description: "Kubernetes TLS Secret containing the client certificate and private key used by console commands when connecting to the proxy.",
+    create: {
+        ...TLS_SECRET_EXTERNAL_REF.create!,
+        label: 'Proxy Client Certificate Secret',
+    },
+};
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
@@ -624,6 +726,10 @@ export const PROXY_TLS_CLIENT_AUTH_CONFIG = z.object({
         .describe("PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."),
     trustedClientCaPem: z.string().min(1).optional()
         .describe("Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."),
+    consoleClientSecretName: z.string().optional()
+        .describe("Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.")
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(PROXY_CONSOLE_CLIENT_TLS_EXTERNAL_REF),
     required: z.boolean().default(true).optional()
         .describe("When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.")
 }).strict().superRefine((value, ctx) => {
@@ -659,7 +765,9 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         mode: z.literal("existingSecret")
             .describe("Use a pre-existing Kubernetes TLS secret."),
         secretName: z.string()
-            .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."),
+            .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/.")
+            .uiHint(K8S_NAME_UI_HINT)
+            .externalRef(TLS_SECRET_EXTERNAL_REF),
         clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
     }).describe("Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."),
     z.object({
@@ -670,7 +778,9 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC)
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
         .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
             "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
@@ -753,7 +863,9 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC)
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF),
     podReplicas: z.number().default(1).optional()
         .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     useLocalStack: z.boolean().default(false).optional()
@@ -893,6 +1005,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC)
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF)
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
@@ -928,7 +1042,9 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC)
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF),
     skipEvaluateApproval: z.boolean().default(false).optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().default(false).optional()
@@ -1002,7 +1118,9 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC)
+        .uiHint(K8S_NAME_UI_HINT)
+        .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF),
     skipApproval: z.boolean().default(false).optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
@@ -1294,6 +1412,7 @@ export const HTTP_AUTH_MTLS = z.object({
             .describe("PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."),
         clientSecretName: z.string()
             .describe("Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.")
+            .uiHint(K8S_NAME_UI_HINT)
     })
 }).describe("Mutual TLS (mTLS) authentication using client certificates.");
 

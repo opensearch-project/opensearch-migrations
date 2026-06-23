@@ -40,8 +40,8 @@ type ExternalRefKind =
 
 type ExternalRefPurpose =
   | "http-basic-auth"
-  | "http-mtls-client-cert"
   | "proxy-server-tls"
+  | "proxy-console-client-tls"
   | "proxy-client-ca"
   | "kafka-scram-password"
   | "kafka-ca"
@@ -375,10 +375,13 @@ authConfig: < basic > [REQ 1]
 Missing or malformed resources propagate status upward:
 
 ```text
-targetClusters [ERR 1]
-+-- target [ERR 1]
-    +-- authConfig: < mtls > [ERR 1]
-        +-- clientSecretName: target-client-cert  [Secret missing tls.key]
+Live Traffic Migration [ERR 1]
++-- Capture [ERR 1]
+    +-- capture proxy: cap [ERR 1]
+        +-- proxyConfig [ERR 1]
+            +-- tls: < existingSecret > [ERR 1]
+                +-- clientAuth: < enabled > [ERR 1]
+                    +-- consoleClientSecretName: proxy-client-cert  [Secret missing tls.key]
 ```
 
 Pressing `Enter` on an external-reference row opens the field-specific picker or editor.
@@ -496,7 +499,7 @@ Creates type kubernetes.io/tls with tls.crt and tls.key.
 This form is reused for:
 
 - proxy server TLS (`proxyConfig.tls.mode=existingSecret.secretName`);
-- HTTP mTLS client certificates (`authConfig.mtls.clientSecretName`).
+- proxy console-client TLS (`proxyConfig.tls.clientAuth.consoleClientSecretName`), which is used by migration-console commands when they connect to an mTLS-enabled proxy and is not emitted into the deployed proxy spec.
 
 Validation:
 
@@ -654,12 +657,10 @@ The tables below are a schema coverage checklist for review. They should either 
 | --- | --- | --- | --- | --- |
 | `sourceClusters.<source>.authConfig.basic.secretName` | Secret | `kubernetes.io/basic-auth` or `Opaque`; keys `username`, `password` | List matching Secrets with both keys | HTTP Basic Auth Secret |
 | `targetClusters.<target>.authConfig.basic.secretName` | Secret | `kubernetes.io/basic-auth` or `Opaque`; keys `username`, `password` | List matching Secrets with both keys | HTTP Basic Auth Secret |
-| `sourceClusters.<source>.authConfig.mtls.clientSecretName` | Secret | `kubernetes.io/tls`; keys `tls.crt`, `tls.key` | List TLS Secrets | TLS Secret |
-| `targetClusters.<target>.authConfig.mtls.clientSecretName` | Secret | `kubernetes.io/tls`; keys `tls.crt`, `tls.key` | List TLS Secrets | TLS Secret |
 | `sourceClusters.<source>.authConfig.mtls.caCert` | Scalar | PEM CA bundle or existing container path | No K8s picker in current schema | Paste PEM or type path |
 | `targetClusters.<target>.authConfig.mtls.caCert` | Scalar | PEM CA bundle or existing container path | No K8s picker in current schema | Paste PEM or type path |
 
-`authConfig.mtls.caCert` is the rough spot in the current schema. It overloads inline PEM and path strings, so manage cannot safely list ConfigMaps or Secrets for it. A later schema cleanup should split it into `caCertPem`, `caCertFile`, or `caSecretName`.
+Cluster `authConfig.mtls` remains schema-only for now. Manage should not offer a Secret picker or create flow for `authConfig.mtls.clientSecretName` until source/target HTTP mTLS support is fully defined for the console client path. `authConfig.mtls.caCert` is also a rough spot in the current schema: it overloads inline PEM and path strings, so manage cannot safely list ConfigMaps or Secrets for it. A later schema cleanup should split it into `caCertPem`, `caCertFile`, or `caSecretName`.
 
 ### Kafka Cluster Auth
 
@@ -680,8 +681,9 @@ The schema keeps Kafka username separate from the Secret. The picker should offe
 | `traffic.proxies.<proxy>.proxyConfig.tls.clientAuth.trustedClientCaFile.configMap` + `path` | ConfigMap key | key such as `ca.crt` or `ca.pem`; PEM certificate chain | List ConfigMaps with matching PEM-like keys | Single-file ConfigMap |
 | `traffic.proxies.<proxy>.proxyConfig.tls.clientAuth.trustedClientCaFile.image` + `path` | OCI image file | pullable image; path exists; PEM certificate chain if readable | Manual image editor | None |
 | `traffic.proxies.<proxy>.proxyConfig.tls.clientAuth.trustedClientCaPem` | Scalar | inline PEM certificate chain | No K8s picker | Paste PEM |
+| `traffic.proxies.<proxy>.proxyConfig.tls.clientAuth.consoleClientSecretName` | Secret | `kubernetes.io/tls`; keys `tls.crt`, `tls.key` | List TLS Secrets | TLS Secret |
 
-`trustedClientCaFile` remains a `FILE_REF`, so it supports ConfigMaps and images, not Secrets. Private key material should stay in TLS Secrets; public trust roots can be ConfigMaps or images.
+`trustedClientCaFile` remains a `FILE_REF`, so it supports ConfigMaps and images, not Secrets. Private key material is only needed for console clients that connect to an mTLS-enabled proxy, so it stays in the `consoleClientSecretName` TLS Secret and is stripped before proxy deployment resources are produced.
 
 ### Logging Overrides
 
