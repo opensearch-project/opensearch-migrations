@@ -1838,6 +1838,73 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
 
 @pytest.mark.asyncio
+async def test_resource_view_edit_mode_left_from_external_ref_leaf_moves_to_parent_without_dialog(
+        mock_workflow_with_two_pods):
+    """Left arrow should navigate up from edit leaves without activating the parent."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.list_calls = 0
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_basic_auth_secret("source-creds"),
+            }
+
+        def list_external_resources(self, external_ref, current_value=None):
+            self.list_calls += 1
+            return []
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_basic_auth_secret(operation["value"]),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig.basic.secretName")
+            app._update_dynamic_bindings()
+
+            await pilot.press("left")
+            await pilot.pause()
+
+            assert tree.cursor_node.data["id"] == "edit:sourceClusters.legacy.authConfig"
+            assert not isinstance(app.screen, (ChoiceSelectModal, ExternalResourcePickerModal))
+            assert service.list_calls == 0
+            assert service.apply_calls == []
+
+
+@pytest.mark.asyncio
 async def test_resource_view_edit_mode_external_secret_update_hides_password(mock_workflow_with_two_pods):
     """Picker update reads non-sensitive values and preserves hidden passwords."""
 

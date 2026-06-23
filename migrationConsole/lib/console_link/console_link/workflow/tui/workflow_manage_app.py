@@ -596,10 +596,11 @@ class WorkflowTreeApp(App):
     def action_collapse_node(self) -> None:
         tree = self.tree_root_widget
         if node := tree.cursor_node:
-            if node.is_expanded:
+            if node.is_expanded and node.children:
                 node.collapse()
             elif node.parent:
-                tree.select_node(node.parent)
+                tree.move_cursor(node.parent)
+                tree.focus()
 
     def update_pod_status(self) -> None:
         status_bar = self.query_one("#pod-status", Static)
