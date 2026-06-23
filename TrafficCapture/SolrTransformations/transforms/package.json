@@ -15,9 +15,9 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.61.1",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
     "@typescript-eslint/parser": "^8.56.1",
-    "@typescript/native-preview": "7.0.0-dev.20260617.2",
+    "@typescript/native-preview": "7.0.0-dev.20260622.1",
     "@vitest/coverage-v8": "^4.1.9",
     "esbuild": "^0.28.1",
     "eslint": "^10.5.0",
@@ -27,8 +27,8 @@
     "vitest": "^4.1.9"
   },
   "optionalDependencies": {
-    "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20260617.2",
-    "@typescript/native-preview-darwin-x64": "7.0.0-dev.20260617.2",
-    "@typescript/native-preview-linux-x64": "7.0.0-dev.20260617.2"
+    "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20260622.1",
+    "@typescript/native-preview-darwin-x64": "7.0.0-dev.20260622.1",
+    "@typescript/native-preview-linux-x64": "7.0.0-dev.20260622.1"
   }
 }
