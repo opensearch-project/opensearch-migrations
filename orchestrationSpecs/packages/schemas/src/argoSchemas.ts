@@ -1,7 +1,6 @@
 import {
     CLUSTER_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
-    getZodKeys,
     HTTP_ENDPOINT_PATTERN,
     KAFKA_CLIENT_CONFIG,
     KAFKA_CLUSTER_CONFIG,
@@ -176,20 +175,20 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
         metadataTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
 );
-export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_SNAPSHOT_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-}));
+export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>)[];
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
@@ -197,16 +196,16 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         documentTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
-    podReplicas: true,
-    minPodReplicas: true,
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    useTargetClusterForWorkCoordination: true,
-    resources: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
+    "podReplicas",
+    "minPodReplicas",
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "useTargetClusterForWorkCoordination",
+    "resources",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
 
 // Fields config lowering adds on top of the user-facing proxy schema, named as a
 // single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
@@ -226,18 +225,18 @@ const PROXY_RESOLVED_FIELDS = {
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
 );
-export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
-    loggingConfigurationOverrideConfigMap: true,
-    serviceType: true,
-    internetFacing: true,
-    podReplicas: true,
-    minPodReplicas: true,
-    resources: true,
-    tls: true,
-    sslTrustCertPem: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
+    "loggingConfigurationOverrideConfigMap",
+    "serviceType",
+    "internetFacing",
+    "podReplicas",
+    "minPodReplicas",
+    "resources",
+    "tls",
+    "sslTrustCertPem",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_PROXY_OPTIONS>)[];
 
 // Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
 // schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
@@ -261,16 +260,16 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
         tupleTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    podReplicas: true,
-    minPodReplicas: true,
-    useLocalStack: true,
-    resources: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "podReplicas",
+    "minPodReplicas",
+    "useLocalStack",
+    "resources",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_REPLAYER_OPTIONS>)[];
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     // override label because when not specified, we'll use an integer,

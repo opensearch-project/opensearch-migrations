@@ -45,7 +45,7 @@ const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const REPLAYER_APP_LABEL = "replayer";
-const REPLAYER_NAME_LABEL = "migrations.opensearch.org/replayer";
+const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -249,7 +249,6 @@ function getReplayerDeploymentManifest
             ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
                 app: REPLAYER_APP_LABEL,
-                [REPLAYER_NAME_LABEL]: makeStringTypeProxy(args.name),
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -264,14 +263,13 @@ function getReplayerDeploymentManifest
             selector: {
                 matchLabels: {
                     app: REPLAYER_APP_LABEL,
-                    [REPLAYER_NAME_LABEL]: makeStringTypeProxy(args.name),
                 },
             },
             template: {
                 metadata: {
                     labels: {
                         app: REPLAYER_APP_LABEL,
-                        [REPLAYER_NAME_LABEL]: makeStringTypeProxy(args.name),
+                        [REPLAYER_SELECTOR_LABEL]: makeStringTypeProxy(args.name),
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -367,7 +365,6 @@ function makeReplayerPodDisruptionBudgetDefinition(
 ) {
     const labels = {
         app: REPLAYER_APP_LABEL,
-        [REPLAYER_NAME_LABEL]: inputs.name,
         "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
         "migrations.opensearch.org/source": inputs.sourceK8sLabel,
         "migrations.opensearch.org/target": inputs.targetK8sLabel,
@@ -377,8 +374,7 @@ function makeReplayerPodDisruptionBudgetDefinition(
         name: inputs.name,
         minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
         matchLabels: {
-            app: REPLAYER_APP_LABEL,
-            [REPLAYER_NAME_LABEL]: inputs.name,
+            [REPLAYER_SELECTOR_LABEL]: inputs.name,
         },
         labels,
         ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
