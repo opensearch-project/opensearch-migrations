@@ -332,16 +332,27 @@ class SolrS3MetadataMigrationTest {
     }
 
     /**
-     * Externally-managed-snapshot IMPORT path: SolrCloud → CreateSnapshot (CREATE) → S3, then DELETE
-     * the schema config object to simulate a snapshot produced by some external process that did NOT
-     * include the schema (e.g. a raw standalone backup, or a backup taken before this fix). Without
-     * the schema, MetadataMigration produces empty mappings. We then run CreateSnapshot --mode import
-     * (the production import-prepare step, the same one orchestration now invokes for externally-
-     * managed Solr snapshots), which re-fetches the schema from the live source and uploads it; after
-     * that, MetadataMigration must produce the correct, schema-derived mappings.
+     * Externally-managed-snapshot IMPORT path for a STANDALONE Solr source: CreateSnapshot (CREATE)
+     * → S3, then DELETE the schema config object to simulate a snapshot produced by some external
+     * process that did NOT include the schema. Without the schema, MetadataMigration produces empty
+     * mappings. We then run CreateSnapshot --mode import (the production import-prepare step, the same
+     * one orchestration now invokes for externally-managed Solr snapshots), which re-fetches the
+     * schema from the live source and uploads it; after that, MetadataMigration must produce the
+     * correct, schema-derived mappings.
      *
-     * <p>This is the end-to-end guard for the whole feature: it proves --mode import bridges
-     * "snapshot exists in S3 but lacks the Solr schema" → "metadata migration yields correct mappings".
+     * <p>This uses STANDALONE rather than SolrCloud deliberately. Standalone replication backups
+     * carry no ZooKeeper configs, so the synthetic {@code zk_backup_0/configs/<core>/managed-schema.xml}
+     * key IS the real (and only) schema location, and re-uploading it on import is both necessary and
+     * non-destructive. SolrCloud's Collections API BACKUP, by contrast, writes its schema two levels
+     * deep ({@code <snapshot>/<collection>/<collection>/zk_backup_0/...}) inside the backup itself, so
+     * import must NOT pre-upload a shallow synthetic schema there — doing so shadows the real layout
+     * from the downstream reader and stalls the migration (see
+     * TestCreateSnapshotModeFlag#importMode_solrCloud_doesNotPreUploadShadowingConfig). The cloud
+     * import path is exercised end-to-end by the solr-8x k8s-local test (TestSolr0070).
+     *
+     * <p>This is the end-to-end guard for the standalone import feature: it proves --mode import
+     * bridges "snapshot exists in S3 but lacks the Solr schema" → "metadata migration yields correct
+     * mappings".
      */
     @Test
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -349,7 +360,7 @@ class SolrS3MetadataMigrationTest {
         var version = SolrClusterContainer.SOLR_8;
         try (
             var solr = SolrClusterContainer.withS3Backup(
-                version, Mode.CLOUD, NETWORK, COLLECTION, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
+                version, Mode.STANDALONE, NETWORK, COLLECTION, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
             var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
             CompletableFuture.allOf(
@@ -359,7 +370,7 @@ class SolrS3MetadataMigrationTest {
             var targetOps = new ClusterOperations(target);
 
             var solrUrl = solr.getSolrUrl();
-            createCollectionWithSchema(solr, Mode.CLOUD);
+            createCollectionWithSchema(solr, Mode.STANDALONE);
             indexOneDoc(solr);
 
             String snapshotName = "meta_s3_snap_import";
