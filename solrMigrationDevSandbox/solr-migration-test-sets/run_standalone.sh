@@ -15,7 +15,7 @@
 # so the retained snapshot reflects the cumulative state after the final cycle.
 #
 # When --s3-upload is used, each snapshot is copied from ./backups/standalone/ into
-# ./s3_upload/standalone/, where v7/v8 snapshots are reshaped into the layout MA
+# ./s3_upload/standalone/, where v7/v8/v9 snapshots are reshaped into the layout MA
 # expects before syncing to S3.
 #
 # Step 7 (Migration Assistant) is interactive and is intentionally NOT automated here.
@@ -237,11 +237,12 @@ stop_solr() {
 }
 
 # ---------------------------------------------------------------------------
-# Snapshot reshaping (v7, v8) — operates on the copy in ${S3_UPLOAD_BASE}
+# Snapshot reshaping — operates on the copy in ${S3_UPLOAD_BASE}
 # ---------------------------------------------------------------------------
 reshape_snapshot() {
-    local version="$1"
-    local dir="${S3_UPLOAD_BASE}/snapshot.nyc_taxis_${version}"
+    local name="$1"
+    local version="$2"
+    local dir="${S3_UPLOAD_BASE}/${name}"
 
     log "Reshaping snapshot ${dir} into the MA layout"
     mkdir -p "$dir/nyc_taxis/index"
@@ -321,8 +322,8 @@ prepare_s3_upload() {
             log "Copying ${src} -> ${dst}"
             rm -rf "$dst"
             cp -a "$src" "$dst"
-            if [[ "$v" == "7" || "$v" == "8" ]]; then
-                reshape_snapshot "$v"
+            if [[ "$v" == "7" || "$v" == "8" || "$v" == "9" ]]; then
+                reshape_snapshot "$name" "$v"
             fi
         done
     done
