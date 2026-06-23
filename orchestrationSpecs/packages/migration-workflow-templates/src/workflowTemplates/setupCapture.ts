@@ -568,6 +568,9 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
+            // Auto-skip the proxy-setup approval gate when skip-approvals is configured,
+            // mirroring how the metadata/backfill gates honor the approval-config map.
+            const skipProxyApproval = expr.dig(config, ["skipApproval"], expr.literal(false));
             // Use dig for ALL tls field accesses so expressions are null-safe.
             // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
             // so expr.get() on a nil tls block crashes even when the step is guarded.
@@ -734,7 +737,8 @@ export const SetupCapture = WorkflowBuilder.create({
                 .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
                     c.register({
                         resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
-                    })
+                    }),
+                    { when: c => ({templateExp: expr.not(skipProxyApproval)}) }
                 )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({

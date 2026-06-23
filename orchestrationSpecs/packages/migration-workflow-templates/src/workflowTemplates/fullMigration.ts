@@ -834,6 +834,7 @@ export const FullMigration = WorkflowBuilder.create({
                         topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
                         checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),

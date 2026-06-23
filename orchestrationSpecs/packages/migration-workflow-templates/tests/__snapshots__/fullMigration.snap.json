@@ -2262,7 +2262,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"skipApproval\", sprig.dig('skipApproval', false, item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
