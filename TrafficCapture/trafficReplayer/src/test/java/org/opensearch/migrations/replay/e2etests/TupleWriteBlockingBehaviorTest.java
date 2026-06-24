@@ -39,6 +39,7 @@ import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
  * Verifies that the ThreadLocalTupleWriter architecture correctly:
@@ -143,11 +144,15 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     /**
      * Verifies that offset commits are blocked until tuple futures complete.
      *
-     * Strategy: use a LatchedTupleSink that holds futures indefinitely. After all tuples
-     * are accepted (proving requests flowed through), check that offsets have NOT been committed.
-     * Then release the futures and verify commits happen.
+     * <p>Coordination is signal-driven throughout: the test waits on a
+     * {@link CountDownLatch} the sink counts down each time it accepts a tuple, then waits
+     * on a {@link CompletableFuture} that completes when the replay thread exits, and
+     * polls the source's commit cursor until it advances. The only timeouts are the
+     * method-level {@code @Timeout} and the {@link #awaitCursorAdvance} safety net —
+     * no tight inner deadline depends on CI scheduling fairness.
      */
     @Test
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteBlocksOffsetCommit() throws Throwable {
         var random = new Random(1);
         var latchedSink = new LatchedTupleSink(NUM_REQUESTS);
@@ -170,40 +175,46 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
-                // Run the replayer in a background thread since it blocks
+                // Run the replayer in a background thread. The future completes when the
+                // thread exits — that's the signal we use to assert "replay is done"
+                // instead of a Thread.join with a hard-coded deadline.
+                var replayDone = new CompletableFuture<Void>();
                 var replayThread = new Thread(() -> {
                     try {
                         tr.setupRunAndWaitForReplayToFinish(
                             Duration.ofSeconds(70), Duration.ofSeconds(30),
                             blockingTrafficSource, new TimeShifter(10 * 1000),
                             tupleWriter, Duration.ofSeconds(5));
+                        replayDone.complete(null);
                     } catch (Exception e) {
                         log.atError().setCause(e).setMessage("Replay thread exception").log();
+                        replayDone.completeExceptionally(e);
                     }
                 });
                 replayThread.start();
 
-                // Wait for all tuples to be accepted by the sink (requests have been processed)
-                Assertions.assertTrue(
-                    latchedSink.allAccepted.await(30, TimeUnit.SECONDS),
-                    "Timed out waiting for all tuples to be accepted"
-                );
-                Assertions.assertEquals(0, latchedSink.allAccepted.getCount());
+                // Wait for the sink to receive every tuple. Bare await — the method-level
+                // @Timeout is the upper bound, so we don't have to pick a number here that
+                // somehow has to fit JVM warmup + Netty startup + 3 round-trips.
+                latchedSink.allAccepted.await();
 
-                // Offsets should NOT have been committed yet — futures are still held
+                // Invariant under test: while the futures are still held, the commit
+                // cursor MUST not have advanced. This is a snapshot of a state the
+                // production code is contractually blocked from changing right now —
+                // if it has advanced, that IS the bug.
                 Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
-                    "Offsets should not have been committed while tuple futures are pending");
+                    "Offsets must not be committed while tuple futures are pending");
 
-                // Now release all futures
+                // Release the futures and wait — signal-driven — for the commit to
+                // catch up. awaitCursorAdvance polls the production-set cursor; no
+                // assumption about how fast the commit thread will get scheduled.
                 latchedSink.releaseAll();
+                awaitCursorAdvance(sourceContext, 1, Duration.ofMinutes(1));
 
-                // Wait for the replayer to finish
-                replayThread.join(30_000);
+                // Wait for the replay loop to exit cleanly. Surface any exception
+                // that occurred inside the thread.
+                replayDone.get(1, TimeUnit.MINUTES);
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
-
-                // Offsets should now be committed
-                Assertions.assertEquals(1, sourceContext.nextReadCursor.get(),
-                    "Offsets should have been committed after tuple futures completed");
 
                 tr.shutdown(null).get();
             }
@@ -214,11 +225,14 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * Verifies that subsequent requests on the same connection are NOT blocked
      * while tuple writes are pending.
      *
-     * Strategy: use a LatchedTupleSink. If request processing were blocked on tuple
-     * completion, we'd never see all NUM_REQUESTS accepted. The fact that all tuples
-     * arrive (while none are completed) proves requests flow independently.
+     * <p>If tuple writes back-pressured request processing, the latch would only ever
+     * count down once (the first request). The fact that it counts all the way to zero
+     * — with every future still held by the sink — is the invariant. The bare
+     * {@code await()} relies on the method-level {@code @Timeout} as the upper bound
+     * rather than picking a number that has to absorb cold-JVM and CI-scheduling jitter.
      */
     @Test
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteDoesNotBlockNextRequest() throws Throwable {
         var random = new Random(1);
         var latchedSink = new LatchedTupleSink(NUM_REQUESTS);
@@ -241,35 +255,52 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
+                var replayDone = new CompletableFuture<Void>();
                 var replayThread = new Thread(() -> {
                     try {
                         tr.setupRunAndWaitForReplayToFinish(
                             Duration.ofSeconds(70), Duration.ofSeconds(30),
                             blockingTrafficSource, new TimeShifter(10 * 1000),
                             tupleWriter, Duration.ofSeconds(5));
+                        replayDone.complete(null);
                     } catch (Exception e) {
                         log.atError().setCause(e).setMessage("Replay thread exception").log();
+                        replayDone.completeExceptionally(e);
                     }
                 });
                 replayThread.start();
 
-                // If tuple writes blocked subsequent requests, this latch would never
-                // count down to zero — only the first request would be accepted.
-                // The fact that ALL requests arrive proves they are not blocked.
-                Assertions.assertTrue(
-                    latchedSink.allAccepted.await(30, TimeUnit.SECONDS),
-                    "All " + NUM_REQUESTS + " requests should be processed even though "
-                        + "no tuple futures have been completed — tuple writes must not block "
-                        + "subsequent request processing"
-                );
+                // The only assertion that matters: every request was accepted by the
+                // sink even though no future was completed. Bare await — the method
+                // @Timeout is the upper bound, not an arbitrary inner deadline.
+                latchedSink.allAccepted.await();
                 Assertions.assertEquals(0, latchedSink.allAccepted.getCount(),
-                    "All requests should have been accepted by the sink without waiting for future completion");
+                    "All requests should have been accepted by the sink without "
+                        + "waiting for future completion");
 
-                // Clean up
+                // Clean up — release futures, then wait for the replay to finish.
                 latchedSink.releaseAll();
-                replayThread.join(30_000);
+                replayDone.get(1, TimeUnit.MINUTES);
                 tr.shutdown(null).get();
             }
+        }
+    }
+
+    /**
+     * Polls a signal the production code controls — the commit cursor — until it
+     * reaches the expected value. Deadline-bounded so a real hang fails the test
+     * rather than tying up the CI runner.
+     */
+    private static void awaitCursorAdvance(
+            ArrayCursorTrafficSourceContext ctx, int target, Duration deadline)
+            throws InterruptedException {
+        var endNanos = System.nanoTime() + deadline.toNanos();
+        while (ctx.nextReadCursor.get() < target) {
+            if (System.nanoTime() > endNanos) {
+                Assertions.fail("Commit cursor did not advance to " + target
+                    + " within " + deadline + " (still at " + ctx.nextReadCursor.get() + ")");
+            }
+            Thread.sleep(20);
         }
     }
 

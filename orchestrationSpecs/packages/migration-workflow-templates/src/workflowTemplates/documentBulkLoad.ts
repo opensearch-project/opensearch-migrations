@@ -62,9 +62,18 @@ function makeParamsDict(
     rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
-    sessionName: BaseExpression<string>
+    sessionName: BaseExpression<string>,
+    snapshotMigrationUid: BaseExpression<string>,
+    sourceEndpoint?: BaseExpression<string>
 ) {
-    return expr.mergeDicts(
+    const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
+    const failedDocumentStreamParams = expr.makeDict({
+        // The SnapshotMigration's own UID is the failed-document-stream session id: it uniquely
+        // identifies this backfill (so multiple backfills in one workflow never share a session=
+        // prefix) and is exactly what the console reads back from the SnapshotMigration it reports on.
+        failedDocumentStreamSessionId: snapshotMigrationUid
+    });
+    const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
                 makeTargetParamDict(targetConfig),
@@ -73,31 +82,37 @@ function makeParamsDict(
             expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
-            expr.makeDict({
-                snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                sourceVersion: sourceVersion,
-                sessionName: sessionName,
-                luceneDir: "/tmp",
-                cleanLocalDirs: true
-            }),
+            expr.mergeDicts(
+                expr.makeDict({
+                    snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+                    sourceVersion: sourceVersion,
+                    sessionName: sessionName,
+                    luceneDir: "/tmp",
+                    cleanLocalDirs: true
+                }),
+                failedDocumentStreamParams
+            ),
             makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+                expr.omit(repoConfig, "s3RoleArn"),
                 true)
         )
     );
+    return base;
 }
 
 function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
+// The failed-document-stream session id is the SnapshotMigration's own UID (see makeParamsDict).
+// There is intentionally no namespace-global "current session" ConfigMap: a single ConfigMap can
+// only point at one backfill, which breaks with multiple/parallel SnapshotMigrations in a workflow.
+// The console instead reads the stream's config + UID directly from the SnapshotMigration it reports on.
+
 function getRfsDoneCronJobName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs-done"));
 }
 
-// Label keys for the RFS completion CronJob.
-// workflow-uid: per-claim label rewritten on every workflow apply for supersession checks.
-// session: stable for the SnapshotMigration lifetime and used as the drain selector.
 const RFS_MONITOR_WORKFLOW_UID_LABEL = "migrations.opensearch.org/rfs-monitor-workflow-uid";
 const RFS_MONITOR_SESSION_LABEL = "migrations.opensearch.org/rfs-monitor-session";
 
@@ -122,6 +137,7 @@ const startHistoricalBackfillInputs = {
     taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
     ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
 };
+
 
 function getRfsDeploymentManifest
 (args: {
@@ -167,10 +183,16 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
+            // Terminal RFS document failures go to a durable S3 failed document stream
+            // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
+            // pod-local FailedRequests log because no durable replacement existed; we can now keep the
+            // in-pod logger at WARN as a local-dev safety net. The S3 sink is enabled via the
+            // --failed-document-stream-s3-* args, which the config processor resolves (including the
+            // deployment default) before submission — RFS no longer reads any S3 default from the pod
+            // environment. Per-pod session id comes from the workflow.
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
-                value: "OFF"
+                value: "WARN"
             },
             {
                 name: "CONSOLE_LOG_FORMAT",
@@ -252,6 +274,53 @@ function getRfsDeploymentManifest
     } as Deployment;
 }
 
+function getCheckBackfillStatusScript(sessionName: BaseExpression<string>) {
+    const template = `
+set -e -x
+touch /tmp/status-output.txt
+touch /tmp/phase-output.txt
+
+status_json=$(console --config-file=/config/migration_services.yaml --json backfill status --deep-check)
+status=$(echo "$status_json" | jq -r '.status')
+
+failed_document_stream_loc=$(echo "$status_json" | jq -r '.failed_document_stream_location // empty')
+failed_document_stream_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
+failed_document_stream_suffix=""
+if [[ -n "$failed_document_stream_loc" ]]; then
+    if [[ -n "$failed_document_stream_count" && "$failed_document_stream_count" != "null" ]]; then
+        failed_document_stream_suffix="; failed document stream: $failed_document_stream_count failed doc(s) at $failed_document_stream_loc"
+    else
+        failed_document_stream_suffix="; failed document stream location: $failed_document_stream_loc (count unavailable)"
+    fi
+fi
+
+# Check if initializing
+if [[ "$status" == "Pending" ]]; then
+    echo "Shards are initializing$failed_document_stream_suffix" > /tmp/status-output.txt
+else
+    eval "$(echo "$status_json" | jq -r '
+      @sh "pct=\(.percentage_completed // 0)
+      eta=\(if .eta_ms == null then "unknown" else "\(.eta_ms / 1000 | floor)s" end)
+      progress=\(.shard_in_progress // 0)
+      waiting=\(.shard_waiting // 0)
+      complete=\(.shard_complete // 0)
+      total=\(.shard_total // 0)"
+    ')"
+    printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d%s\\n" \
+           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" "$failed_document_stream_suffix" > /tmp/status-output.txt
+fi
+
+# Check completion status - exit 0 only if complete, otherwise exit 1
+if [[ "$status" == "Completed" ]]; then
+  exit 0
+else
+  echo Checked > /tmp/phase-output.txt
+  exit 1
+fi
+`;
+    return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
+}
+
 const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "document-bulk-load",
     serviceAccountName: "argo-workflow-executor"
@@ -300,6 +369,70 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
             retryPolicy: "Always",
             backoff: {duration: "2", factor: "2", cap: "30"}
         })
+    )
+
+    .addTemplate("stopHistoricalBackfill", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete", flags: ["--ignore-not-found"],
+                manifest: {
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "metadata": {
+                        "name": getRfsDeploymentName(b.inputs.sessionName)
+                    }
+                }
+            })
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("waitForCompletionInternal", t => t
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshotStatusCheck")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("checkBackfillStatus", MigrationConsole, "runMigrationCommandForStatus", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    command: getCheckBackfillStatusScript(b.inputs.sessionName)
+                }))
+        )
+        .addRetryParameters({
+            limit: "200",
+            retryPolicy: "Always",
+            backoff: {duration: "5", factor: "2", cap: "300"}
+        })
+    )
+
+    .addTemplate("waitForCompletion", t => t
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("groupName_view", c => "checks")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("runStatusChecks", INTERNAL, "waitForCompletionInternal", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    configContents: b.inputs.configContents,
+                    sessionName: b.inputs.sessionName,
+                    sourceK8sLabel: b.inputs.sourceK8sLabel,
+                    targetK8sLabel: b.inputs.targetK8sLabel,
+                    snapshotK8sLabel: b.inputs.snapshotK8sLabel,
+                    fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel
+                }))
+        )
     )
 
 type StartHistoricalBackfillInputExpressions = InputParamsToExpressions<typeof startHistoricalBackfillInputs>;
@@ -357,6 +490,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
@@ -377,7 +511,9 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                             b.inputs.rfsCoordinatorConfig,
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
-                            b.inputs.sessionName)
+                            b.inputs.sessionName,
+                            b.inputs.crdUid,
+                            b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
                     crdName: b.inputs.crdName,
@@ -390,6 +526,50 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
             )
         )
     )
+
+
+    .addTemplate("runBulkLoad", t => t
+        .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+
+        .addSteps(b => b
+            .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c)
+                }))
+            .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    targetConfig: b.inputs.rfsCoordinatorConfig,
+                    backfillSession: expr.serialize(expr.makeDict({
+                        sessionName: b.inputs.sessionName,
+                        deploymentName: getRfsDeploymentName(b.inputs.sessionName)
+                    }))
+                }))
+            .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    configContents: c.steps.setupWaitForCompletion.outputs.configContents,
+                    sourceK8sLabel: b.inputs.sourceLabel,
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
+                }))
+            .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
+                c.register({sessionName: b.inputs.sessionName}))
+        )
+    )
+
 
 
     .addTemplate("doNothing", t => t

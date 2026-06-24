@@ -65,8 +65,26 @@ echo "Using snapshot nonce: $RUN_NONCE"
 
 WORKFLOW_NAME="migration-workflow"
 
+# Read deployment-provisioned S3 defaults from the Helm-managed ConfigMap and pass them to the config
+# processor as explicit input. This lets the processor resolve the effective failed-document-stream
+# bucket/region/endpoint into MigrationRun.spec.resolvedConfig before submission, instead of RFS
+# discovering them from pod env at runtime. Missing keys are omitted (kubectl failure is non-fatal so
+# non-k8s/local runs that pass --deployment-defaults themselves still work).
+DEPLOYMENT_DEFAULTS_FILE="$TEMP_DIR/deployment-defaults.json"
+DEF_BUCKET="$(kubectl get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}' 2>/dev/null || true)" \
+DEF_REGION="$(kubectl get cm migrations-default-s3-config -o jsonpath='{.data.AWS_REGION}' 2>/dev/null || true)" \
+DEF_ENDPOINT="$(kubectl get cm migrations-default-s3-config -o jsonpath='{.data.ENDPOINT_HTTP}' 2>/dev/null || true)" \
+"$NODEJS" -e '
+  const o = {};
+  if (process.env.DEF_BUCKET)   o.defaultS3Bucket   = process.env.DEF_BUCKET;
+  if (process.env.DEF_REGION)   o.defaultS3Region   = process.env.DEF_REGION;
+  if (process.env.DEF_ENDPOINT) o.defaultS3Endpoint = process.env.DEF_ENDPOINT;
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$DEPLOYMENT_DEFAULTS_FILE"
+echo "Resolved deployment S3 defaults: $(cat "$DEPLOYMENT_DEFAULTS_FILE")"
+
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" "${ALL_ARGS[@]}"
+$INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" --deployment-defaults "$DEPLOYMENT_DEFAULTS_FILE" "${ALL_ARGS[@]}"
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then

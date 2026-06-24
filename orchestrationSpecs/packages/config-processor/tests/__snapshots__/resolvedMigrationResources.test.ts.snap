@@ -130,6 +130,8 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillDocumentsSizePerBulkRequest": 10485760,
       "documentBackfillEmitDocType": "AUTO",
       "documentBackfillEnableSourcelessMigrations": false,
+      "documentBackfillFailedDocumentStreamMaxBufferBytes": 67108864,
+      "documentBackfillFailedDocumentStreamS3Prefix": "rfs-failed-document-stream/",
       "documentBackfillFileSourceVolumeMounts": [],
       "documentBackfillFileSourceVolumes": [],
       "documentBackfillIndexAllowlist": [],

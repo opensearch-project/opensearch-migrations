@@ -1,0 +1,30 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ *
+ * Modifications Copyright OpenSearch Contributors. See
+ * GitHub history for details.
+ */
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    // S3AsyncClient appears in the public s3ObjectUploader(...) factory signature, so it must be `api`
+    // for consumers (tupleSink, RFS) to compile against it.
+    api libs.aws.s3
+    implementation libs.slf4j.api
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.mockito.core
+    testRuntimeOnly libs.junit.jupiter.engine
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
