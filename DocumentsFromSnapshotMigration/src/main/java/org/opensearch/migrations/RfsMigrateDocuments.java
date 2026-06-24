@@ -165,6 +165,13 @@ public class RfsMigrateDocuments {
         public String snapshotLocalDir = null;
 
         @Parameter(required = false,
+            names = { "--solr-collection-name", "--solrCollectionName" },
+            description = ("Target index name for a bare Solr backup. Optional for SolrCloud (the collection "
+                + "name is read from backup.properties); recommended for standalone backups, whose core name is "
+                + "not recorded in the backup. Ignored for wrapped multi-collection layouts."))
+        public String solrCollectionName = null;
+
+        @Parameter(required = false,
             names = { "--s3-local-dir", "--s3LocalDir" },
             description = ("The absolute path to the directory on local disk to download S3 files to.  " +
                 "If you supply this, you must also supply --s3-repo-uri and --s3-region.  " +
@@ -1161,8 +1168,17 @@ public class RfsMigrateDocuments {
             }
 
             var schemas = new LinkedHashMap<String, JsonNode>();
+            final Map<String, String> dataDirByCollection = new ConcurrentHashMap<>();
             final List<String> collections;
-            if (s3Repo != null) {
+            var bare = (s3Repo != null)
+                ? detectBareSolrLayoutInS3(s3Repo, arguments.solrCollectionName)
+                : SolrBackupLayout.classifyBareBackup(backupDir, arguments.solrCollectionName);
+            if (bare != null && bare.collectionName() != null) {
+                log.atInfo().setMessage("Detected bare {} Solr backup; single collection '{}' at '{}'")
+                    .addArgument(bare.mode()).addArgument(bare.collectionName()).addArgument(bare.dataPath()).log();
+                collections = new ArrayList<>(List.of(bare.collectionName()));
+                dataDirByCollection.put(bare.collectionName(), bare.dataPath());
+            } else if (s3Repo != null) {
                 collections = new ArrayList<>(s3Repo.listTopLevelDirectories());
             } else {
                 collections = new ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
@@ -1176,71 +1192,104 @@ public class RfsMigrateDocuments {
 
             final S3Repo finalS3Repo = s3Repo;
             final Path finalBackupDir = backupDir;
-            final Map<String, String> dataPrefixByCollection = new ConcurrentHashMap<>();
+            final var bareMode = bare != null ? bare.mode() : null;
             Consumer<String> collectionPreparer = collection -> {
-                if (finalS3Repo != null) {
-                    var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
-                        collection, finalS3Repo::listSubDirectories);
-                    if (resolved != null) {
-                        dataPrefixByCollection.put(collection, resolved.dataPrefix());
-                        var dataRoot = resolved.joinWith(collection);
-                        finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
+                if (finalS3Repo != null && bareMode == SolrBackupLayout.SolrBackupMode.STANDALONE) {
+                    // Flat standalone index: download the whole data dir so shard discovery and
+                    // reading both work without a separate per-shard download.
+                    finalS3Repo.downloadPrefix(dataDirByCollection.get(collection));
+                } else if (finalS3Repo != null) {
+                    String dataDir = null;
+                    String zkBackupName = null;
+                    if (dataDirByCollection.containsKey(collection)) {
+                        dataDir = dataDirByCollection.get(collection);
+                        zkBackupName = SolrBackupLayout.findLatestZkBackupName(finalS3Repo.listSubDirectories(dataDir));
+                    } else {
+                        var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
+                            collection, finalS3Repo::listSubDirectories);
+                        if (resolved == null) {
+                            log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+                        } else {
+                            dataDir = resolved.joinWith(collection);
+                            zkBackupName = resolved.latestZkBackupName();
+                            dataDirByCollection.put(collection, dataDir);
+                        }
+                    }
+                    if (dataDir != null) {
+                        if (zkBackupName != null) {
+                            finalS3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkBackupName));
+                        }
                         log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                        finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
+                        finalS3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, "shard_backup_metadata"));
                         // Solr 6: create local stub dirs for snapshot.shardN/ so shard
                         // discovery can count them before index files are downloaded.
-                        finalS3Repo.listSubDirectories(dataRoot).stream()
+                        var dataDirFinal = dataDir;
+                        finalS3Repo.listSubDirectories(dataDir).stream()
                             .filter(name -> name.startsWith("snapshot."))
                             .forEach(snapshotDirName -> {
                                 try {
-                                    Files.createDirectories(finalBackupDir.resolve(dataRoot).resolve(snapshotDirName));
+                                    Files.createDirectories(finalBackupDir.resolve(dataDirFinal).resolve(snapshotDirName));
                                 } catch (IOException e) {
-                                    log.warn("Failed to create snapshot stub dir {}/{}", dataRoot, snapshotDirName, e);
+                                    log.warn("Failed to create snapshot stub dir {}/{}", dataDirFinal, snapshotDirName, e);
                                 }
                             });
-                    } else {
-                        log.warn("No zk_backup directories found for collection '{}' in S3", collection);
                     }
                 }
-                var collectionRoot = finalBackupDir.resolve(collection);
-                var dataPrefix = dataPrefixByCollection.getOrDefault(collection, "");
-                var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
+                var dataDir = finalBackupDir.resolve(dataDirByCollection.getOrDefault(collection, collection));
                 schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
             };
             // Only S3 needs lazy per-shard downloads; filesystem backups are already local
-            Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
-                var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
-                var collectionDataPrefix = dataPrefix.isEmpty()
-                    ? partition.collection()
-                    : partition.collection() + "/" + dataPrefix;
+            Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null
+                    && bareMode != SolrBackupLayout.SolrBackupMode.STANDALONE) ? partition -> {
+                var dataDir = dataDirByCollection.getOrDefault(partition.collection(), partition.collection());
                 var mapping = partition.fileNameMapping();
                 if (mapping != null) {
                     log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
                         .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
                     for (var uuid : mapping.values()) {
-                        finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
+                        finalS3Repo.downloadFile(SolrBackupLayout.joinPrefix(dataDir, "index/" + uuid));
                     }
                 } else {
-                    // Non-UUID layout: Solr 6 uses snapshot.shardN/ dirs at the collection
-                    // root; Solr 8 non-incremental uses a single index/ dir.
                     log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
                         .addArgument(partition.collection()).addArgument(partition.shard()).log();
                     var shardPath = partition.shard().startsWith("snapshot.")
-                        ? collectionDataPrefix + "/" + partition.shard()
-                        : collectionDataPrefix + "/index";
+                        ? SolrBackupLayout.joinPrefix(dataDir, partition.shard())
+                        : SolrBackupLayout.joinPrefix(dataDir, "index");
                     finalS3Repo.downloadPrefix(shardPath);
                 }
             } : null;
 
             var solrMajor = arguments.sourceVersion.getMajor();
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, dataDirByCollection);
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
                 useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context);
         };
+    }
+
+    private static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
+        var bare = SolrBackupLayout.detectBareLayoutFromListing(s3Repo.listTopLevelDirectories());
+        if (bare == null) {
+            return null;
+        }
+        if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
+            var name = nameOverride;
+            if (name == null) {
+                try {
+                    s3Repo.downloadFile("backup.properties");
+                    name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
+                } catch (RuntimeException e) {
+                    log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
+                }
+            }
+            return new SolrBackupLayout.BareBackupLayout(SolrBackupLayout.SolrBackupMode.CLOUD, name, bare.dataPath());
+        }
+        return nameOverride != null
+            ? new SolrBackupLayout.BareBackupLayout(bare.mode(), nameOverride, bare.dataPath())
+            : bare;
     }
 
 
