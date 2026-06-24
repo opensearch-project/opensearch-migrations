@@ -928,6 +928,24 @@
           [
             {
               "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{='confirmtrafficrouting.'+inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "waitForTrafficRoutingApproval"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },

@@ -323,6 +323,24 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
+            .addStep("waitForTrafficRoutingApproval", ResourceManagement, "waitForUserApproval", c =>
+                c.register({
+                    resourceName: expr.concat(
+                        expr.literal("confirmtrafficrouting."),
+                        b.inputs.resourceName
+                    ),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.not(expr.and(
+                        expr.equals(c.readSnapshotPhase.outputs.phase, "Completed"),
+                        expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                    )),
+                    expr.not(expr.and(
+                        expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
+                        expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                    ))
+                )})}
+            )
             .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

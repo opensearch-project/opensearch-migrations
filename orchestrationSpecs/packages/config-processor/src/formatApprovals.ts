@@ -47,6 +47,7 @@ export function scrapeApprovalsForSnapshotConfigs(
                             ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipEvaluateApproval) ? { evaluateMetadata: true } : {}),
                             ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipMigrateApproval) ? { migrateMetadata: true } : {}),
                             ...( (skipAll || migrationCfg.documentBackfillConfig?.skipApproval) ? { documentBackfill: true } : {}),
+                            ...( skipAll ? { confirmTrafficRouting: true } : {}),
                         }])
                 )
             ])
