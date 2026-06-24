@@ -1,0 +1,36 @@
+baseConfig: ../fixtures/basicSnapshotMigration.local.wf.yaml
+phaseCompletionTimeoutSeconds: 900
+
+# Small impossible-mutation spec for framework bring-up. SnapshotMigration
+# is a terminal resource wrapped by the workflow's ApprovalGate retry
+# loop, so changing its document-backfill settings after baseline should
+# block rather than rerun in place.
+matrix:
+  subject: snapshotmigration:source-target-snap1-migration-0
+  select:
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: leave-blocked
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: approve-only
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: reset-only
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: reset-then-approve
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
