@@ -364,6 +364,39 @@
         },
         {
             "height": 6,
+            "width": 12,
+            "y": 48,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "lag_avg_ms_ts/1000", "label": "Expression3", "id": "e3_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "lag_avg_ms_ts", "region": "REGION", "label": "lag_avg_ms", "visible": false } ],
+                    [ { "expression": "lag_avg_ms_ts/1000", "label": "lag_avg_sec", "id": "lag_avg_sec_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ { "expression": "lag_avg_sec_ts/3600", "label": "lag_avg_hr", "id": "lag_avg_hr_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ { "expression": "-1*RATE(lag_avg_sec_ts)+1", "label": "Speedup Factor", "id": "speedup_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ { "expression": "IF(speedup_ts<=1, 0/0, lag_avg_hr_ts/(speedup_ts-1))", "label": "catchup_hours", "id": "catchup_hours_ts", "region": "REGION", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "title": "Time to catchup in hours (Historical)",
+                "region": "REGION",
+                "yAxis": {
+                    "left": {
+                        "label": "Hours",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                },
+                "stat": "Average",
+                "period": 300,
+                "setPeriodToTimeRange": true,
+                "sparkline": true,
+                "stacked": false,
+                "liveData": false
+            }
+        },
+        {
+            "height": 6,
             "width": 24,
             "y": 7,
             "x": 0,
