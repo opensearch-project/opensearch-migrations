@@ -452,19 +452,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
-        .addOptionalInput("skipDocumentBackfillApproval", c =>
-            new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
-                ...getSourceTargetPathAndSnapshotAndMigrationIndex(
-                    c.inputParameters.sourceLabel,
-                    c.inputParameters.targetConfig,
-                    expr.jsonPathStrict(c.inputParameters.snapshotConfig, "label"),
-                    c.inputParameters.migrationLabel
-                ),
-                expr.literal("documentBackfill"),
-                expr.literal(false),
-                expr.deserializeRecord(c.inputParameters.skipApprovalMap)
-            ])
-        )
 
         .addSteps(b => b
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
@@ -481,9 +468,25 @@ export const FullMigration = WorkflowBuilder.create({
                     c.register({
                         name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
                     }),
+                // The skip flag must be a native boolean expression here: this `when` is
+                // compound, so it renders as an expr-lang ({{=...}}) condition where a
+                // stringified input parameter cannot be negated (`!"false"` throws
+                // "interface {} is string, not bool"). Inlining the sprig.dig keeps it a
+                // real bool. (The metadata gates dodge this only because their `when` is a
+                // lone `!()` that renders in Argo's legacy templating.)
                 {when: {templateExp: expr.and(
                     expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
-                    expr.not(b.inputs.skipDocumentBackfillApproval)
+                    expr.not(new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+                        ...getSourceTargetPathAndSnapshotAndMigrationIndex(
+                            b.inputs.sourceLabel,
+                            b.inputs.targetConfig,
+                            expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                            b.inputs.migrationLabel
+                        ),
+                        expr.literal("documentBackfill"),
+                        expr.literal(false),
+                        expr.deserializeRecord(b.inputs.skipApprovalMap)
+                    ]))
                 )}}
             )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>

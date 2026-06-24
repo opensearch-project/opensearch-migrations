@@ -1264,10 +1264,6 @@
                   "optional": true
                 }
               }
-            },
-            {
-              "name": "skipDocumentBackfillApproval",
-              "value": "{{=sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap))}}"
             }
           ]
         },
@@ -1352,7 +1348,7 @@
                 "template": "approvebackfill",
                 "name": "document-bulk-load"
               },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(inputs.parameters.skipDocumentBackfillApproval)}}",
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap)))}}",
               "arguments": {
                 "parameters": [
                   {
