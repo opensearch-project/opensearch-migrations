@@ -964,6 +964,100 @@ def edit_state_with_kafka_override_leaf():
     }
 
 
+def edit_state_with_unset_kafka_override_children():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:kafkaClusterConfiguration",
+                "path": ["kafkaClusterConfiguration"],
+                "label": "Kafka Clusters",
+                "valueKind": "record",
+                "description": "Kafka cluster configurations.",
+                "status": "ok",
+                "statusCounts": {},
+                "children": [
+                    {
+                        "id": "edit:kafkaClusterConfiguration.kafka",
+                        "path": ["kafkaClusterConfiguration", "kafka"],
+                        "label": "kafka: kafka",
+                        "valueKind": "object",
+                        "description": "Kafka cluster configuration.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "children": [
+                            {
+                                "id": "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                                "path": [
+                                    "kafkaClusterConfiguration",
+                                    "kafka",
+                                    "autoCreate",
+                                    "clusterSpecOverrides",
+                                ],
+                                "label": "clusterSpecOverrides: <unset>",
+                                "valueKind": "object",
+                                "presence": "optional",
+                                "description": "Optional overrides merged into the generated Strimzi Kafka.spec.",
+                                "status": "ok",
+                                "statusCounts": {},
+                                "children": [
+                                    {
+                                        "id": (
+                                            "edit:kafkaClusterConfiguration.kafka.autoCreate"
+                                            ".clusterSpecOverrides.kafka"
+                                        ),
+                                        "path": [
+                                            "kafkaClusterConfiguration",
+                                            "kafka",
+                                            "autoCreate",
+                                            "clusterSpecOverrides",
+                                            "kafka",
+                                        ],
+                                        "label": "kafka: <unset>",
+                                        "valueKind": "object",
+                                        "presence": "optional",
+                                        "description": "Kafka broker configuration.",
+                                        "status": "ok",
+                                        "statusCounts": {},
+                                        "children": [
+                                            {
+                                                "id": (
+                                                    "edit:kafkaClusterConfiguration.kafka.autoCreate"
+                                                    ".clusterSpecOverrides.kafka.replicas"
+                                                ),
+                                                "path": [
+                                                    "kafkaClusterConfiguration",
+                                                    "kafka",
+                                                    "autoCreate",
+                                                    "clusterSpecOverrides",
+                                                    "kafka",
+                                                    "replicas",
+                                                ],
+                                                "label": "replicas: <unset>",
+                                                "valueKind": "scalar",
+                                                "valueType": "number",
+                                                "presence": "optional",
+                                                "description": "Broker replicas.",
+                                                "status": "ok",
+                                                "statusCounts": {},
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_field_visibility():
     return {
         "formatVersion": 1,
@@ -2638,6 +2732,69 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
             assert get_clean_text_label(tree.cursor_node) == initial_label
             assert get_label_style(tree.cursor_node) == initial_style
             assert "Status: All" in str(app.query_one("#pod-status").content)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_collapses_unset_blocks_one_level_at_a_time(mock_workflow_with_two_pods):
+    """Unset optional containers are collapsed until the user expands each level."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_unset_kafka_override_children(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            cluster_overrides = find_tree_node_by_id(
+                tree.root,
+                "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+            )
+            kafka_overrides = find_tree_node_by_id(
+                tree.root,
+                "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka",
+            )
+            assert cluster_overrides is not None
+            assert kafka_overrides is not None
+            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
+            assert not cluster_overrides.is_expanded
+            assert not kafka_overrides.is_expanded
+
+            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._update_dynamic_bindings()
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert cluster_overrides.is_expanded
+            assert not kafka_overrides.is_expanded
 
 
 @pytest.mark.asyncio

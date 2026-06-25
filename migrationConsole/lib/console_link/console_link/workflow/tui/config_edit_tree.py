@@ -88,7 +88,7 @@ def render_edit_state(
     tree.root.data = {"id": "config-edit-root", "type": EDIT_NODE_TYPE}
     for node in edit_state.get("nodes", []):
         _add_edit_node(tree.root, node, value_mode, status_mode, show_optional, show_expert)
-    tree.root.expand_all()
+    tree.root.expand()
 
 
 def selected_edit_node(tree: Tree) -> Optional[Dict[str, Any]]:
@@ -145,7 +145,51 @@ def _add_edit_node(
     )
     for child in visible_children:
         _add_edit_node(node, child, value_mode, status_mode, show_optional, show_expert)
+    if _should_expand_edit_node(edit_node, status_mode, visible_children):
+        node.expand()
+    else:
+        node.collapse()
     return node
+
+
+def _should_expand_edit_node(
+    edit_node: Dict[str, Any],
+    status_mode: str,
+    visible_children: list[Dict[str, Any]],
+) -> bool:
+    if not visible_children:
+        return False
+    status, counts = _effective_status(edit_node, status_mode)
+    if _has_attention_status(status, counts):
+        return True
+    if _is_optional_unset_block(edit_node, visible_children):
+        return False
+    return True
+
+
+def _has_attention_status(status: str, counts: Dict[str, Any]) -> bool:
+    if status in {"changed", "warning", "gated", "required", "error", "blocked"}:
+        return True
+    return any(
+        counts.get(key)
+        for key in ("changed", "warnings", "gated", "required", "errors", "blocked")
+    )
+
+
+def _is_optional_unset_block(edit_node: Dict[str, Any], visible_children: list[Dict[str, Any]]) -> bool:
+    if not visible_children:
+        return False
+    if edit_node.get("presence") != "optional":
+        return False
+    if edit_node.get("valueKind") not in {"object", "array", "record", "union"}:
+        return False
+
+    label = _strip_badge(str(edit_node.get("label", ""))).lower()
+    value_present = "value" in edit_node
+    value = edit_node.get("value")
+    if "<unset>" in label:
+        return True
+    return value_present and value in (None, "", "unset")
 
 
 def _should_render_edit_node(
