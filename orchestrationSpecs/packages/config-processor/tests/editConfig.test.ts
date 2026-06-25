@@ -390,6 +390,27 @@ describe("editConfig state", () => {
         });
 
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default")?.label).toContain("kafka: default");
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")).toMatchObject({
+            valueKind: "union",
+            value: "unset",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.map(variant => variant.value)).toEqual([
+            "unset",
+            "none",
+            "scram-sha-512",
+        ]);
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.clusterSpecOverrides")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.nodePoolSpecOverrides")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.topicSpecOverrides")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
         expect(findNode(state.nodes, "edit:traffic.proxies.capture")?.label).toContain("capture proxy: capture");
         expect(findNode(state.nodes, "edit:traffic.s3Sources.archive")?.label).toContain("S3 captured traffic source: archive");
         expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
@@ -669,6 +690,21 @@ describe("editConfig state", () => {
             path: ["kafkaClusterConfiguration", "default", "mode"],
             value: "existing",
         });
+        const scramKafka = applyEditOperationToObject(parse(existingKafka.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "default", "existing", "auth"],
+            value: "scram-sha-512",
+        });
+        const defaultAuthKafka = applyEditOperationToObject(parse(addedKafka.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "default", "autoCreate", "auth"],
+            value: "scram-sha-512",
+        });
+        const resetDefaultAuthKafka = applyEditOperationToObject(parse(defaultAuthKafka.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "default", "autoCreate", "auth"],
+            value: "unset",
+        });
         const addedProxy = applyEditOperationToObject(parse(existingKafka.yaml), {
             op: "add",
             path: ["traffic", "proxies"],
@@ -690,6 +726,26 @@ describe("editConfig state", () => {
         });
 
         expect(existingKafka.yaml).toContain("existing: {}");
+        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.kafkaConnection")).toMatchObject({
+            status: "required",
+            required: true,
+        });
+        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.kafkaTopic")).toMatchObject({
+            valueKind: "scalar",
+            presence: "optional",
+        });
+        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth")).toMatchObject({
+            valueKind: "union",
+            value: "none",
+        });
+        expect(scramKafka.yaml).toContain("type: scram-sha-512");
+        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.secretName")).toMatchObject({
+            status: "required",
+            required: true,
+        });
+        expect(defaultAuthKafka.yaml).toContain("auth:");
+        expect(defaultAuthKafka.yaml).toContain("type: scram-sha-512");
+        expect(resetDefaultAuthKafka.yaml).not.toContain("auth:");
         expect(addedProxy.yaml).toContain("capture:");
         expect(addedProxy.yaml).toContain("proxyConfig: {}");
         expect(addedS3Source.yaml).toContain("archive:");

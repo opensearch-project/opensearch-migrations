@@ -350,6 +350,209 @@ function schemaContainerKind(schema: any): "array" | "object" | undefined {
     return undefined;
 }
 
+function schemaOptions(schema: any): any[] {
+    const unwrapped = unwrapSchema(schema);
+    const options = unwrapped?.options ?? unwrapped?._def?.options;
+    return Array.isArray(options) ? options : [];
+}
+
+function schemaShape(schema: any): Record<string, any> | undefined {
+    const shape = unwrapSchema(schema)?.shape;
+    return isPlainObject(shape) ? shape : undefined;
+}
+
+interface SingleKeyUnionBranch {
+    value: string;
+    optionSchema: any;
+    fieldSchema: any;
+    description?: string;
+}
+
+function singleKeyUnionBranches(schema: any): SingleKeyUnionBranch[] {
+    const options = schemaOptions(schema);
+    if (!options.length) {
+        return [];
+    }
+    const branches = options.map(optionSchema => {
+        const shape = schemaShape(optionSchema);
+        const keys = Object.keys(shape ?? {});
+        if (keys.length !== 1) {
+            return undefined;
+        }
+        const value = keys[0];
+        return {
+            value,
+            optionSchema,
+            fieldSchema: shape![value],
+            description: schemaDescription(optionSchema),
+        };
+    });
+    return branches.every(Boolean) ? branches as SingleKeyUnionBranch[] : [];
+}
+
+function selectedSingleKeyUnionBranch(
+    branches: SingleKeyUnionBranch[],
+    value: unknown,
+    fallbackValue?: string,
+): SingleKeyUnionBranch | undefined {
+    if (isPlainObject(value)) {
+        const presentBranch = branches.find(branch => Object.hasOwn(value, branch.value));
+        if (presentBranch) {
+            return presentBranch;
+        }
+    }
+    return branches.find(branch => branch.value === fallbackValue) ?? branches[0];
+}
+
+function schemaObjectChildren(
+    rootPath: string[],
+    schema: any,
+    value: unknown,
+    excludedKeys: Set<string> = new Set(),
+): EditNode[] {
+    const shape = schemaShape(schema) ?? {};
+    const config = isPlainObject(value) ? value : {};
+    return Object.entries(shape)
+        .filter(([key]) => !excludedKeys.has(key))
+        .map(([key, fieldSchema]) => schemaFieldNode(rootPath, key, fieldSchema, config));
+}
+
+function singleKeyUnionMode(
+    rootPath: string[],
+    modeKey: string,
+    schema: any,
+    value: unknown,
+    description: string | undefined,
+    fallbackValue?: string,
+): { modeNode: EditNode; branchChildren: EditNode[] } {
+    const branches = singleKeyUnionBranches(schema);
+    const selected = selectedSingleKeyUnionBranch(branches, value, fallbackValue);
+    const selectedValue = selected?.value ?? "unknown";
+    const branchValue = selected && isPlainObject(value) && isPlainObject(value[selected.value])
+        ? value[selected.value]
+        : {};
+    const expectedValues = branches.map(branch => branch.value).join(" or ");
+    const diagnostics: EditDiagnostic[] = selected
+        ? []
+        : [{severity: "error", message: `Unknown variant. Expected ${expectedValues}.`, path: rootPath}];
+
+    return {
+        modeNode: finalizeNode({
+            id: `edit:${[...rootPath, modeKey].join(".")}`,
+            path: [...rootPath, modeKey],
+            label: `${modeKey}: < ${selectedValue} >`,
+            value: selectedValue,
+            valueKind: "union",
+            description,
+            status: selected ? "ok" : "error",
+            diagnostics,
+            variants: branches.map(branch => ({
+                label: branch.value,
+                value: branch.value,
+                description: branch.description,
+            })),
+        }),
+        branchChildren: selected
+            ? schemaObjectChildren([...rootPath, selected.value], selected.fieldSchema, branchValue)
+            : [],
+    };
+}
+
+function discriminatorForSchema(schema: any): string | undefined {
+    const discriminator = unwrapSchema(schema)?._def?.discriminator;
+    return typeof discriminator === "string" ? discriminator : undefined;
+}
+
+interface DiscriminatedUnionBranch {
+    value: unknown;
+    optionSchema: any;
+    description?: string;
+}
+
+function discriminatedUnionBranches(schema: any, discriminator: string): DiscriminatedUnionBranch[] {
+    return schemaOptions(schema)
+        .map(optionSchema => {
+            const shape = schemaShape(optionSchema);
+            const values = literalValues(shape?.[discriminator]);
+            const [value] = values;
+            if (value === undefined) {
+                return undefined;
+            }
+            return {
+                value,
+                optionSchema,
+                description: schemaDescription(optionSchema),
+            };
+        })
+        .filter(Boolean) as DiscriminatedUnionBranch[];
+}
+
+function discriminatedUnionNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    hasValue: boolean,
+    description: string,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode | undefined {
+    const discriminator = discriminatorForSchema(schema);
+    if (!discriminator) {
+        return undefined;
+    }
+
+    const branches = discriminatedUnionBranches(schema, discriminator);
+    if (!branches.length) {
+        return undefined;
+    }
+
+    const selectedValue = isPlainObject(value) ? value[discriminator] : undefined;
+    const selected = branches.find(branch => branch.value === selectedValue);
+    const hasSchemaDefault = defaultValueForSchema(schema) !== undefined;
+    const includeUnset = !required && !hasSchemaDefault;
+    const unset = includeUnset && !hasValue && selectedValue === undefined;
+    const missing = required && selectedValue === undefined;
+    const unknown = selectedValue !== undefined && !selected;
+    const diagnostics: EditDiagnostic[] = [];
+    if (missing) {
+        diagnostics.push({severity: "required", message: `${key} is required.`, path});
+    } else if (unknown) {
+        diagnostics.push({
+            severity: "error",
+            message: `Unknown ${key} variant. Expected ${branches.map(branch => String(branch.value)).join(" or ")}.`,
+            path,
+        });
+    }
+
+    const variants = [
+        ...(includeUnset ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
+        ...branches.map(branch => ({
+            label: String(branch.value),
+            value: branch.value,
+            description: branch.description,
+        })),
+    ];
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${unset ? "unset" : selectedValue ?? "required"} >`,
+        value: unset ? "unset" : selectedValue,
+        valueKind: "union",
+        presence,
+        expert,
+        description,
+        status: missing ? "required" : unknown ? "error" : "ok",
+        diagnostics,
+        variants,
+        children: selected
+            ? schemaObjectChildren(path, selected.optionSchema, value, new Set([discriminator]))
+            : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
 function optionsFromRecord(record: Record<string, unknown> | undefined): EditOption[] {
     return Object.keys(record ?? {})
         .sort((a, b) => a.localeCompare(b))
@@ -924,52 +1127,16 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
     });
 }
 
-function kafkaMode(config: unknown): "autoCreate" | "existing" | "unknown" {
-    if (!config || typeof config !== "object") {
-        return "autoCreate";
-    }
-    const keys = Object.keys(config as Record<string, unknown>);
-    if (keys.includes("autoCreate")) {
-        return "autoCreate";
-    }
-    if (keys.includes("existing")) {
-        return "existing";
-    }
-    return "unknown";
-}
-
 function kafkaClusterNode(name: string, value: any): EditNode {
     const rootPath = ["kafkaClusterConfiguration", name];
-    const mode = kafkaMode(value);
-    const children: EditNode[] = [
-        finalizeNode({
-            id: `edit:${[...rootPath, "mode"].join(".")}`,
-            path: [...rootPath, "mode"],
-            label: `mode: < ${mode} >`,
-            value: mode,
-            valueKind: "union",
-            description: KAFKA_CLUSTER_DESCRIPTION,
-            status: mode === "unknown" ? "error" : "ok",
-            diagnostics: mode === "unknown"
-                ? [{severity: "error", message: "Unknown Kafka cluster variant. Expected autoCreate or existing.", path: rootPath}]
-                : [],
-            variants: [
-                {label: "autoCreate", value: "autoCreate"},
-                {label: "existing", value: "existing"},
-            ],
-        }),
-    ];
-    if (mode === "existing") {
-        children.push(
-            scalarNode(
-                [...rootPath, "existing", "bootstrapServers"],
-                "bootstrapServers",
-                value?.existing?.bootstrapServers,
-                "Kafka bootstrap servers for an existing cluster.",
-                true
-            )
-        );
-    }
+    const {modeNode, branchChildren} = singleKeyUnionMode(
+        rootPath,
+        "mode",
+        KAFKA_CLUSTER_CONFIG,
+        value,
+        KAFKA_CLUSTER_DESCRIPTION,
+        "autoCreate",
+    );
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
@@ -977,7 +1144,7 @@ function kafkaClusterNode(name: string, value: any): EditNode {
         valueKind: "object",
         description: KAFKA_CLUSTER_DESCRIPTION,
         status: "ok",
-        children,
+        children: [modeNode, ...branchChildren],
     });
 }
 
@@ -1066,6 +1233,10 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
 
     if (key === "tls" && schema === unwrapSchema(USER_PROXY_OPTIONS).shape?.tls) {
         return proxyTlsNode(path, value, description, expert, presence);
+    }
+    const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, required, expert, presence);
+    if (unionNode) {
+        return unionNode;
     }
     if (scalarType === "boolean") {
         return booleanNode(path, key, value === true, description, expert, presence);
@@ -1468,6 +1639,65 @@ function parentAtPath(config: any, path: string[]): { parent: any; key: string }
     return {parent, key: path[path.length - 1]};
 }
 
+function childSchemaAtPath(schema: any, path: string[]): any | undefined {
+    if (!path.length) {
+        return schema;
+    }
+
+    const [part, ...rest] = path;
+    const shape = schemaShape(schema);
+    if (shape?.[part]) {
+        return childSchemaAtPath(shape[part], rest);
+    }
+
+    const keyedBranch = singleKeyUnionBranches(schema).find(branch => branch.value === part);
+    if (keyedBranch) {
+        return childSchemaAtPath(keyedBranch.fieldSchema, rest);
+    }
+
+    const discriminator = discriminatorForSchema(schema);
+    if (discriminator) {
+        const branch = schemaOptions(schema).find(optionSchema => Boolean(schemaShape(optionSchema)?.[part]));
+        const branchShape = branch ? schemaShape(branch) : undefined;
+        if (branchShape?.[part]) {
+            return childSchemaAtPath(branchShape[part], rest);
+        }
+    }
+
+    const unwrapped = unwrapSchema(schema);
+    const elementSchema = unwrapped?.element ?? unwrapped?._def?.element;
+    if (elementSchema && isArrayIndex(part)) {
+        return childSchemaAtPath(elementSchema, rest);
+    }
+
+    return undefined;
+}
+
+function schemaForConfigPath(path: string[]): any | undefined {
+    if (path[0] === "sourceClusters" && path.length >= 2) {
+        return childSchemaAtPath(SOURCE_CLUSTER_CONFIG, path.slice(2));
+    }
+    if (path[0] === "targetClusters" && path.length >= 2) {
+        return childSchemaAtPath(TARGET_CLUSTER_CONFIG, path.slice(2));
+    }
+    if (path[0] === "kafkaClusterConfiguration" && path.length >= 2) {
+        return childSchemaAtPath(KAFKA_CLUSTER_CONFIG, path.slice(2));
+    }
+    if (path[0] === "traffic" && path[1] === "proxies" && path.length >= 3) {
+        return childSchemaAtPath(CAPTURE_CONFIG, path.slice(3));
+    }
+    if (path[0] === "traffic" && path[1] === "s3Sources" && path.length >= 3) {
+        return childSchemaAtPath(S3_CAPTURED_TRAFFIC_SOURCE, path.slice(3));
+    }
+    if (path[0] === "traffic" && path[1] === "replayers" && path.length >= 3) {
+        return childSchemaAtPath(REPLAYER_CONFIG, path.slice(3));
+    }
+    if (path[0] === "snapshotMigrationConfigs" && path.length >= 2 && isArrayIndex(path[1])) {
+        return childSchemaAtPath(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, path.slice(2));
+    }
+    return undefined;
+}
+
 function authConfigForVariant(existing: any, variant: unknown): unknown {
     if (variant === "none" || variant === null || variant === undefined || variant === "") {
         return undefined;
@@ -1484,14 +1714,50 @@ function authConfigForVariant(existing: any, variant: unknown): unknown {
     throw new Error(`Unknown authConfig variant: ${String(variant)}`);
 }
 
+function singleKeyUnionValueForVariant(schema: any, existing: any, variant: unknown): unknown {
+    const branch = singleKeyUnionBranches(schema).find(item => item.value === variant);
+    if (!branch) {
+        throw new Error(`Unknown variant: ${String(variant)}`);
+    }
+    return {
+        [branch.value]: isPlainObject(existing?.[branch.value]) ? existing[branch.value] : {},
+    };
+}
+
 function kafkaConfigForVariant(existing: any, variant: unknown): unknown {
-    if (variant === "autoCreate") {
-        return {autoCreate: existing?.autoCreate ?? {}};
+    return singleKeyUnionValueForVariant(KAFKA_CLUSTER_CONFIG, existing, variant);
+}
+
+function discriminatedUnionValueForVariant(schema: any, existing: any, variant: unknown): unknown {
+    if (variant === "unset" || variant === null || variant === undefined || variant === "") {
+        return undefined;
     }
-    if (variant === "existing") {
-        return {existing: existing?.existing ?? {}};
+
+    const discriminator = discriminatorForSchema(schema);
+    if (!discriminator) {
+        throw new Error("Schema is not a discriminated union");
     }
-    throw new Error(`Unknown Kafka cluster variant: ${String(variant)}`);
+    const branch = discriminatedUnionBranches(schema, discriminator).find(item => item.value === variant);
+    if (!branch) {
+        throw new Error(`Unknown ${discriminator} variant: ${String(variant)}`);
+    }
+
+    const branchShape = schemaShape(branch.optionSchema) ?? {};
+    const next: Record<string, unknown> = {[discriminator]: variant};
+    for (const [key, fieldSchema] of Object.entries(branchShape)) {
+        if (key === discriminator) {
+            continue;
+        }
+        if (isPlainObject(existing) && Object.hasOwn(existing, key)) {
+            next[key] = existing[key];
+            continue;
+        }
+        const defaultValue = defaultValueForSchema(fieldSchema);
+        if (defaultValue !== undefined) {
+            next[key] = defaultValue;
+        }
+    }
+    return next;
 }
 
 function proxyTlsConfigForVariant(existing: any, variant: unknown): unknown {
@@ -1562,6 +1828,16 @@ function setAtPath(config: any, path: string[], value: unknown): void {
     }
     if (key === "clientAuth" && path[path.length - 2] === "tls") {
         const next = proxyClientAuthForVariant(parent[key], value);
+        if (next === undefined) {
+            delete parent[key];
+        } else {
+            parent[key] = next;
+        }
+        return;
+    }
+    const schema = schemaForConfigPath(path);
+    if (schema && discriminatorForSchema(schema)) {
+        const next = discriminatedUnionValueForVariant(schema, parent[key], value);
         if (next === undefined) {
             delete parent[key];
         } else {
