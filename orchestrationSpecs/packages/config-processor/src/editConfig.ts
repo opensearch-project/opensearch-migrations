@@ -2,6 +2,7 @@ import {
     CLUSTER_CONFIG,
     CLUSTER_VERSION_STRING,
     CAPTURE_CONFIG,
+    EffectiveDefaultHint,
     ExternalRefHint,
     FieldMeta,
     HTTP_ENDPOINT_PATTERN,
@@ -29,6 +30,7 @@ import {
     USER_PROXY_PROCESS_OPTION_KEYS,
     USER_PROXY_WORKFLOW_OPTION_KEYS,
     getDescription,
+    loadUnifiedSchema,
     unwrapSchema as unwrapSchemaWithPipes,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
@@ -90,6 +92,7 @@ export interface EditNode {
     };
     inputHint?: EditInputHint;
     externalRef?: ExternalRefHint;
+    effectiveDefault?: EffectiveDefaultHint;
     validation?: EditNodeValidation;
     diagnostics?: EditDiagnostic[];
     variants?: {
@@ -233,6 +236,14 @@ function externalRefOf(schema: any): ExternalRefHint | undefined {
     return hint ? structuredClone(hint) : undefined;
 }
 
+function effectiveDefaultOf(schema: any): EffectiveDefaultHint | undefined {
+    const direct = schema?.meta?.() as FieldMeta | undefined;
+    const unwrapped = unwrapSchema(schema);
+    const inner = unwrapped === schema ? undefined : unwrapped?.meta?.() as FieldMeta | undefined;
+    const hint = direct?.effectiveDefault ?? inner?.effectiveDefault;
+    return hint ? structuredClone(hint) : undefined;
+}
+
 function uiHintAt(schema: any, path: string[]): EditInputHint | undefined {
     let current = schema;
     for (const part of path) {
@@ -348,6 +359,322 @@ function schemaContainerKind(schema: any): "array" | "object" | undefined {
         return "object";
     }
     return undefined;
+}
+
+function isGenericRecordSchema(schema: any): boolean {
+    return schemaConstructorName(schema) === "ZodRecord";
+}
+
+type JsonSchema = Record<string, any>;
+
+let cachedUnifiedSchema: JsonSchema | undefined;
+let cachedUnifiedSchemaKey: string | undefined;
+
+function unifiedSchema(): JsonSchema | undefined {
+    const cacheKey = process.env.MIGRATION_UNIFIED_SCHEMA_PATH ?? "";
+    if (cachedUnifiedSchema !== undefined && cachedUnifiedSchemaKey === cacheKey) {
+        return cachedUnifiedSchema;
+    }
+    try {
+        cachedUnifiedSchema = loadUnifiedSchema().schema as JsonSchema;
+        cachedUnifiedSchemaKey = cacheKey;
+    } catch {
+        return undefined;
+    }
+    return cachedUnifiedSchema;
+}
+
+function isJsonSchemaObject(value: unknown): value is JsonSchema {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function resolveJsonSchemaRef(schema: JsonSchema | undefined, root: JsonSchema | undefined = unifiedSchema()): JsonSchema | undefined {
+    if (!schema) {
+        return undefined;
+    }
+    if (typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/")) {
+        return schema;
+    }
+    const refPath = schema.$ref
+        .slice(2)
+        .split("/")
+        .map(part => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+    let current: any = root;
+    for (const part of refPath) {
+        current = current?.[part];
+        if (!current) {
+            return schema;
+        }
+    }
+    const resolved = isJsonSchemaObject(current) ? current : schema;
+    return {
+        ...resolved,
+        description: schema.description ?? resolved.description,
+    };
+}
+
+function jsonSchemaBranches(schema: JsonSchema | undefined): JsonSchema[] {
+    const resolved = resolveJsonSchemaRef(schema);
+    const branches = resolved?.oneOf ?? resolved?.anyOf;
+    return Array.isArray(branches)
+        ? branches.filter(isJsonSchemaObject).map(branch => resolveJsonSchemaRef(branch) ?? branch)
+        : [];
+}
+
+function jsonSchemaProperties(schema: JsonSchema | undefined): Record<string, JsonSchema> {
+    const resolved = resolveJsonSchemaRef(schema);
+    return isJsonSchemaObject(resolved?.properties) ? resolved.properties : {};
+}
+
+function jsonSchemaRequired(schema: JsonSchema | undefined): Set<string> {
+    const required = resolveJsonSchemaRef(schema)?.required;
+    return new Set(Array.isArray(required) ? required.map(String) : []);
+}
+
+function jsonSchemaType(schema: JsonSchema | undefined): string | undefined {
+    const type = resolveJsonSchemaRef(schema)?.type;
+    return Array.isArray(type) ? type.find(item => item !== "null") : type;
+}
+
+function jsonSchemaProperty(schema: JsonSchema | undefined, key: string): JsonSchema | undefined {
+    return jsonSchemaProperties(schema)[key];
+}
+
+function jsonSchemaChildAtPath(schema: JsonSchema | undefined, path: string[]): JsonSchema | undefined {
+    const resolved = resolveJsonSchemaRef(schema);
+    if (!resolved || !path.length) {
+        return resolved;
+    }
+
+    const [part, ...rest] = path;
+    const direct = jsonSchemaProperty(resolved, part);
+    if (direct) {
+        return jsonSchemaChildAtPath(direct, rest);
+    }
+
+    const branch = jsonSchemaBranches(resolved).find(item => Boolean(jsonSchemaProperty(item, part)));
+    if (branch) {
+        return jsonSchemaChildAtPath(branch, path);
+    }
+
+    const additional = resolved.additionalProperties;
+    if (isJsonSchemaObject(additional)) {
+        return jsonSchemaChildAtPath(additional, rest);
+    }
+
+    const items = resolveJsonSchemaRef(resolved.items);
+    if (items && isArrayIndex(part)) {
+        return jsonSchemaChildAtPath(items, rest);
+    }
+
+    return undefined;
+}
+
+function jsonSchemaForConfigPath(path: string[]): JsonSchema | undefined {
+    return jsonSchemaChildAtPath(unifiedSchema(), path);
+}
+
+function jsonSchemaDescription(schema: JsonSchema | undefined): string {
+    return String(resolveJsonSchemaRef(schema)?.description ?? "");
+}
+
+function jsonScalarValueType(schema: JsonSchema | undefined): EditNode["valueType"] | undefined {
+    const type = jsonSchemaType(schema);
+    if (type === "number" || type === "integer") {
+        return "number";
+    }
+    if (type === "boolean") {
+        return "boolean";
+    }
+    if (type === "string") {
+        return "string";
+    }
+    return undefined;
+}
+
+function jsonSchemaEnumValues(schema: JsonSchema | undefined): unknown[] {
+    const resolved = resolveJsonSchemaRef(schema);
+    if (Object.hasOwn(resolved ?? {}, "const")) {
+        return [resolved!.const];
+    }
+    return Array.isArray(resolved?.enum) ? resolved.enum : [];
+}
+
+function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | undefined {
+    const resolved = resolveJsonSchemaRef(schema);
+    const pattern = typeof resolved?.pattern === "string" ? resolved.pattern : undefined;
+    return pattern ? textHint(pattern, "Value does not match the expected format.") : undefined;
+}
+
+function jsonSchemaDiscriminator(schema: JsonSchema | undefined): string | undefined {
+    const branches = jsonSchemaBranches(schema);
+    if (!branches.length) {
+        return undefined;
+    }
+    const candidates = new Set<string>();
+    for (const branch of branches) {
+        for (const [key, childSchema] of Object.entries(jsonSchemaProperties(branch))) {
+            if (jsonSchemaEnumValues(childSchema).length === 1) {
+                candidates.add(key);
+            }
+        }
+    }
+    return [...candidates].find(candidate =>
+        branches.every(branch => jsonSchemaEnumValues(jsonSchemaProperty(branch, candidate)).length === 1)
+    );
+}
+
+function jsonSchemaUnionNode(
+    path: string[],
+    key: string,
+    schema: JsonSchema,
+    value: unknown,
+    hasValue: boolean,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode | undefined {
+    const discriminator = jsonSchemaDiscriminator(schema);
+    if (!discriminator) {
+        return undefined;
+    }
+
+    const branches = jsonSchemaBranches(schema);
+    const selectedValue = isPlainObject(value) ? value[discriminator] : undefined;
+    const selectedBranch = branches.find(branch => jsonSchemaEnumValues(jsonSchemaProperty(branch, discriminator))[0] === selectedValue);
+    const unset = !required && !hasValue && selectedValue === undefined;
+    const variants = [
+        ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
+        ...branches.map(branch => {
+            const branchValue = jsonSchemaEnumValues(jsonSchemaProperty(branch, discriminator))[0];
+            return {
+                label: String(branchValue),
+                value: branchValue,
+                description: jsonSchemaDescription(branch),
+            };
+        }),
+    ];
+    const unknown = selectedValue !== undefined && !selectedBranch;
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${unset ? "unset" : selectedValue ?? "required"} >`,
+        value: unset ? "unset" : selectedValue,
+        valueKind: "union",
+        presence,
+        expert,
+        description: jsonSchemaDescription(schema),
+        status: unknown ? "error" : required && selectedValue === undefined ? "required" : "ok",
+        diagnostics: unknown ? [{
+            severity: "error",
+            message: `Unknown ${key} variant. Expected ${variants.map(variant => variant.value).join(" or ")}.`,
+            path,
+        }] : [],
+        variants,
+        children: selectedBranch
+            ? jsonSchemaObjectChildren(path, selectedBranch, value, new Set([discriminator]))
+            : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
+function jsonEnumNode(
+    path: string[],
+    key: string,
+    schema: JsonSchema,
+    value: unknown,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode {
+    const values = jsonSchemaEnumValues(schema);
+    const unset = value === undefined || value === null || value === "";
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${unset ? (required ? "required" : "unset") : String(value)} >`,
+        value: unset && !required ? "unset" : value,
+        valueKind: "union",
+        presence,
+        expert,
+        description: jsonSchemaDescription(schema),
+        status: required && unset ? "required" : "ok",
+        variants: [
+            ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional value."}] : []),
+            ...values.map(option => ({label: String(option), value: option})),
+        ],
+    });
+}
+
+function jsonSchemaObjectChildren(
+    rootPath: string[],
+    schema: JsonSchema,
+    value: unknown,
+    excludedKeys: Set<string> = new Set(),
+): EditNode[] {
+    const requiredKeys = jsonSchemaRequired(schema);
+    const objectValue = isPlainObject(value) ? value : {};
+    return Object.entries(jsonSchemaProperties(schema))
+        .filter(([key]) => !excludedKeys.has(key))
+        .map(([key, childSchema]) => jsonSchemaFieldNode(
+            rootPath,
+            key,
+            childSchema,
+            objectValue,
+            requiredKeys.has(key),
+        ));
+}
+
+function jsonSchemaFieldNode(
+    rootPath: string[],
+    key: string,
+    schema: JsonSchema,
+    config: Record<string, unknown>,
+    required = false,
+): EditNode {
+    const resolved = resolveJsonSchemaRef(schema) ?? schema;
+    const path = [...rootPath, key];
+    const hasValue = Object.hasOwn(config, key);
+    const value = hasValue ? config[key] : resolved.default;
+    const description = jsonSchemaDescription(resolved);
+    const presence: EditNode["presence"] = required ? "required" : "optional";
+    const expert = isExpertDescription(description);
+    const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, required, expert, presence);
+    if (unionNode) {
+        return unionNode;
+    }
+    if (jsonSchemaEnumValues(resolved).length > 0) {
+        return jsonEnumNode(path, key, resolved, value, required, expert, presence);
+    }
+    const valueType = jsonScalarValueType(resolved);
+    if (valueType === "boolean") {
+        return booleanNode(path, key, value === true, description, expert, presence);
+    }
+    if (valueType === "number" || valueType === "string") {
+        return scalarNode(path, key, value ?? "", description, required, jsonSchemaInputHint(resolved), valueType, expert, presence);
+    }
+
+    const containerKind = jsonSchemaType(resolved) === "array" ? "array" : "object";
+    const childNodes = containerKind === "object"
+        ? jsonSchemaObjectChildren(path, resolved, value)
+        : [];
+    if (childNodes.length || value === undefined || value === null || isPlainObject(value) || Array.isArray(value)) {
+        return finalizeNode({
+            id: `edit:${path.join(".")}`,
+            path,
+            label: `${key}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (Object.keys(value).length ? "configured" : "{}") : String(value)}`,
+            value,
+            valueKind: containerKind,
+            presence,
+            expert,
+            description,
+            required,
+            status: required && (value === undefined || value === null) ? "required" : "ok",
+            children: childNodes,
+        });
+    }
+
+    return genericDisplayNode(path, key, value, presence, expert, description);
 }
 
 function schemaOptions(schema: any): any[] {
@@ -511,8 +838,12 @@ function discriminatedUnionNode(
     const selectedValue = isPlainObject(value) ? value[discriminator] : undefined;
     const selected = branches.find(branch => branch.value === selectedValue);
     const hasSchemaDefault = defaultValueForSchema(schema) !== undefined;
+    const effectiveDefault = effectiveDefaultOf(schema);
     const includeUnset = !required && !hasSchemaDefault;
     const unset = includeUnset && !hasValue && selectedValue === undefined;
+    const unsetLabel = effectiveDefault?.label
+        ? `default: ${effectiveDefault.label}`
+        : "unset";
     const missing = required && selectedValue === undefined;
     const unknown = selectedValue !== undefined && !selected;
     const diagnostics: EditDiagnostic[] = [];
@@ -527,7 +858,11 @@ function discriminatedUnionNode(
     }
 
     const variants = [
-        ...(includeUnset ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
+        ...(includeUnset ? [{
+            label: effectiveDefault?.label ? `default (${effectiveDefault.label})` : "unset",
+            value: "unset",
+            description: effectiveDefault?.description ?? "Remove this optional configuration.",
+        }] : []),
         ...branches.map(branch => ({
             label: String(branch.value),
             value: branch.value,
@@ -538,12 +873,13 @@ function discriminatedUnionNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: < ${unset ? "unset" : selectedValue ?? "required"} >`,
+        label: `${key}: < ${unset ? unsetLabel : selectedValue ?? "required"} >`,
         value: unset ? "unset" : selectedValue,
         valueKind: "union",
         presence,
         expert,
         description,
+        effectiveDefault,
         status: missing ? "required" : unknown ? "error" : "ok",
         diagnostics,
         variants,
@@ -1231,6 +1567,16 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
 
+    if (isGenericRecordSchema(schema)) {
+        const jsonSchema = jsonSchemaForConfigPath(path);
+        if (jsonSchema && (
+            Object.keys(jsonSchemaProperties(jsonSchema)).length > 0
+            || jsonSchemaBranches(jsonSchema).length > 0
+            || jsonSchemaEnumValues(jsonSchema).length > 0
+        )) {
+            return jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required);
+        }
+    }
     if (key === "tls" && schema === unwrapSchema(USER_PROXY_OPTIONS).shape?.tls) {
         return proxyTlsNode(path, value, description, expert, presence);
     }
@@ -1760,6 +2106,39 @@ function discriminatedUnionValueForVariant(schema: any, existing: any, variant: 
     return next;
 }
 
+function jsonDiscriminatedUnionValueForVariant(schema: JsonSchema, existing: any, variant: unknown): unknown {
+    if (variant === "unset" || variant === null || variant === undefined || variant === "") {
+        return undefined;
+    }
+
+    const discriminator = jsonSchemaDiscriminator(schema);
+    if (!discriminator) {
+        throw new Error("JSON schema is not a discriminated union");
+    }
+    const branch = jsonSchemaBranches(schema).find(item =>
+        jsonSchemaEnumValues(jsonSchemaProperty(item, discriminator))[0] === variant
+    );
+    if (!branch) {
+        throw new Error(`Unknown ${discriminator} variant: ${String(variant)}`);
+    }
+
+    const next: Record<string, unknown> = {[discriminator]: variant};
+    for (const [key, fieldSchema] of Object.entries(jsonSchemaProperties(branch))) {
+        if (key === discriminator) {
+            continue;
+        }
+        if (isPlainObject(existing) && Object.hasOwn(existing, key)) {
+            next[key] = existing[key];
+            continue;
+        }
+        const defaultValue = resolveJsonSchemaRef(fieldSchema)?.default;
+        if (defaultValue !== undefined) {
+            next[key] = defaultValue;
+        }
+    }
+    return next;
+}
+
 function proxyTlsConfigForVariant(existing: any, variant: unknown): unknown {
     if (variant === "unset" || variant === null || variant === undefined || variant === "") {
         return undefined;
@@ -1843,6 +2222,20 @@ function setAtPath(config: any, path: string[], value: unknown): void {
         } else {
             parent[key] = next;
         }
+        return;
+    }
+    const jsonSchema = jsonSchemaForConfigPath(path);
+    if (jsonSchema && jsonSchemaDiscriminator(jsonSchema)) {
+        const next = jsonDiscriminatedUnionValueForVariant(jsonSchema, parent[key], value);
+        if (next === undefined) {
+            delete parent[key];
+        } else {
+            parent[key] = next;
+        }
+        return;
+    }
+    if (jsonSchema && jsonSchemaEnumValues(jsonSchema).length > 0 && value === "unset") {
+        delete parent[key];
         return;
     }
     parent[key] = value;

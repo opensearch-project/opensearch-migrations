@@ -32,6 +32,13 @@ export type UiHint =
         addLabel: string;
     };
 
+export interface EffectiveDefaultHint {
+    label: string;
+    value?: unknown;
+    description?: string;
+    source?: string;
+}
+
 export type ExternalRefKind = 'secret' | 'configMap' | 'image' | 'certManagerIssuer';
 export type ExternalRefPurpose =
     | 'http-basic-auth'
@@ -122,6 +129,8 @@ export interface FieldMeta {
     uiHint?: UiHint;
     /** External resource reference hint exported into JSON schema and edit-state DTOs. */
     externalRef?: ExternalRefHint;
+    /** Effective runtime default when omission is meaningful and the Zod schema cannot express the resolved value directly. */
+    effectiveDefault?: EffectiveDefaultHint;
     /** Advanced field hint exported into JSON schema. */
     expert?: boolean;
 }
@@ -132,6 +141,7 @@ declare module "zod" {
         changeRestriction(restriction: 'impossible' | 'gated'): this;
         uiHint(hint: UiHint): this;
         externalRef(hint: ExternalRefHint): this;
+        effectiveDefault(hint: EffectiveDefaultHint): this;
     }
 }
 
@@ -153,6 +163,11 @@ z.ZodType.prototype.uiHint = function(hint: UiHint) {
 z.ZodType.prototype.externalRef = function(hint: ExternalRefHint) {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, externalRef: hint });
+};
+
+z.ZodType.prototype.effectiveDefault = function(hint: EffectiveDefaultHint) {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, effectiveDefault: hint });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -1305,7 +1320,13 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
                 + "If omitted, transform-time resolution currently defaults workflow-managed Kafka to "
                 + "`scram-sha-512` as the secure-by-default policy. This default is intentionally "
                 + "resolved outside the deep-merged Strimzi object defaults so auth policy can change "
-                + "without being hidden inside the structural Kafka/NodePool/Topic default merge."),
+                + "without being hidden inside the structural Kafka/NodePool/Topic default merge.")
+            .effectiveDefault({
+                label: "scram-sha-512",
+                value: {type: "scram-sha-512"},
+                source: "workflow policy",
+                description: "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication.",
+            }),
         // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and
         // initialization deep-merges them with the baseline defaults above.
         //

@@ -34,6 +34,10 @@ function safeObjectValues(obj: Record<string, unknown>) {
 function unwrapZod(schema: z.ZodType): z.ZodType {
     if ('unwrap' in schema && typeof (schema as any).unwrap === 'function') return unwrapZod((schema as any).unwrap());
     if ('removeDefault' in schema && typeof (schema as any).removeDefault === 'function') return unwrapZod((schema as any).removeDefault());
+    if (schema instanceof z.ZodPipe) {
+        const def = schema._def;
+        return unwrapZod((def.in instanceof z.ZodTransform ? def.out : def.in) as z.ZodType);
+    }
     return schema;
 }
 
@@ -65,6 +69,7 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
             if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
             if (meta?.uiHint) propSchema['x-ui-hint'] = meta.uiHint;
             if (meta?.externalRef) propSchema['x-external-ref'] = meta.externalRef;
+            if (meta?.effectiveDefault) propSchema['x-effective-default'] = meta.effectiveDefault;
             if (meta?.expert || isExpertDescription(getDescription(fieldZod as z.ZodTypeAny) ?? String(propSchema.description ?? ""))) {
                 propSchema['x-expert'] = true;
             }
@@ -124,6 +129,7 @@ function removeRawUiHintMetadata(jsonSchema: any): void {
     }
     delete jsonSchema.uiHint;
     delete jsonSchema.externalRef;
+    delete jsonSchema.effectiveDefault;
     safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 

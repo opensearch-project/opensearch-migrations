@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 from typing import Any, Dict, Optional
+
+import yaml
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.screen import ModalScreen
@@ -36,6 +38,7 @@ from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
+from .structured_value_modal import StructuredValueModal
 from .text_input_modal import TextInputModal
 from .tree_state_manager import TreeStateManager
 from .resource_tree_state_manager import RESOURCE_ID_PREFIX
@@ -676,8 +679,6 @@ class WorkflowTreeApp(App):
             self.bind("s", "save_config_edit", description="Save")
             self.bind("ctrl+s", "save_config_edit", description="Save")
             self.bind("?", "show_config_edit_help", description="Help")
-            self.bind("v", "cycle_config_value_mode", description="Value Mode")
-            self.bind("t", "cycle_config_status_mode", description="Status Mode")
             optional_description = "Hide Optional" if self._edit_show_optional else "Show Optional"
             expert_description = "Hide Expert" if self._edit_show_expert else "Show Expert"
             self.bind("o", "toggle_config_optional_fields", description=optional_description)
@@ -1162,6 +1163,8 @@ class WorkflowTreeApp(App):
             self.action_toggle_config_boolean()
         elif kind == "union":
             self._show_config_variant_picker(node)
+        elif kind in {"object", "array"} and not node.get("children"):
+            self._show_structured_config_editor(node)
         else:
             tree = self.tree_root_widget
             if tree.cursor_node:
@@ -1185,6 +1188,35 @@ class WorkflowTreeApp(App):
             ),
         )
         self.push_screen(modal, lambda value: self._handle_scalar_config_value(node, value))
+
+    def _show_structured_config_editor(self, node: Dict) -> None:
+        kind = str(node.get("valueKind") or "object")
+        self.push_screen(
+            StructuredValueModal(
+                f"Edit {'.'.join(node.get('path', []))}",
+                self._structured_config_initial_text(node),
+                documentation=self._edit_node_documentation(node),
+                expected_kind=kind,
+            ),
+            lambda value: self._handle_structured_config_value(node, value),
+        )
+
+    @staticmethod
+    def _structured_config_initial_text(node: Dict) -> str:
+        value = node.get("value")
+        if value is None or value == "":
+            return "[]\n" if node.get("valueKind") == "array" else "{}\n"
+        return yaml.safe_dump(value, sort_keys=False)
+
+    def _handle_structured_config_value(self, node: Dict, value: Optional[Any]) -> None:
+        if value is None:
+            return
+        self._cancel_config_edit_validation()
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": value,
+        }, selected_id=node.get("id"))
 
     def _show_external_resource_picker(self, node: Dict) -> None:
         external_ref = node.get("externalRef") or {}
@@ -1594,6 +1626,8 @@ class WorkflowTreeApp(App):
             return "Toggle"
         if kind == "union":
             return "Choose Option"
+        if kind in {"object", "array"} and not node.get("children"):
+            return "Edit YAML"
         return "Expand"
 
     @staticmethod

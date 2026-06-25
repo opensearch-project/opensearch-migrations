@@ -1,5 +1,5 @@
 import {applyEditOperationToObject, buildEditStateFromObject, EditNode} from "../src/editConfig";
-import {USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
+import {buildUnifiedSchema, USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
 import {parse} from "yaml";
 import {spawnSync} from "child_process";
 import path from "path";
@@ -16,6 +16,25 @@ function findNode(nodes: EditNode[], id: string): EditNode | undefined {
         stack.push(...(node.children ?? []));
     }
     return undefined;
+}
+
+function withUnifiedSchemaFixture<T>(callback: () => T): T {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "edit-config-unified-schema-"));
+    const schemaPath = path.join(tempDir, "workflowMigration.schema.json");
+    const strimziFixturePath = path.resolve(__dirname, "../../schemas/tests/fixtures/strimzi/minimal-openapi.json");
+    const previousPath = process.env.MIGRATION_UNIFIED_SCHEMA_PATH;
+    try {
+        writeFileSync(schemaPath, JSON.stringify(buildUnifiedSchema({strimziSchemaPath: strimziFixturePath}).schema));
+        process.env.MIGRATION_UNIFIED_SCHEMA_PATH = schemaPath;
+        return callback();
+    } finally {
+        if (previousPath === undefined) {
+            delete process.env.MIGRATION_UNIFIED_SCHEMA_PATH;
+        } else {
+            process.env.MIGRATION_UNIFIED_SCHEMA_PATH = previousPath;
+        }
+        rmSync(tempDir, {recursive: true, force: true});
+    }
 }
 
 describe("editConfig state", () => {
@@ -393,12 +412,18 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")).toMatchObject({
             valueKind: "union",
             value: "unset",
+            effectiveDefault: {
+                label: "scram-sha-512",
+                source: "workflow policy",
+            },
         });
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.map(variant => variant.value)).toEqual([
             "unset",
             "none",
             "scram-sha-512",
         ]);
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.[0].label).toBe("default (scram-sha-512)");
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.label).toContain("auth: < default: scram-sha-512 >");
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.clusterSpecOverrides")).toMatchObject({
             valueKind: "object",
             presence: "optional",
@@ -432,6 +457,54 @@ describe("editConfig state", () => {
             options: [{label: "prod", value: "prod"}],
         });
     });
+
+    it("renders generic object override fields from the unified JSON schema", () => withUnifiedSchemaFixture(() => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},
+            targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
+            kafkaClusterConfiguration: {
+                kafka: {autoCreate: {}},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka.config.min.insync.replicas")).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.storage")).toMatchObject({
+            valueKind: "union",
+            value: "unset",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.topicSpecOverrides.config.cleanup.policy")).toMatchObject({
+            valueKind: "union",
+        });
+
+        const compactTopic = applyEditOperationToObject({
+            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "topicSpecOverrides", "config", "cleanup.policy"],
+            value: "compact",
+        });
+        const persistentStorage = applyEditOperationToObject(parse(compactTopic.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "storage"],
+            value: "persistent-claim",
+        });
+
+        expect(compactTopic.yaml).toContain("cleanup.policy: compact");
+        expect(persistentStorage.yaml).toContain("type: persistent-claim");
+        expect(findNode(persistentStorage.editState.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.storage.size")).toMatchObject({
+            valueKind: "scalar",
+            presence: "optional",
+        });
+    }));
 
     it("renders missing capture proxy options as visible required fields", () => {
         const state = buildEditStateFromObject({
@@ -775,7 +848,7 @@ describe("editConfig state", () => {
         const result = spawnSync(
             process.execPath,
             ["--import", "tsx", cliPath, "editConfig", "state", "--pending-config", samplePath],
-            {encoding: "utf8"}
+            {encoding: "utf8", maxBuffer: 5 * 1024 * 1024}
         );
 
         expect(result.status).toBe(0);

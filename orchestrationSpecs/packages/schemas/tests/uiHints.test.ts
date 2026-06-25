@@ -74,4 +74,17 @@ describe("workflow schema UI hints", () => {
         expect(proxyConfig.properties.serviceType["x-expert"]).toBe(true);
         expect(proxyConfig.properties.podReplicas["x-expert"]).toBeUndefined();
     });
+
+    it("exports effective defaults for fields resolved outside the raw schema", () => {
+        const kafkaConfig = schema.properties.kafkaClusterConfiguration.additionalProperties;
+        const autoCreate = kafkaConfig.anyOf
+            .find((branch: any) => branch.properties?.autoCreate)
+            .properties.autoCreate;
+
+        expect(autoCreate.properties.auth["x-effective-default"]).toMatchObject({
+            label: "scram-sha-512",
+            value: {type: "scram-sha-512"},
+            source: "workflow policy",
+        });
+    });
 });

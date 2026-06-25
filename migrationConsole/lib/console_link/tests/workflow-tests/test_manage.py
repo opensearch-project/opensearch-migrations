@@ -28,6 +28,7 @@ from console_link.workflow.tui.external_resource_modal import (
     ExternalResourcePickerModal,
     PICKER_PAGE_SIZE,
 )
+from console_link.workflow.tui.structured_value_modal import StructuredValueModal
 from console_link.workflow.tui.text_input_modal import TextInputModal
 from console_link.workflow.tui.manage_injections import (
     WaiterInterface,
@@ -913,6 +914,56 @@ def edit_state_with_editable_source_fields():
     }
 
 
+def edit_state_with_kafka_override_leaf():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:kafkaClusterConfiguration",
+                "path": ["kafkaClusterConfiguration"],
+                "label": "[OK] Kafka Clusters",
+                "valueKind": "record",
+                "description": "Kafka cluster configurations.",
+                "status": "ok",
+                "statusCounts": {},
+                "children": [
+                    {
+                        "id": "edit:kafkaClusterConfiguration.kafka",
+                        "path": ["kafkaClusterConfiguration", "kafka"],
+                        "label": "[OK] kafka: kafka",
+                        "valueKind": "object",
+                        "description": "Kafka cluster configuration.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "children": [
+                            {
+                                "id": "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                                "path": [
+                                    "kafkaClusterConfiguration",
+                                    "kafka",
+                                    "autoCreate",
+                                    "clusterSpecOverrides",
+                                ],
+                                "label": "[OK] clusterSpecOverrides: <unset>",
+                                "valueKind": "object",
+                                "presence": "optional",
+                                "description": "Optional overrides merged into the generated Strimzi Kafka.spec.",
+                                "status": "ok",
+                                "statusCounts": {},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_field_visibility():
     return {
         "formatVersion": 1,
@@ -980,6 +1031,19 @@ def edit_state_with_field_visibility():
         "policyPreview": [],
         "validation": {"valid": False, "errors": ["endpoint is required"]},
     }
+
+
+def test_structured_value_modal_parses_yaml_objects_and_arrays():
+    object_modal = StructuredValueModal("Edit object", expected_kind="object")
+    array_modal = StructuredValueModal("Edit array", expected_kind="array")
+
+    assert object_modal._parse_value("kafka:\n  replicas: 3\n") == {"kafka": {"replicas": 3}}
+    assert object_modal._parse_value("") == {}
+    assert array_modal._parse_value("- one\n- two\n") == ["one", "two"]
+    assert array_modal._parse_value("") == []
+
+    with pytest.raises(ValueError, match="YAML object"):
+        object_modal._parse_value("- not\n- an\n- object\n")
 
 
 def resource_sections_for_manage_tests():
@@ -2509,8 +2573,8 @@ async def test_resource_view_edit_mode_dirty_exit_defaults_to_save_when_valid(mo
 
 
 @pytest.mark.asyncio
-async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_two_pods):
-    """Edit rows use one status color and can switch value/status projection modes."""
+async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow_with_two_pods):
+    """Edit rows use one status color and keep value/status projection hotkeys disabled."""
 
     class FakeConfigEditService:
         def load_edit_session(self):
@@ -2558,24 +2622,22 @@ async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_
             assert "deployed/workflow=https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
             assert "pending=https://new.example.com:9200" in get_clean_text_label(tree.cursor_node)
             assert "cyan" in get_label_style(tree.cursor_node)
+            assert binding_descriptions(app, "v") == []
+            assert binding_descriptions(app, "t") == []
+            initial_label = get_clean_text_label(tree.cursor_node)
+            initial_style = get_label_style(tree.cursor_node)
 
             await pilot.press("v")
-            assert await wait_until(
-                pilot,
-                lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
-            )
-            assert "endpoint: https://old.example.com:9200 [CHG 1]" in get_clean_text_label(tree.cursor_node)
-            assert "Values: Deployed" in str(app.query_one("#pod-status").content)
+            await pilot.pause()
+            assert get_clean_text_label(tree.cursor_node) == initial_label
+            assert get_label_style(tree.cursor_node) == initial_style
+            assert "Values: All" in str(app.query_one("#pod-status").content)
 
             await pilot.press("t")
-            assert await wait_until(
-                pilot,
-                lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
-            )
-            assert "[OK]" not in get_clean_text_label(tree.cursor_node)
-            assert "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
-            assert "green" in get_label_style(tree.cursor_node)
-            assert "Status: Deployed" in str(app.query_one("#pod-status").content)
+            await pilot.pause()
+            assert get_clean_text_label(tree.cursor_node) == initial_label
+            assert get_label_style(tree.cursor_node) == initial_style
+            assert "Status: All" in str(app.query_one("#pod-status").content)
 
 
 @pytest.mark.asyncio
@@ -2624,6 +2686,8 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             assert binding_descriptions(app, "O") == ["Hide Optional"]
             assert binding_descriptions(app, "x") == ["Show Expert"]
             assert binding_descriptions(app, "X") == ["Show Expert"]
+            assert binding_descriptions(app, "v") == []
+            assert binding_descriptions(app, "t") == []
 
             await pilot.press("o")
             assert await wait_until(
@@ -3161,6 +3225,88 @@ async def test_resource_view_edit_mode_add_row_bindings_do_not_offer_delete(mock
                     "op": "add",
                     "path": ["sourceClusters"],
                     "value": {"name": "new-source"},
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_workflow_with_two_pods):
+    """Enter opens a YAML editor for object/array edit rows that have no rendered children."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_kafka_override_leaf(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            state = edit_state_with_kafka_override_leaf()
+            state["nodes"][0]["children"][0]["children"][0]["value"] = operation["value"]
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": state,
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+
+            selected = tree.cursor_node.data["edit_node"]
+            assert app._config_edit_enter_description(selected) == "Edit YAML"
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, StructuredValueModal))
+            assert app.screen.query_one("#value", TextArea).text == "{}\n"
+
+            app.screen.query_one("#value", TextArea).load_text("kafka:\n  replicas: 3\n")
+            await pilot.press("ctrl+s")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert await wait_until(pilot, lambda: not isinstance(app.screen, StructuredValueModal))
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "set",
+                    "path": [
+                        "kafkaClusterConfiguration",
+                        "kafka",
+                        "autoCreate",
+                        "clusterSpecOverrides",
+                    ],
+                    "value": {"kafka": {"replicas": 3}},
                 },
             )
 
