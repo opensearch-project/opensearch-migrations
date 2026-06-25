@@ -815,7 +815,7 @@
                 "template": "waitforuserapproval",
                 "name": "resource-management"
               },
-              "when": "{{=!(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.proxyConfig)))}}",
+              "when": "{{=!(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.proxyConfig)) == 'true')}}",
               "arguments": {
                 "parameters": [
                   {
