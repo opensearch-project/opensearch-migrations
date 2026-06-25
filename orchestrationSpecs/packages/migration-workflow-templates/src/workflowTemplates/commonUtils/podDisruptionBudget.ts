@@ -4,25 +4,9 @@ import {
     makeStringTypeProxy,
     ResourceWorkflowDefinition,
 } from "@opensearch-migrations/argo-workflow-builders";
-import {OwnerReference} from "@opensearch-migrations/k8s-types";
+import {OwnerReference, PodDisruptionBudget} from "@opensearch-migrations/k8s-types";
 
-export type PodDisruptionBudgetManifest = {
-    apiVersion: "policy/v1",
-    kind: "PodDisruptionBudget",
-    metadata: {
-        name: string | object,
-        ownerReferences?: OwnerReference[],
-        labels?: Record<string, string | object>,
-    },
-    spec: {
-        minAvailable: number | object,
-        selector: {
-            matchLabels: Record<string, string | object>,
-        },
-    },
-};
-
-function stringifyLabels(labels: Record<string, string | BaseExpression<string>>): Record<string, string | object> {
+function stringifyLabels(labels: Record<string, string | BaseExpression<string>>): Record<string, string> {
     return Object.fromEntries(
         Object.entries(labels).map(([key, value]) => [
             key,
@@ -37,7 +21,7 @@ export function makePodDisruptionBudgetManifest(args: {
     matchLabels: Record<string, string | BaseExpression<string>>,
     labels?: Record<string, string | BaseExpression<string>>,
     ownerReferences?: OwnerReference[],
-}): PodDisruptionBudgetManifest {
+}): PodDisruptionBudget {
     return {
         apiVersion: "policy/v1",
         kind: "PodDisruptionBudget",
