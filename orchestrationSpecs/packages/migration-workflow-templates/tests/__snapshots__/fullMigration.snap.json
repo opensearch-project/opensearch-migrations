@@ -1856,7 +1856,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
+                    "value": "{{=sprig.regexReplaceAll('[-.]+$', sprig.regexReplaceAll('^[-.]+', sprig.regexReplaceAll('-+', sprig.regexReplaceAll('[^a-z0-9.-]+', lower(item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']), '-'), '-'), ''), '')}}"
                   },
                   {
                     "name": "configChecksum",

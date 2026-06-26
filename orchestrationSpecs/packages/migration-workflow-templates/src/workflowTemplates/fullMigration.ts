@@ -674,7 +674,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: expr.concat(
+                        resourceName: sanitizeCrdName(expr.concat(
                             expr.asString(expr.get(c.item, "source")),
                             expr.literal("-"),
                             expr.dig(
@@ -686,7 +686,7 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.asString(expr.get(c.item, "snapshot")),
                             expr.literal("-"),
                             expr.asString(expr.get(c.item, "migrationLabel"))
-                        ),
+                        )),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
                         checksumField: expr.literal("checksumForReplayer"),
                     });
