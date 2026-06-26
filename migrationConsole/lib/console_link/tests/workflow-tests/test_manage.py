@@ -2935,7 +2935,7 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
 
             source_node = tree.root.children[0]
             assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
-            assert "green" in get_label_style(source_node)
+            assert get_label_style(source_node) == ""
             assert not source_node.is_expanded
 
             endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
@@ -2943,7 +2943,7 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
 
             assert "deployed/workflow=https://old.example.com:9200" in get_clean_text_label(endpoint_node)
             assert "pending=https://new.example.com:9200" in get_clean_text_label(endpoint_node)
-            assert "green" in get_label_style(endpoint_node)
+            assert get_label_style(endpoint_node) == ""
             assert binding_descriptions(app, "v") == []
             assert binding_descriptions(app, "t") == []
             initial_label = get_clean_text_label(endpoint_node)
@@ -2963,8 +2963,8 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
 
 
 @pytest.mark.asyncio
-async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(mock_workflow_with_two_pods):
-    """Edit mode uses submitted workflow config as the deployed/current baseline."""
+async def test_resource_view_edit_mode_enriches_deployed_values_from_console_snapshots(mock_workflow_with_two_pods):
+    """Edit mode uses submitted console resources as the deployed/current baseline."""
 
     state = edit_state_with_editable_source_fields()
     source = state["nodes"][0]
@@ -2989,15 +2989,18 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(m
 
         def load_resource_config_snapshots(self, workflow_name):
             return {
-                "submitted": {
-                    "workflowConfig": {
-                        "sourceClusters": {
-                            "legacy": {
-                                "endpoint": "https://old.example.com:9200",
-                                "allowInsecure": False,
-                            },
+                "submitted": {},
+                "submitted_console": {
+                    "sources": [{
+                        "refName": "legacy",
+                        "clientConfig": {
+                            "endpoint": "https://old.example.com:9200",
+                            "allow_insecure": False,
                         },
-                    },
+                    }],
+                    "targets": [],
+                    "kafkas": [],
+                    "consumerGroups": [],
                 },
             }
 
@@ -3034,7 +3037,6 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(m
             assert source_node is not None
             assert endpoint_node is not None
             assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
-            assert not source_node.is_expanded
             assert (
                 "endpoint: deployed/workflow=https://old.example.com:9200 | "
                 "pending=https://new.example.com:9200 [1 change]"

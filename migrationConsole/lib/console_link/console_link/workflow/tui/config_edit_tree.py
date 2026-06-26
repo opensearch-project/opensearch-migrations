@@ -47,7 +47,7 @@ _STATUS_PRIORITY = {
 }
 _STATUS_STYLE = {
     "ok": "",
-    "changed": "green",
+    "changed": "",
     "warning": "yellow",
     "gated": "magenta",
     "required": "yellow",

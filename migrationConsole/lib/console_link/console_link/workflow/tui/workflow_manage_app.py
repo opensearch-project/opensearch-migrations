@@ -1022,15 +1022,23 @@ class WorkflowTreeApp(App):
         if not snapshots:
             return edit_state
 
-        submitted_config = ((snapshots.get("submitted") or {}).get("workflowConfig"))
-        if submitted_config is None:
-            return edit_state
-
         enriched = copy.deepcopy(edit_state)
+        submitted_config = ((snapshots.get("submitted") or {}).get("workflowConfig")) or {}
         current_config = submitted_config
         pending_config = pending_config or {}
+        submitted_console = snapshots.get("submitted_console") or {}
+        current_console = submitted_console
+        pending_console = snapshots.get("pending_console") or {}
         for node in enriched.get("nodes") or []:
-            self._enrich_config_edit_node(node, submitted_config, current_config, pending_config)
+            self._enrich_config_edit_node(
+                node,
+                submitted_config,
+                current_config,
+                pending_config,
+                submitted_console,
+                current_console,
+                pending_console,
+            )
         return enriched
 
     def _enrich_config_edit_node(
@@ -1039,17 +1047,33 @@ class WorkflowTreeApp(App):
         deployed_config: Dict[str, Any],
         current_config: Dict[str, Any],
         pending_config: Dict[str, Any],
+        deployed_console: Dict[str, Any],
+        current_console: Dict[str, Any],
+        pending_console: Dict[str, Any],
     ) -> int:
         changed_count = 0
         for child in node.get("children") or []:
-            changed_count += self._enrich_config_edit_node(child, deployed_config, current_config, pending_config)
+            changed_count += self._enrich_config_edit_node(
+                child,
+                deployed_config,
+                current_config,
+                pending_config,
+                deployed_console,
+                current_console,
+                pending_console,
+            )
 
         own_changed = 0
         if self._edit_node_supports_value_states(node):
             states = copy.deepcopy(node.get("states") or {})
-            deployed = self._workflow_config_value_state(deployed_config, node)
-            current = self._workflow_config_value_state(current_config, node)
-            pending = self._workflow_config_value_state(pending_config, node)
+            deployed = self._config_edit_value_state(deployed_config, deployed_console, node)
+            current = self._config_edit_value_state(current_config, current_console, node)
+            pending = self._config_edit_value_state(
+                pending_config,
+                pending_console,
+                node,
+                prefer_console=False,
+            )
 
             submitted_changed = not self._same_value_state(deployed, current)
             pending_changed = not self._same_value_state(current, pending)
@@ -1064,6 +1088,157 @@ class WorkflowTreeApp(App):
         if total_changed:
             self._merge_edit_node_changed_status(node, total_changed)
         return total_changed
+
+    @classmethod
+    def _config_edit_value_state(
+        cls,
+        workflow_config: Dict[str, Any],
+        console_config: Dict[str, Any],
+        node: Dict[str, Any],
+        prefer_console: bool = True,
+    ) -> Dict[str, Any]:
+        console_state = cls._console_config_value_state(console_config, node)
+        if prefer_console and console_state is not None:
+            return console_state
+
+        workflow_state = cls._workflow_config_value_state(workflow_config, node)
+        if not prefer_console:
+            if workflow_state.get("present") or console_state is None:
+                return workflow_state
+            return console_state
+        return workflow_state
+
+    @classmethod
+    def _console_config_value_state(
+        cls,
+        console_config: Dict[str, Any],
+        node: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        path = node.get("path") or []
+        if len(path) < 3 or not console_config:
+            return None
+
+        root = path[0]
+        name = str(path[1])
+        relative_path = [str(part) for part in path[2:]]
+        if root == "sourceClusters":
+            return cls._cluster_console_value_state(
+                console_config,
+                "sources",
+                name,
+                relative_path,
+                node,
+            )
+        if root == "targetClusters":
+            return cls._cluster_console_value_state(
+                console_config,
+                "targets",
+                name,
+                relative_path,
+                node,
+            )
+        if root == "kafkaClusterConfiguration":
+            return cls._kafka_console_value_state(console_config, name, relative_path)
+        return None
+
+    @classmethod
+    def _cluster_console_value_state(
+        cls,
+        console_config: Dict[str, Any],
+        collection_name: str,
+        name: str,
+        relative_path: list[str],
+        node: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        resource = cls._find_console_resource(console_config, collection_name, name)
+        if resource is None:
+            return {"present": False}
+        client_config = resource.get("clientConfig") or {}
+        parameter_path = cls._cluster_console_parameter_path(relative_path, node)
+        if parameter_path is None:
+            return None
+        if parameter_path == ["authConfig"]:
+            return cls._cluster_auth_mode_state(client_config)
+        return cls._nested_state(client_config, parameter_path)
+
+    @staticmethod
+    def _cluster_console_parameter_path(relative_path: list[str], node: Dict[str, Any]) -> Optional[list[str]]:
+        if relative_path == ["endpoint"]:
+            return ["endpoint"]
+        if relative_path == ["allowInsecure"]:
+            return ["allow_insecure"]
+        if relative_path == ["version"]:
+            return ["version"]
+        if relative_path == ["authConfig"] and node.get("valueKind") == "union":
+            return ["authConfig"]
+        if relative_path[:2] == ["authConfig", "basic"]:
+            field = relative_path[2:]
+            if field == ["secretName"]:
+                return ["basic_auth", "k8s_secret_name"]
+            if field in (["username"], ["password"]):
+                return ["basic_auth", field[0]]
+        if relative_path[:2] == ["authConfig", "sigv4"]:
+            return ["sigv4", *relative_path[2:]]
+        if relative_path[:2] == ["authConfig", "mtls"]:
+            return ["mtls_auth", *relative_path[2:]]
+        return None
+
+    @staticmethod
+    def _cluster_auth_mode_state(client_config: Dict[str, Any]) -> Dict[str, Any]:
+        if "basic_auth" in client_config:
+            return {"present": True, "value": "basic"}
+        if "sigv4" in client_config:
+            return {"present": True, "value": "sigv4"}
+        if "mtls_auth" in client_config:
+            return {"present": True, "value": "mtls"}
+        if "no_auth" in client_config:
+            return {"present": True, "value": "none"}
+        return {"present": False}
+
+    @classmethod
+    def _kafka_console_value_state(
+        cls,
+        console_config: Dict[str, Any],
+        name: str,
+        relative_path: list[str],
+    ) -> Optional[Dict[str, Any]]:
+        resource = cls._find_console_resource(console_config, "kafkas", name)
+        if resource is None:
+            return {"present": False}
+        runtime = resource.get("runtime") or {}
+        if relative_path == ["mode"]:
+            runtime_type = runtime.get("type")
+            if runtime_type == "strimzi":
+                return {"present": True, "value": "autoCreate"}
+            if runtime_type == "direct":
+                return {"present": True, "value": "existing"}
+            return {"present": False}
+        if relative_path == ["autoCreate", "auth"]:
+            auth_type = runtime.get("authType")
+            return {"present": True, "value": auth_type} if auth_type else {"present": False}
+        if relative_path == ["autoCreate", "auth", "type"]:
+            auth_type = runtime.get("authType")
+            return {"present": True, "value": auth_type} if auth_type else {"present": False}
+        return None
+
+    @staticmethod
+    def _find_console_resource(
+        console_config: Dict[str, Any],
+        collection_name: str,
+        name: str,
+    ) -> Optional[Dict[str, Any]]:
+        for resource in console_config.get(collection_name) or []:
+            aliases = [resource.get("refName"), *(resource.get("aliases") or [])]
+            if name in aliases:
+                return resource
+        return None
+
+    @classmethod
+    def _nested_state(cls, source: Dict[str, Any], path: list[str]) -> Dict[str, Any]:
+        found, value = cls._lookup_workflow_config_path(source, path)
+        if not found:
+            return {"present": False}
+        return {"present": True, "value": value}
 
     @staticmethod
     def _edit_node_supports_value_states(node: Dict[str, Any]) -> bool:
