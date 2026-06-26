@@ -32,19 +32,6 @@ variable "node_count" {
   default     = 2
 }
 
-
-variable "source_endpoint" {
-  description = "Source Elasticsearch/OpenSearch cluster endpoint URL"
-  type        = string
-  default     = ""
-}
-
-variable "target_endpoint" {
-  description = "Target OpenSearch cluster endpoint URL (e.g. Aiven)"
-  type        = string
-  default     = ""
-}
-
 variable "kafka_brokers" {
   description = "Comma-separated list of Kafka bootstrap brokers"
   type        = string

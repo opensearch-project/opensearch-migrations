@@ -74,3 +74,12 @@ run "none_mode_plans_no_connectivity_modules" {
     error_message = "Default none mode must create no connectivity modules."
   }
 }
+
+run "none_mode_outputs_null_private_endpoints" {
+  command = plan
+
+  assert {
+    condition     = output.source_private_endpoint == null && output.target_private_endpoint == null
+    error_message = "none mode must output null for both private endpoints."
+  }
+}
