@@ -68,14 +68,13 @@ export const DEFAULT_RESOURCES = {
         }
     },
 
-    // Strimzi entity-operator sidecars (topic-operator + user-operator), set PER CONTAINER.
-    // These default to no resources at all, which makes them 'BestEffort' and lets the
+    // Strimzi entity-operator sidecars (topic-operator + user-operator), set per container.
+    // These default to no resources at all, which makes them BestEffort and lets the
     // scheduler pack them onto an already-saturated node. On a busy 2-vCPU node the JVM
-    // cold-start then loses the race against the operator's liveness probe and crash-loops —
+    // cold-start then loses the race against the operator's liveness probe and crash-loops,
     // and because the user-operator creates the KafkaUser SCRAM secret, that wedges the whole
-    // migration (Kafka never goes Ready, no secret, replayer never deploys). Reserve real CPU
-    // so the scheduler keeps them off saturated nodes. requests==limits => 'Guaranteed' QoS.
-    // Sized to Strimzi's own operator footprint (~0.5 vCPU / 0.5Gi each).
+    // migration. Reserve real CPU so the scheduler keeps them off saturated nodes.
+    // requests==limits gives Guaranteed QoS. Sized to Strimzi's own operator footprint.
     ENTITY_OPERATOR: {
         limits: {
             cpu: "500m",
@@ -84,6 +83,18 @@ export const DEFAULT_RESOURCES = {
         requests: {
             cpu: "500m",
             memory: "512Mi",
+        }
+    },
+
+    // Kafka broker/controller node-pool pods. requests==limits gives Guaranteed QoS.
+    KAFKA_BROKER: {
+        limits: {
+            cpu: "1000m",
+            memory: "2048Mi",
+        },
+        requests: {
+            cpu: "1000m",
+            memory: "2048Mi",
         }
     },
 } as const;

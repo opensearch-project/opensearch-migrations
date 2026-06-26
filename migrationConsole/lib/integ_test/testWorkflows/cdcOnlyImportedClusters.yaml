@@ -125,6 +125,7 @@ spec:
                       "proxyConfig": ({
                         "listenPort": 9201,
                         "noCapture": false,
+                        "podReplicas": 2,
                         "serviceType": "{{workflow.parameters.capture-proxy-service-type}}"
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint

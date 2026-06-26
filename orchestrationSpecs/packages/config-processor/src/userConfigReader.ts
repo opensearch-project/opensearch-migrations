@@ -10,7 +10,7 @@ async function readStdin(): Promise<string> {
         const chunks: Buffer[] = [];
 
         process.stdin.on('data', (chunk) => {
-            chunks.push(chunk);
+            chunks.push(Buffer.from(chunk));
         });
 
         process.stdin.on('end', () => {

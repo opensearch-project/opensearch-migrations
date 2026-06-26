@@ -49,6 +49,7 @@ import {SetupCapture} from "./setupCapture";
 import {S3TrafficLoader} from "./s3TrafficLoader";
 import {Replayer} from "./replayer";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {SCALABLE_WORKLOAD_INPUTS, scalingFromOptions} from "./commonUtils/scalableWorkload";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -195,7 +196,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -221,6 +222,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
                     topicReplicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
@@ -648,14 +650,12 @@ export const FullMigration = WorkflowBuilder.create({
         })
     )
 
-
-    // ── Section 5: Traffic Replays ───────────────────────────────────────
-
     .addTemplate("runSingleReplay", t => t
         .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("fromCapturedTraffic", typeToken<string>())
+        .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
         .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
@@ -712,17 +712,12 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            // Replayer waits on the CapturedTraffic CR (works uniformly for live
-            // proxy and S3 loader sources). The CR's name pattern is
-            // `<fromCapturedTraffic>-topic` (set up by setupSingleProxy /
-            // setupSingleS3Source). The checksum field threaded through is
-            // checksumForReplayer, which the producer side patches on Ready.
-            .addStep("waitIndefinitelyForCapturedTraffic", ResourceManagement, "waitIndefinitelyForCapturedTraffic", c =>
+            .addStep("waitIndefinitelyForTrafficSource", ResourceManagement, "waitIndefinitelyForTrafficSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(b.inputs.fromCapturedTraffic, expr.literal("-topic")),
+                    sourceName: b.inputs.fromCapturedTraffic,
+                    sourceKind: b.inputs.fromCapturedTrafficSourceKind,
                     configChecksum: b.inputs.fromCapturedTrafficConfigChecksum,
-                    checksumField: expr.literal("checksumForReplayer"),
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
@@ -825,8 +820,9 @@ export const FullMigration = WorkflowBuilder.create({
                     when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters")}
                 }
             )
-            .addStep("createProxy", INTERNAL, "setupSingleProxy", c =>
-                c.register({
+            .addStep("createProxy", INTERNAL, "setupSingleProxy", c => {
+                const proxyScaling = scalingFromOptions(expr.get(c.item, "proxyConfig"));
+                return c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
@@ -864,11 +860,8 @@ export const FullMigration = WorkflowBuilder.create({
                         ["listenPort"],
                         9200
                     ),
-                    podReplicas: expr.dig(
-                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
-                        ["podReplicas"],
-                        1
-                    ),
+                    podReplicas: proxyScaling.podReplicas,
+                    minPodReplicas: proxyScaling.minPodReplicas,
                     topicPartitions: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         ["topicSpecOverrides", "partitions"],
@@ -887,7 +880,8 @@ export const FullMigration = WorkflowBuilder.create({
                     groupName_view: expr.get(c.item, "name"),
                     resourceName: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
-                }), {
+                });
+            }, {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
                 }

@@ -1,7 +1,6 @@
 import {
     CLUSTER_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
-    getZodKeys,
     HTTP_ENDPOINT_PATTERN,
     KAFKA_CLIENT_CONFIG,
     KAFKA_CLUSTER_CONFIG,
@@ -21,6 +20,16 @@ import {
     USER_RFS_OPTIONS,
 } from "./userSchemas";
 import {z} from "zod";
+
+// zod ≥4.4 makes structural ops (.omit()/.pick()) throw when the object schema
+// still carries refinements (.refine/.superRefine/.transform), instead of
+// silently discarding them as pre-4.4 did. The Argo-side schemas below are
+// resolved/denormalized projections that intentionally shed the user-level
+// cross-field refinements, so rebuilding a plain object from the shape before
+// the structural op restores the prior (and intended) behavior.
+function dropRefinements<T extends z.ZodRawShape>(schema: z.ZodObject<T>): z.ZodObject<T> {
+    return z.object(schema.shape);
+}
 
 // DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
 export const SOURCE_PROXY_CONFIG = z.object({
@@ -132,7 +141,7 @@ export const NAMED_SOURCE_CLUSTER_CONFIG =
     }));
 
 export const NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO =
-    NAMED_SOURCE_CLUSTER_CONFIG.omit({snapshotInfo: true});
+    dropRefinements(NAMED_SOURCE_CLUSTER_CONFIG).omit({snapshotInfo: true});
 
 export const NAMED_TARGET_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.safeExtend({
@@ -160,42 +169,43 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
     }));
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_METADATA_OPTIONS.omit({
+    dropRefinements(USER_METADATA_OPTIONS).omit({
         skipEvaluateApproval: true,
         skipMigrateApproval: true,
         metadataTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
 );
-export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_SNAPSHOT_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-}));
+export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>)[];
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_RFS_OPTIONS.in.omit({
+    dropRefinements(USER_RFS_OPTIONS.in).omit({
         skipApproval: true,
         documentTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
-    podReplicas: true,
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    useTargetClusterForWorkCoordination: true,
-    resources: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
+    "podReplicas",
+    "minPodReplicas",
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "useTargetClusterForWorkCoordination",
+    "resources",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
 
 // Fields config lowering adds on top of the user-facing proxy schema, named as a
 // single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
@@ -213,19 +223,20 @@ const PROXY_RESOLVED_FIELDS = {
 } as const;
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
 );
-export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
-    loggingConfigurationOverrideConfigMap: true,
-    serviceType: true,
-    internetFacing: true,
-    podReplicas: true,
-    resources: true,
-    tls: true,
-    sslTrustCertPem: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
+    "loggingConfigurationOverrideConfigMap",
+    "serviceType",
+    "internetFacing",
+    "podReplicas",
+    "minPodReplicas",
+    "resources",
+    "tls",
+    "sslTrustCertPem",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_PROXY_OPTIONS>)[];
 
 // Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
 // schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
@@ -244,20 +255,21 @@ export const ARGO_PROXY_CR_OMITTED_KEYS = [
 ];
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_REPLAYER_OPTIONS.omit({
+    dropRefinements(USER_REPLAYER_OPTIONS).omit({
         requestTransforms: true,
         tupleTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
-export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIONS.pick({
-    jvmArgs: true,
-    loggingConfigurationOverrideConfigMap: true,
-    podReplicas: true,
-    useLocalStack: true,
-    resources: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "podReplicas",
+    "minPodReplicas",
+    "useLocalStack",
+    "resources",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_REPLAYER_OPTIONS>)[];
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     // override label because when not specified, we'll use an integer,
@@ -358,11 +370,8 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     sourceLabel: z.string(),
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
-    // Captured-traffic source name + checksum: works uniformly across live
-    // proxy and S3 loader paths. The replayer uses these to wait on the
-    // CapturedTraffic CR (whose name is `<fromCapturedTraffic>-topic`) and
-    // re-evaluate when the source's checksum changes.
     fromCapturedTraffic: z.string(),
+    fromCapturedTrafficSourceKind: z.enum(["proxy", "s3"]),
     fromCapturedTrafficConfigChecksum: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,

@@ -1073,6 +1073,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 name: [sourceName, replayer.toTarget, name].join('-'),
                 sourceLabel,
                 fromCapturedTraffic: sourceName,
+                fromCapturedTrafficSourceKind: proxy ? "proxy" : "s3",
                 kafkaClusterName: kafkaCluster,
                 kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },

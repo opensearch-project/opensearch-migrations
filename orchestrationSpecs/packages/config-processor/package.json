@@ -24,12 +24,12 @@
     "ajv": "^8.20.0",
     "ci": "^2.3.0",
     "yaml": "^2.9.0",
-    "zod": "^4"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@testcontainers/k3s": "^11.12.0",
+    "@testcontainers/k3s": "^12.0.2",
     "@types/jest": "*",
-    "@types/node": "^24.13.2",
+    "@types/node": "^26.0.0",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }
