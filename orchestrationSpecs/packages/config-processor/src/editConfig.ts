@@ -4,10 +4,6 @@ import {
     EffectiveDefaultHint,
     ExternalRefHint,
     FieldMeta,
-    HTTP_AUTH_BASIC,
-    HTTP_AUTH_MTLS,
-    HTTP_AUTH_SIGV4,
-    K8S_NAMING_PATTERN,
     KAFKA_CLUSTER_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
@@ -167,24 +163,11 @@ const TRAFFIC_DESCRIPTION = descriptionOf(TRAFFIC_CONFIG);
 const CAPTURE_DESCRIPTION = descriptionOf(CAPTURE_CONFIG);
 const REPLAYER_DESCRIPTION = descriptionOf(REPLAYER_CONFIG);
 const SNAPSHOT_MIGRATION_DESCRIPTION = descriptionOf(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG);
-const AUTH_DESCRIPTION = "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS.";
-const K8S_NAME_INPUT_HINT: EditInputHint = {
-    kind: "text",
-    format: "k8s-name",
-    pattern: K8S_NAMING_PATTERN.source,
-    message: "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
-};
-const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]) ?? K8S_NAME_INPUT_HINT;
-const BASIC_SECRET_EXTERNAL_REF = externalRefAt(HTTP_AUTH_BASIC, ["basic", "secretName"]);
-const MTLS_CLIENT_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_MTLS, ["mtls", "clientSecretName"]) ?? K8S_NAME_INPUT_HINT;
+const AUTH_CONFIG_SCHEMA = schemaShape(CLUSTER_CONFIG)?.authConfig;
+const AUTH_DESCRIPTION = schemaDescription(AUTH_CONFIG_SCHEMA) || "Authentication configuration for connecting to the cluster.";
 const PROXY_TLS_CERT_MANAGER_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "certManager");
-const PROXY_TLS_ISSUER_EXTERNAL_REF = externalRefAt(PROXY_TLS_CERT_MANAGER_SCHEMA, ["issuerRef"]);
 const PROXY_TLS_EXISTING_SECRET_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "existingSecret");
 const PROXY_TLS_PLAINTEXT_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "plaintext");
-const PROXY_TLS_SECRET_NAME_HINT = uiHintAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]) ?? K8S_NAME_INPUT_HINT;
-const PROXY_TLS_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]);
-const PROXY_CLIENT_AUTH_CONSOLE_SECRET_HINT = uiHintAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]) ?? K8S_NAME_INPUT_HINT;
-const PROXY_CLIENT_AUTH_CONSOLE_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]);
 const S3_CAPTURED_TRAFFIC_DESCRIPTION = descriptionOf(S3_CAPTURED_TRAFFIC_SOURCE);
 const KAFKA_RECORD_HINT = uiHintOf(KAFKA_CLUSTERS_MAP);
 const SOURCE_RECORD_HINT = uiHintOf(SOURCE_CLUSTERS_MAP);
@@ -239,18 +222,6 @@ function uiHintAt(schema: any, path: string[]): EditInputHint | undefined {
         }
     }
     return uiHintOf(current);
-}
-
-function externalRefAt(schema: any, path: string[]): ExternalRefHint | undefined {
-    let current = schema;
-    for (const part of path) {
-        const unwrapped = unwrapSchema(current);
-        current = unwrapped?.shape?.[part];
-        if (!current) {
-            return undefined;
-        }
-    }
-    return externalRefOf(current);
 }
 
 function discriminatedUnionOption(schema: any, discriminator: string, value: unknown): any | undefined {
@@ -760,6 +731,10 @@ function singleKeyUnionBranches(schema: any): SingleKeyUnionBranch[] {
     return branches.every(Boolean) ? branches as SingleKeyUnionBranch[] : [];
 }
 
+function singleKeyUnionBranchFor(schema: any, value: string): SingleKeyUnionBranch | undefined {
+    return singleKeyUnionBranches(schema).find(branch => branch.value === value);
+}
+
 function selectedSingleKeyUnionBranch(
     branches: SingleKeyUnionBranch[],
     value: unknown,
@@ -803,6 +778,18 @@ function schemaFieldNodeFor(
         node.inputHint = referenceHint(node.inputHint, referenceOptions);
     }
     return node;
+}
+
+function schemaNestedObjectChildren(
+    parentSchema: any,
+    rootPath: string[],
+    key: string,
+    value: any,
+): EditNode[] {
+    const nestedSchema = schemaShape(parentSchema)?.[key];
+    return nestedSchema
+        ? schemaObjectChildren([...rootPath, key], nestedSchema, value?.[key])
+        : [];
 }
 
 function singleKeyUnionMode(
@@ -1265,45 +1252,13 @@ function authVariant(authConfig: unknown): "none" | "basic" | "sigv4" | "mtls" |
 }
 
 function authChildren(path: string[], variant: ReturnType<typeof authVariant>, authConfig: any): EditNode[] {
-    if (variant === "basic") {
-        return [
-            scalarNode(
-                [...path, "basic", "secretName"],
-                "secretName",
-                authConfig?.basic?.secretName,
-                "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
-                true,
-                BASIC_SECRET_NAME_HINT,
-                "string",
-                false,
-                "required",
-                BASIC_SECRET_EXTERNAL_REF
-            ),
-        ];
+    if (variant === "none" || variant === "unknown") {
+        return [];
     }
-    if (variant === "sigv4") {
-        return [
-            scalarNode([...path, "sigv4", "region"], "region", authConfig?.sigv4?.region, "AWS region for SigV4 request signing (e.g. 'us-east-1').", true),
-            scalarNode([...path, "sigv4", "service"], "service", authConfig?.sigv4?.service ?? "es", "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."),
-        ];
-    }
-    if (variant === "mtls") {
-        return [
-            scalarNode([...path, "mtls", "caCert"], "caCert", authConfig?.mtls?.caCert, "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate.", true),
-            scalarNode(
-                [...path, "mtls", "clientSecretName"],
-                "clientSecretName",
-                authConfig?.mtls?.clientSecretName,
-                "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
-                true,
-                MTLS_CLIENT_SECRET_NAME_HINT,
-                "string",
-                false,
-                "required"
-            ),
-        ];
-    }
-    return [];
+    const branch = singleKeyUnionBranchFor(AUTH_CONFIG_SCHEMA, variant);
+    return branch
+        ? schemaNestedObjectChildren(branch.optionSchema, path, variant, authConfig)
+        : [];
 }
 
 function authNode(path: string[], authConfig: unknown): EditNode {
@@ -1311,6 +1266,14 @@ function authNode(path: string[], authConfig: unknown): EditNode {
     const diagnostics: EditDiagnostic[] = variant === "unknown"
         ? [{severity: "error", message: "Unknown authConfig variant. Expected basic, sigv4, mtls, or omitted.", path}]
         : [];
+    const authVariants = [
+        {label: "none", value: "none"},
+        ...singleKeyUnionBranches(AUTH_CONFIG_SCHEMA).map(branch => ({
+            label: branch.value,
+            value: branch.value,
+            description: branch.description,
+        })),
+    ];
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -1322,12 +1285,7 @@ function authNode(path: string[], authConfig: unknown): EditNode {
         descriptionShort: AUTH_DESCRIPTION,
         status: variant === "unknown" ? "error" : "ok",
         diagnostics,
-        variants: [
-            {label: "none", value: "none"},
-            {label: "basic", value: "basic", description: descriptionOf(HTTP_AUTH_BASIC)},
-            {label: "sigv4", value: "sigv4", description: descriptionOf(HTTP_AUTH_SIGV4)},
-            {label: "mtls", value: "mtls", description: descriptionOf(HTTP_AUTH_MTLS)},
-        ],
+        variants: authVariants,
         children: authChildren(path, variant, authConfig),
     });
 }
@@ -1385,43 +1343,7 @@ function proxyClientAuthNode(path: string[], config: unknown): EditNode {
             },
         ],
         children: mode === "enabled"
-            ? [
-                genericDisplayNode(
-                    [...path, "trustedClientCaFile"],
-                    "trustedClientCaFile",
-                    clientAuth.trustedClientCaFile,
-                    "optional",
-                    false,
-                    "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy.",
-                ),
-                scalarNode(
-                    [...path, "trustedClientCaPem"],
-                    "trustedClientCaPem",
-                    clientAuth.trustedClientCaPem ?? "",
-                    "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy.",
-                    false,
-                    undefined,
-                    "string",
-                ),
-                scalarNode(
-                    [...path, "consoleClientSecretName"],
-                    "consoleClientSecretName",
-                    clientAuth.consoleClientSecretName,
-                    "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
-                    false,
-                    PROXY_CLIENT_AUTH_CONSOLE_SECRET_HINT,
-                    "string",
-                    false,
-                    "optional",
-                    PROXY_CLIENT_AUTH_CONSOLE_SECRET_EXTERNAL_REF,
-                ),
-                booleanNode(
-                    [...path, "required"],
-                    "required",
-                    clientAuth.required ?? true,
-                    "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.",
-                ),
-            ]
+            ? schemaObjectChildren(path, PROXY_TLS_CLIENT_AUTH_CONFIG, clientAuth)
             : mode === "unknown" ? objectChildrenFromValue(path, config) : [],
     });
 }
@@ -1429,35 +1351,17 @@ function proxyClientAuthNode(path: string[], config: unknown): EditNode {
 function proxyTlsChildren(path: string[], mode: ReturnType<typeof proxyTlsMode>, config: any): EditNode[] {
     if (mode === "existingSecret") {
         return [
-            scalarNode(
-                [...path, "secretName"],
-                "secretName",
-                config?.secretName,
-                "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/.",
-                true,
-                PROXY_TLS_SECRET_NAME_HINT,
-                "string",
-                false,
-                "required",
-                PROXY_TLS_SECRET_EXTERNAL_REF
-            ),
+            schemaFieldNodeFor(PROXY_TLS_EXISTING_SECRET_SCHEMA, path, "secretName", config),
             proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
         ];
     }
     if (mode === "certManager") {
         return [
-            objectRefNode(
-                [...path, "issuerRef"],
-                "issuerRef",
-                config?.issuerRef,
-                "Reference to a cert-manager issuer that will sign TLS certificates for the proxy.",
-                true,
-                PROXY_TLS_ISSUER_EXTERNAL_REF
-            ),
-            genericDisplayNode([...path, "dnsNames"], "dnsNames", config?.dnsNames, "required", false, "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name."),
-            scalarNode([...path, "commonName"], "commonName", config?.commonName ?? "", "Optional common name (CN) for the TLS certificate subject."),
-            scalarNode([...path, "duration"], "duration", config?.duration ?? "2160h", "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
-            scalarNode([...path, "renewBefore"], "renewBefore", config?.renewBefore ?? "360h", "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
+            schemaFieldNodeFor(PROXY_TLS_CERT_MANAGER_SCHEMA, path, "issuerRef", config),
+            schemaFieldNodeFor(PROXY_TLS_CERT_MANAGER_SCHEMA, path, "dnsNames", config),
+            schemaFieldNodeFor(PROXY_TLS_CERT_MANAGER_SCHEMA, path, "commonName", config),
+            schemaFieldNodeFor(PROXY_TLS_CERT_MANAGER_SCHEMA, path, "duration", config),
+            schemaFieldNodeFor(PROXY_TLS_CERT_MANAGER_SCHEMA, path, "renewBefore", config),
             proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
         ];
     }
@@ -1660,6 +1564,9 @@ function schemaFieldNode(rootPath: string[], key: string, schema: any, config: R
     }
     if (scalarType === "string") {
         return scalarNode(path, key, value ?? "", description, required, inputHint, "string", expert, presence, externalRef);
+    }
+    if (externalRef?.selection?.target === "objectRef") {
+        return objectRefNode(path, key, value, description, required, externalRef);
     }
     if (value === undefined || value === null) {
         const containerKind = schemaContainerKind(schema);
