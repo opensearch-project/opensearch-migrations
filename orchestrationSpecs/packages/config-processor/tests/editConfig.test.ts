@@ -1,4 +1,5 @@
-import {applyEditOperationToObject, buildEditStateFromObject, EditNode} from "../src/editConfig";
+import {applyEditOperationToObject, buildEditStateFromObject} from "../src/editConfig";
+import type {EditNode} from "../src/schemaEditModel";
 import {buildUnifiedSchema, USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
 import {parse} from "yaml";
 import {spawnSync} from "child_process";

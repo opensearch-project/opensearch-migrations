@@ -9,7 +9,7 @@ import {z} from "zod";
 import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
 import {KAFKA_VERSION, MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {validationForConfig} from "./editConfig";
-import type {EditDiagnostic} from "./editConfig";
+import type {EditDiagnostic} from "./schemaEditModel";
 import type {ConsoleResources} from "./consoleResources";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
