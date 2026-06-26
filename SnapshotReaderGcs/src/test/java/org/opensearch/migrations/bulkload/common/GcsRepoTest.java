@@ -5,6 +5,7 @@ import java.nio.file.Paths;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.GcsRepo.CannotFindSnapshotRepoRoot;
+import org.opensearch.migrations.bulkload.common.GcsRepo.CannotListObjects;
 
 import com.google.api.gax.paging.Page;
 import com.google.cloud.storage.Blob;
@@ -19,6 +20,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -176,5 +178,17 @@ public class GcsRepoTest {
         List<String> result = testRepo.listFilesInRoot();
 
         assertEquals(List.of("index-0", "index-1"), result);
+    }
+
+    @Test
+    void CannotFindSnapshotRepoRoot_IsSnapshotReadFailure() {
+        var exception = new CannotFindSnapshotRepoRoot("bucket-name", "directory");
+        assertThat(exception, instanceOf(SnapshotReadFailure.class));
+    }
+
+    @Test
+    void CannotListObjects_IsSnapshotReadFailure() {
+        var exception = new CannotListObjects("bucket-name", "directory", new RuntimeException("cause"));
+        assertThat(exception, instanceOf(SnapshotReadFailure.class));
     }
 }

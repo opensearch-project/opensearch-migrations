@@ -221,7 +221,7 @@ public class GcsRepo implements SourceRepo {
         return strippedKeys;
     }
 
-    public static class CannotFindSnapshotRepoRoot extends RfsException {
+    public static class CannotFindSnapshotRepoRoot extends RfsException implements SnapshotReadFailure {
         public CannotFindSnapshotRepoRoot(String bucket, String prefix) {
             super("Cannot find the snapshot repository root in GCS bucket: " + bucket + ", prefix: " + prefix);
         }
@@ -233,7 +233,7 @@ public class GcsRepo implements SourceRepo {
         }
     }
 
-    public static class CannotListObjects extends RfsException {
+    public static class CannotListObjects extends RfsException implements SnapshotReadFailure {
         public CannotListObjects(String bucket, String prefix, Throwable cause) {
             super("Failed to list objects in GCS bucket: " + bucket + ", prefix: " + prefix, cause);
         }
