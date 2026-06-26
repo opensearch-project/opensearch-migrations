@@ -2822,7 +2822,7 @@ async def test_resource_view_edit_mode_collapses_unset_blocks_one_level_at_a_tim
 
             app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
             app._update_dynamic_bindings()
-            await pilot.press("right")
+            await pilot.press("enter")
             await pilot.pause()
 
             assert cluster_overrides.is_expanded

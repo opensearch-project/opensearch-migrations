@@ -588,7 +588,7 @@ class WorkflowTreeApp(App):
             self.notify(f"Error: {e}", severity="error")
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action in {"expand_node", "collapse_node"} and isinstance(self.screen, ModalScreen):
+        if action in {"expand_node", "collapse_node", "edit_selected_config_node"} and isinstance(self.screen, ModalScreen):
             return False
         return super().check_action(action, parameters)
 
@@ -687,6 +687,13 @@ class WorkflowTreeApp(App):
             self.bind("x", "toggle_config_expert_fields", description=expert_description)
             self.bind("X", "toggle_config_expert_fields", description=expert_description)
             self.bind("i", "edit_selected_config_node", show=False)
+            self._bindings.bind(
+                "enter",
+                "edit_selected_config_node",
+                "",
+                show=False,
+                priority=True,
+            )
             self._bindings.bind(
                 "left",
                 "collapse_node",
