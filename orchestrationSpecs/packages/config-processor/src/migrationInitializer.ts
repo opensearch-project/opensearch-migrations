@@ -10,6 +10,7 @@ import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import { crdName } from './crdNaming';
 import {
     buildResolvedMigrationResources,
     ResolvedMigrationResources,
@@ -364,20 +365,7 @@ export class MigrationInitializer {
     static readonly CRD_API_VERSION = `${MigrationInitializer.CRD_GROUP}/v1alpha1`;
 
     private makeCrdName(...labels: string[]): string {
-        const raw = labels.join('-').toLowerCase();
-        const chars: string[] = [];
-        for (const ch of raw) {
-            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch === '.') {
-                chars.push(ch);
-            } else if (chars.length > 0 && chars[chars.length - 1] !== '-') {
-                chars.push('-');
-            }
-        }
-        let start = 0;
-        while (start < chars.length && (chars[start] === '-' || chars[start] === '.')) start++;
-        let end = chars.length - 1;
-        while (end >= start && (chars[end] === '-' || chars[end] === '.')) end--;
-        return chars.slice(start, end + 1).join('');
+        return crdName(...labels);
     }
 
     private sanitizeResourceName(value: string): string {
