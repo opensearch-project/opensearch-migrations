@@ -93,20 +93,34 @@ class ConfigEditService:
     def list_external_resources(
         self,
         external_ref: Dict[str, Any],
-        current_value: Optional[str] = None,
+        current_value: Optional[Any] = None,
     ) -> list[Dict[str, Any]]:
         """List Kubernetes resources matching an edit-node externalRef hint."""
-        kind = external_ref.get("kind")
-        if kind == "secret":
-            return self._list_external_secret_rows(external_ref, current_value)
-        if kind == "configMap":
-            return self._list_external_config_map_rows(external_ref, current_value)
-        return []
+        k8s_hint = _normalized_k8s_hint(external_ref)
+        resource_types = _external_resource_types(external_ref, k8s_hint)
+        current = _external_current_ref(current_value)
+        rows: list[Dict[str, Any]] = []
+        for resource_type in resource_types:
+            rows.extend(self._list_external_kubernetes_rows(k8s_hint, resource_type, current))
+        if current.get("name") and not any(_row_matches_current(row, current) for row in rows):
+            first_type = resource_types[0] if resource_types else {}
+            rows.append({
+                "name": current["name"],
+                "kind": current.get("kind") or first_type.get("kind") or "Resource",
+                "group": current.get("group") or first_type.get("group") or "",
+                "version": first_type.get("version") or "",
+                "keys": [],
+                "status": "warn",
+                "message": "current YAML value was not found in Kubernetes",
+                "current": True,
+            })
+        return _sort_external_rows(rows)
 
     def read_external_resource(self, external_ref: Dict[str, Any], name: str) -> Dict[str, Any]:
         """Read one external resource for descriptor-driven view/update panes."""
-        kind = external_ref.get("kind")
-        if kind == "secret":
+        resource_type = _create_output_resource_type(external_ref)
+        kind = resource_type.get("kind")
+        if kind == "Secret":
             secret = self._core_v1().read_namespaced_secret(name=name, namespace=self.namespace)
             values = {
                 key: _decode_k8s_data_value(value)
@@ -119,7 +133,7 @@ class ConfigEditService:
                 "keys": sorted(values.keys()),
                 "values": values,
             }
-        if kind == "configMap":
+        if kind == "ConfigMap":
             config_map = self._core_v1().read_namespaced_config_map(name=name, namespace=self.namespace)
             values = dict(config_map.data or {})
             return {
@@ -288,22 +302,39 @@ class ConfigEditService:
         api_client = client.ApiClient(client.Configuration.get_default_copy())
         return client.CoreV1Api(api_client)
 
+    def _custom_objects(self):
+        load_k8s_config()
+        api_client = client.ApiClient(client.Configuration.get_default_copy())
+        return client.CustomObjectsApi(api_client)
+
+    def _list_external_kubernetes_rows(
+        self,
+        k8s_hint: Dict[str, Any],
+        resource_type: Dict[str, Any],
+        current: Dict[str, str],
+    ) -> list[Dict[str, Any]]:
+        group = str(resource_type.get("group") or "")
+        version = str(resource_type.get("version") or "v1")
+        kind = str(resource_type.get("kind") or "")
+        if group == "" and version == "v1" and kind == "Secret":
+            return self._list_external_secret_rows(k8s_hint, current)
+        if group == "" and version == "v1" and kind == "ConfigMap":
+            return self._list_external_config_map_rows(k8s_hint, current)
+        return self._list_external_custom_resource_rows(resource_type, current)
+
     def _list_external_secret_rows(
         self,
-        external_ref: Dict[str, Any],
-        current_value: Optional[str],
+        k8s_hint: Dict[str, Any],
+        current: Dict[str, str],
     ) -> list[Dict[str, Any]]:
-        k8s_hint = external_ref.get("k8s") or {}
-        required_keys = list(k8s_hint.get("requiredKeys") or [])
-        accepted_types = set(k8s_hint.get("acceptedSecretTypes") or [])
+        required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
+        accepted_types = set(_k8s_match_value(k8s_hint, "acceptedSecretTypes") or [])
         rows: list[Dict[str, Any]] = []
-        seen: set[str] = set()
         secrets = self._core_v1().list_namespaced_secret(namespace=self.namespace)
         for secret in secrets.items:
             name = getattr(secret.metadata, "name", None)
             if not name:
                 continue
-            seen.add(name)
             secret_type = secret.type or "Opaque"
             values = {
                 key: _decode_k8s_data_value(value)
@@ -319,39 +350,33 @@ class ConfigEditService:
             rows.append({
                 "name": name,
                 "kind": "Secret",
+                "group": "",
+                "version": "v1",
+                "namespaced": True,
                 "type": secret_type,
                 "keys": keys,
                 "status": status,
                 "message": message,
-                "current": name == current_value,
+                "current": _row_matches_current({
+                    "name": name,
+                    "kind": "Secret",
+                    "group": "",
+                }, current),
             })
-        if current_value and current_value not in seen:
-            rows.append({
-                "name": current_value,
-                "kind": "Secret",
-                "type": "<not found>",
-                "keys": [],
-                "status": "warn",
-                "message": "current YAML value was not found in Kubernetes",
-                "current": True,
-            })
-        return _sort_external_rows(rows)
+        return rows
 
     def _list_external_config_map_rows(
         self,
-        external_ref: Dict[str, Any],
-        current_value: Optional[str],
+        k8s_hint: Dict[str, Any],
+        current: Dict[str, str],
     ) -> list[Dict[str, Any]]:
-        k8s_hint = external_ref.get("k8s") or {}
-        required_keys = list(k8s_hint.get("requiredKeys") or [])
+        required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
         rows: list[Dict[str, Any]] = []
-        seen: set[str] = set()
         config_maps = self._core_v1().list_namespaced_config_map(namespace=self.namespace)
         for config_map in config_maps.items:
             name = getattr(config_map.metadata, "name", None)
             if not name:
                 continue
-            seen.add(name)
             values = dict(config_map.data or {})
             keys = sorted(values.keys())
             missing = [key for key in required_keys if key not in keys]
@@ -360,21 +385,75 @@ class ConfigEditService:
             rows.append({
                 "name": name,
                 "kind": "ConfigMap",
+                "group": "",
+                "version": "v1",
+                "namespaced": True,
                 "keys": keys,
                 "status": "warn" if messages else "matching",
                 "message": "; ".join(messages),
-                "current": name == current_value,
+                "current": _row_matches_current({
+                    "name": name,
+                    "kind": "ConfigMap",
+                    "group": "",
+                }, current),
             })
-        if current_value and current_value not in seen:
+        return rows
+
+    def _list_external_custom_resource_rows(
+        self,
+        resource_type: Dict[str, Any],
+        current: Dict[str, str],
+    ) -> list[Dict[str, Any]]:
+        group = str(resource_type.get("group") or "")
+        version = str(resource_type.get("version") or "v1")
+        kind = str(resource_type.get("kind") or "Resource")
+        plural = str(resource_type.get("plural") or _plural_for_kind(kind))
+        namespaced = bool(resource_type.get("namespaced"))
+        api = self._custom_objects()
+        try:
+            if namespaced:
+                listed = api.list_namespaced_custom_object(group, version, self.namespace, plural)
+            else:
+                listed = api.list_cluster_custom_object(group, version, plural)
+        except ApiException as e:
+            if current.get("name") and _current_matches_resource_type(current, resource_type):
+                return [{
+                    "name": current["name"],
+                    "kind": current.get("kind") or kind,
+                    "group": current.get("group") or group,
+                    "version": version,
+                    "namespaced": namespaced,
+                    "keys": [],
+                    "status": "warn",
+                    "message": f"could not list {kind}: {e.reason or e.status}",
+                    "current": True,
+                }]
+            return []
+
+        rows: list[Dict[str, Any]] = []
+        for item in listed.get("items") or []:
+            metadata = item.get("metadata") or {}
+            name = metadata.get("name")
+            if not name:
+                continue
+            status, message = _custom_resource_match_status(item)
             rows.append({
-                "name": current_value,
-                "kind": "ConfigMap",
+                "name": name,
+                "kind": kind,
+                "group": group,
+                "version": version,
+                "apiVersion": f"{group}/{version}" if group else version,
+                "namespaced": namespaced,
                 "keys": [],
-                "status": "warn",
-                "message": "current YAML value was not found in Kubernetes",
-                "current": True,
+                "status": status,
+                "message": message,
+                "current": _row_matches_current({
+                    "name": name,
+                    "kind": kind,
+                    "group": group,
+                }, current),
             })
-        return _sort_external_rows(rows)
+        return rows
 
     def _save_external_secret(
         self,
@@ -472,6 +551,102 @@ def _decode_k8s_data_value(value: str) -> str:
         return ""
 
 
+def _normalized_k8s_hint(external_ref: Dict[str, Any]) -> Dict[str, Any]:
+    k8s_hint = dict(external_ref.get("k8s") or {})
+    match = dict(k8s_hint.get("match") or {})
+    for legacy_key in (
+        "acceptedSecretTypes",
+        "requiredKeys",
+        "recommendedKeys",
+        "keyPatterns",
+        "contentValidationIds",
+    ):
+        if legacy_key in k8s_hint and legacy_key not in match:
+            match[legacy_key] = list(k8s_hint.get(legacy_key) or [])
+    if match:
+        k8s_hint["match"] = match
+    return k8s_hint
+
+
+def _external_resource_types(external_ref: Dict[str, Any], k8s_hint: Dict[str, Any]) -> list[Dict[str, Any]]:
+    resource_types = list(k8s_hint.get("resourceTypes") or [])
+    if resource_types:
+        return resource_types
+
+    resource = k8s_hint.get("resource")
+    if resource == "Secret" or external_ref.get("kind") == "secret":
+        return [{"group": "", "version": "v1", "kind": "Secret", "namespaced": True}]
+    if resource == "ConfigMap" or external_ref.get("kind") == "configMap":
+        return [{"group": "", "version": "v1", "kind": "ConfigMap", "namespaced": True}]
+    if resource:
+        return [{
+            "group": "cert-manager.io",
+            "version": "v1",
+            "kind": str(resource),
+            "namespaced": resource == "Issuer",
+        }]
+    return []
+
+
+def _create_output_resource_type(external_ref: Dict[str, Any]) -> Dict[str, Any]:
+    output = (external_ref.get("create") or {}).get("output") or {}
+    output_kind = output.get("kind")
+    if output_kind:
+        return {"group": "", "version": "v1", "kind": output_kind, "namespaced": True}
+    resource_types = _external_resource_types(external_ref, _normalized_k8s_hint(external_ref))
+    return resource_types[0] if resource_types else {}
+
+
+def _k8s_match_value(k8s_hint: Dict[str, Any], key: str) -> list[str]:
+    match = k8s_hint.get("match") or {}
+    return [str(value) for value in match.get(key) or k8s_hint.get(key) or []]
+
+
+def _external_current_ref(current_value: Optional[Any]) -> Dict[str, str]:
+    if isinstance(current_value, dict):
+        return {
+            "name": str(current_value.get("name") or ""),
+            "kind": str(current_value.get("kind") or ""),
+            "group": str(current_value.get("group") or ""),
+        }
+    if current_value:
+        return {"name": str(current_value), "kind": "", "group": ""}
+    return {"name": "", "kind": "", "group": ""}
+
+
+def _row_matches_current(row: Dict[str, Any], current: Dict[str, str]) -> bool:
+    if not current.get("name") or row.get("name") != current.get("name"):
+        return False
+    if current.get("kind") and row.get("kind") != current.get("kind"):
+        return False
+    if current.get("group") and row.get("group") != current.get("group"):
+        return False
+    return True
+
+
+def _current_matches_resource_type(current: Dict[str, str], resource_type: Dict[str, Any]) -> bool:
+    if current.get("kind") and current.get("kind") != resource_type.get("kind"):
+        return False
+    if current.get("group") and current.get("group") != (resource_type.get("group") or ""):
+        return False
+    return True
+
+
+def _plural_for_kind(kind: str) -> str:
+    return f"{kind.lower()}s"
+
+
+def _custom_resource_match_status(item: Dict[str, Any]) -> tuple[str, str]:
+    conditions = ((item.get("status") or {}).get("conditions") or [])
+    ready = next((condition for condition in conditions if condition.get("type") == "Ready"), None)
+    if not ready:
+        return "matching", ""
+    if str(ready.get("status")) == "True":
+        return "matching", ""
+    message = ready.get("message") or ready.get("reason") or "Ready condition is not True"
+    return "warn", str(message)
+
+
 def _external_secret_status(
     secret_type: str,
     keys: list[str],
@@ -494,8 +669,8 @@ def _merge_external_status(status: str, message: str, extra_messages: list[str])
 
 
 def _external_content_validation_messages(k8s_hint: Dict[str, Any], values: Dict[str, str]) -> list[str]:
-    validation_ids = set(k8s_hint.get("contentValidationIds") or [])
-    required_keys = [str(key) for key in k8s_hint.get("requiredKeys") or []]
+    validation_ids = set(_k8s_match_value(k8s_hint, "contentValidationIds"))
+    required_keys = _k8s_match_value(k8s_hint, "requiredKeys")
     messages: list[str] = []
     if "non-empty-keys" in validation_ids:
         empty = [key for key in required_keys if key in values and not str(values.get(key) or "").strip()]

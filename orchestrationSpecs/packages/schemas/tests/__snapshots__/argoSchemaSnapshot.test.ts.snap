@@ -715,10 +715,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   "type": "string",
                                   "enum": [
                                     "Issuer",
-                                    "ClusterIssuer"
+                                    "ClusterIssuer",
+                                    "AWSPCAClusterIssuer"
                                   ],
                                   "default": "ClusterIssuer",
-                                  "description": "Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."
+                                  "description": "Kind of the issuer resource. 'ClusterIssuer' and 'AWSPCAClusterIssuer' are cluster-scoped; 'Issuer' is namespace-scoped."
                                 },
                                 "group": {
                                   "type": "string",
@@ -3146,23 +3147,38 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
                         },
                         "x-external-ref": {
-                          "kind": "secret",
+                          "kind": "kubernetesResource",
                           "purpose": "http-basic-auth",
                           "displayName": "HTTP Basic Auth Secret",
                           "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                          "matchProfiles": [
+                            "http-basic-auth-secret"
+                          ],
+                          "selection": {
+                            "target": "scalarName"
+                          },
                           "k8s": {
-                            "resource": "Secret",
-                            "acceptedSecretTypes": [
-                              "kubernetes.io/basic-auth",
-                              "Opaque"
+                            "resourceTypes": [
+                              {
+                                "group": "",
+                                "version": "v1",
+                                "kind": "Secret",
+                                "namespaced": true
+                              }
                             ],
-                            "requiredKeys": [
-                              "username",
-                              "password"
-                            ],
-                            "contentValidationIds": [
-                              "non-empty-keys"
-                            ]
+                            "match": {
+                              "acceptedSecretTypes": [
+                                "kubernetes.io/basic-auth",
+                                "Opaque"
+                              ],
+                              "requiredKeys": [
+                                "username",
+                                "password"
+                              ],
+                              "contentValidationIds": [
+                                "non-empty-keys"
+                              ]
+                            }
                           },
                           "create": {
                             "label": "HTTP Basic Auth Secret",
@@ -3389,18 +3405,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
                                   },
                                   "x-external-ref": {
-                                    "kind": "configMap",
+                                    "kind": "kubernetesResource",
                                     "purpose": "log4j-config",
                                     "displayName": "Log4j2 ConfigMap",
                                     "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                                    "matchProfiles": [
+                                      "log4j-configmap"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
                                     "k8s": {
-                                      "resource": "ConfigMap",
-                                      "requiredKeys": [
-                                        "log4j2.properties"
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "ConfigMap",
+                                          "namespaced": true
+                                        }
                                       ],
-                                      "contentValidationIds": [
-                                        "log4j-properties"
-                                      ]
+                                      "match": {
+                                        "requiredKeys": [
+                                          "log4j2.properties"
+                                        ],
+                                        "contentValidationIds": [
+                                          "log4j-properties"
+                                        ]
+                                      }
                                     },
                                     "create": {
                                       "label": "Log4j2 ConfigMap",
@@ -3580,23 +3611,38 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
                         },
                         "x-external-ref": {
-                          "kind": "secret",
+                          "kind": "kubernetesResource",
                           "purpose": "http-basic-auth",
                           "displayName": "HTTP Basic Auth Secret",
                           "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                          "matchProfiles": [
+                            "http-basic-auth-secret"
+                          ],
+                          "selection": {
+                            "target": "scalarName"
+                          },
                           "k8s": {
-                            "resource": "Secret",
-                            "acceptedSecretTypes": [
-                              "kubernetes.io/basic-auth",
-                              "Opaque"
+                            "resourceTypes": [
+                              {
+                                "group": "",
+                                "version": "v1",
+                                "kind": "Secret",
+                                "namespaced": true
+                              }
                             ],
-                            "requiredKeys": [
-                              "username",
-                              "password"
-                            ],
-                            "contentValidationIds": [
-                              "non-empty-keys"
-                            ]
+                            "match": {
+                              "acceptedSecretTypes": [
+                                "kubernetes.io/basic-auth",
+                                "Opaque"
+                              ],
+                              "requiredKeys": [
+                                "username",
+                                "password"
+                              ],
+                              "contentValidationIds": [
+                                "non-empty-keys"
+                              ]
+                            }
                           },
                           "create": {
                             "label": "HTTP Basic Auth Secret",
@@ -4895,18 +4941,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
                     },
                     "x-external-ref": {
-                      "kind": "configMap",
+                      "kind": "kubernetesResource",
                       "purpose": "log4j-config",
                       "displayName": "Log4j2 ConfigMap",
                       "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                      "matchProfiles": [
+                        "log4j-configmap"
+                      ],
+                      "selection": {
+                        "target": "scalarName"
+                      },
                       "k8s": {
-                        "resource": "ConfigMap",
-                        "requiredKeys": [
-                          "log4j2.properties"
+                        "resourceTypes": [
+                          {
+                            "group": "",
+                            "version": "v1",
+                            "kind": "ConfigMap",
+                            "namespaced": true
+                          }
                         ],
-                        "contentValidationIds": [
-                          "log4j-properties"
-                        ]
+                        "match": {
+                          "requiredKeys": [
+                            "log4j2.properties"
+                          ],
+                          "contentValidationIds": [
+                            "log4j-properties"
+                          ]
+                        }
                       },
                       "create": {
                         "label": "Log4j2 ConfigMap",
@@ -5169,10 +5230,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "enum": [
                                   "Issuer",
-                                  "ClusterIssuer"
+                                  "ClusterIssuer",
+                                  "AWSPCAClusterIssuer"
                                 ],
                                 "default": "ClusterIssuer",
-                                "description": "Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."
+                                "description": "Kind of the issuer resource. 'ClusterIssuer' and 'AWSPCAClusterIssuer' are cluster-scoped; 'Issuer' is namespace-scoped."
                               },
                               "group": {
                                 "type": "string",
@@ -5183,7 +5245,38 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "required": [
                               "name"
                             ],
-                            "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."
+                            "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy.",
+                            "x-external-ref": {
+                              "kind": "kubernetesResource",
+                              "purpose": "cert-manager-issuer",
+                              "displayName": "cert-manager Issuer",
+                              "description": "cert-manager Issuer, ClusterIssuer, or AWS PCA ClusterIssuer that signs proxy TLS certificates.",
+                              "selection": {
+                                "target": "objectRef"
+                              },
+                              "k8s": {
+                                "resourceTypes": [
+                                  {
+                                    "group": "cert-manager.io",
+                                    "version": "v1",
+                                    "kind": "Issuer",
+                                    "namespaced": true
+                                  },
+                                  {
+                                    "group": "cert-manager.io",
+                                    "version": "v1",
+                                    "kind": "ClusterIssuer",
+                                    "namespaced": false
+                                  },
+                                  {
+                                    "group": "awspca.cert-manager.io",
+                                    "version": "v1beta1",
+                                    "kind": "AWSPCAClusterIssuer",
+                                    "namespaced": false
+                                  }
+                                ]
+                              }
+                            }
                           },
                           "commonName": {
                             "type": "string",
@@ -5272,7 +5365,100 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               },
                               "consoleClientSecretName": {
                                 "type": "string",
-                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "format": "k8s-name",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                },
+                                "x-external-ref": {
+                                  "kind": "kubernetesResource",
+                                  "purpose": "proxy-console-client-tls",
+                                  "displayName": "Proxy Client Certificate Secret",
+                                  "description": "Kubernetes TLS Secret containing the client certificate and private key used by console commands when connecting to the proxy.",
+                                  "matchProfiles": [
+                                    "tls-secret"
+                                  ],
+                                  "selection": {
+                                    "target": "scalarName"
+                                  },
+                                  "k8s": {
+                                    "resourceTypes": [
+                                      {
+                                        "group": "",
+                                        "version": "v1",
+                                        "kind": "Secret",
+                                        "namespaced": true
+                                      }
+                                    ],
+                                    "match": {
+                                      "acceptedSecretTypes": [
+                                        "kubernetes.io/tls",
+                                        "Opaque"
+                                      ],
+                                      "requiredKeys": [
+                                        "tls.crt",
+                                        "tls.key"
+                                      ],
+                                      "contentValidationIds": [
+                                        "tls-certificate-key-pair"
+                                      ]
+                                    }
+                                  },
+                                  "create": {
+                                    "label": "Proxy Client Certificate Secret",
+                                    "fields": [
+                                      {
+                                        "name": "secretName",
+                                        "label": "Secret name",
+                                        "input": "name",
+                                        "required": true,
+                                        "validationIds": [
+                                          "k8s-name"
+                                        ]
+                                      },
+                                      {
+                                        "name": "certificate",
+                                        "label": "Certificate PEM",
+                                        "input": "multilineText",
+                                        "required": true,
+                                        "validationIds": [
+                                          "non-empty",
+                                          "pem-certificate-chain"
+                                        ]
+                                      },
+                                      {
+                                        "name": "privateKey",
+                                        "label": "Private key PEM",
+                                        "input": "secretMultilineText",
+                                        "required": true,
+                                        "sensitive": true,
+                                        "validationIds": [
+                                          "non-empty",
+                                          "pem-private-key"
+                                        ],
+                                        "confirm": true
+                                      }
+                                    ],
+                                    "output": {
+                                      "kind": "Secret",
+                                      "type": "kubernetes.io/tls",
+                                      "stringData": {
+                                        "tls.crt": {
+                                          "fromField": "certificate"
+                                        },
+                                        "tls.key": {
+                                          "fromField": "privateKey"
+                                        }
+                                      }
+                                    },
+                                    "apply": {
+                                      "target": "scalarName",
+                                      "nameField": "secretName"
+                                    }
+                                  }
+                                }
                               },
                               "required": {
                                 "type": "boolean",
@@ -5303,7 +5489,100 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           },
                           "secretName": {
                             "type": "string",
-                            "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
+                            "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/.",
+                            "x-ui-hint": {
+                              "kind": "text",
+                              "format": "k8s-name",
+                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                            },
+                            "x-external-ref": {
+                              "kind": "kubernetesResource",
+                              "purpose": "proxy-server-tls",
+                              "displayName": "TLS Certificate Secret",
+                              "description": "Kubernetes TLS Secret containing 'tls.crt' and 'tls.key' entries.",
+                              "matchProfiles": [
+                                "tls-secret"
+                              ],
+                              "selection": {
+                                "target": "scalarName"
+                              },
+                              "k8s": {
+                                "resourceTypes": [
+                                  {
+                                    "group": "",
+                                    "version": "v1",
+                                    "kind": "Secret",
+                                    "namespaced": true
+                                  }
+                                ],
+                                "match": {
+                                  "acceptedSecretTypes": [
+                                    "kubernetes.io/tls",
+                                    "Opaque"
+                                  ],
+                                  "requiredKeys": [
+                                    "tls.crt",
+                                    "tls.key"
+                                  ],
+                                  "contentValidationIds": [
+                                    "tls-certificate-key-pair"
+                                  ]
+                                }
+                              },
+                              "create": {
+                                "label": "TLS Certificate Secret",
+                                "fields": [
+                                  {
+                                    "name": "secretName",
+                                    "label": "Secret name",
+                                    "input": "name",
+                                    "required": true,
+                                    "validationIds": [
+                                      "k8s-name"
+                                    ]
+                                  },
+                                  {
+                                    "name": "certificate",
+                                    "label": "Certificate PEM",
+                                    "input": "multilineText",
+                                    "required": true,
+                                    "validationIds": [
+                                      "non-empty",
+                                      "pem-certificate-chain"
+                                    ]
+                                  },
+                                  {
+                                    "name": "privateKey",
+                                    "label": "Private key PEM",
+                                    "input": "secretMultilineText",
+                                    "required": true,
+                                    "sensitive": true,
+                                    "validationIds": [
+                                      "non-empty",
+                                      "pem-private-key"
+                                    ],
+                                    "confirm": true
+                                  }
+                                ],
+                                "output": {
+                                  "kind": "Secret",
+                                  "type": "kubernetes.io/tls",
+                                  "stringData": {
+                                    "tls.crt": {
+                                      "fromField": "certificate"
+                                    },
+                                    "tls.key": {
+                                      "fromField": "privateKey"
+                                    }
+                                  }
+                                },
+                                "apply": {
+                                  "target": "scalarName",
+                                  "nameField": "secretName"
+                                }
+                              }
+                            }
                           },
                           "clientAuth": {
                             "type": "object",
@@ -5370,7 +5649,100 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               },
                               "consoleClientSecretName": {
                                 "type": "string",
-                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "format": "k8s-name",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                },
+                                "x-external-ref": {
+                                  "kind": "kubernetesResource",
+                                  "purpose": "proxy-console-client-tls",
+                                  "displayName": "Proxy Client Certificate Secret",
+                                  "description": "Kubernetes TLS Secret containing the client certificate and private key used by console commands when connecting to the proxy.",
+                                  "matchProfiles": [
+                                    "tls-secret"
+                                  ],
+                                  "selection": {
+                                    "target": "scalarName"
+                                  },
+                                  "k8s": {
+                                    "resourceTypes": [
+                                      {
+                                        "group": "",
+                                        "version": "v1",
+                                        "kind": "Secret",
+                                        "namespaced": true
+                                      }
+                                    ],
+                                    "match": {
+                                      "acceptedSecretTypes": [
+                                        "kubernetes.io/tls",
+                                        "Opaque"
+                                      ],
+                                      "requiredKeys": [
+                                        "tls.crt",
+                                        "tls.key"
+                                      ],
+                                      "contentValidationIds": [
+                                        "tls-certificate-key-pair"
+                                      ]
+                                    }
+                                  },
+                                  "create": {
+                                    "label": "Proxy Client Certificate Secret",
+                                    "fields": [
+                                      {
+                                        "name": "secretName",
+                                        "label": "Secret name",
+                                        "input": "name",
+                                        "required": true,
+                                        "validationIds": [
+                                          "k8s-name"
+                                        ]
+                                      },
+                                      {
+                                        "name": "certificate",
+                                        "label": "Certificate PEM",
+                                        "input": "multilineText",
+                                        "required": true,
+                                        "validationIds": [
+                                          "non-empty",
+                                          "pem-certificate-chain"
+                                        ]
+                                      },
+                                      {
+                                        "name": "privateKey",
+                                        "label": "Private key PEM",
+                                        "input": "secretMultilineText",
+                                        "required": true,
+                                        "sensitive": true,
+                                        "validationIds": [
+                                          "non-empty",
+                                          "pem-private-key"
+                                        ],
+                                        "confirm": true
+                                      }
+                                    ],
+                                    "output": {
+                                      "kind": "Secret",
+                                      "type": "kubernetes.io/tls",
+                                      "stringData": {
+                                        "tls.crt": {
+                                          "fromField": "certificate"
+                                        },
+                                        "tls.key": {
+                                          "fromField": "privateKey"
+                                        }
+                                      }
+                                    },
+                                    "apply": {
+                                      "target": "scalarName",
+                                      "nameField": "secretName"
+                                    }
+                                  }
+                                }
                               },
                               "required": {
                                 "type": "boolean",
@@ -5627,18 +5999,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
                     },
                     "x-external-ref": {
-                      "kind": "configMap",
+                      "kind": "kubernetesResource",
                       "purpose": "log4j-config",
                       "displayName": "Log4j2 ConfigMap",
                       "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                      "matchProfiles": [
+                        "log4j-configmap"
+                      ],
+                      "selection": {
+                        "target": "scalarName"
+                      },
                       "k8s": {
-                        "resource": "ConfigMap",
-                        "requiredKeys": [
-                          "log4j2.properties"
+                        "resourceTypes": [
+                          {
+                            "group": "",
+                            "version": "v1",
+                            "kind": "ConfigMap",
+                            "namespaced": true
+                          }
                         ],
-                        "contentValidationIds": [
-                          "log4j-properties"
-                        ]
+                        "match": {
+                          "requiredKeys": [
+                            "log4j2.properties"
+                          ],
+                          "contentValidationIds": [
+                            "log4j-properties"
+                          ]
+                        }
                       },
                       "create": {
                         "label": "Log4j2 ConfigMap",

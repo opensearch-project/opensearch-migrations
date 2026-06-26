@@ -60,6 +60,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self.current_value = current_value
         self.documentation = documentation
         self.can_create = can_create
+        self.can_update = can_create
         self.external_ref = external_ref or {}
         self.clear_allowed = clear_allowed
         self.show_all = False
@@ -77,7 +78,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             with Vertical(id="actions"):
                 with Horizontal(classes="action-row"):
                     yield MouseOnlyModalButton("Select (<Enter>)", id="select", variant="primary")
-                    yield MouseOnlyModalButton("Update (u)", id="update", disabled=not bool(self.rows))
+                    yield MouseOnlyModalButton("Update (u)", id="update", disabled=not self.can_update or not bool(self.rows))
                     if self.clear_allowed:
                         yield MouseOnlyModalButton("Clear", id="clear")
                     yield MouseOnlyModalButton("Cancel", id="cancel", variant="error")
@@ -117,6 +118,8 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self._select_entry(self._focused_entry())
 
     def action_update(self) -> None:
+        if not self.can_update:
+            return
         row = self._selected_resource_row()
         if row:
             self.dismiss({"action": "update", "row": row})
@@ -385,7 +388,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         has_displayed_entries = bool(self._displayed_entries())
         has_active_resource = bool(self._selected_resource_row())
         self.query_one("#select", Button).disabled = not has_displayed_entries
-        self.query_one("#update", Button).disabled = not has_active_resource
+        self.query_one("#update", Button).disabled = not self.can_update or not has_active_resource
 
     def _initial_entry_index(self) -> Optional[int]:
         entries = self._visible_entries()
@@ -660,8 +663,9 @@ def _row_missing_keys(row: Dict[str, Any]) -> List[str]:
 
 def _requirement_title(external_ref: Dict[str, Any]) -> str:
     k8s_hint = external_ref.get("k8s") or {}
-    required_keys = [str(key) for key in k8s_hint.get("requiredKeys") or []]
-    recommended_keys = [str(key) for key in k8s_hint.get("recommendedKeys") or []]
+    match = k8s_hint.get("match") or {}
+    required_keys = [str(key) for key in match.get("requiredKeys") or k8s_hint.get("requiredKeys") or []]
+    recommended_keys = [str(key) for key in match.get("recommendedKeys") or k8s_hint.get("recommendedKeys") or []]
     if required_keys:
         return f"(Required Keys: {', '.join(required_keys)})"
     if recommended_keys:
@@ -675,6 +679,9 @@ def _requirement_title(external_ref: Dict[str, Any]) -> str:
 def _resource_kind_plural(external_ref: Dict[str, Any], rows: List[Dict[str, Any]]) -> str:
     k8s_hint = external_ref.get("k8s") or {}
     kind = str(k8s_hint.get("resource") or "").strip()
+    resource_types = k8s_hint.get("resourceTypes") or []
+    if not kind and len(resource_types) == 1:
+        kind = str((resource_types[0] or {}).get("kind") or "").strip()
     if not kind:
         kind = str(next((row.get("kind") for row in rows if row.get("kind")), "Resource"))
     if kind.endswith("s"):

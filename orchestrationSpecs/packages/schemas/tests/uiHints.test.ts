@@ -1,5 +1,24 @@
 import {OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "../src";
 
+function findExternalRefSchema(root: any, purpose: string): any | undefined {
+    const stack = [root];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== "object") {
+            continue;
+        }
+        if (node["x-external-ref"]?.purpose === purpose) {
+            return node;
+        }
+        for (const value of Object.values(node)) {
+            if (value && typeof value === "object") {
+                stack.push(value);
+            }
+        }
+    }
+    return undefined;
+}
+
 describe("workflow schema UI hints", () => {
     const schema = zodSchemaToJsonSchema(OVERALL_MIGRATION_CONFIG);
 
@@ -53,17 +72,38 @@ describe("workflow schema UI hints", () => {
             .properties.basic.properties.secretName;
 
         expect(basicSecret["x-external-ref"]).toMatchObject({
-            kind: "secret",
+            kind: "kubernetesResource",
             purpose: "http-basic-auth",
             displayName: "HTTP Basic Auth Secret",
+            matchProfiles: ["http-basic-auth-secret"],
+            selection: {target: "scalarName"},
             k8s: {
-                resource: "Secret",
-                acceptedSecretTypes: ["kubernetes.io/basic-auth", "Opaque"],
-                requiredKeys: ["username", "password"],
+                resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                match: {
+                    acceptedSecretTypes: ["kubernetes.io/basic-auth", "Opaque"],
+                    requiredKeys: ["username", "password"],
+                },
             },
             create: {
                 label: "HTTP Basic Auth Secret",
                 apply: {target: "scalarName", nameField: "secretName"},
+            },
+        });
+    });
+
+    it("exports cert-manager issuer references as Kubernetes object refs", () => {
+        const issuerRef = findExternalRefSchema(schema, "cert-manager-issuer");
+
+        expect(issuerRef?.["x-external-ref"]).toMatchObject({
+            kind: "kubernetesResource",
+            purpose: "cert-manager-issuer",
+            selection: {target: "objectRef"},
+            k8s: {
+                resourceTypes: [
+                    {group: "cert-manager.io", version: "v1", kind: "Issuer", namespaced: true},
+                    {group: "cert-manager.io", version: "v1", kind: "ClusterIssuer", namespaced: false},
+                    {group: "awspca.cert-manager.io", version: "v1beta1", kind: "AWSPCAClusterIssuer", namespaced: false},
+                ],
             },
         });
     });

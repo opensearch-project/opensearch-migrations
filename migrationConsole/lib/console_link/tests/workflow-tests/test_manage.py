@@ -427,6 +427,27 @@ async def test_external_resource_picker_action_buttons_click_focused_item_withou
     assert result["row"]["name"] == "second-creds"
 
 
+def test_external_resource_selection_builds_object_ref_values():
+    row = {
+        "name": "migrations-ca",
+        "kind": "ClusterIssuer",
+        "group": "cert-manager.io",
+    }
+
+    assert WorkflowTreeApp._external_resource_value_for_row(
+        {"selection": {"target": "objectRef"}},
+        row,
+    ) == {
+        "name": "migrations-ca",
+        "kind": "ClusterIssuer",
+        "group": "cert-manager.io",
+    }
+    assert WorkflowTreeApp._external_resource_value_for_row(
+        {"selection": {"target": "scalarName"}},
+        row,
+    ) == "migrations-ca"
+
+
 @pytest.mark.asyncio
 async def test_choice_select_modal_renders_mouse_ok_enter_affordance():
     modal = ChoiceSelectModal(

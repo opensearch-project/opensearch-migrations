@@ -66,11 +66,16 @@ describe("editConfig state", () => {
         expect(secretName?.status).toBe("required");
         expect(secretName?.label).toContain("secretName: <required>");
         expect(secretName?.externalRef).toMatchObject({
-            kind: "secret",
+            kind: "kubernetesResource",
             purpose: "http-basic-auth",
+            matchProfiles: ["http-basic-auth-secret"],
+            selection: {target: "scalarName"},
             k8s: {
-                resource: "Secret",
-                requiredKeys: ["username", "password"],
+                resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                match: {
+                    requiredKeys: ["username", "password"],
+                    acceptedSecretTypes: ["kubernetes.io/basic-auth", "Opaque"],
+                },
             },
             create: {
                 label: "HTTP Basic Auth Secret",
@@ -704,11 +709,16 @@ describe("editConfig state", () => {
             required: true,
             status: "required",
             externalRef: {
-                kind: "secret",
+                kind: "kubernetesResource",
                 purpose: "proxy-server-tls",
+                matchProfiles: ["tls-secret"],
+                selection: {target: "scalarName"},
                 k8s: {
-                    resource: "Secret",
-                    requiredKeys: ["tls.crt", "tls.key"],
+                    resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                    match: {
+                        requiredKeys: ["tls.crt", "tls.key"],
+                        acceptedSecretTypes: ["kubernetes.io/tls", "Opaque"],
+                    },
                 },
                 create: {
                     label: "TLS Certificate Secret",
@@ -716,6 +726,49 @@ describe("editConfig state", () => {
                 },
             },
         });
+    });
+
+    it("renders proxy TLS certManager issuerRef as a Kubernetes object reference", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            tls: {
+                                mode: "certManager",
+                                issuerRef: {name: "migrations-ca", kind: "ClusterIssuer"},
+                                dnsNames: ["cap.default.svc.cluster.local"],
+                            },
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const issuerRef = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.issuerRef");
+
+        expect(issuerRef).toMatchObject({
+            valueKind: "object",
+            value: {name: "migrations-ca", kind: "ClusterIssuer"},
+            externalRef: {
+                kind: "kubernetesResource",
+                purpose: "cert-manager-issuer",
+                selection: {target: "objectRef"},
+                k8s: {
+                    resourceTypes: [
+                        {group: "cert-manager.io", version: "v1", kind: "Issuer", namespaced: true},
+                        {group: "cert-manager.io", version: "v1", kind: "ClusterIssuer", namespaced: false},
+                        {group: "awspca.cert-manager.io", version: "v1beta1", kind: "AWSPCAClusterIssuer", namespaced: false},
+                    ],
+                },
+            },
+        });
+        expect(issuerRef?.label).toContain("issuerRef: migrations-ca (ClusterIssuer)");
     });
 
     it("applies proxy TLS mode changes and refreshes required children", () => {
@@ -786,11 +839,16 @@ describe("editConfig state", () => {
             value: "console-client-cert",
             presence: "optional",
             externalRef: {
-                kind: "secret",
+                kind: "kubernetesResource",
                 purpose: "proxy-console-client-tls",
+                matchProfiles: ["tls-secret"],
+                selection: {target: "scalarName"},
                 k8s: {
-                    resource: "Secret",
-                    requiredKeys: ["tls.crt", "tls.key"],
+                    resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                    match: {
+                        requiredKeys: ["tls.crt", "tls.key"],
+                        acceptedSecretTypes: ["kubernetes.io/tls", "Opaque"],
+                    },
                 },
                 create: {
                     label: "Proxy Client Certificate Secret",

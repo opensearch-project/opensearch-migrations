@@ -189,6 +189,7 @@ const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]
 const BASIC_SECRET_EXTERNAL_REF = externalRefAt(HTTP_AUTH_BASIC, ["basic", "secretName"]);
 const MTLS_CLIENT_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_MTLS, ["mtls", "clientSecretName"]) ?? K8S_NAME_INPUT_HINT;
 const PROXY_TLS_CERT_MANAGER_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "certManager");
+const PROXY_TLS_ISSUER_EXTERNAL_REF = externalRefAt(PROXY_TLS_CERT_MANAGER_SCHEMA, ["issuerRef"]);
 const PROXY_TLS_EXISTING_SECRET_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "existingSecret");
 const PROXY_TLS_PLAINTEXT_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "plaintext");
 const PROXY_TLS_SECRET_NAME_HINT = uiHintAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]) ?? K8S_NAME_INPUT_HINT;
@@ -1247,6 +1248,41 @@ function booleanNode(
     });
 }
 
+function objectRefNode(
+    path: string[],
+    key: string,
+    value: unknown,
+    description: string,
+    required: boolean,
+    externalRef?: ExternalRefHint,
+): EditNode {
+    const refValue = isPlainObject(value) ? value : {};
+    const name = typeof refValue.name === "string" ? refValue.name : "";
+    const kind = typeof refValue.kind === "string" ? refValue.kind : "";
+    const group = typeof refValue.group === "string" ? refValue.group : "";
+    const missing = required && !name;
+    const suffix = name
+        ? `${name}${kind ? ` (${kind}${group ? `, ${group}` : ""})` : ""}`
+        : required ? "<required>" : "<unset>";
+    const diagnostics: EditDiagnostic[] = missing
+        ? [{severity: "required", message: `${key} is required.`, path}]
+        : [];
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: ${suffix}`,
+        value: refValue,
+        valueKind: "object",
+        presence: required ? "required" : "optional",
+        description,
+        required,
+        externalRef,
+        status: missing ? "required" : "ok",
+        diagnostics,
+        children: objectChildrenFromValue(path, refValue),
+    });
+}
+
 function authVariant(authConfig: unknown): "none" | "basic" | "sigv4" | "mtls" | "unknown" {
     if (!authConfig || typeof authConfig !== "object") {
         return "none";
@@ -1446,7 +1482,14 @@ function proxyTlsChildren(path: string[], mode: ReturnType<typeof proxyTlsMode>,
     }
     if (mode === "certManager") {
         return [
-            genericDisplayNode([...path, "issuerRef"], "issuerRef", config?.issuerRef, "required", false, "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."),
+            objectRefNode(
+                [...path, "issuerRef"],
+                "issuerRef",
+                config?.issuerRef,
+                "Reference to a cert-manager issuer that will sign TLS certificates for the proxy.",
+                true,
+                PROXY_TLS_ISSUER_EXTERNAL_REF
+            ),
             genericDisplayNode([...path, "dnsNames"], "dnsNames", config?.dnsNames, "required", false, "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name."),
             scalarNode([...path, "commonName"], "commonName", config?.commonName ?? "", "Optional common name (CN) for the TLS certificate subject."),
             scalarNode([...path, "duration"], "duration", config?.duration ?? "2160h", "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),

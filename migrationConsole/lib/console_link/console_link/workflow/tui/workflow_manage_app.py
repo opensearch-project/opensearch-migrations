@@ -1149,10 +1149,10 @@ class WorkflowTreeApp(App):
                 ),
                 lambda value: self._handle_add_config_name(node, value),
             )
+        elif node.get("externalRef"):
+            self._show_external_resource_picker(node)
+            return
         elif kind == "scalar":
-            if node.get("externalRef"):
-                self._show_external_resource_picker(node)
-                return
             input_hint = node.get("inputHint") or {}
             options = input_hint.get("options") or []
             if input_hint.get("kind") == "reference" and options:
@@ -1248,7 +1248,7 @@ class WorkflowTreeApp(App):
             if not hasattr(service, "list_external_resources"):
                 self.call_from_thread(self._show_scalar_config_text_input, node)
                 return
-            rows = service.list_external_resources(external_ref, str(node.get("value") or "") or None)
+            rows = service.list_external_resources(external_ref, node.get("value"))
             self.call_from_thread(self._open_external_resource_picker, node, rows)
         except Exception as e:
             logger.exception("Failed to list external resources")
@@ -1261,7 +1261,7 @@ class WorkflowTreeApp(App):
             ExternalResourcePickerModal(
                 title,
                 rows,
-                node.get("value"),
+                self._external_resource_current_value(node),
                 documentation=self._edit_node_documentation(node),
                 can_create=bool(external_ref.get("create")),
                 external_ref=external_ref,
@@ -1296,13 +1296,45 @@ class WorkflowTreeApp(App):
                 message += f"\n\n{row.get('message')}"
             self.push_screen(
                 ConfirmModal(message, confirm_label="Use", cancel_label="Cancel", default_confirm=False),
-                lambda confirmed: self._apply_external_resource_value(node, name) if confirmed else None,
+                lambda confirmed: self._apply_external_resource_row(node, row) if confirmed else None,
             )
             return
-        self._apply_external_resource_value(node, name)
+        self._apply_external_resource_row(node, row)
 
-    def _apply_external_resource_value(self, node: Dict, name: str) -> None:
-        self._handle_scalar_config_value(node, name)
+    def _external_resource_current_value(self, node: Dict):
+        value = node.get("value")
+        if isinstance(value, dict):
+            return str(value.get("name") or "")
+        return value
+
+    def _apply_external_resource_row(self, node: Dict, row: Dict) -> None:
+        value = self._external_resource_value_for_row(node.get("externalRef") or {}, row)
+        self._apply_external_resource_value(node, value)
+
+    @staticmethod
+    def _external_resource_value_for_row(external_ref: Dict, row: Dict):
+        selection = external_ref.get("selection") or {}
+        if selection.get("target") == "objectRef":
+            value = {
+                selection.get("nameField") or "name": row.get("name"),
+                selection.get("kindField") or "kind": row.get("kind"),
+            }
+            group = row.get("group")
+            if group:
+                value[selection.get("groupField") or "group"] = group
+            return value
+        return row.get("name")
+
+    def _apply_external_resource_value(self, node: Dict, value) -> None:
+        if isinstance(value, dict):
+            self._cancel_config_edit_validation()
+            self._apply_config_edit_operation({
+                "op": "set",
+                "path": node.get("path"),
+                "value": value,
+            }, selected_id=node.get("id"))
+            return
+        self._handle_scalar_config_value(node, value)
 
     def _open_external_resource_form_for_row(self, node: Dict, row: Dict, return_to_picker: bool = False) -> None:
         self.run_worker(
@@ -1701,9 +1733,9 @@ class WorkflowTreeApp(App):
         kind = node.get("valueKind")
         if kind == "command":
             return "Add"
+        if node.get("externalRef"):
+            return "Pick Resource"
         if kind == "scalar":
-            if node.get("externalRef"):
-                return "Pick Resource"
             return "Edit Value"
         if kind == "boolean":
             return "Choose Value"

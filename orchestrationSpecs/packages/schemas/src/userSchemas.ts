@@ -39,7 +39,7 @@ export interface EffectiveDefaultHint {
     source?: string;
 }
 
-export type ExternalRefKind = 'secret' | 'configMap' | 'image' | 'certManagerIssuer';
+export type ExternalRefKind = 'kubernetesResource' | 'image' | 'secret' | 'configMap' | 'certManagerIssuer';
 export type ExternalRefPurpose =
     | 'http-basic-auth'
     | 'proxy-server-tls'
@@ -52,6 +52,24 @@ export type ExternalRefPurpose =
     | 'transform-context-file'
     | 'transform-context-directory'
     | 'cert-manager-issuer';
+export type KubernetesExternalRefMatchProfile =
+    | 'http-basic-auth-secret'
+    | 'tls-secret'
+    | 'log4j-configmap';
+export interface KubernetesResourceType {
+    group: string;
+    version: string;
+    kind: string;
+    namespaced: boolean;
+    plural?: string;
+}
+export interface KubernetesExternalRefMatch {
+    acceptedSecretTypes?: string[];
+    requiredKeys?: string[];
+    recommendedKeys?: string[];
+    keyPatterns?: string[];
+    contentValidationIds?: ExternalContentValidationId[];
+}
 
 export type ExternalContentValidationId =
     | 'non-empty-keys'
@@ -99,17 +117,36 @@ export interface ExternalResourceCreateDescriptor {
         | { target: 'fileRefConfigMap'; nameField: string; pathField: string };
 }
 
+export type ExternalRefSelectionDescriptor =
+    | { target: 'scalarName' }
+    | {
+        target: 'objectRef';
+        nameField?: string;
+        kindField?: string;
+        groupField?: string;
+    };
+
 export interface ExternalRefHint {
     kind: ExternalRefKind;
     purpose: ExternalRefPurpose;
     displayName: string;
     description?: string;
+    matchProfiles?: KubernetesExternalRefMatchProfile[];
+    selection?: ExternalRefSelectionDescriptor;
     k8s?: {
-        resource: 'Secret' | 'ConfigMap' | 'Issuer' | 'ClusterIssuer';
+        resourceTypes?: KubernetesResourceType[];
+        match?: KubernetesExternalRefMatch;
+        /** @deprecated use resourceTypes */
+        resource?: 'Secret' | 'ConfigMap' | 'Issuer' | 'ClusterIssuer';
+        /** @deprecated use match */
         acceptedSecretTypes?: string[];
+        /** @deprecated use matchProfiles or match */
         requiredKeys?: string[];
+        /** @deprecated use match */
         recommendedKeys?: string[];
+        /** @deprecated use match */
         keyPatterns?: string[];
+        /** @deprecated use match */
         contentValidationIds?: ExternalContentValidationId[];
     };
     image?: {
@@ -181,16 +218,79 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
-const LOGGING_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = {
-    kind: 'configMap',
-    purpose: 'log4j-config',
-    displayName: 'Log4j2 ConfigMap',
-    description: 'Kubernetes ConfigMap containing a Log4j2 properties file.',
-    k8s: {
-        resource: 'ConfigMap',
+
+const CORE_V1_SECRET: KubernetesResourceType = {group: "", version: "v1", kind: "Secret", namespaced: true};
+const CORE_V1_CONFIG_MAP: KubernetesResourceType = {group: "", version: "v1", kind: "ConfigMap", namespaced: true};
+const CERT_MANAGER_ISSUER_TYPES: KubernetesResourceType[] = [
+    {group: "cert-manager.io", version: "v1", kind: "Issuer", namespaced: true},
+    {group: "cert-manager.io", version: "v1", kind: "ClusterIssuer", namespaced: false},
+    {group: "awspca.cert-manager.io", version: "v1beta1", kind: "AWSPCAClusterIssuer", namespaced: false},
+];
+
+const KUBERNETES_EXTERNAL_REF_MATCH_PROFILES: Record<KubernetesExternalRefMatchProfile, KubernetesExternalRefMatch> = {
+    'http-basic-auth-secret': {
+        acceptedSecretTypes: ['kubernetes.io/basic-auth', 'Opaque'],
+        requiredKeys: ['username', 'password'],
+        contentValidationIds: ['non-empty-keys'],
+    },
+    'tls-secret': {
+        acceptedSecretTypes: ['kubernetes.io/tls', 'Opaque'],
+        requiredKeys: ['tls.crt', 'tls.key'],
+        contentValidationIds: ['tls-certificate-key-pair'],
+    },
+    'log4j-configmap': {
         requiredKeys: ['log4j2.properties'],
         contentValidationIds: ['log4j-properties'],
     },
+};
+
+function mergeKubernetesMatchProfiles(profiles: KubernetesExternalRefMatchProfile[]): KubernetesExternalRefMatch {
+    const result: KubernetesExternalRefMatch = {};
+    for (const profile of profiles) {
+        const profileMatch = KUBERNETES_EXTERNAL_REF_MATCH_PROFILES[profile];
+        for (const key of Object.keys(profileMatch) as (keyof KubernetesExternalRefMatch)[]) {
+            const values = profileMatch[key];
+            if (values) {
+                (result as Record<string, string[]>)[key] = [...new Set([...(result[key] ?? []), ...values])];
+            }
+        }
+    }
+    return result;
+}
+
+function kubernetesResourceRef(args: {
+    purpose: ExternalRefPurpose;
+    displayName: string;
+    description?: string;
+    resourceTypes: KubernetesResourceType[];
+    matchProfiles?: KubernetesExternalRefMatchProfile[];
+    selection?: ExternalRefSelectionDescriptor;
+    create?: ExternalResourceCreateDescriptor;
+}): ExternalRefHint {
+    const matchProfiles = args.matchProfiles ?? [];
+    return {
+        kind: 'kubernetesResource',
+        purpose: args.purpose,
+        displayName: args.displayName,
+        ...(args.description ? {description: args.description} : {}),
+        ...(matchProfiles.length ? {matchProfiles} : {}),
+        selection: args.selection ?? {target: 'scalarName'},
+        k8s: {
+            resourceTypes: args.resourceTypes,
+            ...(matchProfiles.length ? {match: mergeKubernetesMatchProfiles(matchProfiles)} : {}),
+        },
+        ...(args.create ? {create: args.create} : {}),
+    };
+}
+
+const LOGGING_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = {
+    ...kubernetesResourceRef({
+        purpose: 'log4j-config',
+        displayName: 'Log4j2 ConfigMap',
+        description: 'Kubernetes ConfigMap containing a Log4j2 properties file.',
+        resourceTypes: [CORE_V1_CONFIG_MAP],
+        matchProfiles: ['log4j-configmap'],
+    }),
     create: {
         label: 'Log4j2 ConfigMap',
         fields: [
@@ -222,16 +322,13 @@ const LOGGING_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = {
     },
 };
 const TLS_SECRET_EXTERNAL_REF: ExternalRefHint = {
-    kind: 'secret',
-    purpose: 'proxy-server-tls',
-    displayName: 'TLS Certificate Secret',
-    description: "Kubernetes TLS Secret containing 'tls.crt' and 'tls.key' entries.",
-    k8s: {
-        resource: 'Secret',
-        acceptedSecretTypes: ['kubernetes.io/tls', 'Opaque'],
-        requiredKeys: ['tls.crt', 'tls.key'],
-        contentValidationIds: ['tls-certificate-key-pair'],
-    },
+    ...kubernetesResourceRef({
+        purpose: 'proxy-server-tls',
+        displayName: 'TLS Certificate Secret',
+        description: "Kubernetes TLS Secret containing 'tls.crt' and 'tls.key' entries.",
+        resourceTypes: [CORE_V1_SECRET],
+        matchProfiles: ['tls-secret'],
+    }),
     create: {
         label: 'TLS Certificate Secret',
         fields: [
@@ -273,6 +370,13 @@ const TLS_SECRET_EXTERNAL_REF: ExternalRefHint = {
         },
     },
 };
+const CERT_MANAGER_ISSUER_EXTERNAL_REF: ExternalRefHint = kubernetesResourceRef({
+    purpose: 'cert-manager-issuer',
+    displayName: 'cert-manager Issuer',
+    description: 'cert-manager Issuer, ClusterIssuer, or AWS PCA ClusterIssuer that signs proxy TLS certificates.',
+    resourceTypes: CERT_MANAGER_ISSUER_TYPES,
+    selection: {target: 'objectRef'},
+});
 const PROXY_CONSOLE_CLIENT_TLS_EXTERNAL_REF: ExternalRefHint = {
     ...TLS_SECRET_EXTERNAL_REF,
     purpose: 'proxy-console-client-tls',
@@ -730,11 +834,12 @@ export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
 export const CERT_MANAGER_ISSUER_REF = z.object({
     name: z.string().describe("Name of the cert-manager Issuer or ClusterIssuer resource that will sign the certificate."),
-    kind: z.enum(["Issuer", "ClusterIssuer"]).default("ClusterIssuer").optional()
-        .describe("Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."),
+    kind: z.enum(["Issuer", "ClusterIssuer", "AWSPCAClusterIssuer"]).default("ClusterIssuer").optional()
+        .describe("Kind of the issuer resource. 'ClusterIssuer' and 'AWSPCAClusterIssuer' are cluster-scoped; 'Issuer' is namespace-scoped."),
     group: z.string().default("cert-manager.io").optional()
         .describe("API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."),
-}).describe("Reference to a cert-manager issuer that will sign TLS certificates for the proxy.");
+}).describe("Reference to a cert-manager issuer that will sign TLS certificates for the proxy.")
+    .externalRef(CERT_MANAGER_ISSUER_EXTERNAL_REF);
 
 export const PROXY_TLS_CLIENT_AUTH_CONFIG = z.object({
     trustedClientCaFile: FILE_REF.optional()
@@ -1364,16 +1469,13 @@ export const HTTP_AUTH_BASIC = z.object({
             .describe("Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.")
             .uiHint(K8S_NAME_UI_HINT)
             .externalRef({
-                kind: 'secret',
-                purpose: 'http-basic-auth',
-                displayName: 'HTTP Basic Auth Secret',
-                description: "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
-                k8s: {
-                    resource: 'Secret',
-                    acceptedSecretTypes: ['kubernetes.io/basic-auth', 'Opaque'],
-                    requiredKeys: ['username', 'password'],
-                    contentValidationIds: ['non-empty-keys'],
-                },
+                ...kubernetesResourceRef({
+                    purpose: 'http-basic-auth',
+                    displayName: 'HTTP Basic Auth Secret',
+                    description: "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                    resourceTypes: [CORE_V1_SECRET],
+                    matchProfiles: ['http-basic-auth-secret'],
+                }),
                 create: {
                     label: 'HTTP Basic Auth Secret',
                     fields: [

@@ -88,9 +88,15 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
         return;
     }
 
-    if (unwrapped instanceof z.ZodUnion && Array.isArray(jsonSchema?.anyOf)) {
-        const options = (unwrapped as z.ZodUnion<any>).options as z.ZodType[];
-        jsonSchema.anyOf.forEach((branch: unknown, index: number) => {
+    const unionOptions = (unwrapped instanceof z.ZodUnion || unwrapped instanceof z.ZodDiscriminatedUnion)
+        ? (unwrapped as z.ZodUnion<any> | z.ZodDiscriminatedUnion<any, any>).options as z.ZodType[]
+        : undefined;
+    const jsonUnionBranches = Array.isArray(jsonSchema?.anyOf)
+        ? jsonSchema.anyOf
+        : Array.isArray(jsonSchema?.oneOf) ? jsonSchema.oneOf : undefined;
+    if (unionOptions && jsonUnionBranches) {
+        const options = unionOptions;
+        jsonUnionBranches.forEach((branch: unknown, index: number) => {
             if (isSafePlainObject(branch) && options[index]) {
                 injectMetaExtensions(branch, options[index]);
             }

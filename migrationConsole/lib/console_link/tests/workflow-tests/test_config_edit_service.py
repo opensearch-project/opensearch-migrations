@@ -150,6 +150,48 @@ def test_list_external_resources_uses_config_map_content_validation_hints():
     assert by_name["missing-log4j"]["message"] == "missing log4j2.properties"
 
 
+def test_list_external_resources_uses_generic_kubernetes_resource_types_for_issuers():
+    service = ConfigEditService(namespace="test", store=FakeStore())
+    custom = MagicMock()
+    custom.list_cluster_custom_object.return_value = {
+        "items": [
+            {
+                "metadata": {"name": "migrations-ca"},
+                "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+            },
+            {
+                "metadata": {"name": "not-ready"},
+                "status": {"conditions": [{"type": "Ready", "status": "False", "message": "issuer is not ready"}]},
+            },
+        ]
+    }
+    external_ref = {
+        "kind": "kubernetesResource",
+        "purpose": "cert-manager-issuer",
+        "selection": {"target": "objectRef"},
+        "k8s": {
+            "resourceTypes": [
+                {"group": "cert-manager.io", "version": "v1", "kind": "ClusterIssuer", "namespaced": False},
+            ],
+        },
+    }
+
+    with patch.object(service, "_custom_objects", return_value=custom):
+        rows = service.list_external_resources(
+            external_ref,
+            {"name": "migrations-ca", "kind": "ClusterIssuer", "group": "cert-manager.io"},
+        )
+
+    custom.list_cluster_custom_object.assert_called_once_with("cert-manager.io", "v1", "clusterissuers")
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["migrations-ca"]["status"] == "matching"
+    assert by_name["migrations-ca"]["current"] is True
+    assert by_name["migrations-ca"]["kind"] == "ClusterIssuer"
+    assert by_name["migrations-ca"]["group"] == "cert-manager.io"
+    assert by_name["not-ready"]["status"] == "warn"
+    assert by_name["not-ready"]["message"] == "issuer is not ready"
+
+
 @patch(
     "console_link.workflow.services.config_edit_service.list_resources_full",
     return_value={
