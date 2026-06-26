@@ -607,6 +607,62 @@ def test_metadata_with_minimal_gcs_snapshot_omits_optional_flags(mocker):
     assert "--gcs-endpoint" not in actual_args
 
 
+def test_metadata_init_with_gcs_endpoint_in_config_stores_endpoint():
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+                "endpoint": "http://fake-gcs-server:4443",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._gcs_uri == "gs://my-bucket/path"
+    assert metadata._gcs_endpoint == "http://fake-gcs-server:4443"
+
+
+def test_metadata_init_with_gcs_external_snapshot_preserves_endpoint():
+    snapshot_config = {
+        "snapshot_name": "reindex_from_snapshot",
+        "gcs": {
+            "repo_uri": "gs://my-bucket/path",
+            "endpoint": "http://fake-gcs-server:4443",
+        },
+    }
+    snapshot = GcsSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    config = {"from_snapshot": None}
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), snapshot)
+    assert metadata._gcs_uri == snapshot.gcs_repo_uri
+    assert metadata._gcs_endpoint == "http://fake-gcs-server:4443"
+
+
+def test_metadata_with_gcs_snapshot_and_endpoint_passes_endpoint_flag(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/gcs",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+                "endpoint": "http://fake-gcs-server:4443",
+            },
+        },
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_args = mock.call_args.args[0]
+    assert "--endpoint" in actual_args
+    endpoint_idx = actual_args.index("--endpoint")
+    assert actual_args[endpoint_idx + 1] == "http://fake-gcs-server:4443"
+
+
 def test_generate_tmp_dir_truncates_long_name():
     long_name = "x" * 300  # Exceeds max allowed length
     tmp_dir = generate_tmp_dir(long_name)

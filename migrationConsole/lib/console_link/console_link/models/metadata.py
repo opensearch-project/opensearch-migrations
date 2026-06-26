@@ -44,6 +44,7 @@ FROM_SNAPSHOT_SCHEMA = {
             "required": False,
             'schema': {
                 'repo_uri': {'type': 'string', 'required': True},
+                'endpoint': {'type': 'string', 'required': False},
             }
         }
     },
@@ -158,6 +159,7 @@ class Metadata:
             self._aws_region = from_snapshot["s3"]["aws_region"]
         else:
             self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
+            self._gcs_endpoint = from_snapshot["gcs"].get("endpoint")
 
     def _init_from_s3_snapshot(self, snapshot: S3Snapshot) -> None:
         self._snapshot_name = snapshot.snapshot_name
@@ -175,6 +177,7 @@ class Metadata:
         self._snapshot_name = snapshot.snapshot_name
         self._snapshot_location = "gcs"
         self._gcs_uri = snapshot.gcs_repo_uri
+        self._gcs_endpoint = snapshot.gcs_endpoint
 
     def _append_args(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
         if args_to_add is None:
@@ -322,3 +325,7 @@ class Metadata:
             "--local-dir": self._local_dir,
             "--repo-uri": self._gcs_uri,
         })
+        if hasattr(self, '_gcs_endpoint') and self._gcs_endpoint:
+            command_args.update({
+                "--endpoint": self._gcs_endpoint,
+            })
