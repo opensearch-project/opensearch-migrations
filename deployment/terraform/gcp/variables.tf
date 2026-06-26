@@ -215,7 +215,6 @@ variable "source_connectivity" {
     service_attachment  = optional(string)
     allow_global_access = optional(bool, false)
     # vpc_peering:
-    peer_project       = optional(string)
     peer_vpc_self_link = optional(string)
   })
   default = { mode = "none" }
@@ -242,7 +241,6 @@ variable "target_connectivity" {
     mode                = optional(string, "none")
     service_attachment  = optional(string)
     allow_global_access = optional(bool, false)
-    peer_project        = optional(string)
     peer_vpc_self_link  = optional(string)
   })
   default = { mode = "none" }

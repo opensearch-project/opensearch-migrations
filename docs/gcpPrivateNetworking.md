@@ -58,7 +58,6 @@ Use this when the cluster lives in another GCP VPC you can peer with.
    ```hcl
    source_connectivity = {
      mode               = "vpc_peering"
-     peer_project       = "their-project"
      peer_vpc_self_link = "projects/their-project/global/networks/their-vpc"
    }
    ```
@@ -103,6 +102,12 @@ in-cluster migration workloads are unaffected. When enabled:
 - Narrow `master_authorized_cidrs` from the default `0.0.0.0/0` to your internal ranges.
 - Reach the cluster via one of: IAP TCP tunnel (`gcloud container clusters get-credentials`
   then IAP), a bastion host in the VPC, or a VPN. This repo does not provision a bastion.
+
+> **The `terraform apply` host is also affected.** This module's `kubernetes` and `helm`
+> providers connect to the cluster's control-plane endpoint to install the Migration
+> Assistant Helm release. With a private endpoint, the machine running `terraform apply`
+> must itself reach that endpoint (run it from inside the VPC, or over IAP/VPN) — not just
+> your interactive `kubectl`. Otherwise the `helm_release` step will hang or fail.
 
 ## Firewall
 
