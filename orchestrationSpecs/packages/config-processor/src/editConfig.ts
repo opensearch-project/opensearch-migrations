@@ -792,6 +792,10 @@ function schemaNestedObjectChildren(
         : [];
 }
 
+function schemaFieldDescription(parentSchema: any, key: string, fallback: string): string {
+    return schemaDescription(schemaShape(parentSchema)?.[key]) || fallback;
+}
+
 function singleKeyUnionMode(
     rootPath: string[],
     modeKey: string,
@@ -1430,7 +1434,11 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
         value: snapshotInfo,
         valueKind: "object",
         presence: "optional",
-        description: "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.",
+        description: schemaFieldDescription(
+            SOURCE_CLUSTER_CONFIG,
+            "snapshotInfo",
+            "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.",
+        ),
         status: "ok",
     });
 }
@@ -1617,7 +1625,11 @@ function captureProxyConfigNode(rootPath: string[], value: any): EditNode {
         valueKind: "object",
         presence: "required",
         required: true,
-        description: "Process-level and deployment-level configuration options for the capture proxy.",
+        description: schemaFieldDescription(
+            CAPTURE_CONFIG,
+            "proxyConfig",
+            "Process-level and deployment-level configuration options for the capture proxy.",
+        ),
         status: "ok",
         children: [...children, ...extraChildren],
     });
@@ -1706,7 +1718,11 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 path: ["traffic", "proxies"],
                 label: "Capture",
                 valueKind: "record",
-                description: "Capture proxies that receive source traffic and write it to Kafka.",
+                description: schemaFieldDescription(
+                    TRAFFIC_CONFIG,
+                    "proxies",
+                    "Capture proxies that receive source traffic and write it to Kafka.",
+                ),
                 inputHint: TRAFFIC_PROXIES_RECORD_HINT,
                 status: "ok",
                 children: proxyChildren,
@@ -1716,7 +1732,11 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 path: ["traffic", "s3Sources"],
                 label: "Buffer",
                 valueKind: "record",
-                description: "Captured traffic buffers and pre-recorded traffic archives loaded into Kafka for replay.",
+                description: schemaFieldDescription(
+                    TRAFFIC_CONFIG,
+                    "s3Sources",
+                    "Captured traffic buffers and pre-recorded traffic archives loaded into Kafka for replay.",
+                ),
                 inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
                 status: "ok",
                 children: s3SourceChildren,
@@ -1726,7 +1746,11 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 path: ["traffic", "replayers"],
                 label: "Replay",
                 valueKind: "record",
-                description: "Traffic replayers that consume captured traffic and replay it to targets.",
+                description: schemaFieldDescription(
+                    TRAFFIC_CONFIG,
+                    "replayers",
+                    "Traffic replayers that consume captured traffic and replay it to targets.",
+                ),
                 inputHint: TRAFFIC_REPLAYERS_RECORD_HINT,
                 status: "ok",
                 children: replayChildren,
@@ -1762,7 +1786,11 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
         path,
         label: "Backfill",
         valueKind: "array",
-        description: "List of snapshot-based migration configurations.",
+        description: schemaFieldDescription(
+            OVERALL_MIGRATION_CONFIG,
+            "snapshotMigrationConfigs",
+            "List of snapshot-based migration configurations.",
+        ),
         inputHint: SNAPSHOT_MIGRATION_ARRAY_HINT,
         status: "ok",
         children,
