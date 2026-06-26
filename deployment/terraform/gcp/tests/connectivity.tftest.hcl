@@ -49,3 +49,28 @@ run "psc_consumer_requires_service_attachment" {
     var.source_connectivity,
   ]
 }
+
+run "psc_consumer_target_plans_endpoint" {
+  command = plan
+
+  variables {
+    target_connectivity = {
+      mode               = "psc_consumer"
+      service_attachment = "projects/producer/regions/us-south1/serviceAttachments/sa"
+    }
+  }
+
+  assert {
+    condition     = length(module.target_connectivity_psc) == 1
+    error_message = "psc_consumer target must instantiate exactly one psc-consumer module."
+  }
+}
+
+run "none_mode_plans_no_connectivity_modules" {
+  command = plan
+
+  assert {
+    condition     = length(module.source_connectivity_psc) == 0 && length(module.target_connectivity_psc) == 0
+    error_message = "Default none mode must create no connectivity modules."
+  }
+}

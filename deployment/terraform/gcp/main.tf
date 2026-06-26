@@ -67,12 +67,12 @@ resource "random_id" "suffix" {
 }
 
 locals {
-  name           = "os-migration-${random_id.suffix.hex}"
-  bucket_name    = local.name
-  node_locations = length(var.node_locations) > 0 ? var.node_locations : slice(data.google_compute_zones.available.names, 0, min(var.max_zones, length(data.google_compute_zones.available.names)))
-  vpc_network    = var.create_vpc ? google_compute_network.migration_vpc[0].id : data.google_compute_network.existing[0].id
-  vpc_name       = var.create_vpc ? google_compute_network.migration_vpc[0].name : data.google_compute_network.existing[0].name
-  subnet_id      = var.create_vpc ? google_compute_subnetwork.migration_subnet[0].id : data.google_compute_subnetwork.existing_subnet[0].id
+  name             = "os-migration-${random_id.suffix.hex}"
+  bucket_name      = local.name
+  node_locations   = length(var.node_locations) > 0 ? var.node_locations : slice(data.google_compute_zones.available.names, 0, min(var.max_zones, length(data.google_compute_zones.available.names)))
+  vpc_network      = var.create_vpc ? google_compute_network.migration_vpc[0].id : data.google_compute_network.existing[0].id
+  vpc_name         = var.create_vpc ? google_compute_network.migration_vpc[0].name : data.google_compute_network.existing[0].name
+  subnet_id        = var.create_vpc ? google_compute_subnetwork.migration_subnet[0].id : data.google_compute_subnetwork.existing_subnet[0].id
   cluster_name     = google_container_cluster.migration_standard.name
   cluster_endpoint = google_container_cluster.migration_standard.endpoint
   cluster_location = google_container_cluster.migration_standard.location
@@ -244,7 +244,7 @@ resource "google_service_account_iam_member" "migrations_sa_wi" {
   service_account_id = google_service_account.migration_nodes.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project}.svc.id.goog[${var.workload_identity_namespace}/migrations-service-account]"
-  depends_on = [google_container_cluster.migration_standard]
+  depends_on         = [google_container_cluster.migration_standard]
 }
 
 resource "google_service_account_iam_member" "additional_migrations_sa_wi" {
@@ -302,6 +302,54 @@ resource "google_container_node_pool" "kafka" {
     auto_repair  = true
     auto_upgrade = true
   }
+}
+
+# ── Optional per-leg private connectivity (mode = none by default) ──────────
+
+module "source_connectivity_psc" {
+  count  = var.source_connectivity.mode == "psc_consumer" ? 1 : 0
+  source = "./modules/connectivity/psc-consumer"
+
+  name_prefix         = local.name
+  leg                 = "source"
+  region              = var.region
+  vpc_network         = local.vpc_network
+  subnet_id           = local.subnet_id
+  service_attachment  = var.source_connectivity.service_attachment
+  allow_global_access = var.source_connectivity.allow_global_access
+}
+
+module "target_connectivity_psc" {
+  count  = var.target_connectivity.mode == "psc_consumer" ? 1 : 0
+  source = "./modules/connectivity/psc-consumer"
+
+  name_prefix         = local.name
+  leg                 = "target"
+  region              = var.region
+  vpc_network         = local.vpc_network
+  subnet_id           = local.subnet_id
+  service_attachment  = var.target_connectivity.service_attachment
+  allow_global_access = var.target_connectivity.allow_global_access
+}
+
+module "source_connectivity_peering" {
+  count  = var.source_connectivity.mode == "vpc_peering" ? 1 : 0
+  source = "./modules/connectivity/vpc-peering"
+
+  name_prefix         = local.name
+  leg                 = "source"
+  local_vpc_self_link = local.vpc_network
+  peer_vpc_self_link  = var.source_connectivity.peer_vpc_self_link
+}
+
+module "target_connectivity_peering" {
+  count  = var.target_connectivity.mode == "vpc_peering" ? 1 : 0
+  source = "./modules/connectivity/vpc-peering"
+
+  name_prefix         = local.name
+  leg                 = "target"
+  local_vpc_self_link = local.vpc_network
+  peer_vpc_self_link  = var.target_connectivity.peer_vpc_self_link
 }
 
 # Migration Assistant Helm release (includes Argo, Strimzi, migration console)
