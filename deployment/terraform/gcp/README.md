@@ -69,6 +69,10 @@ terraform destroy -var="project=my-project"
 | `node_iam_roles` | `["roles/storage.admin"]` | IAM roles for the node SA |
 | `workload_identity_namespace` | `migration` | Kubernetes namespace containing Migration Assistant service accounts |
 | `additional_workload_identity_service_accounts` | `["migration-console-access-role","argo-workflow-executor","argo-workflow-controller","argo-controller"]` | Additional Kubernetes service accounts that can use the GCP migration service account |
+| `source_connectivity` | `{mode = "none"}` | Private connectivity for source cluster read traffic; `mode = "none"` (default, public internet), `"psc_consumer"` (Private Service Connect), or `"vpc_peering"` |
+| `target_connectivity` | `{mode = "none"}` | Private connectivity for target cluster write traffic; same modes as `source_connectivity` |
+| `gcs_connectivity` | `{mode = "private_google_access"}` | Private Google Access for Cloud Storage snapshot traffic; `mode = "private_google_access"` (default, private path) or `"none"` (public internet) |
+| `enable_private_endpoint` | `false` | Restrict GKE control plane to private IP only (no public endpoint); requires VPN or bastion for kubectl access |
 
 ## Private networking
 

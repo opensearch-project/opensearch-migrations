@@ -45,7 +45,7 @@ variable "kafka_auth_type" {
 }
 
 variable "deploy_kafka" {
-  description = "Deploy a dedicated GKE node pool for in-cluster Kafka brokers. Set to false when using external Kafka (Aiven, MSK, Confluent Cloud) configured via kafka_brokers."
+  description = "Deploy a dedicated GKE node pool for in-cluster Kafka brokers. Set to false when using external Kafka (MSK, Confluent Cloud, Aiven) configured via kafka_brokers."
   type        = bool
   default     = true
 }
