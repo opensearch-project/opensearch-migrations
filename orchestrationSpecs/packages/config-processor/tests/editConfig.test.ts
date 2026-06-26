@@ -277,6 +277,40 @@ describe("editConfig state", () => {
         expect(toggleResult.yaml).toContain("allowInsecure: true");
     });
 
+    it("unsets scalar values without creating missing parent objects", () => {
+        const config = {
+            sourceClusters: {
+                legacy: {
+                    endpoint: "https://legacy.example.com:9200",
+                    allowInsecure: false,
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
+            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            snapshotMigrationConfigs: [],
+        };
+
+        const removedScalar = applyEditOperationToObject(config, {
+            op: "unset",
+            path: ["sourceClusters", "legacy", "allowInsecure"],
+        });
+        const removedMissingNested = applyEditOperationToObject(parse(removedScalar.yaml), {
+            op: "unset",
+            path: [
+                "kafkaClusterConfiguration",
+                "kafka",
+                "autoCreate",
+                "clusterSpecOverrides",
+                "kafka",
+                "replicas",
+            ],
+        });
+
+        expect(removedScalar.yaml).not.toContain("allowInsecure:");
+        expect(removedMissingNested.yaml).not.toContain("clusterSpecOverrides:");
+    });
+
     it("applies hyphenated source references in snapshot and traffic configs", () => {
         const config = {
             sourceClusters: {

@@ -9,6 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Static, TextArea
 
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+from .modal_results import CLEAR_VALUE
 
 
 class StructuredValueModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
@@ -35,12 +36,16 @@ class StructuredValueModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]
         initial_value: str = "",
         documentation: str = "",
         expected_kind: str = "object",
+        clear_allowed: bool = False,
+        clear_label: str = "Clear",
     ):
         super().__init__()
         self.prompt = prompt
         self.initial_value = initial_value
         self.documentation = documentation
         self.expected_kind = expected_kind
+        self.clear_allowed = clear_allowed
+        self.clear_label = clear_label
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
@@ -55,6 +60,8 @@ class StructuredValueModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]
             yield Static("", id="validation")
             with Horizontal(id="buttons"):
                 yield ModalButton("Save (^S)", id="save", variant="success")
+                if self.clear_allowed:
+                    yield ModalButton(self.clear_label, id="clear")
                 yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
@@ -73,9 +80,15 @@ class StructuredValueModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]
             return
         self.dismiss(value)
 
+    def action_clear(self) -> None:
+        if self.clear_allowed:
+            self.dismiss(CLEAR_VALUE)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
             self.action_submit()
+        elif event.button.id == "clear":
+            self.action_clear()
         else:
             self.dismiss(None)
 

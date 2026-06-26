@@ -52,6 +52,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         documentation: str = "",
         can_create: bool = False,
         external_ref: Optional[Dict[str, Any]] = None,
+        clear_allowed: bool = False,
     ):
         super().__init__()
         self.title_text = title
@@ -60,6 +61,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         self.documentation = documentation
         self.can_create = can_create
         self.external_ref = external_ref or {}
+        self.clear_allowed = clear_allowed
         self.show_all = False
         self.page_index = 0
 
@@ -76,6 +78,8 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
                 with Horizontal(classes="action-row"):
                     yield MouseOnlyModalButton("Select (<Enter>)", id="select", variant="primary")
                     yield MouseOnlyModalButton("Update (u)", id="update", disabled=not bool(self.rows))
+                    if self.clear_allowed:
+                        yield MouseOnlyModalButton("Clear", id="clear")
                     yield MouseOnlyModalButton("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
@@ -116,6 +120,10 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         row = self._selected_resource_row()
         if row:
             self.dismiss({"action": "update", "row": row})
+
+    def action_clear(self) -> None:
+        if self.clear_allowed:
+            self.dismiss({"action": "clear"})
 
     def action_toggle_show_all(self) -> None:
         if not self._has_hidden_rows():
@@ -158,6 +166,8 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
             self.action_create()
         elif button_id == "update":
             self.action_update()
+        elif button_id == "clear":
+            self.action_clear()
         elif button_id == "cancel":
             self.dismiss(None)
 

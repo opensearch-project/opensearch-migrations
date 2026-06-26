@@ -512,6 +512,7 @@ def edit_state_with_missing_basic_auth():
                                 "path": ["sourceClusters", "legacy", "endpoint"],
                                 "label": "[OK] endpoint: https://legacy.example.com:9200",
                                 "valueKind": "scalar",
+                                "presence": "optional",
                                 "description": "HTTP(S) endpoint URL for the cluster.",
                                 "status": "ok",
                                 "statusCounts": {},
@@ -856,6 +857,7 @@ def edit_state_with_editable_source_fields():
                                 "label": "[CHG 1] endpoint: https://new.example.com:9200",
                                 "value": "https://new.example.com:9200",
                                 "valueKind": "scalar",
+                                "presence": "optional",
                                 "description": "HTTP(S) endpoint URL for the cluster.",
                                 "validation": {
                                     "pattern": (
@@ -888,6 +890,7 @@ def edit_state_with_editable_source_fields():
                                 "label": "[OK] allowInsecure: false",
                                 "value": False,
                                 "valueKind": "boolean",
+                                "presence": "optional",
                                 "description": "Disable TLS certificate verification.",
                                 "status": "ok",
                                 "statusCounts": {},
@@ -2320,7 +2323,7 @@ async def test_resource_view_edit_mode_proxy_console_client_secret_picker_create
             self.apply_calls.append((raw_yaml, operation))
             return {
                 "raw_yaml": "updated-yaml",
-                "edit_state": edit_state_with_proxy_console_client_secret(operation["value"]),
+                "edit_state": edit_state_with_proxy_console_client_secret(operation.get("value", "")),
             }
 
     service = FakeConfigEditService()
@@ -2359,6 +2362,7 @@ async def test_resource_view_edit_mode_proxy_console_client_secret_picker_create
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
             assert "Required Keys: tls.crt, tls.key" in str(app.screen.query_one("#requirement").content)
+            assert app.screen.query_one("#clear", Button).label.plain == "Clear"
             await pilot.press("c")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
             assert "Create Proxy Client Certificate Secret" in str(app.screen.query_one("#title").content)
@@ -2387,6 +2391,31 @@ async def test_resource_view_edit_mode_proxy_console_client_secret_picker_create
                 "traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "consoleClientSecretName"
             ]
             assert service.apply_calls[0][1]["value"] == "new-client-cert"
+
+            app._select_tree_node_by_id(
+                "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.consoleClientSecretName"
+            )
+            app._update_dynamic_bindings()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
+            await pilot.click("#clear")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml",
+                {
+                    "op": "unset",
+                    "path": [
+                        "traffic",
+                        "proxies",
+                        "cap",
+                        "proxyConfig",
+                        "tls",
+                        "clientAuth",
+                        "consoleClientSecretName",
+                    ],
+                },
+            )
 
 
 @pytest.mark.asyncio
@@ -2653,6 +2682,9 @@ async def test_resource_view_edit_mode_dirty_exit_defaults_to_save_when_valid(mo
             app._select_tree_node_by_id("edit:sourceClusters.legacy.allowInsecure")
             app._update_dynamic_bindings()
             await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            app.screen.set_focus(app.screen.query_one("#choice-1", Button))
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: app._edit_dirty is True)
 
@@ -3403,9 +3435,10 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
         def apply_operation(self, raw_yaml, operation):
             self.apply_calls.append((raw_yaml, operation))
             state = edit_state_with_kafka_override_leaf()
-            state["nodes"][0]["children"][0]["children"][0]["value"] = operation["value"]
+            if operation["op"] == "set":
+                state["nodes"][0]["children"][0]["children"][0]["value"] = operation["value"]
             return {
-                "raw_yaml": "updated-yaml",
+                "raw_yaml": f"updated-yaml-{len(self.apply_calls)}",
                 "edit_state": state,
             }
 
@@ -3467,10 +3500,33 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
                 },
             )
 
+            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, StructuredValueModal))
+            assert app.screen.query_one("#clear", Button).label.plain == "Clear"
+            app.screen.set_focus(app.screen.query_one("#clear", Button))
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml-1",
+                {
+                    "op": "unset",
+                    "path": [
+                        "kafkaClusterConfiguration",
+                        "kafka",
+                        "autoCreate",
+                        "clusterSpecOverrides",
+                    ],
+                },
+            )
+
 
 @pytest.mark.asyncio
 async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_workflow_with_two_pods):
-    """Enter provides a quick edit path for scalar values and toggles booleans."""
+    """Enter edits scalar values, clears optional values, and opens boolean choices."""
 
     class FakeConfigEditService:
         def __init__(self):
@@ -3578,19 +3634,44 @@ async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_work
                 },
             )
 
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.endpoint")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#clear", Button).label.plain == "Clear"
+            app.screen.set_focus(app.screen.query_one("#clear", Button))
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml-1",
+                {
+                    "op": "unset",
+                    "path": ["sourceClusters", "legacy", "endpoint"],
+                },
+            )
+
             app._select_tree_node_by_id("edit:sourceClusters.legacy.allowInsecure")
             app._update_dynamic_bindings()
             await pilot.pause()
             assert binding_descriptions(app, "space") == ["Toggle"]
 
             await pilot.press("enter")
-            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
-            assert service.apply_calls[1] == (
-                "updated-yaml-1",
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            assert len(service.apply_calls) == 2
+            assert app.screen.query_one("#choice-0", Button).label.plain == "unset"
+            assert app.screen.query_one("#choice-1", Button).label.plain == "true"
+            assert app.screen.query_one("#choice-2", Button).label.plain == "false (current)"
+            app.screen.set_focus(app.screen.query_one("#choice-0", Button))
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 3)
+            assert service.apply_calls[2] == (
+                "updated-yaml-2",
                 {
-                    "op": "set",
+                    "op": "unset",
                     "path": ["sourceClusters", "legacy", "allowInsecure"],
-                    "value": True,
                 },
             )
 

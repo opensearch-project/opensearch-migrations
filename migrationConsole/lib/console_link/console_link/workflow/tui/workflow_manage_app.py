@@ -37,6 +37,7 @@ from .external_resource_modal import (
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
+from .modal_results import CLEAR_VALUE
 from .pod_name_manager import PodNameManager
 from .structured_value_modal import StructuredValueModal
 from .text_input_modal import TextInputModal
@@ -1148,10 +1149,11 @@ class WorkflowTreeApp(App):
             input_hint = node.get("inputHint") or {}
             options = input_hint.get("options") or []
             if input_hint.get("kind") == "reference" and options:
+                choices = self._choices_with_unset(node, options)
                 self.push_screen(
                     ChoiceSelectModal(
                         f"Select {'.'.join(node.get('path', []))}",
-                        options,
+                        choices,
                         node.get("value"),
                         documentation=self._edit_node_documentation(node),
                     ),
@@ -1160,7 +1162,7 @@ class WorkflowTreeApp(App):
                 return
             self._show_scalar_config_text_input(node)
         elif kind == "boolean":
-            self.action_toggle_config_boolean()
+            self._show_boolean_config_picker(node)
         elif kind == "union":
             self._show_config_variant_picker(node)
         elif kind in {"object", "array"} and not node.get("children"):
@@ -1180,6 +1182,8 @@ class WorkflowTreeApp(App):
             documentation=self._edit_node_documentation(node),
             validation=self._edit_node_validation(node),
             required=bool(node.get("required")),
+            clear_allowed=self._config_node_can_unset(node),
+            clear_label="Clear",
             on_change=lambda value, locally_valid: self._schedule_scalar_config_validation(
                 node,
                 value,
@@ -1197,6 +1201,8 @@ class WorkflowTreeApp(App):
                 self._structured_config_initial_text(node),
                 documentation=self._edit_node_documentation(node),
                 expected_kind=kind,
+                clear_allowed=self._config_node_can_unset(node),
+                clear_label="Clear",
             ),
             lambda value: self._handle_structured_config_value(node, value),
         )
@@ -1210,6 +1216,9 @@ class WorkflowTreeApp(App):
 
     def _handle_structured_config_value(self, node: Dict, value: Optional[Any]) -> None:
         if value is None:
+            return
+        if value is CLEAR_VALUE:
+            self._unset_config_node(node)
             return
         self._cancel_config_edit_validation()
         self._apply_config_edit_operation({
@@ -1249,6 +1258,7 @@ class WorkflowTreeApp(App):
                 documentation=self._edit_node_documentation(node),
                 can_create=bool(external_ref.get("create")),
                 external_ref=external_ref,
+                clear_allowed=self._config_node_can_unset(node),
             ),
             lambda choice: self._handle_external_resource_picker_choice(node, choice),
         )
@@ -1259,6 +1269,9 @@ class WorkflowTreeApp(App):
         action = choice.get("action")
         if action == "create":
             self._open_external_resource_form(node, "create", return_to_picker=True)
+            return
+        if action == "clear":
+            self._unset_config_node(node)
             return
         row = choice.get("row") or {}
         if action == "select":
@@ -1386,8 +1399,62 @@ class WorkflowTreeApp(App):
             lambda value: self._handle_config_variant_choice(node, value),
         )
 
+    def _show_boolean_config_picker(self, node: Dict) -> None:
+        choices = self._choices_with_unset(node, [
+            {"label": "true", "value": True},
+            {"label": "false", "value": False},
+        ])
+        path = ".".join(str(part) for part in node.get("path", []))
+        self.push_screen(
+            ChoiceSelectModal(
+                f"Select {path}",
+                choices,
+                node.get("value"),
+                documentation=self._edit_node_documentation(node),
+            ),
+            lambda value: self._handle_boolean_config_value(node, value),
+        )
+
+    def _handle_boolean_config_value(self, node: Dict, value) -> None:
+        if value is None or value == node.get("value"):
+            return
+        if value is CLEAR_VALUE:
+            self._unset_config_node(node)
+            return
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": bool(value),
+        }, selected_id=node.get("id"))
+
+    def _choices_with_unset(self, node: Dict, choices: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        if not self._config_node_can_unset(node):
+            return choices
+        return [
+            {"label": "unset", "value": CLEAR_VALUE, "description": "Remove this optional value."},
+            *choices,
+        ]
+
+    def _unset_config_node(self, node: Dict) -> None:
+        self._cancel_config_edit_validation()
+        self._apply_config_edit_operation({
+            "op": "unset",
+            "path": node.get("path"),
+        }, selected_id=node.get("id"))
+
+    @staticmethod
+    def _config_node_can_unset(node: Dict) -> bool:
+        return (
+            node.get("presence") == "optional"
+            and not node.get("required")
+            and node.get("valueKind") in {"scalar", "boolean", "object", "array"}
+        )
+
     def _handle_config_variant_choice(self, node: Dict, value) -> None:
         if value is None or value == node.get("value"):
+            return
+        if value is CLEAR_VALUE:
+            self._unset_config_node(node)
             return
         self._apply_config_edit_operation({
             "op": "set",
@@ -1408,6 +1475,9 @@ class WorkflowTreeApp(App):
 
     def _handle_scalar_config_value(self, node: Dict, value: Optional[Any]) -> None:
         if value is None:
+            return
+        if value is CLEAR_VALUE:
+            self._unset_config_node(node)
             return
         try:
             value = self._coerce_config_scalar_value(node, value)
@@ -1623,7 +1693,7 @@ class WorkflowTreeApp(App):
                 return "Pick Resource"
             return "Edit Value"
         if kind == "boolean":
-            return "Toggle"
+            return "Choose Value"
         if kind == "union":
             return "Choose Option"
         if kind in {"object", "array"} and not node.get("children"):

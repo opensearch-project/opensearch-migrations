@@ -127,6 +127,7 @@ export interface EditStateV1 {
 
 export type EditOperation =
     | { op: "set"; path: string[]; value: unknown }
+    | { op: "unset"; path: string[] }
     | { op: "removeConfig"; path: string[] }
     | { op: "add"; path: string[]; value: unknown };
 
@@ -1985,6 +1986,32 @@ function parentAtPath(config: any, path: string[]): { parent: any; key: string }
     return {parent, key: path[path.length - 1]};
 }
 
+function existingParentAtPath(config: any, path: string[]): { parent: any; key: string } | undefined {
+    if (path.length === 0) {
+        throw new Error("Operation path must not be empty");
+    }
+    let parent = config;
+    const containerPath = path.slice(0, -1);
+    for (const [index, part] of containerPath.entries()) {
+        const nextPart = containerPath[index + 1] ?? path[path.length - 1];
+        if (Array.isArray(parent)) {
+            const arrayIndex = Number(part);
+            if (!Number.isInteger(arrayIndex) || arrayIndex < 0) {
+                throw new Error(`Invalid array index '${part}' in path ${path.join(".")}`);
+            }
+            parent = parent[arrayIndex];
+        } else if (Array.isArray(parent?.[part]) && isArrayIndex(nextPart)) {
+            parent = parent[part];
+        } else {
+            parent = parent?.[part];
+        }
+        if (!parent || typeof parent !== "object") {
+            return undefined;
+        }
+    }
+    return {parent, key: path[path.length - 1]};
+}
+
 function childSchemaAtPath(schema: any, path: string[]): any | undefined {
     if (!path.length) {
         return schema;
@@ -2256,6 +2283,19 @@ function removeAtPath(config: any, path: string[]): void {
     delete parent[key];
 }
 
+function unsetAtPath(config: any, path: string[]): void {
+    const resolved = existingParentAtPath(config, path);
+    if (!resolved) {
+        return;
+    }
+    const {parent, key} = resolved;
+    if (Array.isArray(parent) && isArrayIndex(key)) {
+        parent.splice(Number(key), 1);
+        return;
+    }
+    delete parent[key];
+}
+
 function defaultConfigForPath(path: string[]): Record<string, unknown> {
     const key = path.join(".");
     if (key === "sourceClusters") {
@@ -2318,6 +2358,8 @@ export function applyEditOperation(config: any, operation: EditOperation): any {
     const nextConfig = config && typeof config === "object" ? structuredClone(config) : {};
     if (operation.op === "set") {
         setAtPath(nextConfig, operation.path, operation.value);
+    } else if (operation.op === "unset") {
+        unsetAtPath(nextConfig, operation.path);
     } else if (operation.op === "removeConfig") {
         removeAtPath(nextConfig, operation.path);
     } else if (operation.op === "add") {

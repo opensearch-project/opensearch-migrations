@@ -1,5 +1,5 @@
 import re
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -9,9 +9,10 @@ from textual.widgets import Button, Input, Static
 from rich.markup import escape
 
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+from .modal_results import CLEAR_VALUE
 
 
-class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
+class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     CSS = """
     TextInputModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
@@ -26,7 +27,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
     BUTTON_NAV_SELECTOR = "#buttons Button"
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
-        Binding("enter", "submit", "Save", show=False, priority=True),
+        Binding("enter", "submit_focused", "Save", show=False, priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
 
@@ -37,6 +38,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
         documentation: str = "",
         validation: Optional[dict] = None,
         required: bool = False,
+        clear_allowed: bool = False,
+        clear_label: str = "Clear",
         on_change: Optional[Callable[[str, bool], None]] = None,
     ):
         super().__init__()
@@ -45,6 +48,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
         self.documentation = documentation
         self.validation = validation or {}
         self.required = required
+        self.clear_allowed = clear_allowed
+        self.clear_label = clear_label
         self.on_change = on_change
         self._compiled_pattern = self._compile_pattern(self.validation.get("pattern"))
 
@@ -57,6 +62,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
             yield Static("", id="remote-validation")
             with Horizontal(id="buttons"):
                 yield ModalButton("Save (<Enter>)", id="save", variant="success")
+                if self.clear_allowed:
+                    yield ModalButton(f"{self.clear_label}", id="clear")
                 yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
@@ -75,10 +82,25 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
             return
         self.dismiss(value)
 
+    def action_clear(self) -> None:
+        if self.clear_allowed:
+            self.dismiss(CLEAR_VALUE)
+
+    def action_submit_focused(self) -> None:
+        focused = self.app.focused or self.focused
+        if isinstance(focused, Button):
+            if focused.id == "clear":
+                self.action_clear()
+                return
+            if focused.id == "cancel":
+                self.action_cancel()
+                return
+        self.action_submit()
+
     def on_key(self, event) -> None:
         if event.key == "enter":
             event.stop()
-            self.action_submit()
+            self.action_submit_focused()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if self._update_validation(event.value):
@@ -98,6 +120,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[str]]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
             self.action_submit()
+        elif event.button.id == "clear":
+            self.action_clear()
         else:
             self.dismiss(None)
 
