@@ -72,4 +72,21 @@ public class TestCreateSnapshotArgs {
         // Should get past arg parsing (no ParameterException) and fail on connection
         assert !(ex instanceof ParameterException);
     }
+
+    @Test
+    void solrSourceWithGcsRepo_throwsParameterException() {
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = "http://localhost:8983";
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = "snap";
+        args.snapshotRepoName = "repo";
+        args.repoUri = "gs://bucket/path";
+
+        var strategy = new SolrBackupStrategy(args);
+        // Guard must fire before any Solr network call, so this fails fast rather
+        // than discovering collections against a (non-existent) Solr at localhost.
+        var ex = assertThrows(ParameterException.class, strategy::run);
+        assertThat(ex.getMessage(), containsString("gs://"));
+    }
 }

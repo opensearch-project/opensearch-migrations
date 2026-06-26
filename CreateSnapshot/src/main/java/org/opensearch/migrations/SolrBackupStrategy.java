@@ -52,6 +52,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     @Override
     public void run() {
         var parsedUri = RepoUri.parse(args.repoUri);
+        // Solr + GCS is intentionally out of scope for this release: the metadata
+        // (ClusterReaderExtractor) and document (RfsMigrateDocuments) read paths only
+        // handle file:// and s3:// for Solr sources. Reject gs:// on the create path so a
+        // user can't write a Solr backup to GCS that then can't be read back, matching the
+        // read-side messages.
+        if (parsedUri instanceof RepoUri.GcsRepoUri) {
+            throw new ParameterException(
+                "Solr backup to gs:// is not supported in this release; use --repo-uri with a file:// or s3:// scheme.");
+        }
         // Resolve file repos to the scheme-less filesystem path. Solr's backup APIs expect a
         // bare path for local filesystem locations (the legacy standalone replication handler
         // joins `location` onto the core data dir, so a leading file:// scheme produces a
