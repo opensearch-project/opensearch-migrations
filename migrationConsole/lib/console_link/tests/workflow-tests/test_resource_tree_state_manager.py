@@ -4,6 +4,9 @@ import pytest
 from textual.widgets import Tree
 
 from console_link.workflow.resource_tree import (
+    CONFIG_MODE_CURRENT_WORKFLOW,
+    CONFIG_MODE_DEPLOYED,
+    CONFIG_MODE_PENDING_SUBMIT,
     ResourceNode, ResourceGroup, ResourceSection,
 )
 from console_link.workflow.tui.resource_tree_state_manager import (
@@ -100,6 +103,74 @@ class TestRebuild:
         resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}bf-1')
         labels = [str(c.label) for c in resource_node.children]
         assert any('Backfill status:' in ln for ln in labels)
+
+    def test_rebuild_shows_config_changes_and_mode(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('kafka-1', 'kafkaclusters', spec={'version': '3.6.0'})
+        resource.config_diff = {
+            'has_submitted_changes': True,
+            'has_pending_submit_changes': True,
+            'fields': [{
+                'path': 'version',
+                'label': 'version',
+                'values': {
+                    'deployed': {'present': True, 'value': '3.6.0'},
+                    'submitted': {'present': True, 'value': '3.7.0'},
+                    'pending': {'present': True, 'value': '3.8.0'},
+                },
+            }],
+        }
+
+        mgr.rebuild(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        assert 'to submit' in str(resource_node.label)
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0' in ln for ln in labels)
+
+        mgr.set_config_value_mode('pendingSubmit')
+        mgr.update(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('version: to-submit=3.8.0' in ln for ln in labels)
+
+    def test_value_modes_filter_resources_by_projected_presence(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        delete_after_submit = make_resource('delete-after-submit', 'trafficreplays')
+        delete_after_submit.config_presence = {'deployed': True, 'submitted': True, 'pending': False}
+        create_after_submit = make_resource('create-after-submit', 'trafficreplays', 'Pending Config')
+        create_after_submit.config_presence = {'deployed': False, 'submitted': False, 'pending': True}
+        create_after_workflow = make_resource('create-after-workflow', 'trafficreplays', 'Pending Config')
+        create_after_workflow.config_presence = {'deployed': False, 'submitted': True, 'pending': True}
+        sections = make_sections({
+            'Replay': [delete_after_submit, create_after_submit, create_after_workflow],
+        })
+
+        mgr.rebuild(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_DEPLOYED)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' not in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_CURRENT_WORKFLOW)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_PENDING_SUBMIT)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
 
 
 # --- Incremental Update ---

@@ -7,9 +7,10 @@ from textual.widgets._tree import TreeNode, Tree
 from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
     PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
-    format_spec_fields, format_live_status, has_notable_steps,
+    CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
-    maybe_rewrite_wait_step,
+    maybe_rewrite_wait_step, resource_visible_in_config_mode,
+    format_resource_diagnostics,
 )
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
@@ -27,9 +28,13 @@ class ResourceTreeStateManager:
         self._namespace = namespace
         self._workflow_data: Dict = {}
         self._on_new_pod = on_new_pod
+        self._config_value_mode = CONFIG_MODE_ALL
 
     def set_tree_widget(self, tree_widget: Tree) -> None:
         self.tree = tree_widget
+
+    def set_config_value_mode(self, value_mode: str) -> None:
+        self._config_value_mode = value_mode
 
     def reset(self, root_label: str) -> None:
         self.tree.clear()
@@ -43,16 +48,62 @@ class ResourceTreeStateManager:
         self._populate_tree(sections)
         self.tree.root.expand_all()
 
+    def expand_config_differences(self, sections: List[ResourceSection]) -> None:
+        """Expand the ancestors and resource nodes that contain rollout-phase differences."""
+        if not self.tree:
+            return
+        expansion_ids = self._config_difference_expansion_ids(sections)
+        if not expansion_ids:
+            return
+        self.tree.root.expand()
+        stack = list(self.tree.root.children)
+        while stack:
+            node = stack.pop()
+            node_id = (node.data or {}).get('id') if isinstance(node.data, dict) else None
+            if node_id in expansion_ids:
+                node.expand()
+            stack.extend(node.children)
+
+    @classmethod
+    def _config_difference_expansion_ids(cls, sections: List[ResourceSection]) -> set:
+        expansion_ids = set()
+        for section in sections:
+            section_has_changes = False
+            for group in section.groups:
+                group_has_changes = False
+                for resource in group.resources:
+                    if cls._collect_changed_resource_ids(resource, expansion_ids):
+                        group_has_changes = True
+                if group_has_changes:
+                    expansion_ids.add(f'group:{group.display_name}')
+                    section_has_changes = True
+            if section_has_changes:
+                expansion_ids.add(f'section:{section.name}')
+        return expansion_ids
+
+    @classmethod
+    def _collect_changed_resource_ids(cls, resource: ResourceNode, expansion_ids: set) -> bool:
+        has_changes = bool(resource.config_diff) or bool(resource.diagnostics)
+        child_has_changes = False
+        for child in resource.children:
+            if cls._collect_changed_resource_ids(child, expansion_ids):
+                child_has_changes = True
+        if has_changes or child_has_changes:
+            expansion_ids.add(f'{RESOURCE_ID_PREFIX}{resource.name}')
+            return True
+        return False
+
     def update(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
         """Incremental update preserving cursor, scroll, and expand/collapse state."""
         self._workflow_data = workflow_data or {}
+        self.tree.root.label = "[bold]Migration Status[/]"
         self._update_sections(self.tree.root, sections)
 
     # --- Incremental diffing ---
 
     def _update_sections(self, root: TreeNode, sections: List[ResourceSection]) -> None:
         """Diff sections against existing tree children."""
-        new_sections = [s for s in sections if any(g.resources or g.not_configured for g in s.groups)]
+        new_sections = [s for s in sections if any(self._group_has_content(g) for g in s.groups)]
         existing = self._existing_by_id(root)
         new_ids = [f'section:{s.name}' for s in new_sections]
 
@@ -76,7 +127,7 @@ class ResourceTreeStateManager:
 
     def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
         """Diff groups within a section."""
-        new_groups = [g for g in groups if g.resources or g.not_configured]
+        new_groups = [g for g in groups if self._group_has_content(g)]
         existing = self._existing_by_id(section_node)
         new_ids = [f'group:{g.display_name}' for g in new_groups]
 
@@ -112,7 +163,10 @@ class ResourceTreeStateManager:
             [group.plural]
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
-        sorted_resources = sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name))
+        sorted_resources = sorted(
+            self._visible_resources(group),
+            key=lambda r: (plural_order.get(r.plural, 99), r.name),
+        )
 
         existing = self._existing_by_id(group_node)
         new_ids = [f'{RESOURCE_ID_PREFIX}{r.name}' for r in sorted_resources]
@@ -127,10 +181,8 @@ class ResourceTreeStateManager:
             for resource in sorted_resources:
                 rid = f'{RESOURCE_ID_PREFIX}{resource.name}'
                 resource_node = existing[rid]
-                # Update label if phase changed
-                old_phase = resource_node.data.get('phase')
-                if old_phase != resource.phase:
-                    resource_node.set_label(self._resource_label(resource))
+                resource_node.set_label(self._resource_label(resource))
+                resource_node.data['phase'] = resource.phase
                 # Always rebuild the subtree below the resource (details + workflow steps)
                 self._rebuild_resource_children(resource_node, resource)
 
@@ -139,8 +191,7 @@ class ResourceTreeStateManager:
         collapsed = self._save_collapsed_recursive(resource_node)
         self._remove_children(resource_node)
 
-        for field in format_spec_fields(resource):
-            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        self._add_resource_details(resource_node, resource)
         if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
@@ -152,6 +203,8 @@ class ResourceTreeStateManager:
             live_node.collapse()
         self._add_workflow_progress(resource_node, resource)
         for child in resource.children:
+            if not self._resource_visible(child):
+                continue
             self._add_resource(resource_node, child)
 
         self._restore_collapse_state_recursive(resource_node, collapsed)
@@ -164,14 +217,55 @@ class ResourceTreeStateManager:
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+            if not self._resource_visible(resource):
+                continue
             self._add_resource(group_node, resource)
 
     @staticmethod
     def _resource_label(resource: ResourceNode) -> str:
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+        change_label = ResourceTreeStateManager._resource_change_label(resource)
         if resource.phase in DISPLAY_PHASES:
-            return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
-        return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
+            return (
+                f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] "
+                f"[{color}]({resource.phase})[/{color}]{change_label}"
+            )
+        return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]{change_label}"
+
+    @staticmethod
+    def _resource_change_label(resource: ResourceNode) -> str:
+        diagnostic = ResourceTreeStateManager._highest_priority_diagnostic(resource)
+        if diagnostic:
+            severity = diagnostic.get('severity') or 'error'
+            style = ResourceTreeStateManager._diagnostic_style(severity)
+            label = 'required' if severity == 'required' else severity
+            return f' [{style}]({label})[/{style}]'
+        diff = resource.config_diff or {}
+        if not diff:
+            return ''
+        if diff.get('has_pending_submit_changes'):
+            return ' [green](to submit)[/green]'
+        if diff.get('has_submitted_changes'):
+            return ' [grey50](pending)[/grey50]'
+        return ''
+
+    @staticmethod
+    def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict]:
+        rank = {'error': 4, 'required': 3, 'blocked': 3, 'gated': 2, 'warning': 1}
+        diagnostics = resource.diagnostics or []
+        if not diagnostics:
+            return None
+        return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
+
+    @staticmethod
+    def _diagnostic_style(severity: str) -> str:
+        if severity in ('error', 'blocked'):
+            return 'red'
+        if severity == 'required':
+            return 'yellow'
+        if severity == 'gated':
+            return 'magenta'
+        return 'yellow'
 
     @staticmethod
     def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
@@ -248,7 +342,7 @@ class ResourceTreeStateManager:
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""
         for section in sections:
-            section_has_content = any(g.resources or g.not_configured for g in section.groups)
+            section_has_content = any(self._group_has_content(g) for g in section.groups)
             if not section_has_content:
                 continue
             section_node = self.tree.root.add(
@@ -258,7 +352,7 @@ class ResourceTreeStateManager:
 
     def _add_group(self, parent: TreeNode, group: ResourceGroup) -> None:
         """Add a resource group to the tree."""
-        if not group.resources and not group.not_configured:
+        if not self._group_has_content(group):
             return
         group_node = parent.add(
             f"[bold]{group.display_name}[/]", data={'id': f'group:{group.display_name}'})
@@ -271,7 +365,7 @@ class ResourceTreeStateManager:
             [group.plural]
         )
         plural_order = {p: i for i, p in enumerate(group_plurals)}
-        for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+        for resource in sorted(self._visible_resources(group), key=lambda r: (plural_order.get(r.plural, 99), r.name)):
             self._add_resource(group_node, resource)
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
@@ -285,8 +379,7 @@ class ResourceTreeStateManager:
         })
 
         # Spec details
-        for field in format_spec_fields(resource):
-            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        self._add_resource_details(resource_node, resource)
         if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
@@ -302,7 +395,27 @@ class ResourceTreeStateManager:
 
         # Children (e.g., topics under kafka)
         for child in resource.children:
+            if not self._resource_visible(child):
+                continue
             self._add_resource(resource_node, child)
+
+    def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
+        for field in format_spec_fields(resource):
+            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
+            resource_node.add(field, data=None)
+        for diagnostic in format_resource_diagnostics(resource):
+            style = self._diagnostic_style(diagnostic.get('severity', 'error'))
+            resource_node.add(f"[{style}]{diagnostic['label']}[/{style}]", data=None)
+
+    def _group_has_content(self, group: ResourceGroup) -> bool:
+        return bool(self._visible_resources(group)) or group.not_configured
+
+    def _visible_resources(self, group: ResourceGroup) -> List[ResourceNode]:
+        return [resource for resource in group.resources if self._resource_visible(resource)]
+
+    def _resource_visible(self, resource: ResourceNode) -> bool:
+        return resource_visible_in_config_mode(resource, self._config_value_mode)
 
     def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""

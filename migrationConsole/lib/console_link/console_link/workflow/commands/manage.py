@@ -95,7 +95,7 @@ def _initialize_k8s_client(ctx):
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.option('--insecure', is_flag=True, default=True, hidden=True, envvar='WORKFLOW_INSECURE')
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN')
-@click.option('--resource-view/--step-view', default=False, show_default='step-view',
+@click.option('--resource-view/--step-view', default=True, show_default='resource-view',
               help='Show the resource-centric view (--resource-view) or the current Argo '
                    "Workflow's step tree (--step-view). The step tree does not show "
                    'historical actions from prior runs.')

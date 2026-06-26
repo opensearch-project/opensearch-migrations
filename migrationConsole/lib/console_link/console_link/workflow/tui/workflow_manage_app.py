@@ -9,21 +9,38 @@ import platform
 import subprocess
 import sys
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container
+from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static, Tree
 
+from .choice_select_modal import ChoiceSelectModal
+from .config_edit_exit_modal import ConfigEditExitModal
 from .confirm_modal import ConfirmModal
 from .container_select_modal import ContainerSelectModal
+from .config_edit_tree import (
+    EDIT_MODE_ALL,
+    EDIT_MODE_LABELS,
+    EDIT_MODES,
+    render_edit_state,
+    selected_edit_node,
+    update_help_panel,
+)
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
+from .text_input_modal import TextInputModal
 from .tree_state_manager import TreeStateManager
 from .resource_tree_state_manager import RESOURCE_ID_PREFIX
 from ..commands.artifact_store import ArtifactStoreError
 from ..commands.crd_utils import resource_display_name
+from ..resource_tree import (
+    CONFIG_MODE_LABELS,
+    apply_config_overlays,
+    resource_config_change_summary,
+)
 from ..commands.show import read_managed_output
 from ..tree_utils import is_approval_node
 
@@ -41,11 +58,20 @@ PATCH_OUTPUT_STEPS = {
     "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
 }
+ENABLE_MOUSE_SEQUENCES = "\x1b[?1000h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
+DISABLE_MOUSE_SEQUENCES = "\x1b[?1000l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1016l"
+DISABLE_MOUSE_PIXELS_SEQUENCE = "\x1b[?1016l"
 
 
 class WorkflowTreeApp(App):
     CSS = """
     Tree { scrollbar-gutter: stable; }
+    #edit-help {
+        height: 4;
+        padding: 0 1;
+        border-top: solid $primary;
+        display: none;
+    }
     #pod-status { height: 1; padding: 0 1; }
     """
 
@@ -56,7 +82,8 @@ class WorkflowTreeApp(App):
                  pod_scraper: PodScraperInterface,
                  workflow_waiter: WaiterInterface,
                  refresh_interval: float,
-                 resource_view: bool = False):
+                 resource_view: bool = False,
+                 config_edit_service=None):
         super().__init__()
         self.title = f"[{namespace}] {name}"  # override from base
 
@@ -70,6 +97,27 @@ class WorkflowTreeApp(App):
         self._pod_scraper = pod_scraper
         self._refresh_interval = refresh_interval
         self._resource_view = resource_view
+        self._config_edit_service = config_edit_service
+        self._edit_mode = False
+        self._edit_state: Optional[Dict] = None
+        self._edit_draft_yaml: Optional[str] = None
+        self._edit_dirty = False
+        self._edit_value_mode = EDIT_MODE_ALL
+        self._edit_status_mode = EDIT_MODE_ALL
+        self._edit_show_optional = True
+        self._edit_show_expert = False
+        self._after_config_edit_save: Optional[str] = None
+        self._resource_value_mode = EDIT_MODE_ALL
+        self._resource_change_summary = {'pending': 0, 'to_submit': 0, 'resources': 0}
+        self._last_resource_sections = None
+        self._last_resource_workflow_data: Dict = {}
+        self._expand_changed_resources_on_next_render = resource_view
+        self._submitting_workflow = False
+        self._edit_validation_generation = 0
+        self._edit_validation_timer: Optional[Any] = None
+        self._edit_validation_delay = 0.4
+        self._mouse_input_enabled = True
+        self._mouse_pixels_was_enabled = False
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
@@ -88,11 +136,14 @@ class WorkflowTreeApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(Tree(LOADING_ROOT_LABEL, id="workflow-tree"), id="tree-container")
+        yield Static("", id="edit-help")
         yield Static("", id="pod-status")
         yield Footer()
 
     def on_mount(self) -> None:
         self._tree_state.set_tree_widget(self.tree_root_widget)
+        if self._resource_view and hasattr(self._tree_state, "set_config_value_mode"):
+            self._tree_state.set_config_value_mode(self._resource_value_mode)
         self.action_refresh_workflow()
 
     @property
@@ -101,6 +152,7 @@ class WorkflowTreeApp(App):
 
     def on_unmount(self) -> None:
         self.is_exiting = True
+        self._set_mouse_input_enabled(True, notify=False, update_bindings=False)
         try:
             self._workflow_waiter.reset()
         except Exception:
@@ -116,6 +168,8 @@ class WorkflowTreeApp(App):
             return {"success": False, "error": str(e)}, {}
 
     def action_refresh_workflow(self) -> None:
+        if self._edit_mode:
+            return
         self.run_worker(self._refresh_workflow_worker, thread=True, name="refresh_wf")
 
     def _refresh_workflow_worker(self) -> None:
@@ -142,6 +196,19 @@ class WorkflowTreeApp(App):
             steps = extract_workflow_steps_by_resource(filtered_tree)
             self._assign_workflow_progress(sections, steps)
             mark_not_configured_groups(sections, filtered_tree)
+        try:
+            service = self._config_edit_service_or_default()
+            if hasattr(service, "load_resource_config_snapshots"):
+                snapshots = service.load_resource_config_snapshots(self._workflow_name)
+                apply_config_overlays(
+                    sections,
+                    submitted_resolved_config=snapshots.get("submitted"),
+                    pending_resolved_config=snapshots.get("pending"),
+                    submitted_console_config=snapshots.get("submitted_console"),
+                    pending_console_config=snapshots.get("pending_console"),
+                )
+        except Exception:
+            logger.exception("Failed to load resource config change overlays")
         return sections
 
     @staticmethod
@@ -165,14 +232,23 @@ class WorkflowTreeApp(App):
             return
 
         new_run_id = workflow_data.get('status', {}).get('startedAt') if workflow_data else None
+        had_resource_tree = self._last_resource_sections is not None
         is_restart = self.current_run_id != new_run_id
+        self._last_resource_sections = sections
+        self._last_resource_workflow_data = workflow_data
+        self._resource_change_summary = resource_config_change_summary(sections)
+        if hasattr(self._tree_state, "set_config_value_mode"):
+            self._tree_state.set_config_value_mode(self._resource_value_mode)
 
-        if is_restart:
+        if is_restart or not had_resource_tree:
             self.current_run_id = new_run_id
             self._pods.clear_cache()
             self._tree_state.rebuild(sections, workflow_data)
         else:
             self._tree_state.update(sections, workflow_data)
+        if self._expand_changed_resources_on_next_render:
+            self._expand_changed_resources_on_next_render = False
+            self._expand_changed_resource_nodes(sections)
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
         self.update_pod_status()
@@ -217,6 +293,8 @@ class WorkflowTreeApp(App):
 
     def action_manual_refresh(self) -> None:
         """User-triggered manual refresh (Strongly Consistent)."""
+        if self._edit_mode:
+            return
         self.run_worker(self._force_refresh_workflow, thread=True, name="_force_refresh_workflow")
 
     def _force_refresh_workflow(self) -> None:
@@ -232,8 +310,43 @@ class WorkflowTreeApp(App):
     # --- Event Handlers & Actions ---
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+        if self._edit_mode:
+            self._update_edit_help()
         self.update_pod_status()
         self._update_dynamic_bindings()
+
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        if not self.is_mounted or isinstance(self.screen, ModalScreen):
+            return
+        if self._edit_mode:
+            event.stop()
+            data = event.node.data or {}
+            if data.get("type") == "config-edit":
+                self._edit_config_node(data.get("edit_node") or data)
+            return
+
+        data = event.node.data or {}
+        if data and is_approval_node(data) and data.get('phase') == PHASE_RUNNING:
+            event.stop()
+            self.action_approve_step()
+            return
+        if event.node.is_expanded:
+            event.node.collapse()
+        else:
+            event.node.expand()
+
+    def on_key(self, event) -> None:
+        if not self._edit_mode or isinstance(self.screen, ModalScreen):
+            return
+        if event.key == "right":
+            event.stop()
+            self.action_expand_node()
+        elif event.key == "left":
+            event.stop()
+            self.action_collapse_node()
+        elif event.key == "space":
+            event.stop()
+            self.action_toggle_config_boolean()
 
     @property
     def current_node_data(self) -> Optional[Dict]:
@@ -460,6 +573,40 @@ class WorkflowTreeApp(App):
 
     def update_pod_status(self) -> None:
         status_bar = self.query_one("#pod-status", Static)
+        if self._edit_mode:
+            node = selected_edit_node(self.tree_root_widget)
+            dirty = "dirty" if self._edit_dirty else "clean"
+            value_mode = EDIT_MODE_LABELS.get(self._edit_value_mode, self._edit_value_mode)
+            status_mode = EDIT_MODE_LABELS.get(self._edit_status_mode, self._edit_status_mode)
+            optional_state = "optional on" if self._edit_show_optional else "optional off"
+            expert_state = "expert on" if self._edit_show_expert else "expert off"
+            if node:
+                status = node.get("status", "ok")
+                status_bar.update(
+                    f"Config edit: [bold cyan]{status}[/]  [{dirty}]  "
+                    f"Values: {value_mode}  Status: {status_mode}  "
+                    f"{optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
+                )
+            else:
+                status_bar.update(
+                    f"Config edit: [{dirty}]  Values: {value_mode}  "
+                    f"Status: {status_mode}  {optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
+                )
+            return
+        if self._resource_view:
+            summary = self._resource_change_summary
+            value_mode = CONFIG_MODE_LABELS.get(self._resource_value_mode, self._resource_value_mode)
+            if self._submitting_workflow:
+                status_bar.update(f"Submitting workflow...  Values: {value_mode}")
+                return
+            if summary.get('resources'):
+                status_bar.update(
+                    f"Config changes: [green]{summary.get('to_submit', 0)} to submit[/], "
+                    f"[grey50]{summary.get('pending', 0)} pending[/]  Values: {value_mode}"
+                )
+                return
+            status_bar.update(f"Values: {value_mode}")
+            return
         if not self.current_node_data:
             status_bar.update("")
             return
@@ -486,8 +633,60 @@ class WorkflowTreeApp(App):
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "manual_refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
+        self.bind(
+            "m",
+            "toggle_mouse_input",
+            description="Mouse Off" if self._mouse_input_enabled else "Mouse On",
+        )
+
+        if self._edit_mode:
+            node = selected_edit_node(self.tree_root_widget)
+            self.bind("escape", "exit_config_edit", description="Exit Edit")
+            self.bind("s", "save_config_edit", description="Save")
+            self.bind("ctrl+s", "save_config_edit", description="Save")
+            self.bind("?", "show_config_edit_help", description="Help")
+            self.bind("v", "cycle_config_value_mode", description="Value Mode")
+            self.bind("t", "cycle_config_status_mode", description="Status Mode")
+            if self._edit_show_optional:
+                self.bind("o", "hide_config_optional_fields", description="Hide Optional")
+            else:
+                self.bind("O", "show_config_optional_fields", description="Show Optional")
+            if self._edit_show_expert:
+                self.bind("x", "hide_config_expert_fields", description="Hide Expert")
+            else:
+                self.bind("X", "show_config_expert_fields", description="Show Expert")
+            self.bind("i", "edit_selected_config_node", show=False)
+            self._bindings.bind(
+                "left",
+                "collapse_node",
+                "",
+                show=False,
+                priority=True,
+            )
+            self._bindings.bind(
+                "right",
+                "expand_node",
+                "",
+                show=False,
+                priority=True,
+            )
+            if node and node.get("valueKind") == "boolean":
+                self._bindings.bind("space", "toggle_config_boolean", "Toggle", priority=True)
+            if node and node.get("valueKind") == "command":
+                self.bind("a", "edit_selected_config_node", description="Add")
+            if self._is_removable_edit_node(node):
+                self.bind("delete", "remove_config_node", description="Remove")
+                self.bind("backspace", "remove_config_node", show=False)
+            self.refresh_bindings()
+            return
+
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)
+
+        if self._resource_view:
+            self.bind("e", "edit_config", description="Edit Config")
+            self.bind("s", "submit_workflow", description="Submit")
+            self.bind("v", "cycle_resource_value_mode", description="Value Mode")
 
         node = self.current_node_data
         if node:
@@ -515,6 +714,778 @@ class WorkflowTreeApp(App):
             self.bind("a", "approve_step", description="Approve")
         elif self._collect_managed_output_refs():
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+
+    def action_toggle_mouse_input(self) -> None:
+        """Temporarily release or restore terminal mouse reporting."""
+        self._set_mouse_input_enabled(not self._mouse_input_enabled)
+
+    def _set_mouse_input_enabled(
+        self,
+        enabled: bool,
+        notify: bool = True,
+        update_bindings: bool = True,
+    ) -> None:
+        if enabled == self._mouse_input_enabled:
+            return
+        driver = getattr(self, "_driver", None)
+        if driver is not None:
+            if not enabled:
+                self.capture_mouse(None)
+                self._mouse_pixels_was_enabled = bool(getattr(driver, "_mouse_pixels", False))
+                self._write_mouse_reporting(driver, enabled=False)
+            else:
+                self._write_mouse_reporting(driver, enabled=True)
+                if self._mouse_pixels_was_enabled and hasattr(driver, "_enable_mouse_pixels"):
+                    driver._enable_mouse_pixels()
+                self._mouse_pixels_was_enabled = False
+
+        self._mouse_input_enabled = enabled
+        if notify:
+            if enabled:
+                self.notify("Mouse handling restored")
+            else:
+                self.notify("Mouse handling disabled; drag to select text, press m to restore")
+        if update_bindings:
+            self._update_dynamic_bindings()
+
+    @staticmethod
+    def _write_mouse_reporting(driver, enabled: bool) -> None:
+        method_name = "_enable_mouse_support" if enabled else "_disable_mouse_support"
+        method = getattr(driver, method_name, None)
+        if callable(method):
+            method()
+            if not enabled and callable(getattr(driver, "write", None)):
+                driver.write(DISABLE_MOUSE_PIXELS_SEQUENCE)
+                flush = getattr(driver, "flush", None)
+                if callable(flush):
+                    flush()
+            return
+        write = getattr(driver, "write", None)
+        if callable(write):
+            write(ENABLE_MOUSE_SEQUENCES if enabled else DISABLE_MOUSE_SEQUENCES)
+            flush = getattr(driver, "flush", None)
+            if callable(flush):
+                flush()
+
+    def action_activate_selected_node(self) -> None:
+        node = self.current_node_data
+        if node and is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            self.action_approve_step()
+            return
+        tree = self.tree_root_widget
+        if tree.cursor_node:
+            if tree.cursor_node.is_expanded:
+                tree.cursor_node.collapse()
+            else:
+                tree.cursor_node.expand()
+
+    def action_cycle_resource_value_mode(self) -> None:
+        if not self._resource_view or self._edit_mode:
+            return
+        self._resource_value_mode = self._next_edit_mode(self._resource_value_mode)
+        if hasattr(self._tree_state, "set_config_value_mode"):
+            self._tree_state.set_config_value_mode(self._resource_value_mode)
+        if self._last_resource_sections is not None:
+            self._tree_state.update(self._last_resource_sections, self._last_resource_workflow_data)
+            self._expand_changed_resource_nodes(self._last_resource_sections)
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def action_submit_workflow(self) -> None:
+        if not self._resource_view or self._edit_mode or self._submitting_workflow:
+            return
+        self.push_screen(
+            ConfirmModal("Submit saved workflow configuration and replace the current workflow?"),
+            lambda confirmed: self._start_submit_workflow() if confirmed else None,
+        )
+
+    def _start_submit_workflow(self) -> None:
+        self._submitting_workflow = True
+        self.update_pod_status()
+        self.run_worker(self._submit_workflow_worker, thread=True, name="submit_workflow")
+
+    def _submit_workflow_worker(self) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            result = service.submit_saved_config(self._workflow_name)
+            self.call_from_thread(self._handle_workflow_submitted, result)
+        except Exception as e:
+            logger.exception("Failed to submit workflow")
+            self.call_from_thread(self._handle_workflow_submit_failed, e)
+
+    def _handle_workflow_submitted(self, result: Dict) -> None:
+        self._submitting_workflow = False
+        submitted_name = result.get('workflow_name') or self._workflow_name
+        self.notify(f"Workflow submitted: {submitted_name}")
+        self.current_run_id = None
+        self._expand_changed_resources_on_next_render = True
+        self.action_manual_refresh()
+
+    def _handle_workflow_submit_failed(self, error: Exception) -> None:
+        self._submitting_workflow = False
+        self.notify(f"Workflow submit failed: {error}", severity="error")
+        self.update_pod_status()
+
+    def action_edit_config(self) -> None:
+        """Enter schema-guided pending-config edit mode."""
+        if not self._resource_view:
+            self.notify("Config edit is available from resource view", severity="warning")
+            return
+        self.run_worker(self._load_config_edit_state_worker, thread=True, name="load_config_edit_state")
+
+    def _config_edit_service_or_default(self):
+        if self._config_edit_service is not None:
+            return self._config_edit_service
+        from ..services.config_edit_service import ConfigEditService
+        return ConfigEditService(namespace=self._namespace)
+
+    def _load_config_edit_state_worker(self) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if hasattr(service, "load_edit_session"):
+                session = service.load_edit_session()
+            else:
+                session = {
+                    "raw_yaml": "",
+                    "edit_state": service.load_edit_state(),
+                }
+            self.call_from_thread(self._handle_config_edit_session, session)
+        except Exception as e:
+            logger.exception("Failed to load config edit state")
+            self.call_from_thread(self.notify, f"Config edit unavailable: {e}", severity="error")
+
+    def _handle_config_edit_session(self, session) -> None:
+        edit_state = getattr(session, "edit_state", None) or session["edit_state"]
+        raw_yaml = getattr(session, "raw_yaml", None)
+        if raw_yaml is None:
+            raw_yaml = session.get("raw_yaml", "")
+        self._edit_mode = True
+        self._edit_state = edit_state
+        self._edit_draft_yaml = raw_yaml
+        self._edit_dirty = False
+        self._edit_value_mode = EDIT_MODE_ALL
+        self._edit_status_mode = EDIT_MODE_ALL
+        self._edit_show_optional = True
+        self._edit_show_expert = False
+        render_edit_state(
+            self.tree_root_widget,
+            edit_state,
+            self._edit_value_mode,
+            self._edit_status_mode,
+            self._edit_show_optional,
+            self._edit_show_expert,
+        )
+        help_panel = self.query_one("#edit-help", Static)
+        help_panel.display = True
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def action_exit_config_edit(self) -> None:
+        """Leave edit mode and restore the live resource tree."""
+        if not self._edit_mode:
+            return
+        if self._edit_dirty:
+            self.push_screen(
+                ConfigEditExitModal(
+                    "Leave config edit mode?",
+                    self._config_edit_exit_status_message(),
+                    default_action=self._default_config_edit_exit_action(),
+                ),
+                lambda action: self._handle_config_edit_exit_choice(action, quit_after=False),
+            )
+            return
+        self._discard_config_edit()
+
+    def action_quit(self) -> None:
+        """Quit the app, confirming first if a config edit draft is dirty."""
+        if self._edit_mode and self._edit_dirty:
+            self.push_screen(
+                ConfigEditExitModal(
+                    "Quit manage with unsaved config edits?",
+                    self._config_edit_exit_status_message(),
+                    default_action=self._default_config_edit_exit_action(),
+                    save_label="Save and quit",
+                    discard_label="Discard and quit",
+                ),
+                lambda action: self._handle_config_edit_exit_choice(action, quit_after=True),
+            )
+            return
+        self.exit()
+
+    def _config_edit_exit_status_message(self) -> str:
+        validation = (self._edit_state or {}).get("validation") or {}
+        diagnostics = validation.get("diagnostics") or []
+        errors = validation.get("errors") or []
+        if validation.get("valid") is False or diagnostics or errors:
+            count = len(diagnostics) or len(errors) or 1
+            return f"Validation still reports {count} issue{'s' if count != 1 else ''}. You can save anyway, discard, or return."
+        return "No validation errors are currently reported. You can save, discard, or return."
+
+    def _default_config_edit_exit_action(self) -> str:
+        validation = (self._edit_state or {}).get("validation") or {}
+        if validation.get("valid") is False or validation.get("diagnostics") or validation.get("errors"):
+            return "return"
+        return "save"
+
+    def _handle_config_edit_exit_choice(self, action: Optional[str], quit_after: bool = False) -> None:
+        if action == "discard":
+            if quit_after:
+                self.exit()
+            else:
+                self._discard_config_edit()
+        elif action == "save":
+            self._after_config_edit_save = "quit" if quit_after else "exit"
+            self.action_save_config_edit()
+
+    def _discard_config_edit(self) -> None:
+        """Discard the current edit session and restore the live resource tree."""
+        self._edit_mode = False
+        self._edit_state = None
+        self._edit_draft_yaml = None
+        self._edit_dirty = False
+        self._edit_value_mode = EDIT_MODE_ALL
+        self._edit_status_mode = EDIT_MODE_ALL
+        self._edit_show_optional = True
+        self._edit_show_expert = False
+        self._after_config_edit_save = None
+        self._cancel_config_edit_validation()
+        self.current_run_id = None
+        self._expand_changed_resources_on_next_render = True
+        self.query_one("#edit-help", Static).display = False
+        self.action_manual_refresh()
+
+    def _expand_changed_resource_nodes(self, sections) -> None:
+        if self._resource_view and hasattr(self._tree_state, "expand_config_differences"):
+            self._tree_state.expand_config_differences(sections)
+
+    def action_save_config_edit(self) -> None:
+        """Save the current edit draft back to the workflow config store."""
+        if not self._edit_mode or self._edit_draft_yaml is None:
+            return
+        self.run_worker(self._save_config_edit_worker, thread=True, name="save_config_edit")
+
+    def _save_config_edit_worker(self) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            message = service.save_raw_yaml(self._edit_draft_yaml or "")
+            self.call_from_thread(self._handle_config_edit_saved, message)
+        except Exception as e:
+            logger.exception("Failed to save config edit draft")
+            self.call_from_thread(self._handle_config_edit_save_failed, e)
+
+    def _handle_config_edit_saved(self, message: str) -> None:
+        after_save = self._after_config_edit_save
+        self._after_config_edit_save = None
+        self._edit_dirty = False
+        self.update_pod_status()
+        self.notify(message or "Configuration saved")
+        if after_save == "exit":
+            self._discard_config_edit()
+        elif after_save == "quit":
+            self.exit()
+
+    def _handle_config_edit_save_failed(self, error: Exception) -> None:
+        self._after_config_edit_save = None
+        self.notify(f"Save failed: {error}", severity="error")
+
+    def action_show_config_edit_help(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if node:
+            description = node.get("description") or node.get("descriptionShort") or "No field description available"
+            self.notify(description, timeout=8)
+
+    def _update_edit_help(self) -> None:
+        help_panel = self.query_one("#edit-help", Static)
+        update_help_panel(help_panel, selected_edit_node(self.tree_root_widget), self._edit_status_mode)
+
+    def action_cycle_config_value_mode(self) -> None:
+        self._edit_value_mode = self._next_edit_mode(self._edit_value_mode)
+        self._rerender_config_edit_state()
+
+    def action_cycle_config_status_mode(self) -> None:
+        self._edit_status_mode = self._next_edit_mode(self._edit_status_mode)
+        self._rerender_config_edit_state()
+
+    def action_show_config_optional_fields(self) -> None:
+        self._edit_show_optional = True
+        self._rerender_config_edit_state()
+
+    def action_hide_config_optional_fields(self) -> None:
+        self._edit_show_optional = False
+        self._rerender_config_edit_state()
+
+    def action_show_config_expert_fields(self) -> None:
+        self._edit_show_expert = True
+        self._rerender_config_edit_state()
+
+    def action_hide_config_expert_fields(self) -> None:
+        self._edit_show_expert = False
+        self._rerender_config_edit_state()
+
+    @staticmethod
+    def _next_edit_mode(current: str) -> str:
+        try:
+            index = EDIT_MODES.index(current)
+        except ValueError:
+            index = 0
+        return EDIT_MODES[(index + 1) % len(EDIT_MODES)]
+
+    def _rerender_config_edit_state(self) -> None:
+        if not self._edit_mode or self._edit_state is None:
+            return
+        selected_id = None
+        node = self.tree_root_widget.cursor_node
+        if node and node.data:
+            selected_id = node.data.get("id")
+        render_edit_state(
+            self.tree_root_widget,
+            self._edit_state,
+            self._edit_value_mode,
+            self._edit_status_mode,
+            self._edit_show_optional,
+            self._edit_show_expert,
+        )
+        if selected_id:
+            self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
+        else:
+            self._update_edit_help()
+            self.update_pod_status()
+            self._update_dynamic_bindings()
+
+    def action_next_config_variant(self) -> None:
+        self._cycle_config_variant(1)
+
+    def action_previous_config_variant(self) -> None:
+        self._cycle_config_variant(-1)
+
+    def _cycle_config_variant(self, delta: int) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") != "union":
+            if delta > 0:
+                self.action_expand_node()
+            else:
+                self.action_collapse_node()
+            return
+        variants = node.get("variants") or []
+        values = [variant.get("value") for variant in variants]
+        if not values:
+            return
+        try:
+            current_index = values.index(node.get("value"))
+        except ValueError:
+            current_index = 0
+        next_value = values[(current_index + delta) % len(values)]
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": next_value,
+        }, selected_id=node.get("id"))
+
+    def action_toggle_config_boolean(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") != "boolean":
+            return
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": not bool(node.get("value")),
+        }, selected_id=node.get("id"))
+
+    def action_edit_selected_config_node(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node:
+            return
+        self._edit_config_node(node)
+
+    def _edit_config_node(self, node: Dict) -> None:
+        kind = node.get("valueKind")
+        if kind == "command" and node.get("id", "").endswith(":add"):
+            command = node.get("command") or {}
+            if command.get("requiresName") is False:
+                self._apply_config_edit_operation({
+                    "op": "add",
+                    "path": node.get("path"),
+                    "value": {},
+                })
+                return
+            label = str(node.get("label", "+ Add")).replace("[OK] ", "")
+            self.push_screen(
+                TextInputModal(
+                    f"{label} name",
+                    documentation=self._edit_node_documentation(node),
+                    validation=self._edit_node_validation(node),
+                    required=True,
+                ),
+                lambda value: self._handle_add_config_name(node, value),
+            )
+        elif kind == "scalar":
+            input_hint = node.get("inputHint") or {}
+            options = input_hint.get("options") or []
+            if input_hint.get("kind") == "reference" and options:
+                self.push_screen(
+                    ChoiceSelectModal(
+                        f"Select {'.'.join(node.get('path', []))}",
+                        options,
+                        node.get("value"),
+                        documentation=self._edit_node_documentation(node),
+                    ),
+                    lambda value: self._handle_scalar_config_value(node, value),
+                )
+                return
+            modal = TextInputModal(
+                f"Edit {'.'.join(node.get('path', []))}",
+                str(node.get("value") or ""),
+                documentation=self._edit_node_documentation(node),
+                validation=self._edit_node_validation(node),
+                required=bool(node.get("required")),
+                on_change=lambda value, locally_valid: self._schedule_scalar_config_validation(
+                    node,
+                    value,
+                    modal,
+                    locally_valid,
+                ),
+            )
+            self.push_screen(modal, lambda value: self._handle_scalar_config_value(node, value))
+        elif kind == "boolean":
+            self.action_toggle_config_boolean()
+        elif kind == "union":
+            self._show_config_variant_picker(node)
+        else:
+            tree = self.tree_root_widget
+            if tree.cursor_node:
+                if tree.cursor_node.is_expanded:
+                    tree.cursor_node.collapse()
+                else:
+                    tree.cursor_node.expand()
+
+    def _show_config_variant_picker(self, node: Dict) -> None:
+        variants = node.get("variants") or []
+        if not variants:
+            return
+        path = ".".join(str(part) for part in node.get("path", []))
+        self.push_screen(
+            ChoiceSelectModal(
+                f"Select {path}",
+                variants,
+                node.get("value"),
+                documentation=self._edit_node_documentation(node),
+            ),
+            lambda value: self._handle_config_variant_choice(node, value),
+        )
+
+    def _handle_config_variant_choice(self, node: Dict, value) -> None:
+        if value is None or value == node.get("value"):
+            return
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": value,
+        }, selected_id=node.get("id"))
+
+    def _handle_add_config_name(self, node: Dict, value: Optional[str]) -> None:
+        name = (value or "").strip()
+        if not name:
+            return
+        self._cancel_config_edit_validation()
+        self._apply_config_edit_operation({
+            "op": "add",
+            "path": node.get("path"),
+            "value": {"name": name},
+        })
+
+    def _handle_scalar_config_value(self, node: Dict, value: Optional[Any]) -> None:
+        if value is None:
+            return
+        try:
+            value = self._coerce_config_scalar_value(node, value)
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self._cancel_config_edit_validation()
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": value,
+        }, selected_id=node.get("id"))
+
+    @staticmethod
+    def _coerce_config_scalar_value(node: Dict, value: Any) -> Any:
+        if node.get("valueType") != "number":
+            return value
+        text = str(value).strip()
+        if not text:
+            return value
+        try:
+            return float(text) if any(part in text.lower() for part in (".", "e")) else int(text)
+        except ValueError as e:
+            path = ".".join(str(part) for part in node.get("path", [])) or "value"
+            raise ValueError(f"{path} must be a number.") from e
+
+    def _schedule_scalar_config_validation(
+        self,
+        node: Dict,
+        value: str,
+        modal: TextInputModal,
+        locally_valid: bool,
+    ) -> None:
+        self._edit_validation_generation += 1
+        generation = self._edit_validation_generation
+        self._stop_config_edit_validation_timer()
+        if not locally_valid or self._edit_draft_yaml is None:
+            modal.set_remote_validation("")
+            return
+        modal.set_remote_validation("Checking full config...", "pending")
+        self._edit_validation_timer = self.set_timer(
+            self._edit_validation_delay,
+            lambda: self._start_scalar_config_validation(node, value, modal, generation),
+        )
+
+    def _start_scalar_config_validation(
+        self,
+        node: Dict,
+        value: str,
+        modal: TextInputModal,
+        generation: int,
+    ) -> None:
+        if generation != self._edit_validation_generation or self._edit_draft_yaml is None:
+            return
+        try:
+            operation_value = self._coerce_config_scalar_value(node, value)
+        except ValueError as e:
+            modal.set_remote_validation(str(e), "error")
+            return
+        operation = {
+            "op": "set",
+            "path": node.get("path"),
+            "value": operation_value,
+        }
+        raw_yaml = self._edit_draft_yaml or ""
+        self.run_worker(
+            lambda: self._validate_config_edit_operation_worker(raw_yaml, operation, generation, node.get("path") or [], modal),
+            thread=True,
+            name="validate_config_edit_operation",
+        )
+
+    def _validate_config_edit_operation_worker(
+        self,
+        raw_yaml: str,
+        operation: Dict,
+        generation: int,
+        path: list[str],
+        modal: TextInputModal,
+    ) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if hasattr(service, "validate_operation"):
+                result = service.validate_operation(raw_yaml, operation)
+            else:
+                result = service.apply_operation(raw_yaml, operation)
+            self.call_from_thread(self._handle_config_edit_validation_result, result, generation, path, modal)
+        except Exception as e:
+            logger.exception("Failed to validate config edit operation")
+            self.call_from_thread(self._handle_config_edit_validation_error, e, generation, modal)
+
+    def _handle_config_edit_validation_result(
+        self,
+        result,
+        generation: int,
+        path: list[str],
+        modal: TextInputModal,
+    ) -> None:
+        if generation != self._edit_validation_generation or self.screen is not modal:
+            return
+        edit_state = getattr(result, "edit_state", None) or result["edit_state"]
+        diagnostic = self._diagnostic_for_path(edit_state, path)
+        if diagnostic:
+            modal.set_remote_validation(str(diagnostic.get("message") or ""), str(diagnostic.get("severity") or "error"))
+        else:
+            modal.set_remote_validation("No validation issues found.", "ok")
+
+    def _handle_config_edit_validation_error(
+        self,
+        error: Exception,
+        generation: int,
+        modal: TextInputModal,
+    ) -> None:
+        if generation != self._edit_validation_generation or self.screen is not modal:
+            return
+        modal.set_remote_validation(f"Validation unavailable: {error}", "warning")
+
+    def _cancel_config_edit_validation(self) -> None:
+        self._edit_validation_generation += 1
+        self._stop_config_edit_validation_timer()
+
+    def _stop_config_edit_validation_timer(self) -> None:
+        timer = self._edit_validation_timer
+        self._edit_validation_timer = None
+        if timer is not None and hasattr(timer, "stop"):
+            try:
+                timer.stop()
+            except Exception:
+                pass
+
+    @classmethod
+    def _diagnostic_for_path(cls, edit_state: Dict, path: list[str]) -> Optional[Dict]:
+        node = cls._find_edit_node_by_path(edit_state.get("nodes") or [], path)
+        for diagnostic in (node or {}).get("diagnostics") or []:
+            if cls._paths_equal(diagnostic.get("path") or path, path):
+                return diagnostic
+        validation = edit_state.get("validation") or {}
+        for diagnostic in validation.get("diagnostics") or []:
+            if cls._paths_equal(diagnostic.get("path") or [], path):
+                return diagnostic
+        return None
+
+    @classmethod
+    def _find_edit_node_by_path(cls, nodes, path: list[str]) -> Optional[Dict]:
+        stack = list(nodes or [])
+        while stack:
+            node = stack.pop()
+            if cls._paths_equal(node.get("path") or [], path):
+                return node
+            stack.extend(node.get("children") or [])
+        return None
+
+    @staticmethod
+    def _paths_equal(left, right) -> bool:
+        return [str(part) for part in left] == [str(part) for part in right]
+
+    def action_remove_config_node(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") == "command":
+            return
+        path = node.get("path") or []
+        if not self._is_removable_config_path(path):
+            self.notify("Remove is available for config resource entries", severity="warning")
+            return
+        self.push_screen(
+            ConfirmModal(f"Remove config entry '{'.'.join(path)}' from pending YAML?"),
+            lambda confirmed: self._remove_config_node(path) if confirmed else None,
+        )
+
+    @staticmethod
+    def _is_removable_config_path(path: list[str]) -> bool:
+        if len(path) == 2 and path[0] in (
+            "sourceClusters",
+            "targetClusters",
+            "kafkaClusterConfiguration",
+            "snapshotMigrationConfigs",
+        ):
+            return True
+        return len(path) == 3 and path[:2] in (
+            ["traffic", "proxies"],
+            ["traffic", "replayers"],
+        )
+
+    @classmethod
+    def _is_removable_edit_node(cls, node: Optional[Dict]) -> bool:
+        if not node or node.get("valueKind") == "command":
+            return False
+        return cls._is_removable_config_path(node.get("path") or [])
+
+    @staticmethod
+    def _edit_node_documentation(node: Dict) -> str:
+        return str(node.get("description") or node.get("descriptionShort") or "")
+
+    @staticmethod
+    def _edit_node_validation(node: Dict) -> Dict:
+        validation = dict(node.get("validation") or {})
+        input_hint = node.get("inputHint") or {}
+        if not validation and input_hint.get("kind") == "text" and input_hint.get("pattern"):
+            validation = {
+                "pattern": input_hint.get("pattern"),
+                "message": input_hint.get("message"),
+            }
+        return validation
+
+    @classmethod
+    def _config_edit_enter_description(cls, node: Optional[Dict]) -> str:
+        if not node:
+            return "Edit"
+        kind = node.get("valueKind")
+        if kind == "command":
+            return "Add"
+        if kind == "scalar":
+            return "Edit Value"
+        if kind == "boolean":
+            return "Toggle"
+        if kind == "union":
+            return "Choose Option"
+        return "Expand"
+
+    @staticmethod
+    def _node_enter_description(node: Optional[Dict]) -> str:
+        if node and is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            return "Approve"
+        return "Expand"
+
+    def _remove_config_node(self, path: list[str]) -> None:
+        self._apply_config_edit_operation({
+            "op": "removeConfig",
+            "path": path,
+        })
+
+    def _apply_config_edit_operation(self, operation: Dict, selected_id: Optional[str] = None) -> None:
+        if self._edit_draft_yaml is None:
+            self.notify("No edit draft loaded", severity="error")
+            return
+        if selected_id is None:
+            node = self.tree_root_widget.cursor_node
+            if node and node.data:
+                selected_id = node.data.get("id")
+        self.run_worker(
+            lambda: self._apply_config_edit_operation_worker(operation, selected_id),
+            thread=True,
+            name="apply_config_edit_operation",
+        )
+
+    def _apply_config_edit_operation_worker(self, operation: Dict, selected_id: Optional[str]) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            result = service.apply_operation(self._edit_draft_yaml or "", operation)
+            self.call_from_thread(self._handle_config_edit_apply_result, result, selected_id)
+        except Exception as e:
+            logger.exception("Failed to apply config edit operation")
+            self.call_from_thread(self.notify, f"Edit failed: {e}", severity="error")
+
+    def _handle_config_edit_apply_result(self, result, selected_id: Optional[str]) -> None:
+        edit_state = getattr(result, "edit_state", None) or result["edit_state"]
+        raw_yaml = getattr(result, "raw_yaml", None)
+        if raw_yaml is None:
+            raw_yaml = result.get("raw_yaml") or result.get("yaml", "")
+        self._edit_state = edit_state
+        self._edit_draft_yaml = raw_yaml
+        self._edit_dirty = True
+        render_edit_state(
+            self.tree_root_widget,
+            edit_state,
+            self._edit_value_mode,
+            self._edit_status_mode,
+            self._edit_show_optional,
+            self._edit_show_expert,
+        )
+        if selected_id:
+            self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def _restore_config_edit_selection(self, selected_id: str) -> None:
+        self._select_tree_node_by_id(selected_id)
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def _select_tree_node_by_id(self, selected_id: str) -> None:
+        stack = list(self.tree_root_widget.root.children)
+        while stack:
+            node = stack.pop()
+            if node.data and node.data.get("id") == selected_id:
+                self.tree_root_widget.move_cursor(node)
+                self.tree_root_widget.focus()
+                return
+            stack.extend(reversed(node.children))
 
 
 # --- Utilities ---

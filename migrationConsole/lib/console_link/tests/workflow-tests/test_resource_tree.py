@@ -2,8 +2,17 @@
 
 
 from console_link.workflow.resource_tree import (
+    CONFIG_MODE_CURRENT_WORKFLOW,
+    CONFIG_MODE_DEPLOYED,
+    CONFIG_MODE_PENDING_SUBMIT,
+    ResourceGroup,
     ResourceNode,
+    ResourceSection,
     _build_tree_from_raw, _nest_topics_under_kafka,
+    apply_config_overlays,
+    format_config_diff_fields,
+    format_resource_diagnostics,
+    resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
     mark_not_configured_groups,
@@ -140,6 +149,150 @@ class TestFormatSpecFields:
     def test_unknown_plural_returns_empty(self):
         resource = make_resource('unknowntype', spec={'foo': 'bar'})
         assert format_spec_fields(resource) == []
+
+
+class TestConfigOverlays:
+    def test_attaches_pending_and_to_submit_values(self):
+        resource = make_resource(
+            'kafkaclusters',
+            name='default',
+            spec={'version': '3.6.0', 'auth': {'type': 'none'}},
+        )
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='kafkaclusters', display_name='Buffer', resources=[resource])
+        ])]
+
+        submitted = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'version': '3.7.0', 'auth': {'type': 'none'}},
+        }]}
+        pending = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'version': '3.8.0', 'auth': {'type': 'none'}},
+        }]}
+
+        apply_config_overlays(sections, submitted, pending)
+
+        assert resource.config_diff['has_submitted_changes'] is True
+        assert resource.config_diff['has_pending_submit_changes'] is True
+        assert format_config_diff_fields(resource) == [
+            'version: deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0'
+        ]
+        assert format_config_diff_fields(resource, 'pendingSubmit') == ['version: to-submit=3.8.0']
+
+    def test_adds_virtual_resource_from_saved_config(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {'podReplicas': 2, 'speedupFactor': 1.5},
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        replay_group = sections[1].groups[2]
+        assert len(replay_group.resources) == 1
+        resource = replay_group.resources[0]
+        assert resource.name == 'replay-new'
+        assert resource.phase == 'Pending Config'
+        assert resource.config_presence == {'deployed': False, 'pending': True}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
+        assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_adds_partial_loose_resource_and_clears_not_configured_placeholder(self):
+        sections = _build_tree_from_raw({})
+        capture_group = sections[1].groups[0]
+        capture_group.not_configured = True
+        pending = {'resources': [{
+            'kind': 'CaptureProxy',
+            'name': 'capture-new',
+            'parameters': {'dependsOn': ['capture-new-topic']},
+            'diagnostics': [{
+                'severity': 'required',
+                'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+                'message': 'Invalid input: expected object, received undefined',
+            }],
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert capture_group.not_configured is False
+        assert len(capture_group.resources) == 1
+        resource = capture_group.resources[0]
+        assert resource.name == 'capture-new'
+        assert resource.phase == 'Pending Config'
+        assert resource.diagnostics == [{
+            'severity': 'required',
+            'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+            'message': 'Invalid input: expected object, received undefined',
+        }]
+        assert format_resource_diagnostics(resource) == [{
+            'severity': 'required',
+            'label': 'required: traffic.proxies.capture-new.proxyConfig: Invalid input: expected object, received undefined',
+        }]
+
+    def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        pending = {'resources': []}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert resource.config_presence == {'deployed': True, 'pending': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=2 | to-submit=<absent>'
+        ]
+
+    def test_existing_resource_absent_from_submitted_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        submitted = {'resources': []}
+
+        apply_config_overlays(sections, submitted_resolved_config=submitted)
+
+        assert resource.config_presence == {'deployed': True, 'submitted': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=<absent> | to-submit=<absent>'
+        ]
+
+    def test_adds_virtual_source_config_from_console_resources(self):
+        sections = _build_tree_from_raw({})
+        submitted_console = {'sources': [{
+            'refName': 'legacy',
+            'clientConfig': {'endpoint': 'https://old.example.com', 'allow_insecure': False},
+        }]}
+        pending_console = {'sources': [{
+            'refName': 'legacy',
+            'clientConfig': {'endpoint': 'https://new.example.com', 'allow_insecure': False},
+        }]}
+
+        apply_config_overlays(
+            sections,
+            submitted_console_config=submitted_console,
+            pending_console_config=pending_console,
+        )
+
+        config_section = sections[0]
+        assert config_section.name == 'Workflow Configuration'
+        source_group = config_section.groups[0]
+        resource = source_group.resources[0]
+        assert resource.name == 'legacy'
+        assert resource.plural == 'sourceconfigs'
+        assert format_config_diff_fields(resource) == [
+            'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
+        ]
 
 
 # --- format_live_status ---

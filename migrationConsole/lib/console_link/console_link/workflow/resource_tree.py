@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import json
 
 from rich.console import Console
+from rich.markup import escape
 from rich.tree import Tree
 
 from .commands.crd_utils import list_migration_resources_full
@@ -32,6 +34,7 @@ PHASE_SYMBOLS = {
     'Succeeded': ('✓', 'green'),
     'Running': ('▶', 'yellow'),
     'Pending': ('○', 'cyan'),
+    'Pending Config': ('○', 'cyan'),
     'Initialized': ('○', 'cyan'),
     'Failed': ('✗', 'red'),
     'Error': ('✗', 'red'),
@@ -45,6 +48,17 @@ PHASE_SYMBOLS = {
 # x-change-restriction via getSchemaFromZod.ts; a similar x-user-visible annotation could
 # be added, then this code would filter the JSON schema (at runtime or build time).
 SPEC_DISPLAY_FIELDS = {
+    'sourceconfigs': [
+        'endpoint', 'version', 'allow_insecure',
+        'basic_auth.k8s_secret_name', 'sigv4.region', 'sigv4.service',
+    ],
+    'targetconfigs': [
+        'endpoint', 'version', 'allow_insecure',
+        'basic_auth.k8s_secret_name', 'sigv4.region', 'sigv4.service',
+    ],
+    'kafkaconfigs': [
+        'type', 'clusterName', 'authType', 'listenerName',
+    ],
     'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
     'capturedtraffics': ['topicName', 'partitions', 'replicas'],
     'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
@@ -54,6 +68,47 @@ SPEC_DISPLAY_FIELDS = {
         'documentBackfillIndexAllowlist', 'metadataMigrationIndexAllowlist',
     ],
     'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
+}
+
+RESOURCE_KIND_TO_PLURAL = {
+    'KafkaCluster': 'kafkaclusters',
+    'CapturedTraffic': 'capturedtraffics',
+    'CaptureProxy': 'captureproxies',
+    'DataSnapshot': 'datasnapshots',
+    'SnapshotMigration': 'snapshotmigrations',
+    'TrafficReplay': 'trafficreplays',
+}
+
+VIRTUAL_CONFIG_PLURALS = {'sourceconfigs', 'targetconfigs', 'kafkaconfigs'}
+
+CONFIG_MODE_ALL = 'all'
+CONFIG_MODE_DEPLOYED = 'deployed'
+CONFIG_MODE_CURRENT_WORKFLOW = 'currentWorkflow'
+CONFIG_MODE_PENDING_SUBMIT = 'pendingSubmit'
+
+CONFIG_MODE_LABELS = {
+    CONFIG_MODE_ALL: 'All',
+    CONFIG_MODE_DEPLOYED: 'Deployed',
+    CONFIG_MODE_CURRENT_WORKFLOW: 'Pending',
+    CONFIG_MODE_PENDING_SUBMIT: 'To Submit',
+}
+
+CONFIG_VALUE_LABELS = {
+    CONFIG_MODE_DEPLOYED: 'deployed',
+    CONFIG_MODE_CURRENT_WORKFLOW: 'pending',
+    CONFIG_MODE_PENDING_SUBMIT: 'to-submit',
+}
+
+CONFIG_VALUE_STYLES = {
+    CONFIG_MODE_DEPLOYED: '',
+    CONFIG_MODE_CURRENT_WORKFLOW: 'grey50',
+    CONFIG_MODE_PENDING_SUBMIT: 'green',
+}
+
+CONFIG_PHASE_KEY = {
+    CONFIG_MODE_DEPLOYED: 'deployed',
+    CONFIG_MODE_CURRENT_WORKFLOW: 'submitted',
+    CONFIG_MODE_PENDING_SUBMIT: 'pending',
 }
 
 
@@ -70,7 +125,9 @@ class ResourceNode:
     children: List['ResourceNode'] = field(default_factory=list)
 
     workflow_progress: Optional[List[Dict[str, Any]]] = None
-    config_diff: Optional[Dict[str, Any]] = None  # Future: pending config changes
+    config_diff: Optional[Dict[str, Any]] = None
+    config_presence: Dict[str, bool] = field(default_factory=dict)
+    diagnostics: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -93,6 +150,126 @@ def build_resource_tree(namespace: str) -> List[ResourceSection]:
     """Query all migration CRs and build a resource tree grouped by type."""
     raw = list_migration_resources_full(namespace)
     return _build_tree_from_raw(raw)
+
+
+def apply_config_overlays(
+    sections: List[ResourceSection],
+    submitted_resolved_config: Optional[Dict[str, Any]] = None,
+    pending_resolved_config: Optional[Dict[str, Any]] = None,
+    submitted_console_config: Optional[Dict[str, Any]] = None,
+    pending_console_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Attach submitted/pending config projections to deployed resource nodes.
+
+    The TS config processor projects workflow YAML into CR-like resource specs.
+    This function compares those projections against deployed CR specs so the
+    resource tree can show three value phases:
+    deployed, pending current workflow rollout, and saved config to submit.
+    """
+    submitted = _resolved_resource_map(submitted_resolved_config)
+    pending = _resolved_resource_map(pending_resolved_config)
+    submitted.update(_console_resource_map(submitted_console_config))
+    pending.update(_console_resource_map(pending_console_config))
+    submitted_available = submitted_resolved_config is not None or submitted_console_config is not None
+    pending_available = pending_resolved_config is not None or pending_console_config is not None
+    if not submitted and not pending and not submitted_available and not pending_available:
+        return
+
+    deployed = {
+        (node.plural, node.name): node
+        for node in _iter_resource_nodes(sections)
+    }
+
+    for key, node in deployed.items():
+        node.diagnostics = _merged_resource_diagnostics(submitted.get(key), pending.get(key))
+        node.config_presence = _build_config_presence(
+            deployed=True,
+            submitted=key in submitted if submitted_available else None,
+            pending=key in pending if pending_available else None,
+        )
+        node.config_diff = _build_config_diff(
+            node.plural,
+            node.spec,
+            submitted.get(key),
+            pending.get(key),
+            submitted_available=submitted_available,
+            pending_available=pending_available,
+        )
+
+    for key in sorted((set(submitted) | set(pending)) - set(deployed)):
+        plural, name = key
+        resolved = pending.get(key) or submitted.get(key)
+        parameters = (resolved or {}).get('parameters') or {}
+        virtual = ResourceNode(
+            name=name,
+            plural=plural,
+            phase='Pending Config',
+            depends_on=parameters.get('dependsOn', []) or [],
+            spec={},
+            status={},
+            diagnostics=_merged_resource_diagnostics(submitted.get(key), pending.get(key)),
+            config_presence=_build_config_presence(
+                deployed=False,
+                submitted=key in submitted if submitted_available else None,
+                pending=key in pending if pending_available else None,
+            ),
+        )
+        virtual.config_diff = _build_config_diff(
+            plural,
+            {},
+            submitted.get(key),
+            pending.get(key),
+            submitted_available=submitted_available,
+            pending_available=pending_available,
+        )
+        _add_virtual_resource(sections, virtual)
+
+
+def resource_visible_in_config_mode(resource: ResourceNode, value_mode: str) -> bool:
+    """Return whether a resource exists in the selected rollout/config phase."""
+    presence = resource.config_presence or {}
+    if value_mode == CONFIG_MODE_ALL or not presence:
+        return True
+    if value_mode == CONFIG_MODE_DEPLOYED:
+        return presence.get('deployed', True)
+    if value_mode == CONFIG_MODE_CURRENT_WORKFLOW:
+        if 'submitted' in presence:
+            return presence['submitted']
+        return presence.get('deployed', True)
+    if value_mode == CONFIG_MODE_PENDING_SUBMIT:
+        if 'pending' in presence:
+            return presence['pending']
+        if 'submitted' in presence:
+            return presence['submitted']
+        return presence.get('deployed', True)
+    return True
+
+
+def _build_config_presence(
+    deployed: bool,
+    submitted: Optional[bool],
+    pending: Optional[bool],
+) -> Dict[str, bool]:
+    presence = {'deployed': deployed}
+    if submitted is not None:
+        presence['submitted'] = submitted
+    if pending is not None:
+        presence['pending'] = pending
+    return presence
+
+
+def resource_config_change_summary(sections: List[ResourceSection]) -> Dict[str, int]:
+    summary = {'pending': 0, 'to_submit': 0, 'resources': 0}
+    for node in _iter_resource_nodes(sections):
+        diff = node.config_diff or {}
+        if not diff:
+            continue
+        summary['resources'] += 1
+        if diff.get('has_submitted_changes'):
+            summary['pending'] += 1
+        if diff.get('has_pending_submit_changes'):
+            summary['to_submit'] += 1
+    return summary
 
 
 def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceSection]:
@@ -132,6 +309,251 @@ def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
                 topics_to_remove.append(resource)
     for topic in topics_to_remove:
         resources.remove(topic)
+
+
+def _iter_resource_nodes(sections: List[ResourceSection]):
+    for section in sections:
+        for group in section.groups:
+            for resource in group.resources:
+                yield resource
+                yield from _iter_resource_node_children(resource)
+
+
+def _iter_resource_node_children(resource: ResourceNode):
+    for child in resource.children:
+        yield child
+        yield from _iter_resource_node_children(child)
+
+
+def _resolved_resource_map(resolved_config: Optional[Dict[str, Any]]) -> Dict[tuple[str, str], Dict[str, Any]]:
+    if not resolved_config:
+        return {}
+    result = {}
+    for resource in resolved_config.get('resources') or []:
+        plural = RESOURCE_KIND_TO_PLURAL.get(resource.get('kind'))
+        name = resource.get('name')
+        if plural and name:
+            result[(plural, name)] = resource
+    return result
+
+
+def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tuple[str, str], Dict[str, Any]]:
+    if not console_config:
+        return {}
+    result = {}
+    for source in console_config.get('sources') or []:
+        name = source.get('refName')
+        if name:
+            result[('sourceconfigs', name)] = {
+                'kind': 'SourceConfig',
+                'name': name,
+                'parameters': source.get('clientConfig') or {},
+                'diagnostics': source.get('diagnostics') or [],
+            }
+    for target in console_config.get('targets') or []:
+        name = target.get('refName')
+        if name:
+            result[('targetconfigs', name)] = {
+                'kind': 'TargetConfig',
+                'name': name,
+                'parameters': target.get('clientConfig') or {},
+                'diagnostics': target.get('diagnostics') or [],
+            }
+    for kafka in console_config.get('kafkas') or []:
+        name = kafka.get('refName')
+        if name:
+            result[('kafkaconfigs', name)] = {
+                'kind': 'KafkaConfig',
+                'name': name,
+                'parameters': kafka.get('runtime') or {},
+                'diagnostics': kafka.get('diagnostics') or [],
+            }
+    return result
+
+
+def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNode) -> None:
+    for section in sections:
+        for group in section.groups:
+            group_plurals = next(
+                (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
+                [group.plural]
+            )
+            if resource.plural in group_plurals:
+                if resource.plural == 'capturedtraffics':
+                    parent_name = resource.spec.get('kafkaClusterName') or _pending_field_value(
+                        resource.config_diff,
+                        'kafkaClusterName',
+                    )
+                    parent = next((item for item in group.resources if item.name == parent_name), None)
+                    if parent:
+                        group.not_configured = False
+                        parent.children.append(resource)
+                        return
+                group.not_configured = False
+                group.resources.append(resource)
+                return
+    display_names = {
+        'sourceconfigs': 'Sources',
+        'targetconfigs': 'Targets',
+        'kafkaconfigs': 'Kafka Clients',
+    }
+    display_name = display_names.get(resource.plural)
+    if not display_name:
+        return
+    section = next((item for item in sections if item.name == 'Workflow Configuration'), None)
+    if section is None:
+        section = ResourceSection(name='Workflow Configuration', groups=[])
+        sections.insert(0, section)
+    group = next((item for item in section.groups if item.plural == resource.plural), None)
+    if group is None:
+        group = ResourceGroup(plural=resource.plural, display_name=display_name, resources=[])
+        section.groups.append(group)
+    group.resources.append(resource)
+
+
+def _merged_resource_diagnostics(*resources: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result = {}
+    for resource in resources:
+        for diagnostic in (resource or {}).get('diagnostics') or []:
+            key = (
+                diagnostic.get('severity'),
+                tuple(diagnostic.get('path') or []),
+                diagnostic.get('message'),
+            )
+            result[key] = diagnostic
+    return list(result.values())
+
+
+def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
+    for field in (config_diff or {}).get('fields', []):
+        if field.get('path') == path:
+            state = field.get('values', {}).get('pending') or {}
+            if state.get('present'):
+                return state.get('value')
+    return None
+
+
+def _build_config_diff(
+    plural: str,
+    deployed_parameters: Dict[str, Any],
+    submitted_resource: Optional[Dict[str, Any]],
+    pending_resource: Optional[Dict[str, Any]],
+    submitted_available: bool = False,
+    pending_available: bool = False,
+) -> Optional[Dict[str, Any]]:
+    submitted_parameters = (
+        (submitted_resource or {}).get('parameters') if submitted_resource else (
+            None if submitted_available else deployed_parameters
+        )
+    )
+    pending_parameters = (
+        (pending_resource or {}).get('parameters') if pending_resource else (
+            None if pending_available else submitted_parameters
+        )
+    )
+    if submitted_parameters is None and pending_parameters is None and not deployed_parameters:
+        return None
+
+    paths = _ordered_config_paths(plural, deployed_parameters, submitted_parameters, pending_parameters)
+    fields = []
+    has_submitted_changes = False
+    has_pending_submit_changes = False
+    compare_submitted_to_deployed = plural not in VIRTUAL_CONFIG_PLURALS
+    for path in paths:
+        values = {
+            'deployed': _value_state(deployed_parameters, path),
+            'submitted': _value_state(submitted_parameters, path),
+            'pending': _value_state(pending_parameters, path),
+        }
+        submitted_changed = (
+            compare_submitted_to_deployed and
+            not _same_state(values['deployed'], values['submitted'])
+        )
+        pending_submit_changed = not _same_state(values['submitted'], values['pending'])
+        if not submitted_changed and not pending_submit_changed:
+            continue
+        if submitted_changed:
+            has_submitted_changes = True
+        if pending_submit_changed:
+            has_pending_submit_changes = True
+        fields.append({
+            'path': '.'.join(path),
+            'label': path[-1],
+            'values': values,
+        })
+
+    if not fields:
+        return None
+
+    return {
+        'status': 'to_submit' if has_pending_submit_changes else 'pending',
+        'has_submitted_changes': has_submitted_changes,
+        'has_pending_submit_changes': has_pending_submit_changes,
+        'fields': fields,
+    }
+
+
+def _ordered_config_paths(
+    plural: str,
+    deployed_parameters: Dict[str, Any],
+    submitted_parameters: Optional[Dict[str, Any]],
+    pending_parameters: Optional[Dict[str, Any]],
+) -> List[List[str]]:
+    configured = [field.split('.') for field in SPEC_DISPLAY_FIELDS.get(plural, [])]
+    discovered = set()
+    for source in (deployed_parameters, submitted_parameters, pending_parameters):
+        for path in _leaf_paths(source or {}):
+            discovered.add(tuple(path))
+
+    ordered = []
+    seen = set()
+    for path in configured:
+        key = tuple(path)
+        if key in discovered and key not in seen:
+            ordered.append(path)
+            seen.add(key)
+    for key in sorted(discovered - seen):
+        ordered.append(list(key))
+    return ordered
+
+
+def _leaf_paths(value: Any, prefix: Optional[List[str]] = None):
+    prefix = prefix or []
+    if isinstance(value, dict):
+        if not value:
+            if prefix:
+                yield prefix
+            return
+        for key, child in value.items():
+            yield from _leaf_paths(child, [*prefix, key])
+        return
+    if prefix:
+        yield prefix
+
+
+def _value_state(source: Optional[Dict[str, Any]], path: List[str]) -> Dict[str, Any]:
+    if source is None:
+        return {'present': False}
+    if not _has_nested(source, path):
+        return {'present': False}
+    return {'present': True, 'value': _get_nested(source, '.'.join(path))}
+
+
+def _same_state(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    if bool(left.get('present')) != bool(right.get('present')):
+        return False
+    if not left.get('present'):
+        return True
+    return json.dumps(left.get('value'), sort_keys=True) == json.dumps(right.get('value'), sort_keys=True)
+
+
+def _has_nested(data: Dict[str, Any], path: List[str]) -> bool:
+    cur = data
+    for part in path:
+        if not isinstance(cur, dict) or part not in cur:
+            return False
+        cur = cur[part]
+    return True
 
 
 def extract_workflow_steps_by_resource(filtered_tree: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -261,16 +683,20 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
 
 
 # Phases shown in the resource label (settled states)
-DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
+DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error', 'Pending Config'}
 
 
 def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Render a single resource node with its children."""
     symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+    change_label = _resource_change_label(resource)
     if resource.phase in DISPLAY_PHASES:
-        label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
+        label = (
+            f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] "
+            f"[{color}]({resource.phase})[/{color}]{change_label}"
+        )
     else:
-        label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
+        label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]{change_label}"
     node = parent_node.add(label)
     _add_resource_details(node, resource, show_live_status)
     for child in resource.children:
@@ -281,6 +707,11 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
     """Add spec/status detail lines under a resource node."""
     for spec_line in format_spec_fields(resource):
         node.add(f"[dim]{spec_line}[/dim]")
+    for config_line in format_config_diff_fields(resource):
+        node.add(f"[cyan]{config_line}[/cyan]")
+    for diagnostic in format_resource_diagnostics(resource):
+        style = _diagnostic_style(diagnostic.get('severity', 'error'))
+        node.add(f"[{style}]{diagnostic['label']}[/{style}]")
     if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
@@ -294,6 +725,41 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
     if resource.workflow_progress:
         if has_notable_steps(resource.workflow_progress):
             _add_workflow_subtree(node, resource.workflow_progress)
+
+
+def _resource_change_label(resource: ResourceNode) -> str:
+    diagnostic = _highest_priority_diagnostic(resource)
+    if diagnostic:
+        severity = diagnostic.get('severity') or 'error'
+        style = _diagnostic_style(severity)
+        label = 'required' if severity == 'required' else severity
+        return f' [{style}]({escape(str(label))})[/{style}]'
+    diff = resource.config_diff or {}
+    if not diff:
+        return ''
+    if diff.get('has_pending_submit_changes'):
+        return ' [cyan](to submit)[/cyan]'
+    if diff.get('has_submitted_changes'):
+        return ' [magenta](pending)[/magenta]'
+    return ''
+
+
+def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict[str, Any]]:
+    rank = {'error': 4, 'required': 3, 'blocked': 3, 'gated': 2, 'warning': 1}
+    diagnostics = resource.diagnostics or []
+    if not diagnostics:
+        return None
+    return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
+
+
+def _diagnostic_style(severity: str) -> str:
+    if severity in ('error', 'blocked'):
+        return 'red'
+    if severity == 'required':
+        return 'yellow'
+    if severity == 'gated':
+        return 'magenta'
+    return 'yellow'
 
 
 def _should_show_step(step: Dict[str, Any]) -> bool:
@@ -416,6 +882,70 @@ def format_spec_fields(resource: ResourceNode) -> List[str]:
                     value += '...'
             parts.append(f"{label}: {value}")
     return parts
+
+
+def format_config_diff_fields(
+    resource: ResourceNode,
+    value_mode: str = CONFIG_MODE_ALL,
+    rich_markup: bool = False,
+) -> List[str]:
+    diff = resource.config_diff or {}
+    fields = diff.get('fields') or []
+    if not fields:
+        return []
+
+    result = []
+    for field in fields:
+        label = field.get('label') or field.get('path')
+        values = field.get('values') or {}
+        display_label = escape(str(label)) if rich_markup else str(label)
+        if value_mode == CONFIG_MODE_ALL:
+            parts = []
+            for mode in (CONFIG_MODE_DEPLOYED, CONFIG_MODE_CURRENT_WORKFLOW, CONFIG_MODE_PENDING_SUBMIT):
+                key = CONFIG_PHASE_KEY[mode]
+                parts.append(_format_config_value_segment(mode, values.get(key) or {}, rich_markup))
+            result.append(f"{display_label}: {' | '.join(parts)}")
+            continue
+
+        key = CONFIG_PHASE_KEY.get(value_mode)
+        if key:
+            result.append(f"{display_label}: {_format_config_value_segment(value_mode, values.get(key) or {}, rich_markup)}")
+    return result
+
+
+def _format_config_value_segment(mode: str, state: Dict[str, Any], rich_markup: bool) -> str:
+    segment = f"{CONFIG_VALUE_LABELS.get(mode, mode)}={_format_config_value(state)}"
+    if not rich_markup:
+        return segment
+    style = CONFIG_VALUE_STYLES.get(mode)
+    escaped = escape(segment)
+    return f"[{style}]{escaped}[/{style}]" if style else escaped
+
+
+def _format_config_value(state: Dict[str, Any]) -> str:
+    if not state.get('present'):
+        return '<absent>'
+    value = state.get('value')
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, list):
+        return '[' + ', '.join(str(item) for item in value) + ']'
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    if value is None:
+        return 'null'
+    return str(value)
+
+
+def format_resource_diagnostics(resource: ResourceNode) -> List[Dict[str, str]]:
+    result = []
+    for diagnostic in resource.diagnostics or []:
+        severity = str(diagnostic.get('severity') or 'error')
+        message = escape(str(diagnostic.get('message') or 'Invalid value'))
+        path = escape('.'.join(str(part) for part in diagnostic.get('path') or []))
+        label = f"{severity}: {path}: {message}" if path else f"{severity}: {message}"
+        result.append({'severity': severity, 'label': label})
+    return result
 
 
 def format_live_status(resource: ResourceNode):

@@ -6,3 +6,5 @@ export * from './consoleResources';
 export * from './resolvedMigrationResources';
 export * from './streamSchemaTransformer';
 export * from './fileSourceUtils';
+export {applyEditOperation, applyEditOperationToObject, buildEditStateFromObject, validationForConfig} from './editConfig';
+export type {EditApplyResultV1, EditOperation, EditStateV1, EditNode, EditNodeStatus, EditDiagnostic} from './editConfig';

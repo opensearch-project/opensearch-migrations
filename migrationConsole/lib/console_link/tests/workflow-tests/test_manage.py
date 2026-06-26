@@ -7,11 +7,20 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
+from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection, _build_tree_from_raw
 from console_link.workflow.tui.workflow_manage_app import (
+    DISABLE_MOUSE_PIXELS_SEQUENCE,
+    DISABLE_MOUSE_SEQUENCES,
+    ENABLE_MOUSE_SEQUENCES,
     WorkflowTreeApp,
-    copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
+    copy_to_clipboard,
+    PHASE_SUCCEEDED,
+    PHASE_RUNNING,
 )
+from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
+from console_link.workflow.tui.config_edit_exit_modal import ConfigEditExitModal
 from console_link.workflow.tui.confirm_modal import ConfirmModal
+from console_link.workflow.tui.text_input_modal import TextInputModal
 from console_link.workflow.tui.manage_injections import (
     WaiterInterface,
     PodScraperInterface,
@@ -28,6 +37,29 @@ def get_clean_text_label(textual_node):
     """Extract plain text from a Rich-enabled Textual label."""
     label = textual_node.label
     return label.plain if hasattr(label, 'plain') else str(label)
+
+
+def get_label_style(textual_node):
+    label = textual_node.label
+    return str(getattr(label, "style", ""))
+
+
+def binding_descriptions(app, key):
+    try:
+        bindings = app._bindings.get_bindings_for_key(key)
+    except Exception:
+        return []
+    return [binding.description for binding in bindings]
+
+
+def find_tree_node_by_id(root, target_id):
+    stack = list(root.children)
+    while stack:
+        node = stack.pop()
+        if node.data and isinstance(node.data, dict) and node.data.get("id") == target_id:
+            return node
+        stack.extend(node.children)
+    return None
 
 
 @pytest.fixture
@@ -76,6 +108,325 @@ FAILING_WAITER = WaiterInterface(
     checker=lambda: pytest.fail("Waiter checker called unexpectedly"),
     reset=MagicMock()
 )
+
+
+def edit_state_with_missing_basic_auth():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:sourceClusters",
+                "path": ["sourceClusters"],
+                "label": "[REQ 1] Source Clusters",
+                "valueKind": "record",
+                "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
+                "status": "required",
+                "statusCounts": {"required": 1},
+                "children": [
+                    {
+                        "id": "edit:sourceClusters.legacy",
+                        "path": ["sourceClusters", "legacy"],
+                        "label": "[REQ 1] source: legacy",
+                        "valueKind": "object",
+                        "description": "Connection and snapshot configuration for a source cluster.",
+                        "status": "required",
+                        "statusCounts": {"required": 1},
+                        "children": [
+                            {
+                                "id": "edit:sourceClusters.legacy.endpoint",
+                                "path": ["sourceClusters", "legacy", "endpoint"],
+                                "label": "[OK] endpoint: https://legacy.example.com:9200",
+                                "valueKind": "scalar",
+                                "description": "HTTP(S) endpoint URL for the cluster.",
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                            {
+                                "id": "edit:sourceClusters.legacy.authConfig",
+                                "path": ["sourceClusters", "legacy", "authConfig"],
+                                "label": "[REQ 1] authConfig: < basic >",
+                                "value": "basic",
+                                "valueKind": "union",
+                                "description": "Authentication configuration for connecting to the cluster.",
+                                "status": "required",
+                                "statusCounts": {"required": 1},
+                                "variants": [
+                                    {"label": "none", "value": "none"},
+                                    {"label": "basic", "value": "basic"},
+                                    {
+                                        "label": "sigv4",
+                                        "value": "sigv4",
+                                        "description": "AWS SigV4 request signing authentication.",
+                                    },
+                                ],
+                                "children": [
+                                    {
+                                        "id": "edit:sourceClusters.legacy.authConfig.basic.secretName",
+                                        "path": [
+                                            "sourceClusters", "legacy", "authConfig", "basic", "secretName"
+                                        ],
+                                        "label": "[REQ] secretName: <required>",
+                                        "valueKind": "scalar",
+                                        "description": "Name of a Kubernetes Secret containing credentials.",
+                                        "required": True,
+                                        "status": "required",
+                                        "statusCounts": {"required": 1},
+                                        "diagnostics": [
+                                            {
+                                                "severity": "required",
+                                                "message": "secretName is required.",
+                                                "path": [
+                                                    "sourceClusters", "legacy", "authConfig", "basic", "secretName"
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": False, "errors": ["secretName is required"]},
+    }
+
+
+def edit_state_with_sigv4_auth():
+    state = copy.deepcopy(edit_state_with_missing_basic_auth())
+    source = state["nodes"][0]
+    legacy = source["children"][0]
+    auth = legacy["children"][1]
+    auth["label"] = "[REQ 1] authConfig: < sigv4 >"
+    auth["value"] = "sigv4"
+    auth["children"] = [
+        {
+            "id": "edit:sourceClusters.legacy.authConfig.sigv4.region",
+            "path": ["sourceClusters", "legacy", "authConfig", "sigv4", "region"],
+            "label": "[REQ] region: <required>",
+            "valueKind": "scalar",
+            "description": "AWS region for SigV4 request signing.",
+            "required": True,
+            "status": "required",
+            "statusCounts": {"required": 1},
+            "diagnostics": [
+                {
+                    "severity": "required",
+                    "message": "region is required.",
+                    "path": ["sourceClusters", "legacy", "authConfig", "sigv4", "region"],
+                }
+            ],
+        }
+    ]
+    return state
+
+
+def edit_state_with_editable_source_fields():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:sourceClusters",
+                "path": ["sourceClusters"],
+                "label": "[CHG 1] Source Clusters",
+                "valueKind": "record",
+                "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
+                "status": "changed",
+                "statusCounts": {"changed": 1},
+                "children": [
+                    {
+                        "id": "edit:sourceClusters.legacy",
+                        "path": ["sourceClusters", "legacy"],
+                        "label": "[CHG 1] source: legacy",
+                        "valueKind": "object",
+                        "description": "Connection and snapshot configuration for a source cluster.",
+                        "status": "changed",
+                        "statusCounts": {"changed": 1},
+                        "children": [
+                            {
+                                "id": "edit:sourceClusters.legacy.endpoint",
+                                "path": ["sourceClusters", "legacy", "endpoint"],
+                                "label": "[CHG 1] endpoint: https://new.example.com:9200",
+                                "value": "https://new.example.com:9200",
+                                "valueKind": "scalar",
+                                "description": "HTTP(S) endpoint URL for the cluster.",
+                                "validation": {
+                                    "pattern": (
+                                        r"^https?:\/\/[^:\/\s]+(?::(?:[1-9]\d{0,3}|[1-5]\d{4}|"
+                                        r"6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]))?(?:\/)?$"
+                                    ),
+                                    "message": "Use an http:// or https:// endpoint with an optional port and trailing slash.",
+                                },
+                                "status": "changed",
+                                "statusCounts": {"changed": 1},
+                                "states": {
+                                    "deployed": {
+                                        "value": "https://old.example.com:9200",
+                                        "status": "ok",
+                                    },
+                                    "currentWorkflow": {
+                                        "value": "https://old.example.com:9200",
+                                        "status": "ok",
+                                    },
+                                    "pendingSubmit": {
+                                        "value": "https://new.example.com:9200",
+                                        "status": "changed",
+                                        "statusCounts": {"changed": 1},
+                                    },
+                                },
+                            },
+                            {
+                                "id": "edit:sourceClusters.legacy.allowInsecure",
+                                "path": ["sourceClusters", "legacy", "allowInsecure"],
+                                "label": "[OK] allowInsecure: false",
+                                "value": False,
+                                "valueKind": "boolean",
+                                "description": "Disable TLS certificate verification.",
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                        ],
+                    },
+                    {
+                        "id": "edit:sourceClusters:add",
+                        "path": ["sourceClusters"],
+                        "label": "[OK] + Add source cluster",
+                        "valueKind": "command",
+                        "description": "Create a new source cluster entry in pending workflow YAML.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "command": {"requiresName": True},
+                    },
+                ],
+            }
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
+def edit_state_with_field_visibility():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:sourceClusters",
+                "path": ["sourceClusters"],
+                "label": "[REQ 1] Source Clusters",
+                "valueKind": "record",
+                "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
+                "status": "required",
+                "statusCounts": {"required": 1},
+                "children": [
+                    {
+                        "id": "edit:sourceClusters.legacy",
+                        "path": ["sourceClusters", "legacy"],
+                        "label": "[REQ 1] source: legacy",
+                        "valueKind": "object",
+                        "description": "Connection and snapshot configuration for a source cluster.",
+                        "status": "required",
+                        "statusCounts": {"required": 1},
+                        "children": [
+                            {
+                                "id": "edit:sourceClusters.legacy.endpoint",
+                                "path": ["sourceClusters", "legacy", "endpoint"],
+                                "label": "[REQ] endpoint: <required>",
+                                "valueKind": "scalar",
+                                "description": "Required endpoint.",
+                                "required": True,
+                                "presence": "required",
+                                "status": "required",
+                                "statusCounts": {"required": 1},
+                            },
+                            {
+                                "id": "edit:sourceClusters.legacy.allowInsecure",
+                                "path": ["sourceClusters", "legacy", "allowInsecure"],
+                                "label": "[OK] allowInsecure: false",
+                                "value": False,
+                                "valueKind": "boolean",
+                                "description": "Optional TLS verification toggle.",
+                                "presence": "optional",
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                            {
+                                "id": "edit:sourceClusters.legacy.serviceType",
+                                "path": ["sourceClusters", "legacy", "serviceType"],
+                                "label": "[OK] serviceType: LoadBalancer",
+                                "value": "LoadBalancer",
+                                "valueKind": "scalar",
+                                "description": "Expert setting for exposure.",
+                                "presence": "optional",
+                                "expert": True,
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": False, "errors": ["endpoint is required"]},
+    }
+
+
+def resource_sections_for_manage_tests():
+    return [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshot",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot-a",
+                            plural="datasnapshots",
+                            phase="Completed",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+
+def resource_sections_with_kafka_config():
+    return [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="kafkaclusters",
+                    display_name="Buffer",
+                    resources=[
+                        ResourceNode(
+                            name="default",
+                            plural="kafkaclusters",
+                            phase="Ready",
+                            depends_on=[],
+                            spec={"version": "3.6.0", "auth": {"type": "none"}},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
 
 
 async def wait_until(pilot, predicate, timeout=5.0, interval=0.1):
@@ -154,6 +505,177 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
 
         assert await wait_until(pilot, lambda: "Waiting for Workflow" in get_clean_text_label(tree.root))
         assert await wait_until(pilot, lambda: mock_waiter.trigger.call_count >= 1)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_renders_resources_without_workflow():
+    """Resource view should render deployed/configured resources even when no workflow exists."""
+
+    class FakeConfigEditService:
+        pass
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    mock_waiter = WaiterInterface(
+        trigger=MagicMock(),
+        checker=MagicMock(return_value=False),
+        reset=MagicMock(),
+    )
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=mock_waiter,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    get_clean_text_label(tree.root) == "Migration Status"
+                    and find_tree_node_by_id(tree.root, "resource:default") is not None
+                ),
+                timeout=5.0,
+            )
+
+            assert "Waiting for Workflow" not in get_clean_text_label(tree.root)
+            assert "Values: All" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "v") == ["Value Mode"]
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: "Values: Deployed" in str(app.query_one("#pod-status").content),
+            )
+            mock_waiter.trigger.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manage_toggles_mouse_reporting_for_text_selection(mock_workflow_with_two_pods):
+    """The manage UI can temporarily release terminal mouse handling for text selection."""
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_two_pods)
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        tree.focus()
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+        disable_mouse = MagicMock()
+        enable_mouse = MagicMock()
+        enable_mouse_pixels = MagicMock()
+        setattr(app._driver, "_mouse_pixels", True)
+
+        with patch.object(app._driver, "_disable_mouse_support", disable_mouse, create=True), \
+                patch.object(app._driver, "_enable_mouse_support", enable_mouse, create=True), \
+                patch.object(app._driver, "_enable_mouse_pixels", enable_mouse_pixels, create=True):
+            assert binding_descriptions(app, "m") == ["Mouse Off"]
+
+            await pilot.press("m")
+            assert await wait_until(
+                pilot,
+                lambda: app._mouse_input_enabled is False
+                and binding_descriptions(app, "m") == ["Mouse On"],
+            )
+            disable_mouse.assert_called_once()
+            enable_mouse.assert_not_called()
+
+            await pilot.press("m")
+            assert await wait_until(
+                pilot,
+                lambda: app._mouse_input_enabled is True
+                and binding_descriptions(app, "m") == ["Mouse Off"],
+            )
+            enable_mouse.assert_called_once()
+            enable_mouse_pixels.assert_called_once()
+
+
+def test_mouse_reporting_falls_back_to_raw_escape_sequences():
+    """Mouse reporting can be toggled even when a driver has no private helper methods."""
+
+    class FakeDriver:
+        def __init__(self):
+            self.writes = []
+            self.flushes = 0
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            self.flushes += 1
+
+    driver = FakeDriver()
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=False)
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=True)
+
+    assert driver.writes == [DISABLE_MOUSE_SEQUENCES, ENABLE_MOUSE_SEQUENCES]
+    assert driver.flushes == 2
+
+
+def test_mouse_reporting_private_disable_also_releases_pixel_mode():
+    """Pixel mouse reporting is disabled explicitly when a driver helper omits that mode."""
+
+    class FakeDriver:
+        def __init__(self):
+            self.disable_mouse = MagicMock()
+            self.writes = []
+            self.flushes = 0
+
+        def _disable_mouse_support(self):
+            self.disable_mouse()
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            self.flushes += 1
+
+    driver = FakeDriver()
+    WorkflowTreeApp._write_mouse_reporting(driver, enabled=False)
+
+    driver.disable_mouse.assert_called_once()
+    assert driver.writes == [DISABLE_MOUSE_PIXELS_SEQUENCE]
+    assert driver.flushes == 1
+
+
+def test_config_scalar_value_coercion_handles_number_nodes():
+    number_node = {
+        "path": ["traffic", "proxies", "cap", "proxyConfig", "listenPort"],
+        "valueType": "number",
+    }
+
+    assert WorkflowTreeApp._coerce_config_scalar_value(number_node, "9201") == 9201
+    assert WorkflowTreeApp._coerce_config_scalar_value(number_node, "1.5") == 1.5
+    assert WorkflowTreeApp._coerce_config_scalar_value({"valueType": "string"}, "9201") == "9201"
+
+    with pytest.raises(ValueError, match="traffic.proxies.cap.proxyConfig.listenPort must be a number"):
+        WorkflowTreeApp._coerce_config_scalar_value(number_node, "not-a-number")
 
 
 @pytest.mark.asyncio
@@ -238,6 +760,1043 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
         await pilot.pause()
 
         argo_service.approve_step.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_non_edit_enter_opens_approval_confirmation(mock_workflow_with_pod_and_suspend):
+    """Enter should activate the selected approval row in the normal manage tree."""
+
+    k8s_interface = MagicMock(spec=PodScraperInterface(None, None, None))
+    k8s_interface.fetch_pods_metadata.return_value = []
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_pod_and_suspend)
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=k8s_interface,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        tree.focus()
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+        for _ in range(3):
+            await pilot.press("down")
+        await pilot.pause()
+
+        await pilot.press("enter")
+        assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_with_two_pods):
+    """Pressing e in resource view renders the TS-provided edit tree and bottom help."""
+
+    class FakeConfigEditService:
+        def load_edit_state(self):
+            return edit_state_with_missing_basic_auth()
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshot",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot-a",
+                            plural="datasnapshots",
+                            phase="Completed",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            assert "Source Clusters [REQ 1]" in get_clean_text_label(tree.root.children[0])
+            assert "yellow" in get_label_style(tree.root.children[0])
+
+            for _ in range(4):
+                await pilot.press("down")
+            await pilot.pause()
+
+            selected = get_clean_text_label(tree.cursor_node)
+            help_text = app.query_one("#edit-help").content
+            assert "authConfig: < basic > [REQ 1]" in selected
+            assert "yellow" in get_label_style(tree.cursor_node)
+            assert "secretName is required" in str(help_text)
+            assert "Authentication configuration" in str(help_text)
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_with_two_pods):
+    """Edit mode applies committed UI operations to draft YAML and saves on s or Ctrl+s."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.validate_calls = []
+            self.saved_yaml = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_sigv4_auth(),
+            }
+
+        def save_raw_yaml(self, raw_yaml):
+            self.saved_yaml.append(raw_yaml)
+            return "Configuration saved"
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshot",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot-a",
+                            plural="datasnapshots",
+                            phase="Completed",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
+            await pilot.pause()
+            app._update_dynamic_bindings()
+
+            assert binding_descriptions(app, "s") == ["Save"]
+            assert "Next Option" not in binding_descriptions(app, "right")
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert service.apply_calls == []
+            assert not tree.cursor_node.is_expanded
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert service.apply_calls == []
+            assert tree.cursor_node.is_expanded
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            assert "Authentication configuration" in str(app.screen.query_one("#documentation").content)
+            await pilot.press("down")
+            assert "AWS SigV4 request signing" in str(app.screen.query_one("#choice-doc").content)
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "set",
+                    "path": ["sourceClusters", "legacy", "authConfig"],
+                    "value": "sigv4",
+                },
+            )
+            assert "authConfig: < sigv4 > [REQ 1]" in get_clean_text_label(tree.cursor_node)
+
+            await pilot.press("s")
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
+
+            await pilot.press("ctrl+s")
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml", "updated-yaml"])
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_with_two_pods):
+    """Esc and q should offer return, save, or discard for dirty config edit drafts."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.saved_yaml = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_sigv4_auth(),
+            }
+
+        def save_raw_yaml(self, raw_yaml):
+            self.saved_yaml.append(raw_yaml)
+            return "Configuration saved"
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            await pilot.press("down")
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert app._edit_dirty is True
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+            assert "Validation still reports" in str(app.screen.query_one("#status").content)
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert app._edit_mode is True
+            assert app._edit_dirty is True
+
+            await pilot.press("q")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert app._edit_mode is True
+            assert app._edit_dirty is True
+
+            with patch.object(app, "exit") as exit_mock:
+                await pilot.press("q")
+                assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+                await pilot.press("d")
+                await pilot.pause()
+                exit_mock.assert_called_once()
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+            await pilot.press("d")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+            assert app._edit_mode is False
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_dirty_exit_defaults_to_save_when_valid(mock_workflow_with_two_pods):
+    """Dirty edit exit defaults to save when validation has no outstanding issues."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.saved_yaml = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def save_raw_yaml(self, raw_yaml):
+            self.saved_yaml.append(raw_yaml)
+            return "Configuration saved"
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.allowInsecure")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: app._edit_dirty is True)
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+            assert "No validation errors" in str(app.screen.query_one("#status").content)
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+            assert app._edit_mode is False
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_two_pods):
+    """Edit rows use one status color and can switch value/status projection modes."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            source_node = tree.root.children[0]
+            assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
+            assert "cyan" in get_label_style(source_node)
+
+            for _ in range(3):
+                await pilot.press("down")
+            await pilot.pause()
+
+            assert "deployed/workflow=https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
+            assert "pending=https://new.example.com:9200" in get_clean_text_label(tree.cursor_node)
+            assert "cyan" in get_label_style(tree.cursor_node)
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
+            )
+            assert "endpoint: https://old.example.com:9200 [CHG 1]" in get_clean_text_label(tree.cursor_node)
+            assert "Values: Deployed" in str(app.query_one("#pod-status").content)
+
+            await pilot.press("t")
+            assert await wait_until(
+                pilot,
+                lambda: "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node),
+            )
+            assert "[OK]" not in get_clean_text_label(tree.cursor_node)
+            assert "endpoint: https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
+            assert "green" in get_label_style(tree.cursor_node)
+            assert "Status: Deployed" in str(app.query_one("#pod-status").content)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workflow_with_two_pods):
+    """Edit mode can hide optional rows, keep required rows, and reveal expert rows independently."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_field_visibility(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint") is not None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None
+            assert binding_descriptions(app, "o") == ["Hide Optional"]
+            assert binding_descriptions(app, "X") == ["Show Expert"]
+
+            await pilot.press("o")
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is None,
+            )
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint") is not None
+            assert "optional off" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "O") == ["Show Optional"]
+
+            await pilot.press("X")
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is not None,
+            )
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is None
+            assert "expert on" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "x") == ["Hide Expert"]
+
+            await pilot.press("O")
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None,
+            )
+            await pilot.press("x")
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workflow_with_two_pods):
+    """Resource view shows deployed/pending/to-submit values and submits saved config."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.submit_calls = []
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.7.0", "auth": {"type": "none"}},
+                    }]
+                },
+                "pending": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.8.0", "auth": {"type": "none"}},
+                    }]
+                },
+            }
+
+        def submit_saved_config(self, workflow_name):
+            self.submit_calls.append(workflow_name)
+            return {"workflow_name": workflow_name}
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            resource_node = find_tree_node_by_id(tree.root, "resource:default")
+            assert resource_node is not None
+            assert "to submit" in get_clean_text_label(resource_node)
+            labels = [get_clean_text_label(child) for child in resource_node.children]
+            assert "version: deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0" in labels
+            assert "Config changes:" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "s") == ["Submit"]
+
+            group_node = find_tree_node_by_id(tree.root, "group:Buffer")
+            assert group_node is not None
+            group_node.collapse()
+            resource_node.collapse()
+            assert not group_node.is_expanded
+            assert not resource_node.is_expanded
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: any(
+                    get_clean_text_label(child) == "version: deployed=3.6.0"
+                    for child in find_tree_node_by_id(tree.root, "resource:default").children
+                ),
+            )
+            assert find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+            assert find_tree_node_by_id(tree.root, "resource:default").is_expanded
+            await pilot.press("v")
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: any(
+                    get_clean_text_label(child) == "version: to-submit=3.8.0"
+                    for child in find_tree_node_by_id(tree.root, "resource:default").children
+                ),
+            )
+
+            await pilot.press("s")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: service.submit_calls == ["migration"])
+
+
+@pytest.mark.asyncio
+async def test_resource_view_expands_config_changes_after_edit_exit_without_workflow():
+    """Returning from edit mode should reveal changed resource phases even without a workflow."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.8.0", "auth": {"type": "none"}},
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:default") is not None)
+
+            find_tree_node_by_id(tree.root, "group:Buffer").collapse()
+            find_tree_node_by_id(tree.root, "resource:default").collapse()
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            await pilot.press("escape")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    get_clean_text_label(tree.root) == "Migration Status"
+                    and find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+                    and find_tree_node_by_id(tree.root, "resource:default").is_expanded
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_shows_pending_only_config_resources_without_workflow():
+    """Saved config resources that do not exist in K8s should still render in resource view."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "TrafficReplay",
+                        "name": "replay-new",
+                        "parameters": {"podReplicas": 2, "speedupFactor": 1.5, "removeAuthHeader": False},
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=_build_tree_from_raw({})):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "resource:replay-new") is not None,
+                timeout=5.0,
+            )
+
+            replay_node = find_tree_node_by_id(tree.root, "resource:replay-new")
+            assert "Pending Config" in get_clean_text_label(replay_node)
+            assert replay_node.is_expanded
+            labels = [get_clean_text_label(child) for child in replay_node.children]
+            assert "podReplicas: deployed=<absent> | pending=<absent> | to-submit=2" in labels
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: Deployed" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is None
+                ),
+            )
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: Pending" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is None
+                ),
+            )
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    "Values: To Submit" in str(app.query_one("#pod-status").content)
+                    and find_tree_node_by_id(tree.root, "resource:replay-new") is not None
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_shows_loose_projection_diagnostics_without_workflow():
+    """Incomplete saved config resources render in resource view with validation diagnostics."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "CaptureProxy",
+                        "name": "capture-new",
+                        "parameters": {"dependsOn": ["capture-new-topic"]},
+                        "diagnostics": [{
+                            "severity": "required",
+                            "path": ["traffic", "proxies", "capture-new", "proxyConfig"],
+                            "message": "Invalid input: expected object, received undefined",
+                        }],
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=_build_tree_from_raw({})):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "resource:capture-new") is not None,
+                timeout=5.0,
+            )
+
+            capture_node = find_tree_node_by_id(tree.root, "resource:capture-new")
+            assert "(required)" in get_clean_text_label(capture_node)
+            labels = [get_clean_text_label(child) for child in capture_node.children]
+            assert (
+                "required: traffic.proxies.capture-new.proxyConfig: "
+                "Invalid input: expected object, received undefined"
+            ) in labels
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_add_row_bindings_do_not_offer_delete(mock_workflow_with_two_pods):
+    """Synthetic add rows expose Add actions and never expose remove bindings."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "added-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters:add")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+
+            assert binding_descriptions(app, "a") == ["Add"]
+            assert binding_descriptions(app, "delete") == []
+            assert binding_descriptions(app, "backspace") == []
+
+            await pilot.press("delete")
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmModal)
+            assert service.apply_calls == []
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            app.screen.query_one("#value").value = "new-source"
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert await wait_until(pilot, lambda: not isinstance(app.screen, TextInputModal))
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "add",
+                    "path": ["sourceClusters"],
+                    "value": {"name": "new-source"},
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_workflow_with_two_pods):
+    """Enter provides a quick edit path for scalar values and toggles booleans."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.validate_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": f"updated-yaml-{len(self.apply_calls)}",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def validate_operation(self, raw_yaml, operation):
+            self.validate_calls.append((raw_yaml, operation))
+            state = edit_state_with_editable_source_fields()
+            state["validation"] = {
+                "valid": False,
+                "errors": ["Endpoint will require connectivity review"],
+                "diagnostics": [
+                    {
+                        "severity": "warning",
+                        "message": "Endpoint will require connectivity review",
+                        "path": ["sourceClusters", "legacy", "endpoint"],
+                    }
+                ],
+            }
+            return {
+                "raw_yaml": "preview-yaml",
+                "edit_state": state,
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.endpoint")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            value_input = app.screen.query_one("#value")
+            original_value = "https://new.example.com:9200"
+            assert value_input.value == original_value
+            assert "HTTP(S) endpoint URL for the cluster." in str(app.screen.query_one("#documentation").content)
+            await pilot.press("backspace")
+            assert value_input.value == original_value[:-1]
+            value_input.value = "not-an-endpoint"
+            await pilot.press("enter")
+            assert await wait_until(
+                pilot,
+                lambda: "Use an http:// or https:// endpoint" in str(app.screen.query_one("#validation").content),
+            )
+            assert len(service.apply_calls) == 0
+            value_input.value = "https://edited.example.com:9200"
+            assert await wait_until(pilot, lambda: len(service.validate_calls) == 1, timeout=3.0)
+            assert await wait_until(
+                pilot,
+                lambda: "Endpoint will require connectivity review" in str(
+                    app.screen.query_one("#remote-validation").content
+                ),
+            )
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert await wait_until(pilot, lambda: not isinstance(app.screen, TextInputModal))
+            assert await wait_until(pilot, lambda: app._edit_draft_yaml == "updated-yaml-1")
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "set",
+                    "path": ["sourceClusters", "legacy", "endpoint"],
+                    "value": "https://edited.example.com:9200",
+                },
+            )
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.allowInsecure")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "space") == ["Toggle"]
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml-1",
+                {
+                    "op": "set",
+                    "path": ["sourceClusters", "legacy", "allowInsecure"],
+                    "value": True,
+                },
+            )
 
 
 @pytest.mark.asyncio

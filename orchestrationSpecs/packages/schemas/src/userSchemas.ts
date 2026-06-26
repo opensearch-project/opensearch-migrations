@@ -4,18 +4,50 @@ import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
 // ── Schema field metadata ────────────────────────────────────────────
 // Downstream dependency names used in checksumFor annotations.
 export type ChecksumDependency = 'snapshot' | 'snapshotMigration' | 'replayer';
+export type UiTextFormat = 'text' | 'http-endpoint' | 'optional-http-endpoint' | 'cluster-version' | 'k8s-name';
+export type UiHint =
+    | {
+        kind: 'text';
+        format?: UiTextFormat;
+        pattern?: string;
+        message?: string;
+        examples?: string[];
+    }
+    | {
+        kind: 'reference';
+        sourcePath: string[];
+        allowCustom?: boolean;
+        emptyMeansDefault?: string;
+        message?: string;
+    }
+    | {
+        kind: 'record';
+        addLabel: string;
+        keyFormat?: UiTextFormat;
+        keyPattern?: string;
+        message?: string;
+    }
+    | {
+        kind: 'array';
+        addLabel: string;
+    };
 
 export interface FieldMeta {
     /** Which downstream dependencies include this field in their checksum. */
     checksumFor?: ChecksumDependency[];
     /** Change restriction category for VAP generation. Omit for 'safe'. */
     changeRestriction?: 'impossible' | 'gated';
+    /** UI editing hint exported into JSON schema and edit-state DTOs. */
+    uiHint?: UiHint;
+    /** Advanced field hint exported into JSON schema. */
+    expert?: boolean;
 }
 
 declare module "zod" {
     interface ZodType {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
+        uiHint(hint: UiHint): this;
     }
 }
 
@@ -27,6 +59,11 @@ z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
 z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, changeRestriction: restriction });
+};
+
+z.ZodType.prototype.uiHint = function(hint: UiHint) {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, uiHint: hint });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -187,6 +224,25 @@ export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTE
 export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 export const K8S_IMAGE_PULL_POLICY = z.enum(["Always", "Never", "IfNotPresent"]);
+
+const K8S_NAME_UI_HINT: UiHint = {
+    kind: 'text',
+    format: 'k8s-name',
+    pattern: K8S_NAMING_PATTERN.source,
+    message: "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
+};
+const HTTP_ENDPOINT_UI_HINT: UiHint = {
+    kind: 'text',
+    format: 'http-endpoint',
+    pattern: HTTP_ENDPOINT_PATTERN,
+    message: "Use an http:// or https:// endpoint with an optional port and trailing slash.",
+};
+const OPTIONAL_HTTP_ENDPOINT_UI_HINT: UiHint = {
+    kind: 'text',
+    format: 'optional-http-endpoint',
+    pattern: OPTIONAL_HTTP_ENDPOINT_PATTERN,
+    message: "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash.",
+};
 
 export const FILE_RELATIVE_PATH = z.string()
     .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/)
@@ -1118,6 +1174,7 @@ export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
         secretName: z.string().regex(K8S_NAMING_PATTERN)
             .describe("Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.")
+            .uiHint(K8S_NAME_UI_HINT)
     })
 }).describe("HTTP Basic authentication using credentials from a Kubernetes Secret.");
 
@@ -1139,12 +1196,21 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 }).describe("Mutual TLS (mTLS) authentication using client certificates.");
 
-export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]|SOLR [6789])(?:\.[0-9]+)+$/)
-    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.");
+export const CLUSTER_VERSION_PATTERN = /^(?:ES [125678]|OS [123]|SOLR [6789])(?:\.[0-9]+)+$/;
+export const CLUSTER_VERSION_STRING = z.string().regex(CLUSTER_VERSION_PATTERN)
+    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.")
+    .uiHint({
+        kind: 'text',
+        format: 'cluster-version',
+        pattern: CLUSTER_VERSION_PATTERN.source,
+        message: "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
+        examples: ['ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'],
+    });
 
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
-        .describe("HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy."),
+        .describe("HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy.")
+        .uiHint(OPTIONAL_HTTP_ENDPOINT_UI_HINT),
     allowInsecure: z.boolean().default(false).optional()
         .describe("When true, disables TLS certificate verification when connecting to the cluster. Use only for development or self-signed certificates."),
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional()
@@ -1153,7 +1219,8 @@ export const CLUSTER_CONFIG = z.object({
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
-        .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
+        .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters.")
+        .uiHint(HTTP_ENDPOINT_UI_HINT),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
@@ -1162,11 +1229,23 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
-        .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."),
+        .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['kafkaClusterConfiguration'],
+            emptyMeansDefault: 'default',
+            message: "Choose one Kafka cluster from kafkaClusterConfiguration.",
+        }),
     kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
-        .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."),
+        .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record).")
+        .uiHint(K8S_NAME_UI_HINT),
     source: z.string()
-        .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."),
+        .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['sourceClusters'],
+            message: "Choose one source cluster from sourceClusters.",
+        }),
     proxyConfig: USER_PROXY_OPTIONS
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
@@ -1195,16 +1274,32 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
 
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
-        .describe("Name of the source cluster. Must match a key in sourceClusters."),
+        .describe("Name of the source cluster. Must match a key in sourceClusters.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['sourceClusters'],
+            message: "Choose one source cluster from sourceClusters.",
+        }),
     snapshot: z.string()
         .describe("Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots.")
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
     fromCapturedTraffic: z.string()
-        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."),
+        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump).")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['traffic', 'proxies'],
+            allowCustom: true,
+            message: "Choose one captured-traffic source from traffic.proxies or traffic.s3Sources.",
+        }),
     toTarget: z.string()
-        .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters."),
+        .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['targetClusters'],
+            message: "Choose one target cluster from targetClusters.",
+        }),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
@@ -1213,13 +1308,31 @@ export const REPLAYER_CONFIG = z.object({
 
 export const TRAFFIC_CONFIG = z.object({
     proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
-        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels.")
+        .uiHint({
+            kind: 'record',
+            addLabel: 'capture proxy',
+            keyFormat: 'k8s-name',
+            keyPattern: K8S_NAMING_PATTERN.source,
+            message: "Use a valid Kubernetes DNS name for the capture proxy.",
+        }),
     s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
         .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
             "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
-            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."),
-    replayers: z.record(z.string(), REPLAYER_CONFIG)
+            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps).")
+        .uiHint({
+            kind: 'record',
+            addLabel: 'S3 captured traffic source',
+            keyFormat: 'k8s-name',
+            keyPattern: K8S_NAMING_PATTERN.source,
+            message: "Use a valid Kubernetes DNS name for the S3 captured traffic source.",
+        }),
+    replayers: z.record(z.string(), REPLAYER_CONFIG).default({}).optional()
         .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
+        .uiHint({
+            kind: 'record',
+            addLabel: 'traffic replay',
+        })
 }).superRefine((data, ctx) => {
     const proxies = data.proxies ?? {};
     const s3Sources = data.s3Sources ?? {};
@@ -1265,7 +1378,7 @@ export const TRAFFIC_CONFIG = z.object({
         const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
         recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
     }
-    for (const [name, rc] of Object.entries(data.replayers)) {
+    for (const [name, rc] of Object.entries(data.replayers ?? {})) {
         const inProxies = rc.fromCapturedTraffic in proxies;
         const inS3 = rc.fromCapturedTraffic in s3Sources;
         if (!inProxies && !inS3) {
@@ -1409,9 +1522,19 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional()
         .describe("When true, skips all manual approval gates for migrations in this configuration block."),
     fromSource: z.string()
-        .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters."),
+        .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['sourceClusters'],
+            message: "Choose one source cluster from sourceClusters.",
+        }),
     toTarget: z.string()
-        .describe("Label of the target cluster to migrate to. Must match a key in targetClusters."),
+        .describe("Label of the target cluster to migrate to. Must match a key in targetClusters.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['targetClusters'],
+            message: "Choose one target cluster from targetClusters.",
+        }),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD
         .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."),
 }).describe("A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings.").superRefine((data, ctx) => {
@@ -1429,11 +1552,26 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
 });
 
 export const KAFKA_CLUSTERS_MAP = z.record(z.string().regex(K8S_NAMING_PATTERN), KAFKA_CLUSTER_CONFIG)
-    .describe("Map of Kafka cluster names to their configurations. Keys become Kubernetes resource names and must be valid DNS labels. If empty and proxies are configured, a 'default' auto-created cluster is used.");
+    .describe("Map of Kafka cluster names to their configurations. Keys become Kubernetes resource names and must be valid DNS labels. If empty and proxies are configured, a 'default' auto-created cluster is used.")
+    .uiHint({
+        kind: 'record',
+        addLabel: 'Kafka cluster',
+        keyFormat: 'k8s-name',
+        keyPattern: K8S_NAMING_PATTERN.source,
+        message: "Use a valid Kubernetes DNS name for the Kafka cluster.",
+    });
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
-    .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.");
+    .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.")
+    .uiHint({
+        kind: 'record',
+        addLabel: 'source cluster',
+    });
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
-    .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
+    .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.")
+    .uiHint({
+        kind: 'record',
+        addLabel: 'target cluster',
+    });
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
@@ -1448,7 +1586,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         targetClusters: TARGET_CLUSTERS_MAP
             .describe("Target OpenSearch clusters to migrate to."),
         snapshotMigrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG)
-            .describe("List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings."),
+            .describe("List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings.")
+            .uiHint({
+                kind: 'array',
+                addLabel: 'snapshot migration',
+            }),
         traffic: TRAFFIC_CONFIG
             .describe("Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. " +
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
@@ -1530,7 +1672,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 }
             }
 
-            for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
+            for (const [replayerName, rc] of Object.entries(data.traffic.replayers ?? {})) {
                 if (!(rc.toTarget in data.targetClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,

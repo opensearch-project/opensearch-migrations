@@ -26,12 +26,14 @@ import {FileSourceRegistry} from "./fileSourceUtils";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
+type UserTrafficConfig = NonNullable<InputConfig["traffic"]>;
+type UserReplayerConfig = NonNullable<NonNullable<UserTrafficConfig["replayers"]>[string]["replayerConfig"]>;
 export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
 };
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
-const KAFKA_VERSION = "4.0.0";
+export const KAFKA_VERSION = "4.0.0";
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
@@ -399,7 +401,7 @@ function prepareDocumentBackfillConfig(
 }
 
 function prepareReplayerConfig(
-    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
+    config: UserReplayerConfig | undefined
 ) {
     const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
     const fileSourceRegistry = new FileSourceRegistry();

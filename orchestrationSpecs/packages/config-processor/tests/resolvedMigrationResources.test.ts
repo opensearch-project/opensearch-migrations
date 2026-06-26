@@ -5,6 +5,7 @@ import * as path from "path";
 import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {
+    buildLooseResolvedMigrationResources,
     buildResolvedMigrationResources,
     dryRunResourcePolicy,
     MigrationConfigTransformer,
@@ -313,5 +314,69 @@ describe("resolved migration resources", () => {
                 changeRestriction: "gated",
             }),
         ]));
+    });
+
+    it("loosely projects incomplete user config for the manage resource view", async () => {
+        const config = sampleConfig();
+        delete (config.sourceClusters.source as any).endpoint;
+        delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+
+        expect(resolved.projectionMode).toBe("loose");
+        expect(resolved.projectionComplete).toBe(false);
+        expect(resolved.validation?.valid).toBe(false);
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CaptureProxy",
+            name: "source-proxy",
+            parameters: {dependsOn: ["source-proxy-topic"]},
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: ["traffic", "proxies", "source-proxy", "proxyConfig"],
+                }),
+            ]),
+        }));
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CapturedTraffic",
+            name: "source-proxy-topic",
+            parameters: expect.objectContaining({
+                kafkaClusterName: "default",
+                topicName: "source-proxy",
+            }),
+        }));
+        expect(resolved.consoleResources?.sources).toContainEqual(expect.objectContaining({
+            refName: "source",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: ["sourceClusters", "source", "endpoint"],
+                }),
+            ]),
+        }));
+    });
+
+    it("returns best-effort resources from the loose CLI without exiting on validation errors", async () => {
+        const config = sampleConfig();
+        delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;
+        const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "resolved-migration-resources-loose-cli-test-"));
+        const inputFile = path.join(outputDir, "workflowMigration.config.yaml");
+        const outputFile = path.join(outputDir, "resolvedMigrationResources.json");
+        await fs.writeFile(inputFile, JSON.stringify(config, null, 2));
+
+        await resolveMigrationResourcesMain([
+            "--user-config", inputFile,
+            "--workflow-name", "workflow-from-cli",
+            "--validation-mode", "loose",
+            "--output", outputFile,
+        ]);
+
+        const resolved = JSON.parse(await fs.readFile(outputFile, "utf8"));
+        expect(resolved.validation.valid).toBe(false);
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CaptureProxy",
+            name: "source-proxy",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({path: ["traffic", "proxies", "source-proxy", "proxyConfig"]}),
+            ]),
+        }));
     });
 });

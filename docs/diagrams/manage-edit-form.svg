@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Manage inline guided tree editor mockup</title>
+  <desc id="desc">Terminal-style mockup of inline tree-based YAML editing with branch validation cues and bottom help text.</desc>
+  <style>
+    .bg { fill: #0f172a; }
+    .panel { fill: #111827; stroke: #334155; stroke-width: 1; }
+    .header { fill: #1f2937; }
+    .focus { fill: #082f49; stroke: #38bdf8; stroke-width: 1; }
+    .selected { fill: #1e3a8a; opacity: 0.95; }
+    .editline { fill: #172554; stroke: #60a5fa; stroke-width: 1; }
+    .footer { fill: #020617; }
+    .text { fill: #d1d5db; font: 16px Menlo, Consolas, monospace; }
+    .dim { fill: #94a3b8; font: 15px Menlo, Consolas, monospace; }
+    .title { fill: #f9fafb; font: 18px Menlo, Consolas, monospace; font-weight: 700; }
+    .green { fill: #86efac; font: 16px Menlo, Consolas, monospace; }
+    .yellow { fill: #fde68a; font: 16px Menlo, Consolas, monospace; }
+    .red { fill: #fca5a5; font: 16px Menlo, Consolas, monospace; }
+    .cyan { fill: #67e8f9; font: 16px Menlo, Consolas, monospace; }
+    .accent { fill: #bfdbfe; font: 16px Menlo, Consolas, monospace; font-weight: 700; }
+    .smallTitle { fill: #e2e8f0; font: 15px Menlo, Consolas, monospace; font-weight: 700; }
+  </style>
+  <rect class="bg" width="1200" height="760"/>
+  <rect class="header" x="0" y="0" width="1200" height="48"/>
+  <text class="title" x="24" y="31">[ma] migration-workflow - Edit source: legacy-cluster</text>
+  <text class="dim" x="918" y="31">inline guided tree mode</text>
+
+  <rect class="panel" x="24" y="72" width="1152" height="516" rx="6"/>
+  <text class="title" x="48" y="108">Focused Resource Tree</text>
+  <text class="dim" x="48" y="138">Branch badges aggregate hidden child requirements, errors, policy gates, and staged changes.</text>
+
+  <text class="dim" x="56" y="178">Source Clusters</text>
+  <rect class="focus" x="44" y="194" width="1088" height="290" rx="6"/>
+  <text class="accent" x="66" y="226">[REQ 1] v source: legacy-cluster</text>
+  <text class="green" x="90" y="258">[OK] endpoint: https://legacy.example.com:9200</text>
+  <text class="green" x="90" y="290">[OK] allowInsecure: false</text>
+  <text class="green" x="90" y="322">[OK] version: ES 7.10.2</text>
+  <rect class="selected" x="76" y="340" width="1016" height="30" rx="4"/>
+  <text class="yellow" x="90" y="362">[REQ 1] authConfig: &lt; basic &gt;</text>
+  <text class="dim" x="114" y="394">Use left/right to cycle: none | basic | sigv4 | mtls</text>
+  <rect class="editline" x="106" y="412" width="986" height="32" rx="4"/>
+  <text class="red" x="130" y="434">[REQ] secretName: &lt;required&gt;</text>
+  <text class="green" x="90" y="468">[OK] snapshotInfo  repos: 2, snapshots: 1, serializeSnapshotCreation: default</text>
+
+  <text class="dim" x="56" y="524">Target Clusters</text>
+  <text class="dim" x="80" y="552">[OK] target: prod-os</text>
+  <text class="dim" x="448" y="524">Snapshot Migration</text>
+  <text class="dim" x="472" y="552">[CHG 2] snapshotmigration.legacy-prod-snapshot-a-migration-0</text>
+  <text class="cyan" x="80" y="580">+ Add source cluster</text>
+
+  <rect class="panel" x="24" y="596" width="1152" height="100" rx="6"/>
+  <text class="title" x="48" y="622">Help / Status</text>
+  <text class="smallTitle" x="196" y="622">sourceClusters &gt; legacy-cluster &gt; authConfig</text>
+  <text class="yellow" x="48" y="648">Missing required child: secretName. This branch is not complete until that value is set.</text>
+  <text class="dim" x="48" y="672">Authentication configuration for connecting to the cluster. Variant basic requires a Kubernetes Secret</text>
+  <text class="dim" x="48" y="692">with username and password keys.</text>
+
+  <rect class="footer" x="0" y="712" width="1200" height="48"/>
+  <text class="dim" x="24" y="742">Enter Edit/Expand   Left/Right Cycle   Space Toggle   ? Help   y YAML   z Undo   p Preview   Del Remove   Ctrl+s Save   Esc Exit</text>
+</svg>

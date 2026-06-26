@@ -108,20 +108,41 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 COPY start-console.sh /root/
 RUN chmod +x /root/start-console.sh
 
-# Copy Python libraries and install dependencies
-# Note: .dockerignore should exclude .venv, but we ensure clean install
+# Install Python dependencies before copying full source trees so normal Python
+# code edits do not invalidate the network-heavy pipenv layers.
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_RETRIES=20
+ENV PIP_RESUME_RETRIES=20
+ENV PIPENV_CACHE_DIR=/root/.cache/pipenv
 WORKDIR /root
-COPY lib /root/lib
+RUN mkdir -p /root/lib/console_link/console_link \
+    /root/lib/integ_test \
+    /root/cluster_tools/src/cluster_tools
 
+COPY lib/console_link/Pipfile lib/console_link/Pipfile.lock lib/console_link/setup.py /root/lib/console_link/
+COPY lib/console_link/console_link/__init__.py /root/lib/console_link/console_link/
 WORKDIR /root/lib/console_link
-RUN pipenv install --deploy
-WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pipenv \
+    pipenv install --deploy
 
+COPY lib/integ_test/Pipfile lib/integ_test/Pipfile.lock /root/lib/integ_test/
+WORKDIR /root/lib/integ_test
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pipenv \
+    pipenv install --deploy
+
+COPY cluster_tools/Pipfile cluster_tools/Pipfile.lock cluster_tools/setup.py /root/cluster_tools/
+COPY cluster_tools/src/cluster_tools/__init__.py /root/cluster_tools/src/cluster_tools/
+WORKDIR /root/cluster_tools
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pipenv \
+    pipenv install
+
+COPY lib/console_link/console_link /root/lib/console_link/console_link
+COPY lib/integ_test /root/lib/integ_test
 COPY cluster_tools /root/cluster_tools
 RUN rm -rf /root/cluster_tools/.venv
-WORKDIR /root/cluster_tools
-RUN pipenv install
 WORKDIR /root
 
 RUN mkdir -p /usr/share/bash-completion/completions && \
