@@ -1270,13 +1270,19 @@ async def test_config_edit_loading_ignores_late_resource_refresh(mock_workflow_w
     async with app.run_test() as pilot:
         tree = app.query_one("#workflow-tree")
         await pilot.pause()
+        app._tree_state.rebuild(resource_sections_for_manage_tests(), {})
+        assert get_clean_text_label(tree.root) == "Migration Status"
+        assert tree.show_root is False
+        assert tree.disabled is False
 
         app._show_config_edit_loading()
         app._handle_resource_data(resource_sections_for_manage_tests(), {}, force_reload=True)
 
-        assert get_clean_text_label(tree.root) == "Loading Workflow Config Edit..."
-        assert tree.show_root is True
+        assert get_clean_text_label(tree.root) == "Migration Status"
+        assert tree.show_root is False
+        assert tree.disabled is True
         assert app.title == "Workflow Config Edit"
+        assert "Loading configuration editor" in str(app.query_one("#edit-help").content)
 
 
 def resource_sections_with_kafka_config():
@@ -1755,8 +1761,7 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
             assert "Source Clusters [REQ 1]" in get_clean_text_label(tree.root.children[0])
             assert "yellow" in get_label_style(tree.root.children[0])
 
-            for _ in range(4):
-                await pilot.press("down")
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
             await pilot.pause()
 
             selected = get_clean_text_label(tree.cursor_node)
@@ -2873,31 +2878,105 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
 
             source_node = tree.root.children[0]
             assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
-            assert "cyan" in get_label_style(source_node)
+            assert "green" in get_label_style(source_node)
+            assert not source_node.is_expanded
 
-            for _ in range(3):
-                await pilot.press("down")
-            await pilot.pause()
+            endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
+            assert endpoint_node is not None
 
-            assert "deployed/workflow=https://old.example.com:9200" in get_clean_text_label(tree.cursor_node)
-            assert "pending=https://new.example.com:9200" in get_clean_text_label(tree.cursor_node)
-            assert "cyan" in get_label_style(tree.cursor_node)
+            assert "deployed/workflow=https://old.example.com:9200" in get_clean_text_label(endpoint_node)
+            assert "pending=https://new.example.com:9200" in get_clean_text_label(endpoint_node)
+            assert "green" in get_label_style(endpoint_node)
             assert binding_descriptions(app, "v") == []
             assert binding_descriptions(app, "t") == []
-            initial_label = get_clean_text_label(tree.cursor_node)
-            initial_style = get_label_style(tree.cursor_node)
+            initial_label = get_clean_text_label(endpoint_node)
+            initial_style = get_label_style(endpoint_node)
 
             await pilot.press("v")
             await pilot.pause()
-            assert get_clean_text_label(tree.cursor_node) == initial_label
-            assert get_label_style(tree.cursor_node) == initial_style
+            assert get_clean_text_label(endpoint_node) == initial_label
+            assert get_label_style(endpoint_node) == initial_style
             assert "Values: All" in str(app.query_one("#pod-status").content)
 
             await pilot.press("t")
             await pilot.pause()
-            assert get_clean_text_label(tree.cursor_node) == initial_label
-            assert get_label_style(tree.cursor_node) == initial_style
+            assert get_clean_text_label(endpoint_node) == initial_label
+            assert get_label_style(endpoint_node) == initial_style
             assert "Status: All" in str(app.query_one("#pod-status").content)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(mock_workflow_with_two_pods):
+    """Edit mode uses submitted workflow config as the deployed/current baseline."""
+
+    state = edit_state_with_editable_source_fields()
+    source = state["nodes"][0]
+    legacy = source["children"][0]
+    endpoint = legacy["children"][0]
+    for node in (source, legacy, endpoint):
+        node["status"] = "ok"
+        node["statusCounts"] = {}
+    endpoint.pop("states", None)
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": state,
+            }
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted": {
+                    "workflowConfig": {
+                        "sourceClusters": {
+                            "legacy": {
+                                "endpoint": "https://old.example.com:9200",
+                                "allowInsecure": False,
+                            },
+                        },
+                    },
+                },
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            source_node = find_tree_node_by_id(tree.root, "edit:sourceClusters")
+            endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
+            assert source_node is not None
+            assert endpoint_node is not None
+            assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
+            assert not source_node.is_expanded
+            assert (
+                "endpoint: deployed/workflow=https://old.example.com:9200 | "
+                "pending=https://new.example.com:9200 [CHG 1]"
+            ) == get_clean_text_label(endpoint_node)
 
 
 @pytest.mark.asyncio
@@ -3275,8 +3354,8 @@ async def test_resource_view_uses_submitted_console_as_deployed_virtual_config_a
 
 
 @pytest.mark.asyncio
-async def test_resource_view_expands_config_changes_after_edit_exit_without_workflow():
-    """Returning from edit mode should reveal changed resource phases even without a workflow."""
+async def test_resource_view_preserves_collapsed_config_changes_after_edit_exit_without_workflow():
+    """Returning from edit mode preserves collapsed resource branches and badges the root."""
 
     class FakeConfigEditService:
         def load_edit_session(self):
@@ -3330,10 +3409,11 @@ async def test_resource_view_expands_config_changes_after_edit_exit_without_work
                 pilot,
                 lambda: (
                     get_clean_text_label(tree.root) == "Migration Status"
-                    and find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
-                    and find_tree_node_by_id(tree.root, "resource:default").is_expanded
+                    and not find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+                    and not find_tree_node_by_id(tree.root, "resource:default").is_expanded
                 ),
             )
+            assert "[CHG 1]" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))
 
 
 @pytest.mark.asyncio

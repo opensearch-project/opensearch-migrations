@@ -934,9 +934,9 @@ def _resource_change_label(resource: ResourceNode) -> str:
         return f' [{style}]({escape(str(adoption_status))})[/{style}]'
     diff = resource.config_diff or {}
     if diff.get('has_pending_submit_changes') or _has_pending_presence_change(resource):
-        return ' [cyan](to submit)[/cyan]'
+        return ' [green](to submit)[/green]'
     if diff.get('has_submitted_changes') or _has_submitted_presence_change(resource):
-        return ' [magenta](pending)[/magenta]'
+        return ' [grey50](pending)[/grey50]'
     return ''
 
 

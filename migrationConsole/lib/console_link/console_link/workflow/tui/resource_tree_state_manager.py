@@ -125,7 +125,7 @@ class ResourceTreeStateManager:
             self._remove_children(root)
             for section in new_sections:
                 sid = f'section:{section.name}'
-                node = root.add(f"[bold]{section.name}[/]", data={'id': sid})
+                node = root.add(self._section_label(section), data={'id': sid})
                 for group in section.groups:
                     self._add_group(node, group)
                 if sid in collapsed:
@@ -136,6 +136,7 @@ class ResourceTreeStateManager:
             for section in new_sections:
                 sid = f'section:{section.name}'
                 section_node = existing[sid]
+                section_node.set_label(self._section_label(section))
                 self._update_groups(section_node, section.groups)
 
     def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
@@ -150,6 +151,7 @@ class ResourceTreeStateManager:
             for group in new_groups:
                 gid = f'group:{group.display_name}'
                 group_node = existing[gid]
+                group_node.set_label(self._group_label(group))
                 if not group.not_configured:
                     self._update_resources(group_node, group)
 
@@ -159,7 +161,7 @@ class ResourceTreeStateManager:
         self._remove_children(section_node)
         for group in groups:
             gid = f'group:{group.display_name}'
-            node = section_node.add(f"[bold]{group.display_name}[/]", data={'id': gid})
+            node = section_node.add(self._group_label(group), data={'id': gid})
             if group.not_configured:
                 node.add("[dim](not configured)[/dim]", data=None)
             else:
@@ -234,6 +236,14 @@ class ResourceTreeStateManager:
                 continue
             self._add_resource(group_node, resource)
 
+    @classmethod
+    def _section_label(cls, section: ResourceSection) -> str:
+        return f"[bold]{section.name}[/]{cls._change_count_badge(cls._section_change_summary(section))}"
+
+    @classmethod
+    def _group_label(cls, group: ResourceGroup) -> str:
+        return f"[bold]{group.display_name}[/]{cls._change_count_badge(cls._group_change_summary(group))}"
+
     @staticmethod
     def _resource_label(resource: ResourceNode) -> str:
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
@@ -259,12 +269,69 @@ class ResourceTreeStateManager:
             return f' [{style}]({adoption_status})[/{style}]'
         diff = resource.config_diff or {}
         if not diff:
-            return ''
+            return ResourceTreeStateManager._change_count_badge(
+                ResourceTreeStateManager._resource_change_summary(resource)
+            )
+        badge = ResourceTreeStateManager._change_count_badge(
+            ResourceTreeStateManager._resource_change_summary(resource)
+        )
         if diff.get('has_pending_submit_changes'):
-            return ' [green](to submit)[/green]'
+            return f' [green](to submit)[/green]{badge}'
         if diff.get('has_submitted_changes'):
-            return ' [grey50](pending)[/grey50]'
-        return ''
+            return f' [grey50](pending)[/grey50]{badge}'
+        return badge
+
+    @classmethod
+    def _section_change_summary(cls, section: ResourceSection) -> Dict[str, int]:
+        summary = {'count': 0, 'pending_submit': 0}
+        for group in section.groups:
+            cls._merge_change_summary(summary, cls._group_change_summary(group))
+        return summary
+
+    @classmethod
+    def _group_change_summary(cls, group: ResourceGroup) -> Dict[str, int]:
+        summary = {'count': 0, 'pending_submit': 0}
+        for resource in group.resources:
+            cls._merge_change_summary(summary, cls._resource_change_summary(resource))
+        return summary
+
+    @classmethod
+    def _resource_change_summary(cls, resource: ResourceNode) -> Dict[str, int]:
+        summary = {'count': 0, 'pending_submit': 0}
+        diff = resource.config_diff or {}
+        field_count = len(diff.get('fields') or [])
+        presence_changed = cls._resource_presence_changed(resource)
+        if field_count or presence_changed:
+            summary['count'] += field_count or 1
+            if diff.get('has_pending_submit_changes') or presence_changed:
+                summary['pending_submit'] += field_count or 1
+        for child in resource.children:
+            cls._merge_change_summary(summary, cls._resource_change_summary(child))
+        return summary
+
+    @staticmethod
+    def _resource_presence_changed(resource: ResourceNode) -> bool:
+        presence = resource.config_presence or {}
+        if 'pending' in presence:
+            baseline = presence.get('submitted') if 'submitted' in presence else presence.get('deployed', True)
+            if presence.get('pending') != baseline:
+                return True
+        if 'submitted' in presence and presence.get('submitted') != presence.get('deployed', True):
+            return True
+        return False
+
+    @staticmethod
+    def _merge_change_summary(left: Dict[str, int], right: Dict[str, int]) -> None:
+        left['count'] += right.get('count', 0)
+        left['pending_submit'] += right.get('pending_submit', 0)
+
+    @staticmethod
+    def _change_count_badge(summary: Dict[str, int]) -> str:
+        count = summary.get('count', 0)
+        if not count:
+            return ''
+        style = 'green' if summary.get('pending_submit') else 'grey50'
+        return f' [{style}][CHG {count}][/{style}]'
 
     @staticmethod
     def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict]:
@@ -375,7 +442,7 @@ class ResourceTreeStateManager:
             if not section_has_content:
                 continue
             section_node = self.tree.root.add(
-                f"[bold]{section.name}[/]", data={'id': f'section:{section.name}'})
+                self._section_label(section), data={'id': f'section:{section.name}'})
             for group in section.groups:
                 self._add_group(section_node, group)
 
@@ -384,7 +451,7 @@ class ResourceTreeStateManager:
         if not self._group_has_content(group):
             return
         group_node = parent.add(
-            f"[bold]{group.display_name}[/]", data={'id': f'group:{group.display_name}'})
+            self._group_label(group), data={'id': f'group:{group.display_name}'})
         if group.not_configured:
             group_node.add("[dim](not configured)[/dim]", data=None)
             return
