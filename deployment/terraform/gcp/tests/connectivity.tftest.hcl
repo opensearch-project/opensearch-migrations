@@ -121,3 +121,25 @@ run "gcs_rejects_psc_google_apis_for_now" {
     var.gcs_connectivity,
   ]
 }
+
+run "private_endpoint_defaults_false_no_regression" {
+  command = plan
+
+  assert {
+    condition     = google_container_cluster.migration_standard.private_cluster_config[0].enable_private_endpoint != true
+    error_message = "enable_private_endpoint must default to false to preserve current behavior."
+  }
+}
+
+run "private_endpoint_can_be_enabled" {
+  command = plan
+
+  variables {
+    enable_private_endpoint = true
+  }
+
+  assert {
+    condition     = google_container_cluster.migration_standard.private_cluster_config[0].enable_private_endpoint == true
+    error_message = "enable_private_endpoint must be settable to true."
+  }
+}

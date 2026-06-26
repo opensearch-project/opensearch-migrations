@@ -275,3 +275,9 @@ variable "gcs_connectivity" {
     error_message = "gcs_connectivity.mode must be one of: private_google_access, none. (psc_google_apis is not yet implemented.)"
   }
 }
+
+variable "enable_private_endpoint" {
+  description = "Give the GKE control plane a private endpoint only (no public IP). Default false preserves current behavior. When true, operator access requires IAP/bastion/VPN (see docs/gcpPrivateNetworking.md) and master_authorized_cidrs must be narrowed to internal ranges. We do not provision a bastion."
+  type        = bool
+  default     = false
+}

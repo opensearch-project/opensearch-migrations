@@ -184,7 +184,7 @@ resource "google_container_cluster" "migration_standard" {
 
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false
+    enable_private_endpoint = var.enable_private_endpoint
     master_ipv4_cidr_block  = var.master_ipv4_cidr_block
   }
 
