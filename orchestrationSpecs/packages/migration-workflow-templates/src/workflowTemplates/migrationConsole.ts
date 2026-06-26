@@ -124,7 +124,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster", "authConfig", "basic", "secretName"], "")))
             .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
             .addEnvVarsFromRecord({
-                CONFIG_CONTENTS_BASE64: expr.toBase64(expr.asString(c.inputs.configContents)),
+                CONFIG_CONTENTS_BASE64: expr.toBase64YamlSafe(expr.asString(c.inputs.configContents)),
                 MIGRATION_CONSOLE_COMMAND: c.inputs.command,
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })

@@ -84,7 +84,7 @@ export function startCluster() {
                 case 3:
                     _c.sent();
                     console.log("Installing Argo Workflows...");
-                    argoVersion = "v4.0.0";
+                    argoVersion = "v4.0.3";
                     manifestUrl = "https://github.com/argoproj/argo-workflows/releases/download/".concat(argoVersion, "/quick-start-minimal.yaml");
                     return [4 /*yield*/, import("child_process")];
                 case 4:

@@ -1,8 +1,7 @@
 import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
-import { ParitySpec, BuilderVariant, reportContractResult, reportKnownBroken, reportParityResult } from "../infra/parityHelper.js";
+import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
-import { describeBroken } from "../infra/brokenTestControl.js";
 
 type NestedPayload = { nested: { value: number } };
 type FlagPayload = { flag: boolean };
@@ -29,12 +28,11 @@ describe("Type Coercion - toJSON on string parameter double-serializes", () => {
     });
   });
 
-  describeBroken("Builder - serialize", () => {
+  describe("Builder - serialize", () => {
     const builderVariant: BuilderVariant = {
       name: "serialize",
       code: 'expr.serialize(ctx.inputs.data)',
     };
-    reportKnownBroken(spec, builderVariant, "Known mismatch: serialize on plain string does not match Argo double-serialization behavior.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t

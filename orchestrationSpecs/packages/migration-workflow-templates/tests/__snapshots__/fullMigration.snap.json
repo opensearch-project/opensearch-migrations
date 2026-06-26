@@ -522,6 +522,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "minPodReplicas"
+            },
+            {
               "name": "topicPartitions"
             },
             {
@@ -592,6 +595,10 @@
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{inputs.parameters.minPodReplicas}}"
                   },
                   {
                     "name": "topicPartitions",
@@ -1736,6 +1743,9 @@
               "name": "fromCapturedTraffic"
             },
             {
+              "name": "fromCapturedTrafficSourceKind"
+            },
+            {
               "name": "fromCapturedTrafficConfigChecksum"
             },
             {
@@ -1872,16 +1882,12 @@
           [
             {
               "templateRef": {
-                "template": "waitindefinitelyforcapturedtraffic",
+                "template": "waitindefinitelyfortrafficsource",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromCapturedTraffic+'-topic'}}"
-                  },
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.fromCapturedTrafficConfigChecksum}}"
@@ -1895,12 +1901,16 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "checksumField",
-                    "value": "checksumForReplayer"
+                    "name": "sourceName",
+                    "value": "{{inputs.parameters.fromCapturedTraffic}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.fromCapturedTrafficSourceKind}}"
                   }
                 ]
               },
-              "name": "waitIndefinitelyForCapturedTraffic"
+              "name": "waitIndefinitelyForTrafficSource"
             }
           ],
           [
@@ -2264,6 +2274,10 @@
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
                   },
                   {
+                    "name": "minPodReplicas",
+                    "value": "{{=sprig.dig('minPodReplicas', 0, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
                     "name": "topicPartitions",
                     "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
                   },
@@ -2530,6 +2544,10 @@
                   {
                     "name": "fromCapturedTraffic",
                     "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficSourceKind')}}"
                   },
                   {
                     "name": "fromCapturedTrafficConfigChecksum",
