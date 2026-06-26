@@ -279,11 +279,13 @@ spec:
             {{- end }}
             {{- else if eq .Values.cloudProvider "gcp" }}
             {{- if .Values.gcsBucketConfiguration.create }}
-            {{- $gcsBucket := .Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" .Values.gcp.project) }}
+            {{- $useLocalGcs := .Values.gcsBucketConfiguration.useLocalGcs }}
+            {{- $gcsBucket := .Values.gcsBucketConfiguration.bucketName | default (ternary "migration-test-bucket" (printf "migration-snapshots-%s" .Values.gcp.project) $useLocalGcs) }}
+            {{- $gcsEndpoint := ternary (printf "http://%s.%s.svc.cluster.local:4443" .Values.gcsBucketConfiguration.localGcsEndpoint .Release.Namespace) (.Values.gcsBucketConfiguration.endpoint | default "") $useLocalGcs }}
             - name: REPO_ARTIFACTS_BUCKET
               value: {{ printf "gs://%s" $gcsBucket | quote }}
             - name: REPO_ARTIFACTS_ENDPOINT_URL
-              value: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
+              value: {{ $gcsEndpoint | quote }}
             {{- end }}
             {{- end }}
             {{- if and (eq .Values.cloudProvider "aws") (index .Values.conditionalPackageInstalls "cert-manager") }}
