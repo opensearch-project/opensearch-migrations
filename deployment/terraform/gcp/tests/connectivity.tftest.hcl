@@ -83,3 +83,41 @@ run "none_mode_outputs_null_private_endpoints" {
     error_message = "none mode must output null for both private endpoints."
   }
 }
+
+run "private_google_access_enabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = var.gcs_connectivity.mode == "private_google_access"
+    error_message = "gcs_connectivity must default to private_google_access."
+  }
+  assert {
+    condition     = google_compute_subnetwork.migration_subnet[0].private_ip_google_access == true
+    error_message = "Subnet must enable private_ip_google_access in the default mode."
+  }
+}
+
+run "gcs_none_mode_disables_private_access" {
+  command = plan
+
+  variables {
+    gcs_connectivity = { mode = "none" }
+  }
+
+  assert {
+    condition     = google_compute_subnetwork.migration_subnet[0].private_ip_google_access == false
+    error_message = "mode = none must leave private_ip_google_access off."
+  }
+}
+
+run "gcs_rejects_psc_google_apis_for_now" {
+  command = plan
+
+  variables {
+    gcs_connectivity = { mode = "psc_google_apis" }
+  }
+
+  expect_failures = [
+    var.gcs_connectivity,
+  ]
+}

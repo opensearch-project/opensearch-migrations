@@ -102,11 +102,12 @@ resource "google_compute_network" "migration_vpc" {
 }
 
 resource "google_compute_subnetwork" "migration_subnet" {
-  count         = var.create_vpc ? 1 : 0
-  name          = "${local.name}-subnet"
-  network       = google_compute_network.migration_vpc[0].id
-  region        = var.region
-  ip_cidr_range = var.subnet_cidr
+  count                    = var.create_vpc ? 1 : 0
+  name                     = "${local.name}-subnet"
+  network                  = google_compute_network.migration_vpc[0].id
+  region                   = var.region
+  ip_cidr_range            = var.subnet_cidr
+  private_ip_google_access = var.gcs_connectivity.mode == "private_google_access"
   secondary_ip_range {
     range_name    = "pods"
     ip_cidr_range = var.pods_cidr

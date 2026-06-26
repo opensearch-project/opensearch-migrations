@@ -262,3 +262,16 @@ variable "target_connectivity" {
     error_message = "target_connectivity.peer_vpc_self_link is required when mode = vpc_peering."
   }
 }
+
+variable "gcs_connectivity" {
+  description = "Private path for snapshot traffic to Cloud Storage. mode = private_google_access (default) routes GKE->GCS over Google's private network; none disables it. (psc_google_apis, for VPC Service Controls perimeters, is reserved for a future release.)"
+  type = object({
+    mode = optional(string, "private_google_access")
+  })
+  default = { mode = "private_google_access" }
+
+  validation {
+    condition     = contains(["private_google_access", "none"], var.gcs_connectivity.mode)
+    error_message = "gcs_connectivity.mode must be one of: private_google_access, none. (psc_google_apis is not yet implemented.)"
+  }
+}
