@@ -483,7 +483,7 @@ describe("editConfig state", () => {
             snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
         });
 
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default")?.label).toContain("kafka: default");
+        expect(cleanLabel(findNode(state.nodes, "edit:kafkaClusterConfiguration.default"))).toBe("default");
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")).toMatchObject({
             valueKind: "union",
             value: "unset",
@@ -511,9 +511,9 @@ describe("editConfig state", () => {
             valueKind: "object",
             presence: "optional",
         });
-        expect(findNode(state.nodes, "edit:traffic.proxies.capture")?.label).toContain("capture proxy: capture");
-        expect(findNode(state.nodes, "edit:traffic.s3Sources.archive")?.label).toContain("S3 captured traffic source: archive");
-        expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
+        expect(cleanLabel(findNode(state.nodes, "edit:traffic.proxies.capture"))).toBe("capture");
+        expect(cleanLabel(findNode(state.nodes, "edit:traffic.s3Sources.archive"))).toBe("archive");
+        expect(cleanLabel(findNode(state.nodes, "edit:traffic.replayers.replay"))).toBe("replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")?.label).toContain("+ Add snapshot migration");
         expect(findNode(state.nodes, "edit:traffic.proxies.capture.source")?.inputHint).toMatchObject({

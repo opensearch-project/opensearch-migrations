@@ -40,12 +40,28 @@ def make_resource(plural='snapshotmigrations', name='test', phase='Running',
     )
 
 
+def section_by_name(sections, name):
+    return next(section for section in sections if section.name == name)
+
+
+def group_by_plural(sections, plural):
+    for section in sections:
+        for group in section.groups:
+            if group.plural == plural:
+                return group
+    raise AssertionError(f"Missing group for plural {plural}")
+
+
 # --- _build_tree_from_raw ---
 
 class TestBuildTreeFromRaw:
     def test_empty_input_returns_empty_sections(self):
         sections = _build_tree_from_raw({})
-        assert len(sections) == 2  # Snapshot Migration, Live Traffic Migration
+        assert [section.name for section in sections] == [
+            'Workflow Configuration',
+            'Snapshot Migration',
+            'Live Traffic Migration',
+        ]
         for s in sections:
             for g in s.groups:
                 assert g.resources == []
@@ -53,9 +69,9 @@ class TestBuildTreeFromRaw:
     def test_snapshot_placed_in_correct_section(self):
         raw = {'datasnapshots': [make_cr('datasnapshots', 'my-snap', 'Completed')]}
         sections = _build_tree_from_raw(raw)
-        snapshot_section = sections[0]
+        snapshot_section = section_by_name(sections, 'Snapshot Migration')
         assert snapshot_section.name == 'Snapshot Migration'
-        snap_group = snapshot_section.groups[0]
+        snap_group = group_by_plural(sections, 'datasnapshots')
         assert snap_group.display_name == 'Snapshot'
         assert len(snap_group.resources) == 1
         assert snap_group.resources[0].name == 'my-snap'
@@ -67,7 +83,7 @@ class TestBuildTreeFromRaw:
             make_cr('trafficreplays', 'replay-b', 'Pending'),
         ]}
         sections = _build_tree_from_raw(raw)
-        replay_group = sections[1].groups[2]  # Live Traffic → Replay
+        replay_group = group_by_plural(sections, 'trafficreplays')
         assert len(replay_group.resources) == 2
 
     def test_depends_on_parsed(self):
@@ -76,7 +92,7 @@ class TestBuildTreeFromRaw:
                     depends_on=['my-snap'])
         ]}
         sections = _build_tree_from_raw(raw)
-        resource = sections[0].groups[1].resources[0]
+        resource = group_by_plural(sections, 'snapshotmigrations').resources[0]
         assert resource.depends_on == ['my-snap']
 
     def test_missing_status_defaults_to_unknown(self):
@@ -85,7 +101,7 @@ class TestBuildTreeFromRaw:
             'spec': {},
         }]}
         sections = _build_tree_from_raw(raw)
-        resource = sections[0].groups[0].resources[0]
+        resource = group_by_plural(sections, 'datasnapshots').resources[0]
         assert resource.phase == 'Unknown'
 
 
@@ -194,7 +210,7 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, pending_resolved_config=pending)
 
-        replay_group = sections[1].groups[2]
+        replay_group = group_by_plural(sections, 'trafficreplays')
         assert len(replay_group.resources) == 1
         resource = replay_group.resources[0]
         assert resource.name == 'replay-new'
@@ -224,7 +240,7 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, pending_resolved_config=pending)
 
-        resource = sections[1].groups[2].resources[0]
+        resource = group_by_plural(sections, 'trafficreplays').resources[0]
         assert format_config_diff_fields(resource) == [
             'speedupFactor: deployed=<absent> | pending=<absent> | to-submit=2'
         ]
@@ -243,13 +259,13 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, pending_resolved_config=pending)
 
-        resource = sections[1].groups[2].resources[0]
+        resource = group_by_plural(sections, 'trafficreplays').resources[0]
         assert format_config_diff_fields(resource) == []
         assert resource_config_change_summary(sections) == {'pending': 0, 'to_submit': 1, 'resources': 1}
 
     def test_adds_partial_loose_resource_and_clears_not_configured_placeholder(self):
         sections = _build_tree_from_raw({})
-        capture_group = sections[1].groups[0]
+        capture_group = group_by_plural(sections, 'captureproxies')
         capture_group.not_configured = True
         pending = {'resources': [{
             'kind': 'CaptureProxy',
@@ -330,7 +346,7 @@ class TestConfigOverlays:
 
         config_section = sections[0]
         assert config_section.name == 'Workflow Configuration'
-        source_group = config_section.groups[0]
+        source_group = group_by_plural(sections, 'sourceconfigs')
         resource = source_group.resources[0]
         assert resource.name == 'legacy'
         assert resource.plural == 'sourceconfigs'
@@ -356,7 +372,7 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, deployed_console_config=deployed_console)
 
-        source_group = sections[0].groups[0]
+        source_group = group_by_plural(sections, 'sourceconfigs')
         resource = source_group.resources[0]
         assert resource.phase == 'Deployed Config'
         assert resource.config_presence == {'deployed': True}
@@ -385,7 +401,7 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, deployed_console_config=deployed_console)
 
-        resource = sections[0].groups[0].resources[0]
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
         assert resource.virtual_adoption['status'] == 'error'
         assert format_virtual_adoption(resource)[0] == 'Adoption: error (1 deployed, 1 error)'
 
@@ -565,9 +581,8 @@ class TestMarkNotConfiguredGroups:
         ]
         mark_not_configured_groups(sections, filtered_tree)
         # kafkaclusters and captureproxies should be marked
-        live_section = sections[1]
-        capture_group = next(g for g in live_section.groups if g.plural == 'captureproxies')
-        kafka_group = next(g for g in live_section.groups if g.plural == 'kafkaclusters')
+        capture_group = group_by_plural(sections, 'captureproxies')
+        kafka_group = group_by_plural(sections, 'kafkaclusters')
         assert capture_group.not_configured is True
         assert kafka_group.not_configured is True
 
@@ -575,8 +590,7 @@ class TestMarkNotConfiguredGroups:
         sections = _build_tree_from_raw({})
         filtered_tree = [{'display_name': 'createKafka', 'phase': 'Running'}]
         mark_not_configured_groups(sections, filtered_tree)
-        live_section = sections[1]
-        kafka_group = next(g for g in live_section.groups if g.plural == 'kafkaclusters')
+        kafka_group = group_by_plural(sections, 'kafkaclusters')
         assert kafka_group.not_configured is False
 
     def test_empty_filtered_tree_no_op(self):

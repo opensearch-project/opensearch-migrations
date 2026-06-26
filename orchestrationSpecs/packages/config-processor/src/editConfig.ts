@@ -423,7 +423,7 @@ function kafkaClusterNode(name: string, value: any): EditNode {
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
-        label: `kafka: ${name}`,
+        label: name,
         valueKind: "object",
         description: KAFKA_CLUSTER_DESCRIPTION,
         status: "ok",
@@ -510,7 +510,7 @@ function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode 
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
-        label: `capture proxy: ${name}`,
+        label: name,
         valueKind: "object",
         description: CAPTURE_DESCRIPTION,
         status: "ok",
@@ -530,7 +530,7 @@ function s3CapturedTrafficSourceNode(name: string, value: any, ctx: EditContext)
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
-        label: `S3 captured traffic source: ${name}`,
+        label: name,
         valueKind: "object",
         description: S3_CAPTURED_TRAFFIC_DESCRIPTION,
         status: "ok",
@@ -550,7 +550,7 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
-        label: `traffic replay: ${name}`,
+        label: name,
         valueKind: "object",
         description: REPLAYER_DESCRIPTION,
         status: "ok",
@@ -673,7 +673,7 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
-        label: `${kind}: ${name}`,
+        label: name,
         valueKind: "object",
         description: kind === "source" ? SOURCE_CLUSTER_DESCRIPTION : TARGET_CLUSTER_DESCRIPTION,
         status: "ok",

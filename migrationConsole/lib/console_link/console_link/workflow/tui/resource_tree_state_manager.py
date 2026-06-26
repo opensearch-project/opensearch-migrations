@@ -6,12 +6,13 @@ from textual.widgets._tree import TreeNode, Tree
 
 from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
-    PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
+    PHASE_SYMBOLS, DISPLAY_PHASES,
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step, resource_visible_in_config_mode,
     format_resource_diagnostics, format_virtual_adoption,
 )
+from console_link.workflow.manage_tree_schema import group_plurals_for
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 
@@ -173,10 +174,7 @@ class ResourceTreeStateManager:
 
     def _update_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
         """Diff resources within a group."""
-        group_plurals = next(
-            (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
-            [group.plural]
-        )
+        group_plurals = group_plurals_for(group.plural)
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         sorted_resources = sorted(
             self._visible_resources(group),
@@ -226,10 +224,7 @@ class ResourceTreeStateManager:
 
     def _add_group_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
         """Add sorted resources to a group node."""
-        group_plurals = next(
-            (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
-            [group.plural]
-        )
+        group_plurals = group_plurals_for(group.plural)
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
             if not self._resource_visible(resource):
@@ -456,10 +451,7 @@ class ResourceTreeStateManager:
             group_node.add("[dim](not configured)[/dim]", data=None)
             return
 
-        group_plurals = next(
-            (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
-            [group.plural]
-        )
+        group_plurals = group_plurals_for(group.plural)
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         for resource in sorted(self._visible_resources(group), key=lambda r: (plural_order.get(r.plural, 99), r.name)):
             self._add_resource(group_node, resource)

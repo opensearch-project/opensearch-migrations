@@ -9,24 +9,16 @@ from rich.markup import escape
 from rich.tree import Tree
 
 from .commands.crd_utils import list_migration_resources_full
+from .manage_tree_schema import (
+    RESOURCE_SECTIONS,
+    WORKFLOW_CONFIGURATION_SECTION,
+    display_name_for_plural,
+    group_plurals_for,
+)
 from .tree_utils import (
     get_node_input_parameter, get_step_rich_label, is_approval_node, get_node_phase,
 )
 
-
-# Sections and their resource groups
-# Each section contains (list of plurals, display name) tuples
-RESOURCE_SECTIONS = [
-    ('Snapshot Migration', [
-        (['datasnapshots'], 'Snapshot'),
-        (['snapshotmigrations'], 'Backfill'),
-    ]),
-    ('Live Traffic Migration', [
-        (['captureproxies'], 'Capture'),
-        (['kafkaclusters', 'capturedtraffics'], 'Buffer'),
-        (['trafficreplays'], 'Replay'),
-    ]),
-]
 
 PHASE_SYMBOLS = {
     'Ready': ('✓', 'green'),
@@ -437,10 +429,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
 def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNode) -> None:
     for section in sections:
         for group in section.groups:
-            group_plurals = next(
-                (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
-                [group.plural]
-            )
+            group_plurals = group_plurals_for(group.plural)
             if resource.plural in group_plurals:
                 if resource.plural == 'capturedtraffics':
                     parent_name = resource.spec.get('kafkaClusterName') or _pending_field_value(
@@ -455,17 +444,12 @@ def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNod
                 group.not_configured = False
                 group.resources.append(resource)
                 return
-    display_names = {
-        'sourceconfigs': 'Sources',
-        'targetconfigs': 'Targets',
-        'kafkaconfigs': 'Kafka Clients',
-    }
-    display_name = display_names.get(resource.plural)
+    display_name = display_name_for_plural(resource.plural)
     if not display_name:
         return
-    section = next((item for item in sections if item.name == 'Workflow Configuration'), None)
+    section = next((item for item in sections if item.name == WORKFLOW_CONFIGURATION_SECTION), None)
     if section is None:
-        section = ResourceSection(name='Workflow Configuration', groups=[])
+        section = ResourceSection(name=WORKFLOW_CONFIGURATION_SECTION, groups=[])
         sections.insert(0, section)
     group = next((item for item in section.groups if item.plural == resource.plural), None)
     if group is None:
@@ -865,10 +849,7 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
         group_node.add("[dim](not configured)[/dim]")
         return
 
-    group_plurals = next(
-        (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
-        [group.plural]
-    )
+    group_plurals = group_plurals_for(group.plural)
     plural_order = {p: i for i, p in enumerate(group_plurals)}
     for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
         _render_resource(group_node, resource, show_live_status)

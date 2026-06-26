@@ -55,6 +55,7 @@ from ..resource_tree import (
     apply_config_overlays,
     resource_config_change_summary,
 )
+from ..manage_tree_schema import EDIT_ID_BY_TREE_ID
 from ..commands.show import read_managed_output
 from ..tree_utils import is_approval_node
 
@@ -1458,19 +1459,7 @@ class WorkflowTreeApp(App):
         edit_state: Dict[str, Any],
     ) -> Dict[str, bool]:
         mapped: Dict[str, bool] = {}
-        fixed_map = {
-            "section:Workflow Configuration": "edit:workflowConfiguration",
-            "section:Snapshot Migration": "edit:snapshotMigration",
-            "section:Live Traffic Migration": "edit:traffic",
-            "group:Kafka Clients": "edit:kafkaClusterConfiguration",
-            "group:Sources": "edit:sourceClusters",
-            "group:Targets": "edit:targetClusters",
-            "group:Backfill": "edit:snapshotMigrationConfigs",
-            "group:Capture": "edit:traffic.proxies",
-            "group:Buffer": "edit:traffic.s3Sources",
-            "group:Replay": "edit:traffic.replayers",
-        }
-        for source_id, target_id in fixed_map.items():
+        for source_id, target_id in EDIT_ID_BY_TREE_ID.items():
             if source_id in resource_state:
                 mapped[target_id] = resource_state[source_id]
 

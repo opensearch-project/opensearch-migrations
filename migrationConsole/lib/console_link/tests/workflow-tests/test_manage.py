@@ -514,7 +514,7 @@ def edit_state_with_missing_basic_auth():
             {
                 "id": "edit:sourceClusters",
                 "path": ["sourceClusters"],
-                "label": "[REQ 1] Source Clusters",
+                "label": "[REQ 1] Sources",
                 "valueKind": "record",
                 "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
                 "status": "required",
@@ -523,7 +523,7 @@ def edit_state_with_missing_basic_auth():
                     {
                         "id": "edit:sourceClusters.legacy",
                         "path": ["sourceClusters", "legacy"],
-                        "label": "[REQ 1] source: legacy",
+                        "label": "[REQ 1] legacy",
                         "valueKind": "object",
                         "description": "Connection and snapshot configuration for a source cluster.",
                         "status": "required",
@@ -599,10 +599,10 @@ def edit_state_with_no_auth():
     source = state["nodes"][0]
     legacy = source["children"][0]
     auth = legacy["children"][1]
-    source["label"] = "[OK] Source Clusters"
+    source["label"] = "[OK] Sources"
     source["status"] = "ok"
     source["statusCounts"] = {}
-    legacy["label"] = "[OK] source: legacy"
+    legacy["label"] = "[OK] legacy"
     legacy["status"] = "ok"
     legacy["statusCounts"] = {}
     auth["label"] = "[OK] authConfig: < none >"
@@ -649,10 +649,10 @@ def edit_state_with_basic_auth_secret(secret_name="source-creds"):
     legacy = source["children"][0]
     auth = legacy["children"][1]
     secret = auth["children"][0]
-    source["label"] = "[OK] Source Clusters"
+    source["label"] = "[OK] Sources"
     source["status"] = "ok"
     source["statusCounts"] = {}
-    legacy["label"] = "[OK] source: legacy"
+    legacy["label"] = "[OK] legacy"
     legacy["status"] = "ok"
     legacy["statusCounts"] = {}
     auth["label"] = "[OK] authConfig: < basic >"
@@ -694,7 +694,7 @@ def edit_state_with_proxy_logging_config(config_map_name=""):
                             {
                                 "id": "edit:traffic.proxies.cap",
                                 "path": ["traffic", "proxies", "cap"],
-                                "label": "[REQ 1] capture proxy: cap" if missing else "[OK] capture proxy: cap",
+                                "label": "[REQ 1] cap" if missing else "[OK] cap",
                                 "valueKind": "object",
                                 "description": "Capture proxy.",
                                 "status": "required" if missing else "ok",
@@ -858,7 +858,7 @@ def edit_state_with_editable_source_fields():
             {
                 "id": "edit:sourceClusters",
                 "path": ["sourceClusters"],
-                "label": "[CHG 1] Source Clusters",
+                "label": "[CHG 1] Sources",
                 "valueKind": "record",
                 "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
                 "status": "changed",
@@ -867,7 +867,7 @@ def edit_state_with_editable_source_fields():
                     {
                         "id": "edit:sourceClusters.legacy",
                         "path": ["sourceClusters", "legacy"],
-                        "label": "[CHG 1] source: legacy",
+                        "label": "[CHG 1] legacy",
                         "valueKind": "object",
                         "description": "Connection and snapshot configuration for a source cluster.",
                         "status": "changed",
@@ -1013,7 +1013,7 @@ def edit_state_with_kafka_override_leaf():
                     {
                         "id": "edit:kafkaClusterConfiguration.kafka",
                         "path": ["kafkaClusterConfiguration", "kafka"],
-                        "label": "[OK] kafka: kafka",
+                        "label": "[OK] kafka",
                         "valueKind": "object",
                         "description": "Kafka cluster configuration.",
                         "status": "ok",
@@ -1063,7 +1063,7 @@ def edit_state_with_unset_kafka_override_children():
                     {
                         "id": "edit:kafkaClusterConfiguration.kafka",
                         "path": ["kafkaClusterConfiguration", "kafka"],
-                        "label": "kafka: kafka",
+                        "label": "kafka",
                         "valueKind": "object",
                         "description": "Kafka cluster configuration.",
                         "status": "ok",
@@ -1166,7 +1166,7 @@ def edit_state_with_workflow_config_kafka():
                             {
                                 "id": "edit:kafkaClusterConfiguration.kafka",
                                 "path": ["kafkaClusterConfiguration", "kafka"],
-                                "label": "kafka: kafka",
+                                "label": "kafka",
                                 "valueKind": "object",
                                 "description": "Kafka cluster configuration.",
                                 "status": "ok",
@@ -1205,7 +1205,7 @@ def edit_state_with_field_visibility():
             {
                 "id": "edit:sourceClusters",
                 "path": ["sourceClusters"],
-                "label": "[REQ 1] Source Clusters",
+                "label": "[REQ 1] Sources",
                 "valueKind": "record",
                 "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
                 "status": "required",
@@ -1214,7 +1214,7 @@ def edit_state_with_field_visibility():
                     {
                         "id": "edit:sourceClusters.legacy",
                         "path": ["sourceClusters", "legacy"],
-                        "label": "[REQ 1] source: legacy",
+                        "label": "[REQ 1] legacy",
                         "valueKind": "object",
                         "description": "Connection and snapshot configuration for a source cluster.",
                         "status": "required",
@@ -1815,7 +1815,7 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            assert "Source Clusters [REQ 1]" in get_clean_text_label(tree.root.children[0])
+            assert "Sources [REQ 1]" in get_clean_text_label(tree.root.children[0])
             assert "yellow" in get_label_style(tree.root.children[0])
 
             app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
@@ -2934,7 +2934,7 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
             source_node = tree.root.children[0]
-            assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
+            assert "Sources [1 change]" in get_clean_text_label(source_node)
             assert get_label_style(source_node) == ""
             assert not source_node.is_expanded
 
@@ -3036,7 +3036,7 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_console_sna
             endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
             assert source_node is not None
             assert endpoint_node is not None
-            assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
+            assert "Sources [1 change]" in get_clean_text_label(source_node)
             assert (
                 "endpoint: deployed/workflow=https://old.example.com:9200 | "
                 "pending=https://new.example.com:9200 [1 change]"
