@@ -4,7 +4,7 @@ Provisions GCP infrastructure for the OpenSearch Migration Assistant.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6 (native `terraform test` is used for validation)
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated with `gcloud auth application-default login`
 - GCP project with billing enabled
 - Required APIs enabled:
