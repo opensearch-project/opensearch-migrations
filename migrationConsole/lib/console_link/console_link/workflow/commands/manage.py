@@ -14,7 +14,7 @@ from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completi
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, WaiterInterface
-from ..tui.workflow_manage_app import WorkflowTreeApp
+from ..tui.workflow_manage_app import WorkflowTreeApp, reset_terminal_mouse_reporting
 
 
 logger = logging.getLogger(__name__)
@@ -113,3 +113,5 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+    finally:
+        reset_terminal_mouse_reporting(sys.stdout)

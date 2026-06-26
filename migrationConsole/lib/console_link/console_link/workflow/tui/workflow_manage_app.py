@@ -70,8 +70,23 @@ PATCH_OUTPUT_STEPS = {
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
 }
 ENABLE_MOUSE_SEQUENCES = "\x1b[?1000h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
-DISABLE_MOUSE_SEQUENCES = "\x1b[?1000l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1016l"
+DISABLE_MOUSE_SEQUENCES = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1016l"
 DISABLE_MOUSE_PIXELS_SEQUENCE = "\x1b[?1016l"
+
+
+def reset_terminal_mouse_reporting(output=None) -> None:
+    """Best-effort terminal guard for leaked mouse reporting modes."""
+    target = output or sys.stdout
+    write = getattr(target, "write", None)
+    if not callable(write):
+        return
+    try:
+        write(DISABLE_MOUSE_SEQUENCES)
+        flush = getattr(target, "flush", None)
+        if callable(flush):
+            flush()
+    except Exception:
+        logger.debug("Failed to reset terminal mouse reporting", exc_info=True)
 
 
 class WorkflowTreeApp(App):
@@ -163,7 +178,13 @@ class WorkflowTreeApp(App):
 
     def on_unmount(self) -> None:
         self.is_exiting = True
-        self._set_mouse_input_enabled(True, notify=False, update_bindings=False)
+        try:
+            self.capture_mouse(None)
+        except Exception:
+            pass
+        reset_terminal_mouse_reporting(getattr(self, "_driver", None))
+        self._mouse_input_enabled = False
+        self._mouse_pixels_was_enabled = False
         try:
             self._workflow_waiter.reset()
         except Exception:

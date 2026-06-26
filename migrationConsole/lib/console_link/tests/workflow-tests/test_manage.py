@@ -18,6 +18,7 @@ from console_link.workflow.tui.workflow_manage_app import (
     copy_to_clipboard,
     PHASE_SUCCEEDED,
     PHASE_RUNNING,
+    reset_terminal_mouse_reporting,
 )
 from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
 from console_link.workflow.tui.config_edit_exit_modal import ConfigEditExitModal
@@ -1476,6 +1477,28 @@ def test_mouse_reporting_falls_back_to_raw_escape_sequences():
 
     assert driver.writes == [DISABLE_MOUSE_SEQUENCES, ENABLE_MOUSE_SEQUENCES]
     assert driver.flushes == 2
+
+
+def test_terminal_mouse_reporting_reset_writes_raw_disable_sequences():
+    """The command shutdown guard always sends terminal mouse modes off."""
+
+    class FakeOutput:
+        def __init__(self):
+            self.writes = []
+            self.flushes = 0
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            self.flushes += 1
+
+    output = FakeOutput()
+    reset_terminal_mouse_reporting(output)
+
+    assert output.writes == [DISABLE_MOUSE_SEQUENCES]
+    assert output.flushes == 1
+    assert "\x1b[?1002l" in DISABLE_MOUSE_SEQUENCES
 
 
 def test_mouse_reporting_private_disable_also_releases_pixel_mode():
