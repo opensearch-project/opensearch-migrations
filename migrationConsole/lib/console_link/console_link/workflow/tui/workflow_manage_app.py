@@ -971,13 +971,14 @@ class WorkflowTreeApp(App):
         self.notify(f"Config edit unavailable: {error}", severity="error")
 
     def _handle_config_edit_session(self, session, snapshots: Optional[Dict[str, Any]] = None) -> None:
-        edit_state = self._enrich_config_edit_state(
-            getattr(session, "edit_state", None) or session["edit_state"],
-            snapshots,
-        )
         raw_yaml = getattr(session, "raw_yaml", None)
         if raw_yaml is None:
             raw_yaml = session.get("raw_yaml", "")
+        edit_state = self._enrich_config_edit_state(
+            getattr(session, "edit_state", None) or session["edit_state"],
+            snapshots,
+            self._parse_config_yaml(raw_yaml),
+        )
         logger.info(
             "Loaded workflow config edit state: raw_yaml_bytes=%s nodes=%s validation_valid=%s",
             len(raw_yaml or ""),
@@ -995,6 +996,7 @@ class WorkflowTreeApp(App):
         self._edit_status_mode = EDIT_MODE_ALL
         self._edit_show_optional = True
         self._edit_show_expert = False
+        expansion_state = self._edit_expansion_state_for_render(edit_state)
         render_edit_state(
             self.tree_root_widget,
             edit_state,
@@ -1002,6 +1004,7 @@ class WorkflowTreeApp(App):
             self._edit_status_mode,
             self._edit_show_optional,
             self._edit_show_expert,
+            expansion_state=expansion_state,
         )
         help_panel = self.query_one("#edit-help", Static)
         help_panel.display = True
@@ -1013,6 +1016,7 @@ class WorkflowTreeApp(App):
         self,
         edit_state: Dict[str, Any],
         snapshots: Optional[Dict[str, Any]],
+        pending_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Attach deployed/current/pending value states to TS edit nodes."""
         if not snapshots:
@@ -1024,8 +1028,9 @@ class WorkflowTreeApp(App):
 
         enriched = copy.deepcopy(edit_state)
         current_config = submitted_config
+        pending_config = pending_config or {}
         for node in enriched.get("nodes") or []:
-            self._enrich_config_edit_node(node, submitted_config, current_config)
+            self._enrich_config_edit_node(node, submitted_config, current_config, pending_config)
         return enriched
 
     def _enrich_config_edit_node(
@@ -1033,17 +1038,18 @@ class WorkflowTreeApp(App):
         node: Dict[str, Any],
         deployed_config: Dict[str, Any],
         current_config: Dict[str, Any],
+        pending_config: Dict[str, Any],
     ) -> int:
         changed_count = 0
         for child in node.get("children") or []:
-            changed_count += self._enrich_config_edit_node(child, deployed_config, current_config)
+            changed_count += self._enrich_config_edit_node(child, deployed_config, current_config, pending_config)
 
         own_changed = 0
         if self._edit_node_supports_value_states(node):
             states = copy.deepcopy(node.get("states") or {})
             deployed = self._workflow_config_value_state(deployed_config, node)
             current = self._workflow_config_value_state(current_config, node)
-            pending = self._pending_edit_node_value_state(node)
+            pending = self._workflow_config_value_state(pending_config, node)
 
             submitted_changed = not self._same_value_state(deployed, current)
             pending_changed = not self._same_value_state(current, pending)
@@ -1067,6 +1073,9 @@ class WorkflowTreeApp(App):
 
     @classmethod
     def _workflow_config_value_state(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
+        mode_value = cls._single_key_union_mode_value(workflow_config, node)
+        if mode_value is not None:
+            return {"present": True, "value": mode_value}
         found, value = cls._lookup_workflow_config_path(workflow_config, node.get("path") or [])
         if not found:
             return {"present": False}
@@ -1074,14 +1083,23 @@ class WorkflowTreeApp(App):
             value = cls._union_variant_value(value, node)
         return {"present": True, "value": value}
 
-    @staticmethod
-    def _pending_edit_node_value_state(node: Dict[str, Any]) -> Dict[str, Any]:
-        if "value" not in node:
-            return {"present": False}
-        value = node.get("value")
-        if value == "" and (node.get("status") == "required" or node.get("required")):
-            return {"present": False}
-        return {"present": value is not None, "value": value}
+    @classmethod
+    def _single_key_union_mode_value(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> Optional[Any]:
+        path = node.get("path") or []
+        if node.get("valueKind") != "union" or not path or path[-1] != "mode":
+            return None
+        found, value = cls._lookup_workflow_config_path(workflow_config, path[:-1])
+        if not found or not isinstance(value, dict):
+            return None
+        variant_values = [
+            variant.get("value")
+            for variant in (node.get("variants") or [])
+            if variant.get("value") is not None
+        ]
+        for variant_value in variant_values:
+            if variant_value in value:
+                return variant_value
+        return None
 
     @staticmethod
     def _edit_state_payload(state: Dict[str, Any], changed: bool) -> Dict[str, Any]:
@@ -1150,6 +1168,17 @@ class WorkflowTreeApp(App):
         if len(value) == 1:
             return next(iter(value.keys()))
         return value
+
+    @staticmethod
+    def _parse_config_yaml(raw_yaml: Optional[str]) -> Dict[str, Any]:
+        if not raw_yaml or not raw_yaml.strip():
+            return {}
+        try:
+            parsed = yaml.safe_load(raw_yaml) or {}
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            logger.debug("Failed to parse pending config YAML for edit value overlay", exc_info=True)
+            return {}
 
     def action_exit_config_edit(self) -> None:
         """Leave edit mode and restore the live resource tree."""
@@ -1229,6 +1258,67 @@ class WorkflowTreeApp(App):
     def _expand_changed_resource_nodes(self, sections) -> None:
         if self._resource_view and hasattr(self._tree_state, "expand_config_differences"):
             self._tree_state.expand_config_differences(sections)
+
+    def _edit_expansion_state_for_render(self, edit_state: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+        current = self._tree_expansion_state()
+        if any(node_id.startswith("edit:") for node_id in current):
+            return current
+        return self._resource_expansion_state_for_edit(current, edit_state or self._edit_state or {})
+
+    def _tree_expansion_state(self) -> Dict[str, bool]:
+        state = {}
+        stack = list(self.tree_root_widget.root.children)
+        while stack:
+            node = stack.pop()
+            data = node.data if isinstance(node.data, dict) else {}
+            node_id = data.get("id")
+            if node_id and node.children:
+                state[str(node_id)] = bool(node.is_expanded)
+            stack.extend(node.children)
+        return state
+
+    def _resource_expansion_state_for_edit(
+        self,
+        resource_state: Dict[str, bool],
+        edit_state: Dict[str, Any],
+    ) -> Dict[str, bool]:
+        mapped: Dict[str, bool] = {}
+        fixed_map = {
+            "section:Workflow Configuration": "edit:workflowConfiguration",
+            "section:Snapshot Migration": "edit:snapshotMigration",
+            "section:Live Traffic Migration": "edit:traffic",
+            "group:Kafka Clients": "edit:kafkaClusterConfiguration",
+            "group:Sources": "edit:sourceClusters",
+            "group:Targets": "edit:targetClusters",
+            "group:Backfill": "edit:snapshotMigrationConfigs",
+            "group:Capture": "edit:traffic.proxies",
+            "group:Buffer": "edit:traffic.s3Sources",
+            "group:Replay": "edit:traffic.replayers",
+        }
+        for source_id, target_id in fixed_map.items():
+            if source_id in resource_state:
+                mapped[target_id] = resource_state[source_id]
+
+        edit_ids_by_resource_name = self._edit_ids_by_resource_name(edit_state)
+        for source_id, expanded in resource_state.items():
+            if not source_id.startswith(RESOURCE_ID_PREFIX):
+                continue
+            name = source_id[len(RESOURCE_ID_PREFIX):]
+            for edit_id in edit_ids_by_resource_name.get(name, []):
+                mapped.setdefault(edit_id, expanded)
+        return mapped
+
+    @staticmethod
+    def _edit_ids_by_resource_name(edit_state: Dict[str, Any]) -> Dict[str, list[str]]:
+        result: Dict[str, list[str]] = {}
+        stack = list(edit_state.get("nodes") or [])
+        while stack:
+            node = stack.pop()
+            path = node.get("path") or []
+            if len(path) == 2 and path[0] in {"kafkaClusterConfiguration", "sourceClusters", "targetClusters"}:
+                result.setdefault(str(path[1]), []).append(str(node.get("id")))
+            stack.extend(node.get("children") or [])
+        return result
 
     def _collapsed_tree_ids(self) -> set[str]:
         collapsed = set()
@@ -1330,6 +1420,7 @@ class WorkflowTreeApp(App):
             self._edit_status_mode,
             self._edit_show_optional,
             self._edit_show_expert,
+            expansion_state=self._edit_expansion_state_for_render(self._edit_state),
         )
         if selected_id:
             self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
@@ -2056,13 +2147,14 @@ class WorkflowTreeApp(App):
         selected_id: Optional[str],
         auto_edit_required_child: bool = False,
     ) -> None:
-        edit_state = self._enrich_config_edit_state(
-            getattr(result, "edit_state", None) or result["edit_state"],
-            self._last_resource_config_snapshots,
-        )
         raw_yaml = getattr(result, "raw_yaml", None)
         if raw_yaml is None:
             raw_yaml = result.get("raw_yaml") or result.get("yaml", "")
+        edit_state = self._enrich_config_edit_state(
+            getattr(result, "edit_state", None) or result["edit_state"],
+            self._last_resource_config_snapshots,
+            self._parse_config_yaml(raw_yaml),
+        )
         auto_edit_id = (
             self._first_required_edit_target_id(edit_state, selected_id)
             if auto_edit_required_child and selected_id else None
@@ -2070,6 +2162,7 @@ class WorkflowTreeApp(App):
         self._edit_state = edit_state
         self._edit_draft_yaml = raw_yaml
         self._edit_dirty = True
+        expansion_state = self._edit_expansion_state_for_render(edit_state)
         render_edit_state(
             self.tree_root_widget,
             edit_state,
@@ -2077,6 +2170,7 @@ class WorkflowTreeApp(App):
             self._edit_status_mode,
             self._edit_show_optional,
             self._edit_show_expert,
+            expansion_state=expansion_state,
         )
         if auto_edit_id:
             self.call_after_refresh(lambda: self._select_and_edit_config_node(auto_edit_id))

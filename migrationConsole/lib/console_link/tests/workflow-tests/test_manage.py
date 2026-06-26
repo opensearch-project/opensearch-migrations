@@ -1140,6 +1140,63 @@ def edit_state_with_unset_kafka_override_children():
     }
 
 
+def edit_state_with_workflow_config_kafka():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:workflowConfiguration",
+                "path": ["workflowConfiguration"],
+                "label": "Workflow Configuration",
+                "valueKind": "object",
+                "description": "Shared workflow configuration.",
+                "status": "ok",
+                "statusCounts": {},
+                "children": [
+                    {
+                        "id": "edit:kafkaClusterConfiguration",
+                        "path": ["kafkaClusterConfiguration"],
+                        "label": "Kafka Clients",
+                        "valueKind": "record",
+                        "description": "Kafka cluster configurations.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "children": [
+                            {
+                                "id": "edit:kafkaClusterConfiguration.kafka",
+                                "path": ["kafkaClusterConfiguration", "kafka"],
+                                "label": "kafka: kafka",
+                                "valueKind": "object",
+                                "description": "Kafka cluster configuration.",
+                                "status": "ok",
+                                "statusCounts": {},
+                                "children": [
+                                    {
+                                        "id": "edit:kafkaClusterConfiguration.kafka.mode",
+                                        "path": ["kafkaClusterConfiguration", "kafka", "mode"],
+                                        "label": "mode: < autoCreate >",
+                                        "value": "autoCreate",
+                                        "valueKind": "union",
+                                        "description": "Kafka cluster mode.",
+                                        "status": "ok",
+                                        "statusCounts": {},
+                                        "variants": [{"label": "autoCreate", "value": "autoCreate"}],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_field_visibility():
     return {
         "formatVersion": 1,
@@ -2877,7 +2934,7 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
             source_node = tree.root.children[0]
-            assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
+            assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
             assert "green" in get_label_style(source_node)
             assert not source_node.is_expanded
 
@@ -2921,7 +2978,12 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(m
     class FakeConfigEditService:
         def load_edit_session(self):
             return {
-                "raw_yaml": "initial-yaml",
+                "raw_yaml": (
+                    "sourceClusters:\n"
+                    "  legacy:\n"
+                    "    endpoint: https://new.example.com:9200\n"
+                    "    allowInsecure: false\n"
+                ),
                 "edit_state": state,
             }
 
@@ -2971,12 +3033,170 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_snapshots(m
             endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
             assert source_node is not None
             assert endpoint_node is not None
-            assert "Source Clusters [CHG 1]" in get_clean_text_label(source_node)
+            assert "Source Clusters [1 change]" in get_clean_text_label(source_node)
             assert not source_node.is_expanded
             assert (
                 "endpoint: deployed/workflow=https://old.example.com:9200 | "
-                "pending=https://new.example.com:9200 [CHG 1]"
+                "pending=https://new.example.com:9200 [1 change]"
             ) == get_clean_text_label(endpoint_node)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_preserves_matching_resource_expansion(mock_workflow_with_two_pods):
+    """Entering edit mode maps the resource-view expansion shape onto matching edit nodes."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "kafkaClusterConfiguration:\n  kafka:\n    autoCreate: {}\n",
+                "edit_state": edit_state_with_workflow_config_kafka(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+    sections = [
+        ResourceSection(
+            name="Workflow Configuration",
+            groups=[
+                ResourceGroup(
+                    plural="kafkaconfigs",
+                    display_name="Kafka Clients",
+                    resources=[
+                        ResourceNode(
+                            name="kafka",
+                            plural="kafkaconfigs",
+                            phase="Pending Config",
+                            depends_on=[],
+                            spec={"type": "autoCreate"},
+                            status={},
+                        )
+                    ],
+                ),
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:kafka") is not None)
+            find_tree_node_by_id(tree.root, "resource:kafka").collapse()
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            assert find_tree_node_by_id(tree.root, "edit:workflowConfiguration").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration").is_expanded
+            assert not find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_does_not_count_absent_kafka_override_scaffolding(mock_workflow_with_two_pods):
+    """Schema children under absent optional Kafka override blocks are not pending edits."""
+
+    state = edit_state_with_unset_kafka_override_children()
+    replicas = (
+        state["nodes"][0]["children"][0]["children"][0]["children"][0]["children"][0]
+    )
+    replicas["value"] = 3
+    replicas["label"] = "replicas: 3"
+    kafka_override = state["nodes"][0]["children"][0]["children"][0]["children"][0]
+    kafka_override["children"].append({
+        "id": (
+            "edit:kafkaClusterConfiguration.kafka.autoCreate"
+            ".clusterSpecOverrides.kafka.gcLoggingEnabled"
+        ),
+        "path": [
+            "kafkaClusterConfiguration",
+            "kafka",
+            "autoCreate",
+            "clusterSpecOverrides",
+            "kafka",
+            "gcLoggingEnabled",
+        ],
+        "label": "gcLoggingEnabled: false",
+        "value": False,
+        "valueKind": "boolean",
+        "presence": "optional",
+        "description": "GC logging.",
+        "status": "ok",
+        "statusCounts": {},
+    })
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "kafkaClusterConfiguration:\n  kafka:\n    autoCreate: {}\n",
+                "edit_state": state,
+            }
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted": {
+                    "workflowConfig": {
+                        "kafkaClusterConfiguration": {
+                            "kafka": {"autoCreate": {}},
+                        },
+                    },
+                },
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            assert "change" not in get_clean_text_label(
+                find_tree_node_by_id(
+                    tree.root,
+                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                )
+            )
+            assert "change" not in get_clean_text_label(
+                find_tree_node_by_id(
+                    tree.root,
+                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka",
+                )
+            )
 
 
 @pytest.mark.asyncio
@@ -3413,7 +3633,7 @@ async def test_resource_view_preserves_collapsed_config_changes_after_edit_exit_
                     and not find_tree_node_by_id(tree.root, "resource:default").is_expanded
                 ),
             )
-            assert "[CHG 1]" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))
+            assert "[1 change]" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))
 
 
 @pytest.mark.asyncio

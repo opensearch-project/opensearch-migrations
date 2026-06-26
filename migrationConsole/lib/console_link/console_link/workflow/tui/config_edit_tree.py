@@ -81,6 +81,7 @@ def render_edit_state(
     status_mode: str = EDIT_MODE_ALL,
     show_optional: bool = True,
     show_expert: bool = False,
+    expansion_state: Optional[Dict[str, bool]] = None,
 ) -> None:
     """Render a generic TS-provided EditStateV1 into the manage tree."""
     tree.clear()
@@ -88,7 +89,7 @@ def render_edit_state(
     tree.show_root = False
     tree.root.data = {"id": "config-edit-root", "type": EDIT_NODE_TYPE}
     for node in edit_state.get("nodes", []):
-        _add_edit_node(tree.root, node, value_mode, status_mode, show_optional, show_expert)
+        _add_edit_node(tree.root, node, value_mode, status_mode, show_optional, show_expert, expansion_state)
     tree.root.expand()
 
 
@@ -129,6 +130,7 @@ def _add_edit_node(
     status_mode: str,
     show_optional: bool,
     show_expert: bool,
+    expansion_state: Optional[Dict[str, bool]] = None,
 ) -> Optional[TreeNode]:
     visible_children = [
         child for child in edit_node.get("children") or []
@@ -145,8 +147,13 @@ def _add_edit_node(
         },
     )
     for child in visible_children:
-        _add_edit_node(node, child, value_mode, status_mode, show_optional, show_expert)
-    if _should_expand_edit_node(edit_node, status_mode, visible_children):
+        _add_edit_node(node, child, value_mode, status_mode, show_optional, show_expert, expansion_state)
+    node_id = edit_node.get("id")
+    if node_id in (expansion_state or {}):
+        should_expand = bool((expansion_state or {}).get(node_id))
+    else:
+        should_expand = _should_expand_edit_node(edit_node, status_mode, visible_children)
+    if should_expand:
         node.expand()
     else:
         node.collapse()
@@ -317,6 +324,8 @@ def _badge(status: str, counts: Dict[str, Any]) -> str:
         return ""
     if count is None:
         count = 1
+    if status == "changed":
+        return f"[{count} change{'s' if count != 1 else ''}]"
     return f"[{name} {count}]"
 
 

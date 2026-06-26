@@ -331,7 +331,7 @@ class ResourceTreeStateManager:
         if not count:
             return ''
         style = 'green' if summary.get('pending_submit') else 'grey50'
-        return f' [{style}][CHG {count}][/{style}]'
+        return f' [{style}][{count} change{"s" if count != 1 else ""}][/{style}]'
 
     @staticmethod
     def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict]:
