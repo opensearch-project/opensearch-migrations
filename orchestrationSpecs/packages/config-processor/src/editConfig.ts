@@ -1109,20 +1109,17 @@ function pathStartsWith(path: string[], prefix: string[]): boolean {
 }
 
 function findPathAncestors(nodes: EditNode[], path: string[]): EditNode[] {
-    const ancestors: EditNode[] = [];
-    const stack = [...nodes];
-    while (stack.length) {
-        const node = stack.pop()!;
+    const visit = (node: EditNode): EditNode[] => {
         if (node.valueKind === "command") {
-            continue;
+            return [];
         }
-        if (pathStartsWith(path, node.path)) {
-            ancestors.push(node);
-            stack.push(...(node.children ?? []));
+        const childAncestors = (node.children ?? []).flatMap(child => visit(child));
+        if (pathStartsWith(path, node.path) || childAncestors.length) {
+            return [node, ...childAncestors];
         }
-    }
-    ancestors.sort((left, right) => left.path.length - right.path.length);
-    return ancestors;
+        return [];
+    };
+    return nodes.flatMap(node => visit(node));
 }
 
 function addDiagnosticIfNew(node: EditNode, diagnostic: EditDiagnostic): boolean {
@@ -1597,7 +1594,7 @@ function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: "Kafka Clusters",
+        label: "Kafka Clients",
         valueKind: "record",
         description: KAFKA_CLUSTERS_DESCRIPTION,
         inputHint: KAFKA_RECORD_HINT,
@@ -1843,9 +1840,9 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
             finalizeNode({
                 id: "edit:traffic.s3Sources",
                 path: ["traffic", "s3Sources"],
-                label: "S3 Captured Traffic",
+                label: "Buffer",
                 valueKind: "record",
-                description: "Pre-recorded traffic archives loaded from S3 into Kafka for replay.",
+                description: "Captured traffic buffers and pre-recorded traffic archives loaded into Kafka for replay.",
                 inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
                 status: "ok",
                 children: s3SourceChildren,
@@ -1889,7 +1886,7 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: "Snapshot Migrations",
+        label: "Backfill",
         valueKind: "array",
         description: "List of snapshot-based migration configurations.",
         inputHint: SNAPSHOT_MIGRATION_ARRAY_HINT,
@@ -1962,13 +1959,49 @@ function clusterGroupNode(kind: "source" | "target", config: Record<string, any>
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: kind === "source" ? "Source Clusters" : "Target Clusters",
+        label: kind === "source" ? "Sources" : "Targets",
         valueKind: "record",
         description: kind === "source" ? SOURCE_CLUSTERS_DESCRIPTION : TARGET_CLUSTERS_DESCRIPTION,
         inputHint: kind === "source" ? SOURCE_RECORD_HINT : TARGET_RECORD_HINT,
         status: "ok",
         children,
     });
+}
+
+function sectionNode(id: string, label: string, description: string, children: EditNode[]): EditNode {
+    return finalizeNode({
+        id,
+        path: [id.replace(/^edit:/, "")],
+        label,
+        valueKind: "object",
+        description,
+        status: "ok",
+        children,
+    });
+}
+
+function workflowConfigurationNode(config: any): EditNode {
+    return sectionNode(
+        "edit:workflowConfiguration",
+        "Workflow Configuration",
+        "Shared workflow configuration used by migration resources.",
+        [
+            kafkaGroupNode(config?.kafkaClusterConfiguration),
+            clusterGroupNode("source", config?.sourceClusters),
+            clusterGroupNode("target", config?.targetClusters),
+        ],
+    );
+}
+
+function snapshotMigrationSectionNode(config: any, ctx: EditContext): EditNode {
+    return sectionNode(
+        "edit:snapshotMigration",
+        "Snapshot Migration",
+        "Snapshot and backfill migration configuration.",
+        [
+            snapshotMigrationGroupNode(config?.snapshotMigrationConfigs, ctx),
+        ],
+    );
 }
 
 function diagnosticPath(path: PropertyKey[]): string[] {
@@ -2028,11 +2061,9 @@ export function validationForConfig(config: unknown): EditStateV1["validation"] 
 export function buildEditStateFromObject(config: any): EditStateV1 {
     const ctx = buildEditContext(config);
     const nodes = [
-        clusterGroupNode("source", config?.sourceClusters),
-        clusterGroupNode("target", config?.targetClusters),
-        kafkaGroupNode(config?.kafkaClusterConfiguration),
+        workflowConfigurationNode(config),
+        snapshotMigrationSectionNode(config, ctx),
         trafficGroupNode(config?.traffic, ctx),
-        snapshotMigrationGroupNode(config?.snapshotMigrationConfigs, ctx),
     ];
     const validation = validationForConfig(config);
     applyValidationDiagnostics(nodes, validation.diagnostics ?? []);

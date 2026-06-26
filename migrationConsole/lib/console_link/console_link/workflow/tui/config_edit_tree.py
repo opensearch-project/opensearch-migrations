@@ -85,6 +85,7 @@ def render_edit_state(
     """Render a generic TS-provided EditStateV1 into the manage tree."""
     tree.clear()
     tree.root.set_label(Text("Workflow Config Edit"))
+    tree.show_root = False
     tree.root.data = {"id": "config-edit-root", "type": EDIT_NODE_TYPE}
     for node in edit_state.get("nodes", []):
         _add_edit_node(tree.root, node, value_mode, status_mode, show_optional, show_expert)

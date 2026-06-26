@@ -39,12 +39,14 @@ class ResourceTreeStateManager:
     def reset(self, root_label: str) -> None:
         self.tree.clear()
         self.tree.root.label = root_label
+        self.tree.show_root = True
 
     def rebuild(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
         """Full rebuild of the resource tree from pre-built sections."""
         self._workflow_data = workflow_data or {}
         self.tree.clear()
         self.tree.root.label = "[bold]Migration Status[/]"
+        self.tree.show_root = False
         self._populate_tree(sections)
         self.tree.root.expand_all()
 
@@ -107,6 +109,7 @@ class ResourceTreeStateManager:
         """Incremental update preserving cursor, scroll, and expand/collapse state."""
         self._workflow_data = workflow_data or {}
         self.tree.root.label = "[bold]Migration Status[/]"
+        self.tree.show_root = False
         self._update_sections(self.tree.root, sections)
 
     # --- Incremental diffing ---

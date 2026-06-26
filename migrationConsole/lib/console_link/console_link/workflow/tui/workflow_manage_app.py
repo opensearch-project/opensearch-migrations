@@ -12,6 +12,7 @@ import time
 from typing import Any, Dict, Optional
 
 import yaml
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.screen import ModalScreen
@@ -125,6 +126,7 @@ class WorkflowTreeApp(App):
         self._resource_view = resource_view
         self._config_edit_service = config_edit_service
         self._edit_mode = False
+        self._edit_loading = False
         self._edit_state: Optional[Dict] = None
         self._edit_draft_yaml: Optional[str] = None
         self._edit_dirty = False
@@ -276,6 +278,10 @@ class WorkflowTreeApp(App):
 
     def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
         """Handle pre-built resource sections on the main thread."""
+        if self._edit_mode or self._edit_loading:
+            logger.info("Ignoring resource tree refresh while config edit is active or loading")
+            return
+        self.title = "Migration Status"
         if not sections:
             self._tree_state.reset(LOADING_ROOT_LABEL)
             self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
@@ -307,6 +313,7 @@ class WorkflowTreeApp(App):
 
     def _handle_workflow_data(self, new_data: Dict, force_reload: bool = False) -> None:
         """The Conductor routes data to the relevant managers."""
+        self.title = "Workflow Steps"
         if not new_data:
             self._tree_state.reset(LOADING_ROOT_LABEL)
             self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
@@ -890,7 +897,19 @@ class WorkflowTreeApp(App):
         if not self._resource_view:
             self.notify("Config edit is available from resource view", severity="warning")
             return
+        self._show_config_edit_loading()
+        logger.info("Loading workflow config edit state")
         self.run_worker(self._load_config_edit_state_worker, thread=True, name="load_config_edit_state")
+
+    def _show_config_edit_loading(self) -> None:
+        self._edit_loading = True
+        self.title = "Workflow Config Edit"
+        tree = self.tree_root_widget
+        tree.clear()
+        tree.root.set_label(Text("Loading Workflow Config Edit..."))
+        tree.root.data = {"id": "config-edit-loading"}
+        tree.root.expand()
+        tree.show_root = True
 
     def _config_edit_service_or_default(self):
         if self._config_edit_service is not None:
@@ -911,13 +930,34 @@ class WorkflowTreeApp(App):
             self.call_from_thread(self._handle_config_edit_session, session)
         except Exception as e:
             logger.exception("Failed to load config edit state")
-            self.call_from_thread(self.notify, f"Config edit unavailable: {e}", severity="error")
+            self.call_from_thread(self._handle_config_edit_load_failed, e)
+
+    def _handle_config_edit_load_failed(self, error: Exception) -> None:
+        self._edit_loading = False
+        self.title = "Workflow Config Edit"
+        tree = self.tree_root_widget
+        tree.clear()
+        tree.root.set_label(Text("Workflow Config Edit unavailable"))
+        tree.root.data = {"id": "config-edit-unavailable"}
+        tree.root.expand()
+        tree.show_root = True
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+        self.notify(f"Config edit unavailable: {error}", severity="error")
 
     def _handle_config_edit_session(self, session) -> None:
         edit_state = getattr(session, "edit_state", None) or session["edit_state"]
         raw_yaml = getattr(session, "raw_yaml", None)
         if raw_yaml is None:
             raw_yaml = session.get("raw_yaml", "")
+        logger.info(
+            "Loaded workflow config edit state: raw_yaml_bytes=%s nodes=%s validation_valid=%s",
+            len(raw_yaml or ""),
+            len(edit_state.get("nodes") or []),
+            (edit_state.get("validation") or {}).get("valid"),
+        )
+        self._edit_loading = False
+        self.title = "Workflow Config Edit"
         self._edit_mode = True
         self._edit_state = edit_state
         self._edit_draft_yaml = raw_yaml
@@ -1000,6 +1040,7 @@ class WorkflowTreeApp(App):
     def _discard_config_edit(self) -> None:
         """Discard the current edit session and restore the live resource tree."""
         self._edit_mode = False
+        self._edit_loading = False
         self._edit_state = None
         self._edit_draft_yaml = None
         self._edit_dirty = False

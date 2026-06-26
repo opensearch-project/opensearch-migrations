@@ -18,6 +18,10 @@ function findNode(nodes: EditNode[], id: string): EditNode | undefined {
     return undefined;
 }
 
+function cleanLabel(node: EditNode | undefined): string {
+    return (node?.label ?? "").replace(/^\[[^\]]+\]\s*/, "");
+}
+
 function withUnifiedSchemaFixture<T>(callback: () => T): T {
     const tempDir = mkdtempSync(path.join(tmpdir(), "edit-config-unified-schema-"));
     const schemaPath = path.join(tempDir, "workflowMigration.schema.json");
@@ -38,6 +42,37 @@ function withUnifiedSchemaFixture<T>(callback: () => T): T {
 }
 
 describe("editConfig state", () => {
+    it("uses the same top-level grouping as the resource view", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                source: {endpoint: "https://source.example.com:9200", version: "ES 7.10"},
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            snapshotMigrationConfigs: [{fromSource: "source", toTarget: "target"}],
+        });
+
+        expect(state.nodes.map(cleanLabel)).toEqual([
+            "Workflow Configuration",
+            "Snapshot Migration",
+            "Live Traffic Migration",
+        ]);
+        expect((state.nodes[0].children ?? []).map(cleanLabel)).toEqual([
+            "Kafka Clients",
+            "Sources",
+            "Targets",
+        ]);
+        expect((state.nodes[1].children ?? []).map(cleanLabel)).toEqual(["Backfill"]);
+        expect((state.nodes[2].children ?? []).map(cleanLabel)).toEqual([
+            "Capture",
+            "Buffer",
+            "Replay",
+        ]);
+    });
+
     it("shows missing basic auth children as required on the branch and parent", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {

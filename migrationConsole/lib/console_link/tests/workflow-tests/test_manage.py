@@ -1246,6 +1246,39 @@ def resource_sections_for_manage_tests():
     ]
 
 
+@pytest.mark.asyncio
+async def test_config_edit_loading_ignores_late_resource_refresh(mock_workflow_with_two_pods):
+    """A resource refresh finishing after edit starts must not repaint Migration Status."""
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_two_pods)
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+    )
+    app.action_refresh_workflow = lambda: None
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        await pilot.pause()
+
+        app._show_config_edit_loading()
+        app._handle_resource_data(resource_sections_for_manage_tests(), {}, force_reload=True)
+
+        assert get_clean_text_label(tree.root) == "Loading Workflow Config Edit..."
+        assert tree.show_root is True
+        assert app.title == "Workflow Config Edit"
+
+
 def resource_sections_with_kafka_config():
     return [
         ResourceSection(
