@@ -42,6 +42,8 @@ spec:
             default: "LoadBalancer"
           - name: otelTraceCollectorEndpoint
             default: ""
+          - name: clientAuthPemBase64
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -56,6 +58,7 @@ spec:
             TUPLE_S3_ENDPOINT='{{inputs.parameters.tupleS3Endpoint}}'
             TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
+            CLIENT_AUTH_PEM=$(echo "{{inputs.parameters.clientAuthPemBase64}}" | base64 -d)
 
             # Overlay CDC traffic config with capture enabled from start.
             CDC_CONFIG=$(echo "$BASE_CONFIG" | jq \
@@ -65,6 +68,7 @@ spec:
               --arg tupleS3Endpoint "$TUPLE_S3_ENDPOINT" \
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
+              --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               '. + {
               "kafkaClusterConfiguration": {
                 "default": {
@@ -78,9 +82,18 @@ spec:
                     "proxyConfig": ({
                       "listenPort": 9201,
                       "noCapture": false,
+                      "podReplicas": 2,
                       "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
                     } + (if $otelTraceCollectorEndpoint != "" then {
                       "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
+                    } else {} end)
+                    + (if $clientAuthPem != "" then {
+                      "tls": {
+                        "mode": "certManager",
+                        "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
+                        "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
+                        "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                      }
                     } else {} end))
                   }
                 },
@@ -132,6 +145,8 @@ spec:
             default: "LoadBalancer"
           - name: otelTraceCollectorEndpoint
             default: ""
+          - name: clientAuthPemBase64
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -141,9 +156,11 @@ spec:
             set -e
             BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
+            CLIENT_AUTH_PEM=$(echo "{{inputs.parameters.clientAuthPemBase64}}" | base64 -d)
 
             PROXY_ONLY_CONFIG=$(echo "$BASE_CONFIG" | jq \
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
+              --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               '
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
               | .snapshotMigrationConfigs = []
@@ -160,9 +177,18 @@ spec:
                       "proxyConfig": ({
                         "listenPort": 9201,
                         "noCapture": false,
+                        "podReplicas": 2,
                         "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
+                      } else {} end)
+                      + (if $clientAuthPem != "" then {
+                        "tls": {
+                          "mode": "certManager",
+                          "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
+                          "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
+                          "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                        }
                       } else {} end))
                     }
                   },
