@@ -163,10 +163,12 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
+export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
+
 export const S3_REPO_CONFIG = z.object({
     awsRegion: z.string()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
-    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+    endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
     s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
@@ -1177,7 +1179,7 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
         .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
     awsRegion: z.string()
         .describe("AWS region of the S3 bucket holding the export."),
-    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+    endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1383,7 +1385,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
     metadataMigrationConfig: USER_METADATA_OPTIONS.optional()
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),

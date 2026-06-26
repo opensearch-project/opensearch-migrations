@@ -243,7 +243,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               },
                               "endpoint": {
                                 "type": "string",
-                                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                 "default": "",
                                 "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
                               },
@@ -1366,7 +1366,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "endpoint": {
                             "type": "string",
-                            "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                            "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                             "default": ""
                           },
                           "s3RepoPathUri": {
@@ -2251,7 +2251,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "endpoint": {
                           "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": ""
                         },
                         "s3RepoPathUri": {
@@ -3226,7 +3226,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "endpoint": {
                       "type": "string",
-                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                       "default": "",
                       "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
                     },
@@ -3515,7 +3515,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "properties": {
                   "label": {
                     "type": "string",
-                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
                     "default": "",
                     "description": "Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."
                   },
@@ -5151,7 +5151,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "endpoint": {
                 "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                 "default": "",
                 "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
               },
