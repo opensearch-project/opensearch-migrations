@@ -311,6 +311,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     checksumForReplayer: z.string(),
     workloadIdentityChecksum: z.string(),
     resourceUid: z.string(),
+    resourceName: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -355,6 +356,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
     migrationLabel: z.string(),
     configChecksum: z.string(),
+    resourceName: z.string(),
 });
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({

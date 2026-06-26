@@ -2309,6 +2309,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "resourceUid": {
                   "type": "string"
+                },
+                "resourceName": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -2323,7 +2326,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "configChecksum",
                 "checksumForReplayer",
                 "workloadIdentityChecksum",
-                "resourceUid"
+                "resourceUid",
+                "resourceName"
               ]
             },
             "default": []
@@ -2363,13 +2367,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "configChecksum": {
                         "type": "string"
+                      },
+                      "resourceName": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
                       "snapshot",
                       "migrationLabel",
-                      "configChecksum"
+                      "configChecksum",
+                      "resourceName"
                     ]
                   }
                 },

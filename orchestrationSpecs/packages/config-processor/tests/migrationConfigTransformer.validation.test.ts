@@ -1,5 +1,6 @@
 import { MigrationConfigTransformer, normalizeUserConfig } from '../src/migrationConfigTransformer';
 import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
+import { crdName } from '../src/crdNaming';
 
 describe('MigrationConfigTransformer validation', () => {
     let transformer: MigrationConfigTransformer;
@@ -148,6 +149,25 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('stamps a sanitized resourceName on each snapshot migration', async () => {
+        const result = await transformer.processFromObject(baseConfig);
+        const m = result.snapshotMigrations[0];
+        // The resolved CRD name is computed once here so downstream consumers
+        // (initializer CR name, uid-map key, workflow resourceName) all match.
+        expect(m.resourceName).toBe(crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel));
+        expect(m.resourceName).toBe('source1-target1-snap1-migration-0');
+    });
+
+    it('stamps resourceName on each dependsOnSnapshotMigrations entry', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.replayers.replay1.dependsOnSnapshotMigrations = [
+            { source: 'source1', snapshot: 'snap1' }
+        ];
+        const result = await transformer.processFromObject(config);
+        const dep = result.trafficReplays[0].dependsOnSnapshotMigrations[0];
+        expect(dep.resourceName).toBe('source1-target1-snap1-migration-0');
     });
 
     it('should reject s3 traffic sources that reference an unknown kafka cluster', () => {

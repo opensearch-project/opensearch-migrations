@@ -21,6 +21,7 @@ import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
 
@@ -732,6 +733,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             return {
                 ...m,
                 snapshotConfigChecksum,
+                resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
                     sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
@@ -789,6 +791,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                             ...dep,
                             migrationLabel: m.migrationLabel,
                             configChecksum: m.checksumForReplayer,
+                            resourceName: m.resourceName,
                         }))
                 ),
             });
