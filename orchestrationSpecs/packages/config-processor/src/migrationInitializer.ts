@@ -647,12 +647,9 @@ export class MigrationInitializer {
 
         // SnapshotMigration resources from snapshotMigrations
         for (const migration of (workflows.snapshotMigrations ?? []) as SnapshotMigrationConfig[]) {
-            const snapshotMigrationName = this.makeCrdName(
-                migration.sourceLabel,
-                migration.targetConfig.label,
-                migration.label,
-                migration.migrationLabel
-            );
+            // The transformer already computed and sanitized this name; reuse it so the
+            // CR name, the uid-map key, and the workflow's resourceName are guaranteed equal.
+            const snapshotMigrationName = migration.resourceName;
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
@@ -783,12 +780,7 @@ export class MigrationInitializer {
                 name: this.makeCrdName(snapshot.sourceConfig.label, item.label),
             })));
         const snapshotMigrationResources = snapshotMigrations.map(migration => ({
-            name: this.makeCrdName(
-                migration.sourceLabel,
-                migration.targetConfig.label,
-                migration.label,
-                migration.migrationLabel
-            )
+            name: migration.resourceName
         }));
         const shellVar = (prefix: string, name: string) =>
             `${prefix}_${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
