@@ -70,6 +70,12 @@ terraform destroy -var="project=my-project"
 | `workload_identity_namespace` | `migration` | Kubernetes namespace containing Migration Assistant service accounts |
 | `additional_workload_identity_service_accounts` | `["migration-console-access-role","argo-workflow-executor","argo-workflow-controller","argo-controller"]` | Additional Kubernetes service accounts that can use the GCP migration service account |
 
+## Private networking
+
+To run a migration with no public-internet data path (private source/target connectivity,
+private Cloud Storage access, and a private control plane), see
+[Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md).
+
 ## Notes
 
 - Standard clusters use private nodes with Cloud NAT for outbound access.
