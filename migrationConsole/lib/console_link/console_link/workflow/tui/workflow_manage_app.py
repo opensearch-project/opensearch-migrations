@@ -1655,6 +1655,12 @@ class WorkflowTreeApp(App):
 
     @staticmethod
     def _is_removable_config_path(path: list[str]) -> bool:
+        if len(path) >= 2:
+            try:
+                if int(str(path[-1])) >= 0 and str(path[-1]).isdigit():
+                    return True
+            except ValueError:
+                pass
         if len(path) == 2 and path[0] in (
             "sourceClusters",
             "targetClusters",

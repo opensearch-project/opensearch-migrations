@@ -159,6 +159,8 @@ def _should_expand_edit_node(
 ) -> bool:
     if not visible_children:
         return False
+    if edit_node.get("collapsed"):
+        return False
     status, counts = _effective_status(edit_node, status_mode)
     if _has_attention_status(status, counts):
         return True

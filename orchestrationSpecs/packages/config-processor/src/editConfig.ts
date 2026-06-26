@@ -95,6 +95,7 @@ export interface EditNode {
     effectiveDefault?: EffectiveDefaultHint;
     validation?: EditNodeValidation;
     diagnostics?: EditDiagnostic[];
+    collapsed?: boolean;
     variants?: {
         label: string;
         value: unknown;
@@ -501,6 +502,34 @@ function jsonSchemaEnumValues(schema: JsonSchema | undefined): unknown[] {
     return Array.isArray(resolved?.enum) ? resolved.enum : [];
 }
 
+function defaultJsonValueForSchema(schema: JsonSchema | undefined): unknown {
+    const resolved = resolveJsonSchemaRef(schema);
+    if (!resolved) {
+        return {};
+    }
+    if (resolved.default !== undefined) {
+        return structuredClone(resolved.default);
+    }
+    const enumValues = jsonSchemaEnumValues(resolved);
+    if (enumValues.length === 1) {
+        return enumValues[0];
+    }
+    if (enumValues.length > 1) {
+        return "";
+    }
+    const type = jsonSchemaType(resolved);
+    if (type === "array") {
+        return [];
+    }
+    if (type === "object" || jsonSchemaBranches(resolved).length > 0) {
+        return {};
+    }
+    if (type === "boolean") {
+        return false;
+    }
+    return "";
+}
+
 function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | undefined {
     const resolved = resolveJsonSchemaRef(schema);
     const pattern = typeof resolved?.pattern === "string" ? resolved.pattern : undefined;
@@ -626,6 +655,37 @@ function jsonSchemaObjectChildren(
         ));
 }
 
+function jsonSchemaArrayChildren(
+    rootPath: string[],
+    schema: JsonSchema,
+    value: unknown,
+): EditNode[] {
+    const arrayValue = Array.isArray(value) ? value : [];
+    const itemSchema = resolveJsonSchemaRef(schema.items);
+    return [
+        ...arrayValue.map((itemValue, index) => jsonSchemaArrayItemNode(rootPath, itemSchema, itemValue, index)),
+        addRow(rootPath, "item", "Create a new array item in pending workflow YAML.", false),
+    ];
+}
+
+function jsonSchemaArrayItemNode(
+    rootPath: string[],
+    schema: JsonSchema | undefined,
+    value: unknown,
+    index: number,
+): EditNode {
+    const key = String(index);
+    const node = schema
+        ? jsonSchemaFieldNode(rootPath, key, schema, {[key]: value}, true)
+        : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
+    const label = stripBadge(node.label);
+    const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
+    node.label = `item ${index + 1}${valueSuffix}`;
+    node.collapsed = true;
+    refreshNodeBadge(node);
+    return node;
+}
+
 function jsonSchemaFieldNode(
     rootPath: string[],
     key: string,
@@ -658,7 +718,7 @@ function jsonSchemaFieldNode(
     const containerKind = jsonSchemaType(resolved) === "array" ? "array" : "object";
     const childNodes = containerKind === "object"
         ? jsonSchemaObjectChildren(path, resolved, value)
-        : [];
+        : jsonSchemaArrayChildren(path, resolved, value);
     if (childNodes.length || value === undefined || value === null || isPlainObject(value) || Array.isArray(value)) {
         return finalizeNode({
             id: `edit:${path.join(".")}`,
@@ -2335,6 +2395,17 @@ function addAtPath(config: any, path: string[], value: unknown): void {
             config.snapshotMigrationConfigs = [];
         }
         config.snapshotMigrationConfigs.push(defaultConfigForPath(path));
+        return;
+    }
+
+    const arraySchema = resolveJsonSchemaRef(jsonSchemaForConfigPath(path));
+    if (jsonSchemaType(arraySchema) === "array") {
+        const {parent, key} = parentAtPath(config, path);
+        if (!Array.isArray(parent[key])) {
+            parent[key] = [];
+        }
+        const itemSchema = resolveJsonSchemaRef(arraySchema?.items);
+        parent[key].push(defaultJsonValueForSchema(itemSchema));
         return;
     }
 

@@ -917,6 +917,63 @@ def edit_state_with_editable_source_fields():
     }
 
 
+def edit_state_with_array_items():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:roles",
+                "path": ["roles"],
+                "label": "[OK] roles: 1 item",
+                "valueKind": "array",
+                "description": "Kafka node roles.",
+                "status": "ok",
+                "statusCounts": {},
+                "children": [
+                    {
+                        "id": "edit:roles.0",
+                        "path": ["roles", "0"],
+                        "label": "[OK] item 1: configured",
+                        "valueKind": "object",
+                        "description": "Kafka node role.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "collapsed": True,
+                        "children": [
+                            {
+                                "id": "edit:roles.0.name",
+                                "path": ["roles", "0", "name"],
+                                "label": "[OK] name: broker",
+                                "value": "broker",
+                                "valueKind": "scalar",
+                                "presence": "required",
+                                "description": "Role name.",
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                        ],
+                    },
+                    {
+                        "id": "edit:roles:add",
+                        "path": ["roles"],
+                        "label": "[OK] + Add item",
+                        "valueKind": "command",
+                        "description": "Create a new array item in pending workflow YAML.",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "command": {"requiresName": False},
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_kafka_override_leaf():
     return {
         "formatVersion": 1,
@@ -3414,6 +3471,100 @@ async def test_resource_view_edit_mode_add_row_bindings_do_not_offer_delete(mock
                     "op": "add",
                     "path": ["sourceClusters"],
                     "value": {"name": "new-source"},
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_workflow_with_two_pods):
+    """Schema array rows render existing items, expose add rows, and remove indexed items."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_array_items(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": f"updated-yaml-{len(self.apply_calls)}",
+                "edit_state": edit_state_with_array_items(),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:roles.0")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            item_node = find_tree_node_by_id(tree.root, "edit:roles.0")
+            assert item_node is not None
+            assert not item_node.is_expanded
+            assert binding_descriptions(app, "delete") == ["Remove"]
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert item_node.is_expanded
+
+            app._select_tree_node_by_id("edit:roles:add")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "a") == ["Add"]
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "add",
+                    "path": ["roles"],
+                    "value": {},
+                },
+            )
+
+            app._select_tree_node_by_id("edit:roles.0")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("delete")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("y")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml-1",
+                {
+                    "op": "removeConfig",
+                    "path": ["roles", "0"],
                 },
             )
 

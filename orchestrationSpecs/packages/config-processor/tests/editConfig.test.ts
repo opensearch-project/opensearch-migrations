@@ -517,6 +517,13 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.topicSpecOverrides.config.cleanup.policy")).toMatchObject({
             valueKind: "union",
         });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles")).toMatchObject({
+            valueKind: "array",
+            presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles:add")).toMatchObject({
+            valueKind: "command",
+        });
 
         const compactTopic = applyEditOperationToObject({
             kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
@@ -538,6 +545,51 @@ describe("editConfig state", () => {
             valueKind: "scalar",
             presence: "optional",
         });
+
+        const addedRole = applyEditOperationToObject({
+            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
+            value: {},
+        });
+        const roleItem = findNode(addedRole.editState.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles.0");
+        expect(roleItem).toMatchObject({
+            valueKind: "union",
+            status: "required",
+            collapsed: true,
+        });
+        expect(roleItem?.variants?.map(variant => variant.value)).toEqual(["broker", "controller"]);
+
+        const appendedRole = applyEditOperationToObject({
+            kafkaClusterConfiguration: {
+                kafka: {
+                    autoCreate: {
+                        nodePoolSpecOverrides: {roles: ["broker"]},
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
+            value: {},
+        });
+        expect(parse(appendedRole.yaml).kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual(["broker", ""]);
+
+        const setRole = applyEditOperationToObject(parse(addedRole.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
+            value: "broker",
+        });
+        expect(setRole.yaml).toContain("- broker");
+
+        const removedRole = applyEditOperationToObject(parse(setRole.yaml), {
+            op: "removeConfig",
+            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
+        });
+        expect(parse(removedRole.yaml).kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual([]);
     }));
 
     it("renders missing capture proxy options as visible required fields", () => {
