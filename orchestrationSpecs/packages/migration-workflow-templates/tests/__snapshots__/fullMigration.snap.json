@@ -1856,7 +1856,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=sprig.regexReplaceAll('[-.]+$', sprig.regexReplaceAll('^[-.]+', sprig.regexReplaceAll('-+', sprig.regexReplaceAll('[^a-z0-9.-]+', lower(item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']), '-'), '-'), ''), '')}}"
+                    "value": "{{=item['resourceName']}}"
                   },
                   {
                     "name": "configChecksum",
@@ -2478,7 +2478,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=sprig.regexReplaceAll('[-.]+$', sprig.regexReplaceAll('^[-.]+', sprig.regexReplaceAll('-+', sprig.regexReplaceAll('[^a-z0-9.-]+', lower(item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']), '-'), '-'), ''), '')}}"
+                    "value": "{{=item['resourceName']}}"
                   },
                   {
                     "name": "groupName_view",

@@ -89,26 +89,6 @@ function checksumNotDone(
     return expr.and(expr.literal(true), expr.not(expr.equals(actualChecksum, desiredChecksum)));
 }
 
-// Sanitize a string into a valid RFC-1123 subdomain segment used for k8s
-// CRD names. Mirrors makeCrdName() in config-processor/src/migrationInitializer.ts
-// and the jq `crdname()` helper used at workflow-submit time:
-//   1. lowercase
-//   2. replace any run of chars not in [a-z0-9.-] with a single "-"
-//   3. collapse runs of "-" to a single "-"
-//   4. strip leading "-" or "."
-//   5. strip trailing "-" or "."
-// Keeping these three sanitizers in lock-step is what binds workflow-built CRD
-// names (e.g. SnapshotMigration "source1-target1-global-state-snapshot-migration-0")
-// to the resourceUid lookup keys generated at init time.
-function sanitizeCrdName(s: BaseExpression<string>): BaseExpression<string, "complicatedExpression"> {
-    let out: BaseExpression<string> = expr.toLowerCase(s);
-    out = expr.regexReplaceAll("[^a-z0-9.-]+", "-", out);
-    out = expr.regexReplaceAll("-+", "-", out);
-    out = expr.regexReplaceAll("^[-.]+", "", out);
-    out = expr.regexReplaceAll("[-.]+$", "", out);
-    return out as BaseExpression<string, "complicatedExpression">;
-}
-
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
     parallelism: 100,
@@ -674,19 +654,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: sanitizeCrdName(expr.concat(
-                            expr.asString(expr.get(c.item, "source")),
-                            expr.literal("-"),
-                            expr.dig(
-                                expr.deserializeRecord(b.inputs.targetConfig),
-                                ["label"],
-                                ""
-                            ),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "snapshot")),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "migrationLabel"))
-                        )),
+                        resourceName: expr.asString(expr.get(c.item, "resourceName")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
                         checksumField: expr.literal("checksumForReplayer"),
                     });
@@ -944,19 +912,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: sanitizeCrdName(expr.concat(
-                        expr.get(c.item, "sourceLabel"),
-                        expr.literal("-"),
-                        expr.dig(
-                            expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                            ["label"],
-                            ""
-                        ),
-                        expr.literal("-"),
-                        expr.get(c.item, "label"),
-                        expr.literal("-"),
-                        expr.get(c.item, "migrationLabel")
-                    )),
+                    resourceName: expr.get(c.item, "resourceName"),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal(" → "),
