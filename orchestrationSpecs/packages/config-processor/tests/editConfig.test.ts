@@ -95,7 +95,7 @@ describe("editConfig state", () => {
         const secretName = findNode(state.nodes, "edit:sourceClusters.legacy.authConfig.basic.secretName");
 
         expect(source?.status).toBe("required");
-        expect(source?.label).toContain("[REQ 1]");
+        expect(source?.statusCounts?.required).toBe(1);
         expect(auth?.status).toBe("required");
         expect(auth?.label).toContain("authConfig: < basic >");
         expect(secretName?.status).toBe("required");
@@ -138,7 +138,7 @@ describe("editConfig state", () => {
         const auth = findNode(state.nodes, "edit:sourceClusters.legacy.authConfig");
 
         expect(auth?.status).toBe("ok");
-        expect(auth?.label).toContain("[OK] authConfig: < none >");
+        expect(auth?.label).toContain("authConfig: < none >");
         expect(auth?.children).toHaveLength(0);
     });
 
@@ -196,7 +196,7 @@ describe("editConfig state", () => {
 
         expect(state.validation.valid).toBe(false);
         expect(sourceClusters?.status).toBe("required");
-        expect(sourceClusters?.label).toContain("[REQ 1]");
+        expect(sourceClusters?.statusCounts?.required).toBe(1);
         expect(targetClusters?.status).toBe("required");
     });
 
@@ -667,9 +667,9 @@ describe("editConfig state", () => {
             expect(findNode(state.nodes, `edit:traffic.proxies.cap.proxyConfig.${key}`)).toBeDefined();
         }
         expect(proxy?.status).toBe("required");
-        expect(proxy?.label).toContain("[REQ 1]");
+        expect(proxy?.statusCounts?.required).toBe(1);
         expect(proxyConfig?.status).toBe("required");
-        expect(proxyConfig?.label).toContain("[REQ 1]");
+        expect(proxyConfig?.statusCounts?.required).toBe(1);
         expect(proxyConfig?.required).toBe(true);
         expect(proxyConfig?.presence).toBe("required");
         expect(listenPort?.status).toBe("required");
@@ -682,9 +682,9 @@ describe("editConfig state", () => {
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(kafkaTopic?.status).toBe("ok");
         expect(kafkaTopic?.label).toContain("kafkaTopic: <unset>");
-        expect(captureGroup?.label).toContain("[REQ 1]");
+        expect(captureGroup?.statusCounts?.required).toBe(1);
         expect(addProxy?.status).toBe("ok");
-        expect(addProxy?.label).toContain("[OK] + Add capture proxy");
+        expect(addProxy?.label).toContain("+ Add capture proxy");
     });
 
     it("does not require replay config when traffic capture is configured alone", () => {
@@ -705,9 +705,7 @@ describe("editConfig state", () => {
 
         expect(state.validation.valid).toBe(true);
         expect(traffic?.status).toBe("ok");
-        expect(traffic?.label).not.toContain("[REQ");
         expect(replayGroup?.status).toBe("ok");
-        expect(replayGroup?.label).not.toContain("[REQ");
         expect(addReplay?.status).toBe("ok");
     });
 

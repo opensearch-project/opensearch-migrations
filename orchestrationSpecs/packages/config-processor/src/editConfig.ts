@@ -1,11 +1,9 @@
 import {
     CLUSTER_CONFIG,
-    CLUSTER_VERSION_STRING,
     CAPTURE_CONFIG,
     EffectiveDefaultHint,
     ExternalRefHint,
     FieldMeta,
-    HTTP_ENDPOINT_PATTERN,
     HTTP_AUTH_BASIC,
     HTTP_AUTH_MTLS,
     HTTP_AUTH_SIGV4,
@@ -13,7 +11,6 @@ import {
     KAFKA_CLUSTER_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
-    OPTIONAL_HTTP_ENDPOINT_PATTERN,
     OVERALL_MIGRATION_CONFIG,
     PROXY_TLS_CLIENT_AUTH_CONFIG,
     PROXY_TLS_CONFIG,
@@ -171,20 +168,12 @@ const CAPTURE_DESCRIPTION = descriptionOf(CAPTURE_CONFIG);
 const REPLAYER_DESCRIPTION = descriptionOf(REPLAYER_CONFIG);
 const SNAPSHOT_MIGRATION_DESCRIPTION = descriptionOf(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG);
 const AUTH_DESCRIPTION = "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS.";
-const VERSION_INPUT_HINT = uiHintOf(CLUSTER_VERSION_STRING) ?? {
-    kind: "text" as const,
-    format: "cluster-version" as const,
-    pattern: "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\.[0-9]+)+$",
-    message: "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
-};
 const K8S_NAME_INPUT_HINT: EditInputHint = {
     kind: "text",
     format: "k8s-name",
     pattern: K8S_NAMING_PATTERN.source,
     message: "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
 };
-const SOURCE_ENDPOINT_HINT = uiHintAt(CLUSTER_CONFIG, ["endpoint"]) ?? textHint(OPTIONAL_HTTP_ENDPOINT_PATTERN, "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash.", "optional-http-endpoint");
-const TARGET_ENDPOINT_HINT = uiHintAt(TARGET_CLUSTER_CONFIG, ["endpoint"]) ?? textHint(HTTP_ENDPOINT_PATTERN, "Use an http:// or https:// endpoint with an optional port and trailing slash.", "http-endpoint");
 const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]) ?? K8S_NAME_INPUT_HINT;
 const BASIC_SECRET_EXTERNAL_REF = externalRefAt(HTTP_AUTH_BASIC, ["basic", "secretName"]);
 const MTLS_CLIENT_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_MTLS, ["mtls", "clientSecretName"]) ?? K8S_NAME_INPUT_HINT;
@@ -196,14 +185,7 @@ const PROXY_TLS_SECRET_NAME_HINT = uiHintAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["
 const PROXY_TLS_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_EXISTING_SECRET_SCHEMA, ["secretName"]);
 const PROXY_CLIENT_AUTH_CONSOLE_SECRET_HINT = uiHintAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]) ?? K8S_NAME_INPUT_HINT;
 const PROXY_CLIENT_AUTH_CONSOLE_SECRET_EXTERNAL_REF = externalRefAt(PROXY_TLS_CLIENT_AUTH_CONFIG, ["consoleClientSecretName"]);
-const CAPTURE_SOURCE_HINT = uiHintAt(CAPTURE_CONFIG, ["source"]);
-const CAPTURE_KAFKA_HINT = uiHintAt(CAPTURE_CONFIG, ["kafka"]);
-const CAPTURE_KAFKA_TOPIC_HINT = uiHintAt(CAPTURE_CONFIG, ["kafkaTopic"]) ?? K8S_NAME_INPUT_HINT;
-const REPLAYER_CAPTURED_TRAFFIC_HINT = uiHintAt(REPLAYER_CONFIG, ["fromCapturedTraffic"]);
-const REPLAYER_TARGET_HINT = uiHintAt(REPLAYER_CONFIG, ["toTarget"]);
 const S3_CAPTURED_TRAFFIC_DESCRIPTION = descriptionOf(S3_CAPTURED_TRAFFIC_SOURCE);
-const SNAPSHOT_SOURCE_HINT = uiHintAt(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, ["fromSource"]);
-const SNAPSHOT_TARGET_HINT = uiHintAt(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, ["toTarget"]);
 const KAFKA_RECORD_HINT = uiHintOf(KAFKA_CLUSTERS_MAP);
 const SOURCE_RECORD_HINT = uiHintOf(SOURCE_CLUSTERS_MAP);
 const TARGET_RECORD_HINT = uiHintOf(TARGET_CLUSTERS_MAP);
@@ -679,11 +661,10 @@ function jsonSchemaArrayItemNode(
     const node = schema
         ? jsonSchemaFieldNode(rootPath, key, schema, {[key]: value}, true)
         : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
-    const label = stripBadge(node.label);
+    const label = node.label;
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
     node.label = `item ${index + 1}${valueSuffix}`;
     node.collapsed = true;
-    refreshNodeBadge(node);
     return node;
 }
 
@@ -804,6 +785,24 @@ function schemaObjectChildren(
     return Object.entries(shape)
         .filter(([key]) => !excludedKeys.has(key))
         .map(([key, fieldSchema]) => schemaFieldNode(rootPath, key, fieldSchema, config));
+}
+
+function schemaFieldNodeFor(
+    parentSchema: any,
+    rootPath: string[],
+    key: string,
+    value: unknown,
+    referenceOptions?: EditInputHint["options"],
+): EditNode {
+    const fieldSchema = schemaShape(parentSchema)?.[key];
+    const config = isPlainObject(value) ? value : {};
+    const node = fieldSchema
+        ? schemaFieldNode(rootPath, key, fieldSchema, config)
+        : genericDisplayNode([...rootPath, key], key, config[key], "optional", false, "");
+    if (referenceOptions && node.inputHint) {
+        node.inputHint = referenceHint(node.inputHint, referenceOptions);
+    }
+    return node;
 }
 
 function singleKeyUnionMode(
@@ -1053,28 +1052,6 @@ function statusFromCounts(counts: StatusCounts): EditNodeStatus {
     return "ok";
 }
 
-function badge(status: EditNodeStatus, counts: StatusCounts = {}): string {
-    if (status === "ok") {
-        return "[OK]";
-    }
-    if (status === "required") {
-        return `[REQ ${counts.required ?? 1}]`;
-    }
-    if (status === "error") {
-        return `[ERR ${counts.errors ?? 1}]`;
-    }
-    if (status === "warning") {
-        return `[WARN ${counts.warnings ?? 1}]`;
-    }
-    if (status === "changed") {
-        return `[CHG ${counts.changed ?? 1}]`;
-    }
-    if (status === "gated") {
-        return `[GATED ${counts.gated ?? 1}]`;
-    }
-    return `[BLOCK ${counts.blocked ?? 1}]`;
-}
-
 function finalizeNode(node: EditNode): EditNode {
     const counts = emptyCounts();
     addCount(counts, node.status);
@@ -1088,16 +1065,7 @@ function finalizeNode(node: EditNode): EditNode {
     const derivedStatus = statusFromCounts(counts);
     node.status = highestStatus(node.status ?? "ok", derivedStatus);
     node.statusCounts = counts;
-    node.label = `${badge(node.status, counts)} ${node.label}`;
     return node;
-}
-
-function stripBadge(label: string): string {
-    return label.replace(/^\[[^\]]+\]\s*/, "");
-}
-
-function refreshNodeBadge(node: EditNode): void {
-    node.label = `${badge(node.status ?? "ok", node.statusCounts ?? {})} ${stripBadge(node.label)}`;
 }
 
 function samePath(left: unknown[] = [], right: unknown[] = []): boolean {
@@ -1167,7 +1135,6 @@ function applyValidationDiagnostics(nodes: EditNode[], diagnostics: EditDiagnost
                 addCount(node.statusCounts, severity);
             }
             node.status = highestStatus(node.status ?? "ok", severity);
-            refreshNodeBadge(node);
         }
     }
 }
@@ -1759,9 +1726,9 @@ function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode 
         description: CAPTURE_DESCRIPTION,
         status: "ok",
         children: [
-            scalarNode([...rootPath, "source"], "source", value?.source, "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.", true, referenceHint(CAPTURE_SOURCE_HINT, ctx.sourceOptions)),
-            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.", false, referenceHint(CAPTURE_KAFKA_HINT, ctx.kafkaOptions)),
-            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name for captured traffic. If empty, defaults to the proxy name.", false, CAPTURE_KAFKA_TOPIC_HINT),
+            schemaFieldNodeFor(CAPTURE_CONFIG, rootPath, "source", value, ctx.sourceOptions),
+            schemaFieldNodeFor(CAPTURE_CONFIG, rootPath, "kafka", value, ctx.kafkaOptions),
+            schemaFieldNodeFor(CAPTURE_CONFIG, rootPath, "kafkaTopic", value),
             captureProxyConfigNode([...rootPath, "proxyConfig"], value?.proxyConfig),
         ],
     });
@@ -1777,12 +1744,12 @@ function s3CapturedTrafficSourceNode(name: string, value: any, ctx: EditContext)
         description: S3_CAPTURED_TRAFFIC_DESCRIPTION,
         status: "ok",
         children: [
-            scalarNode([...rootPath, "s3Uri"], "s3Uri", value?.s3Uri, "S3 URI of a gzipped traffic export produced by kafkaExport.sh.", true),
-            scalarNode([...rootPath, "awsRegion"], "awsRegion", value?.awsRegion, "AWS region of the S3 bucket holding the export.", true),
-            scalarNode([...rootPath, "endpoint"], "endpoint", value?.endpoint ?? "", "Override the S3 endpoint URL.", false, SOURCE_ENDPOINT_HINT),
-            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration.", false, referenceHint(CAPTURE_KAFKA_HINT, ctx.kafkaOptions)),
-            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name.", false, CAPTURE_KAFKA_TOPIC_HINT),
-            scalarNode([...rootPath, "sourceLabel"], "sourceLabel", value?.sourceLabel, "Label of the source cluster this dump was originally captured from.", true),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "s3Uri", value),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "awsRegion", value),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "endpoint", value),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "kafka", value, ctx.kafkaOptions),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "kafkaTopic", value),
+            schemaFieldNodeFor(S3_CAPTURED_TRAFFIC_SOURCE, rootPath, "sourceLabel", value),
         ],
     });
 }
@@ -1797,8 +1764,8 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
         description: REPLAYER_DESCRIPTION,
         status: "ok",
         children: [
-            scalarNode([...rootPath, "fromCapturedTraffic"], "fromCapturedTraffic", value?.fromCapturedTraffic, "Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies or traffic.s3Sources.", true, referenceHint(REPLAYER_CAPTURED_TRAFFIC_HINT, ctx.capturedTrafficOptions)),
-            scalarNode([...rootPath, "toTarget"], "toTarget", value?.toTarget, "Name of the target cluster to replay traffic to. Must match a key in targetClusters.", true, referenceHint(REPLAYER_TARGET_HINT, ctx.targetOptions)),
+            schemaFieldNodeFor(REPLAYER_CONFIG, rootPath, "fromCapturedTraffic", value, ctx.capturedTrafficOptions),
+            schemaFieldNodeFor(REPLAYER_CONFIG, rootPath, "toTarget", value, ctx.targetOptions),
         ],
     });
 }
@@ -1873,8 +1840,8 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
         description: SNAPSHOT_MIGRATION_DESCRIPTION,
         status: "ok",
         children: [
-            scalarNode([...rootPath, "fromSource"], "fromSource", fromSource, "Label of the source cluster to migrate from. Must match a key in sourceClusters.", true, referenceHint(SNAPSHOT_SOURCE_HINT, ctx.sourceOptions)),
-            scalarNode([...rootPath, "toTarget"], "toTarget", toTarget, "Label of the target cluster to migrate to. Must match a key in targetClusters.", true, referenceHint(SNAPSHOT_TARGET_HINT, ctx.targetOptions)),
+            schemaFieldNodeFor(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, "fromSource", value, ctx.sourceOptions),
+            schemaFieldNodeFor(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, "toTarget", value, ctx.targetOptions),
         ],
     });
 }
@@ -1897,16 +1864,13 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
 
 function clusterNode(kind: "source" | "target", name: string, value: any): EditNode {
     const rootPath = [kind === "source" ? "sourceClusters" : "targetClusters", name];
+    const clusterSchema = kind === "source" ? SOURCE_CLUSTER_CONFIG : TARGET_CLUSTER_CONFIG;
     const children: EditNode[] = [
-        scalarNode([...rootPath, "endpoint"], "endpoint", value?.endpoint, kind === "target"
-            ? "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
-            : "HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy.",
-        kind === "target",
-        kind === "target" ? TARGET_ENDPOINT_HINT : SOURCE_ENDPOINT_HINT),
-        booleanNode([...rootPath, "allowInsecure"], "allowInsecure", value?.allowInsecure, "When true, disables TLS certificate verification when connecting to the cluster. Use only for development or self-signed certificates."),
+        schemaFieldNodeFor(clusterSchema, rootPath, "endpoint", value),
+        schemaFieldNodeFor(clusterSchema, rootPath, "allowInsecure", value),
     ];
     if (kind === "source") {
-        children.push(scalarNode([...rootPath, "version"], "version", value?.version, "Cluster version string in '<ENGINE> <VERSION>' format. Examples: 'ES 7.10.2', 'OS 2.11.0'.", true, VERSION_INPUT_HINT));
+        children.push(schemaFieldNodeFor(clusterSchema, rootPath, "version", value));
     }
     children.push(authNode([...rootPath, "authConfig"], value?.authConfig));
     if (kind === "source") {
