@@ -219,3 +219,59 @@ variable "additional_workload_identity_service_accounts" {
   type        = list(string)
   default     = ["migration-console-access-role", "argo-workflow-executor", "argo-workflow-controller", "argo-controller", "argo-test-workflow-executor"]
 }
+
+variable "source_connectivity" {
+  description = "Private connectivity for the source-read leg. mode = none (default) | psc_consumer | vpc_peering."
+  type = object({
+    mode = optional(string, "none")
+    # psc_consumer:
+    service_attachment  = optional(string)
+    allow_global_access = optional(bool, false)
+    # vpc_peering:
+    peer_project       = optional(string)
+    peer_vpc_self_link = optional(string)
+  })
+  default = { mode = "none" }
+
+  validation {
+    condition     = contains(["none", "psc_consumer", "vpc_peering"], var.source_connectivity.mode)
+    error_message = "source_connectivity.mode must be one of: none, psc_consumer, vpc_peering."
+  }
+
+  validation {
+    condition     = var.source_connectivity.mode != "psc_consumer" || try(var.source_connectivity.service_attachment, null) != null
+    error_message = "source_connectivity.service_attachment is required when mode = psc_consumer."
+  }
+
+  validation {
+    condition     = var.source_connectivity.mode != "vpc_peering" || try(var.source_connectivity.peer_vpc_self_link, null) != null
+    error_message = "source_connectivity.peer_vpc_self_link is required when mode = vpc_peering."
+  }
+}
+
+variable "target_connectivity" {
+  description = "Private connectivity for the target-write leg. mode = none (default) | psc_consumer | vpc_peering."
+  type = object({
+    mode                = optional(string, "none")
+    service_attachment  = optional(string)
+    allow_global_access = optional(bool, false)
+    peer_project        = optional(string)
+    peer_vpc_self_link  = optional(string)
+  })
+  default = { mode = "none" }
+
+  validation {
+    condition     = contains(["none", "psc_consumer", "vpc_peering"], var.target_connectivity.mode)
+    error_message = "target_connectivity.mode must be one of: none, psc_consumer, vpc_peering."
+  }
+
+  validation {
+    condition     = var.target_connectivity.mode != "psc_consumer" || try(var.target_connectivity.service_attachment, null) != null
+    error_message = "target_connectivity.service_attachment is required when mode = psc_consumer."
+  }
+
+  validation {
+    condition     = var.target_connectivity.mode != "vpc_peering" || try(var.target_connectivity.peer_vpc_self_link, null) != null
+    error_message = "target_connectivity.peer_vpc_self_link is required when mode = vpc_peering."
+  }
+}

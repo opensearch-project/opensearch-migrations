@@ -25,3 +25,27 @@ run "baseline_plan_is_valid_with_defaults" {
     error_message = "target_connectivity must default to none."
   }
 }
+
+run "rejects_invalid_source_mode" {
+  command = plan
+
+  variables {
+    source_connectivity = { mode = "carrier_pigeon" }
+  }
+
+  expect_failures = [
+    var.source_connectivity,
+  ]
+}
+
+run "psc_consumer_requires_service_attachment" {
+  command = plan
+
+  variables {
+    source_connectivity = { mode = "psc_consumer" }
+  }
+
+  expect_failures = [
+    var.source_connectivity,
+  ]
+}
