@@ -1,3 +1,18 @@
+/*
+ * Builds and mutates the workflow edit model consumed by `workflow manage`.
+ *
+ * schemaEditModel.ts renders generic Zod/JSON-schema fields, but the editable
+ * workflow contract also needs workflow-specific grouping, add defaults,
+ * reference options, omitted/default variant meanings, and YAML replacement
+ * rules for auth, Kafka, and proxy TLS. Those rules belong in this TS package
+ * because they sit beside the schemas, refinements, and config-to-resource
+ * transformer that define the workflow YAML contract.
+ *
+ * Python should stay a presentation/client layer that invokes this one-shot
+ * command and renders the returned tree. If this file grows, prefer moving
+ * reusable schema mechanics into schemaEditModel.ts or shared projection code
+ * over cloning workflow config policy into Python.
+ */
 import {
     CLUSTER_CONFIG,
     CAPTURE_CONFIG,
