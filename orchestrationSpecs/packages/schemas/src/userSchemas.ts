@@ -1385,7 +1385,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).default("").optional()
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
     metadataMigrationConfig: USER_METADATA_OPTIONS.optional()
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),

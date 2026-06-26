@@ -3515,7 +3515,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "properties": {
                   "label": {
                     "type": "string",
-                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                     "default": "",
                     "description": "Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."
                   },
