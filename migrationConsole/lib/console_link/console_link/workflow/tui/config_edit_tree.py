@@ -317,7 +317,7 @@ def _status_line(edit_node: Dict[str, Any], status_mode: str) -> str:
     if counts.get("blocked"):
         summary.append(f"{counts['blocked']} blocked")
     if counts.get("changed"):
-        summary.append(f"{counts['changed']} changed")
+        summary.append("changed")
     if summary:
         return "[yellow]Status:[/] " + ", ".join(summary)
     if status != "ok":

@@ -16,7 +16,7 @@ from console_link.workflow.manage_tree_schema import group_plurals_for
 from console_link.workflow.manage_tree_status import (
     adoption_style,
     diagnostic_style,
-    format_change_count_badge,
+    format_change_flag,
 )
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
@@ -238,11 +238,11 @@ class ResourceTreeStateManager:
 
     @classmethod
     def _section_label(cls, section: ResourceSection) -> str:
-        return f"[bold]{section.name}[/]{format_change_count_badge(cls._section_change_summary(section))}"
+        return f"[bold]{section.name}[/]{format_change_flag(cls._section_change_summary(section))}"
 
     @classmethod
     def _group_label(cls, group: ResourceGroup) -> str:
-        return f"[bold]{group.display_name}[/]{format_change_count_badge(cls._group_change_summary(group))}"
+        return f"[bold]{group.display_name}[/]{format_change_flag(cls._group_change_summary(group))}"
 
     @staticmethod
     def _resource_label(resource: ResourceNode) -> str:
@@ -269,17 +269,14 @@ class ResourceTreeStateManager:
             return f' [{style}]({adoption_status})[/{style}]'
         diff = resource.config_diff or {}
         if not diff:
-            return format_change_count_badge(
+            return format_change_flag(
                 ResourceTreeStateManager._resource_change_summary(resource)
             )
-        badge = format_change_count_badge(
-            ResourceTreeStateManager._resource_change_summary(resource)
-        )
         if diff.get('has_pending_submit_changes'):
-            return f' [green](to submit)[/green]{badge}'
+            return ' [green](to submit)[/green]'
         if diff.get('has_submitted_changes'):
-            return f' [grey50](pending)[/grey50]{badge}'
-        return badge
+            return ' [grey50](pending)[/grey50]'
+        return format_change_flag(ResourceTreeStateManager._resource_change_summary(resource))
 
     @classmethod
     def _section_change_summary(cls, section: ResourceSection) -> Dict[str, int]:

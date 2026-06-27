@@ -73,16 +73,16 @@ def format_status_badge(status: str, counts: Dict[str, Any]) -> str:
     if count is None:
         count = 1
     if status == "changed":
-        return f"[{count} change{'s' if count != 1 else ''}]"
+        return "(changed)"
     return f"[{name} {count}]"
 
 
-def format_change_count_badge(summary: Dict[str, int]) -> str:
-    count = summary.get("count", 0)
-    if not count:
+def format_change_flag(summary: Dict[str, int]) -> str:
+    if not summary.get("count"):
         return ""
-    style = "green" if summary.get("pending_submit") else "grey50"
-    return f' [{style}][{count} change{"s" if count != 1 else ""}][/{style}]'
+    if summary.get("pending_submit"):
+        return " [green](to submit)[/green]"
+    return " [grey50](pending)[/grey50]"
 
 
 def diagnostic_style(severity: str) -> str:

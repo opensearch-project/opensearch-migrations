@@ -2976,7 +2976,7 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
             source_node = tree.root.children[0]
-            assert "Sources [1 change]" in get_clean_text_label(source_node)
+            assert "Sources (changed)" in get_clean_text_label(source_node)
             assert get_label_style(source_node) == ""
             assert not source_node.is_expanded
 
@@ -3078,10 +3078,10 @@ async def test_resource_view_edit_mode_enriches_deployed_values_from_console_sna
             endpoint_node = find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.endpoint")
             assert source_node is not None
             assert endpoint_node is not None
-            assert "Sources [1 change]" in get_clean_text_label(source_node)
+            assert "Sources (changed)" in get_clean_text_label(source_node)
             assert (
                 "endpoint: deployed/workflow=https://old.example.com:9200 | "
-                "pending=https://new.example.com:9200 [1 change]"
+                "pending=https://new.example.com:9200 (changed)"
             ) == get_clean_text_label(endpoint_node)
 
 
@@ -3677,7 +3677,7 @@ async def test_resource_view_preserves_collapsed_config_changes_after_edit_exit_
                     and not find_tree_node_by_id(tree.root, "resource:default").is_expanded
                 ),
             )
-            assert "[1 change]" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))
+            assert "(to submit)" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))
 
 
 @pytest.mark.asyncio
