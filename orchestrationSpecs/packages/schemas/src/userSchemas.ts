@@ -775,6 +775,10 @@ export const USER_REPLAYER_OPTIONS = z.object({
     }
 });
 
+const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional()
+    .describe("Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. " +
+        "For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections.");
+
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
@@ -789,6 +793,9 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    mode: z.enum(["create", "import"]).default("create").optional()
+        .describe("Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."),
+    solrCollections: SOLR_COLLECTIONS_OPTION,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -1279,9 +1286,28 @@ export const TRAFFIC_CONFIG = z.object({
     }
 });
 
+export const USER_SOLR_IMPORT_OPTIONS = z.object({
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    solrCollections: SOLR_COLLECTIONS_OPTION,
+    jvmArgs: z.string().default("").optional()
+        .describe(JVM_ARGS_DESC),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+}).describe("Options for the Solr import-prepare step that runs CreateSnapshot with '--mode import' " +
+    "against an externally-managed Solr snapshot. The step retrieves each collection/core's schema " +
+    "(managed-schema.xml) from the live Solr source and uploads it into the snapshot repository's " +
+    "zk_backup_0/configs/ layout so the downstream metadata migration can derive OpenSearch mappings. " +
+    "It performs no backup. Requires the live Solr source to be reachable.");
+
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
     externallyManagedSnapshotName: z.string()
-        .describe("Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one.")
+        .describe("Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."),
+    importConfig: USER_SOLR_IMPORT_OPTIONS.optional()
+        .describe("Solr-only: enables the import-prepare step that uploads the source schema into the " +
+            "externally-managed snapshot before metadata migration. Only valid when the source cluster " +
+            "version is a 'SOLR ...' version. Omit for Elasticsearch/OpenSearch sources, where an " +
+            "externally-managed snapshot already carries its own metadata.")
 }).describe("Reference to a snapshot that was created outside of this migration workflow.");
 
 export const GENERATE_SNAPSHOT = z.object({
@@ -1373,6 +1399,21 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
                     });
                 }
             }
+        }
+    }
+
+    // importConfig on an externally-managed snapshot is Solr-only. The import-prepare step runs
+    // CreateSnapshot --mode import, which is a no-op for ES/OS sources (those snapshots already
+    // carry their own metadata). Reject it on non-Solr sources so the misconfiguration surfaces
+    // at config-validation time rather than silently doing nothing at runtime.
+    const isSolrSource = typeof data.version === "string" && data.version.startsWith("SOLR ");
+    for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+        if ("importConfig" in snapConfig.config && snapConfig.config.importConfig !== undefined && !isSolrSource) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Snapshot '${snapName}' sets importConfig, which is only supported for Solr sources (version 'SOLR ...'), but source version is '${data.version ?? "<unset>"}'`,
+                path: ['snapshotInfo', 'snapshots', snapName, 'config', 'importConfig']
+            });
         }
     }
 });

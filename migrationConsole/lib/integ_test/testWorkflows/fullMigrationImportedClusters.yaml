@@ -162,7 +162,8 @@ spec:
                   # Remove unrecognized fields
                   | del(.no_auth) | del(.snapshotRepo)
                   # Build snapshotInfo based on whether snapshot is externally managed (BYOS) or not
-                  | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
+                  | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig // null) as $snapshotNameConfig |
+                    ($snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
                     if $extSnap != null then
                       (($entry.source.snapshotRepo // null) as $srcRepo |
                       . + {"snapshotInfo": {
@@ -170,7 +171,7 @@ spec:
                         "snapshots": {
                           ($extSnap): {
                             "repoName": "default",
-                            "config": {"externallyManagedSnapshotName": $extSnap}
+                            "config": $snapshotNameConfig
                           }
                         }
                       }})

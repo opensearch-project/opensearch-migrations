@@ -10,6 +10,7 @@
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #   0050-0059  Observability tests (metrics/tracing backends)
 #   0060-0069  BYOC captured-traffic tests
+#   0070-0079  Solr snapshot import tests
 #
 import json
 import os

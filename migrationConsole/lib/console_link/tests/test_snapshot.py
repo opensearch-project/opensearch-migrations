@@ -367,6 +367,41 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
+def test_solr_s3_snapshot_uses_configured_collections_and_mode(monkeypatch):
+    config = {
+        "snapshot": {
+            "snapshot_name": "external_solr_snapshot",
+            "mode": "import",
+            "solr_collections": ["products", "orders"],
+            "s3": {
+                "repo_uri": "s3://my-bucket/solr",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 8.11")
+    snapshot = S3Snapshot(config["snapshot"], source)
+
+    monkeypatch.setattr("sys.stdout.write", mock.Mock())
+    monkeypatch.setattr("sys.stderr.write", mock.Mock())
+    run_mock = mock.Mock()
+    monkeypatch.setattr(subprocess, "run", run_mock)
+    snapshot.create()
+
+    run_mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                      "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                      '--snapshot-repo-name', snapshot.snapshot_repo_name,
+                                      "--source-host", source.endpoint,
+                                      "--source-type", "solr",
+                                      "--mode", "import",
+                                      "--source-insecure",
+                                      "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                      "--s3-region", config["snapshot"]["s3"]["aws_region"],
+                                      "--solr-collections", "products,orders",
+                                      "--no-wait",
+                                      ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
 def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_with_correct_args(mocker):
     custom_repo_name = "my-repo"
     config = {

@@ -283,8 +283,17 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const SNAPSHOT_NAME_RESOLUTION = z.union([
-    z.object({ externalSnapshotName: z.string() }),
-    z.object({ dataSnapshotResourceName: z.string() })
+    // Solr import-prepare: an externally-managed snapshot that still needs the schema uploaded by
+    // CreateSnapshot --mode import. A DataSnapshot CR (dataSnapshotResourceName) is created so the
+    // migration waits for the import step to finish, but the snapshot name used is the external one
+    // (externalSnapshotName), not a CR-resolved generated name.
+    z.object({ dataSnapshotResourceName: z.string(), externalSnapshotName: z.string() }).strict(),
+    // External snapshot with no workflow-side preparation (ES/OS, or Solr without importConfig):
+    // the migration uses the external name directly and waits on nothing.
+    z.object({ externalSnapshotName: z.string() }).strict(),
+    // Workflow-generated snapshot: the migration waits on the DataSnapshot CR named here, then
+    // reads the resolved snapshot name from the CR's status.
+    z.object({ dataSnapshotResourceName: z.string() }).strict()
 ]);
 
 export const SNAPSHOT_REPO_CONFIG = z.object({
@@ -350,6 +359,12 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     })),
     configChecksum: z.string(),
     resourceUid: z.string(),
+    // Solr import-prepare only. When present, this snapshot item does NOT create a new backup;
+    // instead CreateSnapshot runs with `--mode import` against the externally-managed snapshot
+    // named here, uploading the source schema into the repo. `config` carries mode:"import" and
+    // the import options; `importExternalSnapshotName` is the pre-existing snapshot name used as
+    // the resolved snapshot name (instead of a workflow-generated one).
+    importExternalSnapshotName: z.string().optional(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({

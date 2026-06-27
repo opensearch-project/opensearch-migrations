@@ -511,6 +511,27 @@ class IntegrationTestArgoService:
             value=status_info
         )
 
+    def get_workflow_uid(self, workflow_name: str) -> str:
+        workflow_data = self._get_workflow_status_json(workflow_name)
+        uid = workflow_data.get("metadata", {}).get("uid", "")
+        if not uid:
+            raise ValueError(f"Workflow '{workflow_name}' does not have a metadata.uid")
+        return uid
+
+    def get_configmap_data(self, configmap_name: str) -> Dict[str, str]:
+        result = self._run_kubectl_command({
+            "get": FlagOnlyArgument,
+            "configmap": configmap_name,
+            "--namespace": self.namespace,
+            "-o": "json"
+        })
+        try:
+            configmap = json.loads(result.output.stdout.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse ConfigMap '{configmap_name}' JSON: {e}")
+            raise
+        return configmap.get("data", {}) or {}
+
     def wait_for_suspend(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
         start_time = time.time()
 

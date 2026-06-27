@@ -49,6 +49,8 @@ SNAPSHOT_SCHEMA = {
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
             'snapshot_repo_name': {'type': 'string', 'required': False},
+            'mode': {'type': 'string', 'required': False, 'allowed': ['create', 'import']},
+            'solr_collections': {'type': 'list', 'schema': {'type': 'string'}, 'required': False},
             'otel_trace_endpoint': {'type': 'string', 'required': False},
             'otel_metrics_endpoint': {'type': 'string', 'required': False},
             's3': {
@@ -85,6 +87,7 @@ class Snapshot(ABC):
             raise ValueError("Invalid config file for snapshot", v.errors)
         self.snapshot_name = config['snapshot_name']
         self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
+        self.solr_collections = config.get("solr_collections") or None
         self.otel_trace_endpoint = config.get("otel_trace_endpoint", None)
         self.otel_metrics_endpoint = config.get("otel_metrics_endpoint", None)
 
@@ -166,6 +169,9 @@ class Snapshot(ABC):
 
         if self._is_solr_source():
             command_args["--source-type"] = "solr"
+            # Always pass --mode for Solr sources; both standalone and SolrCloud
+            # go through CreateSnapshot with the mode flag controlling behavior.
+            command_args["--mode"] = self.config.get("mode", "create")
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -220,7 +226,7 @@ class S3Snapshot(Snapshot):
         command_args.update(s3_command_args)
 
         if self._is_solr_source():
-            collections = self._get_solr_collections()
+            collections = self.solr_collections or self._get_solr_collections()
             command_args["--solr-collections"] = ",".join(collections)
 
         wait = kwargs.get('wait', False)
@@ -291,7 +297,7 @@ class FileSystemSnapshot(Snapshot):
         command_args["--file-system-repo-path"] = self.repo_path
 
         if self._is_solr_source():
-            collections = self._get_solr_collections()
+            collections = self.solr_collections or self._get_solr_collections()
             command_args["--solr-collections"] = ",".join(collections)
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')

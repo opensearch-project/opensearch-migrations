@@ -362,6 +362,10 @@ export const FullMigration = WorkflowBuilder.create({
                     configChecksum: b.inputs.configChecksum,
                     dataSnapshotName: b.inputs.resourceName,
                     dataSnapshotUid: expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "resourceUid"),
+                    // Solr import-prepare: empty for the normal create path. When set, createOrGetSnapshot
+                    // runs the import workflow (schema upload, no backup) against this external snapshot.
+                    importExternalSnapshotName: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), ["importExternalSnapshotName"], ""),
                 }),
                 {when: c => ({templateExp: expr.and(
                     expr.not(expr.equals(c.readSnapshotPhase.outputs.phase, "Completed")),
@@ -399,7 +403,9 @@ export const FullMigration = WorkflowBuilder.create({
                             "dependsOnProxySetups"
                         ),
                         configChecksum: expr.get(c.item, "configChecksum"),
-                        resourceUid: expr.get(c.item, "resourceUid")
+                        resourceUid: expr.get(c.item, "resourceUid"),
+                        // Carried through for the Solr import-prepare path (absent for create items).
+                        importExternalSnapshotName: expr.dig(c.item, ["importExternalSnapshotName"], ""),
                     })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.serialize(

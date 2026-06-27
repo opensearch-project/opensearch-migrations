@@ -63,9 +63,34 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("dataSnapshotName", typeToken<string>())
         .addRequiredInput("dataSnapshotUid", typeToken<string>())
+        // Solr import-prepare: when non-empty, this snapshot is an externally-managed Solr snapshot
+        // that needs the schema uploaded via CreateSnapshot --mode import. The value is the
+        // pre-existing snapshot name; it is used verbatim (not generated, not lowercased) so it
+        // matches the snapshot already present in the repo. Empty for the normal create path.
+        .addOptionalInput("importExternalSnapshotName", c => "")
+        // CreateSnapshot --source-type forwarded to snapshotWorkflow. Set to "solr" on the import
+        // path (selects the import branch in snapshotWorkflow); empty on the create path (the Java
+        // side auto-detects the engine). Derived from importExternalSnapshotName at the call site.
+        .addOptionalInput("sourceType", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            // The Solr import-prepare path and the normal create path share one snapshotWorkflow
+            // call. isImport selects between them: when set, we pass sourceType:"solr" (which makes
+            // snapshotWorkflow run CreateSnapshot --mode import + patch the CR directly, no backup)
+            // and use the external snapshot name verbatim; otherwise sourceType is empty (create
+            // path, engine auto-detected) and the generated, lowercased name is used. The step is
+            // still gated on autoCreate-or-import so a plain externally-managed snapshot (which never
+            // reaches this template) stays a no-op.
+            const isImport = expr.not(expr.isEmpty(b.inputs.importExternalSnapshotName));
+            // Compute autoCreate as a real boolean from the config input (same check getSnapshotName
+            // makes), NOT from getSnapshotName's string output parameter. The when-condition ORs it
+            // with isImport, and govaluate's `||` requires boolean operands — applying `||` to the
+            // string "true"/"false" output parameter throws at runtime and silently skips the step.
+            const autoCreate = expr.hasKey(
+                expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "config"),
+                "createSnapshotConfig");
+            return b
             .addStep("getSnapshotName", INTERNAL, "getSnapshotName", c => c.register({
                     ...selectInputsForRegister(b, c),
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
@@ -80,22 +105,32 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     snapshotConfig: expr.serialize(
                         expr.makeDict({
                             repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
-                            snapshotName: expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName),
+                            // Import: use the external name verbatim (must match the existing snapshot).
+                            // Create: use the generated, lowercased name.
+                            snapshotName: expr.ternary(
+                                isImport,
+                                b.inputs.importExternalSnapshotName,
+                                expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName)),
                             label: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                         })
                     ),
+                    sourceType: expr.ternary(isImport, expr.literal("solr"), expr.literal("")),
                     semaphoreConfigMapName: b.inputs.semaphoreConfigMapName,
                     semaphoreKey: b.inputs.semaphoreKey,
                     dataSnapshotName: b.inputs.dataSnapshotName,
                     dataSnapshotUid: b.inputs.dataSnapshotUid
                 }), {
-                    when: tasks => tasks.getSnapshotName.outputs.autoCreate
+                    when: () => ({templateExp: expr.or(autoCreate, isImport)})
                 }
             )
-        )
+        })
         .addExpressionOutput("snapshotConfig", c =>
             expr.serialize(expr.makeDict({
-                snapshotName: c.steps.getSnapshotName.outputs.snapshotName,
+                // Import uses the external name verbatim; create uses the generated name.
+                snapshotName: expr.ternary(
+                    expr.isEmpty(c.inputs.importExternalSnapshotName),
+                    c.steps.getSnapshotName.outputs.snapshotName,
+                    c.inputs.importExternalSnapshotName),
                 repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig"),
                 label: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "label")
             })))
