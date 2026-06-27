@@ -1,5 +1,5 @@
 {{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
-{{- if eq .Values.cloudProvider "aws" }}
+{{- if or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "") }}
 {{- if .Values.defaultBucketConfiguration.useLocalStack }}
 ---
 apiVersion: v1

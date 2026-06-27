@@ -265,7 +265,7 @@ spec:
               value: "/root/schema/workflowMigration.schema.json"
             - name: MIGRATION_SAMPLE_CONFIG_PATH
               value: "/root/schema/sample.yaml"
-            {{- if eq .Values.cloudProvider "aws" }}
+            {{- if or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "") }}
             {{- if .Values.defaultBucketConfiguration.create }}
             {{- $s3Bucket := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
             - name: REPO_ARTIFACTS_BUCKET
@@ -288,7 +288,7 @@ spec:
               value: {{ $gcsEndpoint | quote }}
             {{- end }}
             {{- end }}
-            {{- if and (eq .Values.cloudProvider "aws") (index .Values.conditionalPackageInstalls "cert-manager") }}
+            {{- if and (or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "")) (index .Values.conditionalPackageInstalls "cert-manager") }}
             - name: PROXY_DEFAULT_AWS_REGION
               valueFrom:
                 configMapKeyRef:

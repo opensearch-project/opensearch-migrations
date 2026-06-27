@@ -269,7 +269,7 @@ spec:
                     --timeout {{ default "300" $chart.timeout }}s \
                     --set global.managedBy="{{ $.Release.Name }}" \
           {{- if eq $name "argo-workflows" }}
-            {{- if eq $.Values.cloudProvider "aws" }}
+            {{- if or (eq $.Values.cloudProvider "aws") (eq $.Values.cloudProvider "") }}
                   --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
                   --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
               {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
