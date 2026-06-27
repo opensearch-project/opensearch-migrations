@@ -434,6 +434,33 @@ describe("resolved migration resources", () => {
         }));
     });
 
+    it("loosely projects config-only snapshot migrations for the manage resource view", async () => {
+        const config = sampleConfig();
+        (config.sourceClusters.source.snapshotInfo!.snapshots as any) = {};
+        delete (config.snapshotMigrationConfigs![0] as any).perSnapshotConfig;
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "SnapshotMigration",
+            name: "snapshot migration: source -> target",
+            parameters: {
+                fromSource: "source",
+                toTarget: "target",
+            },
+            parameterProvenance: expect.objectContaining({
+                fromSource: expect.objectContaining({
+                    presence: "authored",
+                    sourcePath: ["snapshotMigrationConfigs", "0", "fromSource"],
+                }),
+                toTarget: expect.objectContaining({
+                    presence: "authored",
+                    sourcePath: ["snapshotMigrationConfigs", "0", "toTarget"],
+                }),
+            }),
+        }));
+    });
+
     it("returns best-effort resources from the loose CLI without exiting on validation errors", async () => {
         const config = sampleConfig();
         delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;

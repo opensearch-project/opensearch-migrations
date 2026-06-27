@@ -221,6 +221,31 @@ class TestConfigOverlays:
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
 
+    def test_adds_virtual_snapshot_migration_from_saved_config(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'SnapshotMigration',
+            'name': 'snapshot migration: source -> target',
+            'parameters': {
+                'fromSource': 'source',
+                'toTarget': 'target',
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        backfill_group = group_by_plural(sections, 'snapshotmigrations')
+        assert len(backfill_group.resources) == 1
+        resource = backfill_group.resources[0]
+        assert resource.name == 'snapshot migration: source -> target'
+        assert resource.phase == 'Pending Config'
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
+        assert format_config_diff_fields(resource) == [
+            'fromSource: deployed=<absent> | pending=<absent> | to-submit=source',
+            'toTarget: deployed=<absent> | pending=<absent> | to-submit=target',
+        ]
+
     def test_hides_pending_only_defaulted_and_generated_fields(self):
         sections = _build_tree_from_raw({})
         pending = {'resources': [{

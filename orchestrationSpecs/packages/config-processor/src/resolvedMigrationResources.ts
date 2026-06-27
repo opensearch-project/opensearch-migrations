@@ -1082,6 +1082,101 @@ function looseSnapshotMigrationParameters(
     };
 }
 
+function snapshotMigrationPlaceholderParameters(
+    migration: Record<string, unknown>,
+    migrationIndex: number,
+): Record<string, unknown> {
+    return {
+        fromSource: asString(migration.fromSource) ?? `source-${migrationIndex}`,
+        toTarget: asString(migration.toTarget) ?? `target-${migrationIndex}`,
+    };
+}
+
+function snapshotMigrationPlaceholderProvenance(
+    parameters: Record<string, unknown>,
+    migration: Record<string, unknown>,
+    migrationIndex: number,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const basePath = ["snapshotMigrationConfigs", String(migrationIndex)];
+    return buildParameterProvenance(parameters, parameterPath => {
+        const key = parameterPath[0];
+        return {
+            presence: hasPath(migration, [key]) ? "authored" : "defaulted",
+            sourcePath: [...basePath, key],
+        };
+    });
+}
+
+function hasSnapshotMigrationResourceFor(
+    resources: ResolvedMigrationResource[],
+    migrationIndex: number,
+    parameters: Record<string, unknown>,
+): boolean {
+    const migrationPath = ["snapshotMigrationConfigs", String(migrationIndex)];
+    return resources.some(resource => {
+        if (resource.kind !== "SnapshotMigration") {
+            return false;
+        }
+        if (Object.values(resource.parameterProvenance ?? {}).some(provenance =>
+            startsWithPath(provenance.sourcePath, migrationPath)
+        )) {
+            return true;
+        }
+        return (
+            resource.parameters.sourceLabel === parameters.fromSource &&
+            resource.parameters.targetLabel === parameters.toTarget
+        );
+    });
+}
+
+function looseSnapshotMigrationPlaceholderResources(
+    rawConfig: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    options: ResolvedMigrationResourcesOptions,
+    existingResources: ResolvedMigrationResource[] = [],
+): ResolvedMigrationResource[] {
+    const migrations = Array.isArray(rawConfig.snapshotMigrationConfigs)
+        ? rawConfig.snapshotMigrationConfigs
+        : [];
+    const placeholders: ResolvedMigrationResource[] = [];
+    const usedNames = new Set(
+        existingResources
+            .filter(resource => resource.kind === "SnapshotMigration")
+            .map(resource => resource.name)
+    );
+
+    migrations.forEach((migration, migrationIndex) => {
+        if (!isRecord(migration)) {
+            return;
+        }
+        const parameters = snapshotMigrationPlaceholderParameters(migration, migrationIndex);
+        if (hasSnapshotMigrationResourceFor([...existingResources, ...placeholders], migrationIndex, parameters)) {
+            return;
+        }
+
+        const baseName = `snapshot migration: ${parameters.fromSource} -> ${parameters.toTarget}`;
+        const name = usedNames.has(baseName)
+            ? `${baseName} (${migrationIndex + 1})`
+            : baseName;
+        usedNames.add(name);
+        placeholders.push(resourceWithDiagnostics(
+            "SnapshotMigration",
+            name,
+            parameters,
+            validation,
+            [["snapshotMigrationConfigs", String(migrationIndex)]],
+            options,
+            snapshotMigrationPlaceholderProvenance(parameters, migration, migrationIndex, options),
+        ));
+    });
+
+    return placeholders;
+}
+
 function looseClusterClientConfig(cluster: Record<string, unknown>): Record<string, unknown> {
     const authConfig = asRecord(cluster.authConfig);
     const result: Record<string, unknown> = {
@@ -1440,6 +1535,8 @@ function buildLooseResourceList(
         }
     });
 
+    resources.push(...looseSnapshotMigrationPlaceholderResources(rawConfig, validation, options, resources));
+
     return resources;
 }
 
@@ -1457,8 +1554,12 @@ export async function buildLooseResolvedMigrationResources(
     };
     try {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(rawConfig);
+        const resolved = buildResolvedMigrationResources(workflowConfig, workflowName, resolvedOptions);
+        resolved.resources.push(
+            ...looseSnapshotMigrationPlaceholderResources(raw, validation, resolvedOptions, resolved.resources)
+        );
         return {
-            ...buildResolvedMigrationResources(workflowConfig, workflowName, resolvedOptions),
+            ...resolved,
             projectionMode: "loose",
             projectionComplete: true,
             validation: {
