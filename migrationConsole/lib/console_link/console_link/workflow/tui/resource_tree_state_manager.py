@@ -13,6 +13,11 @@ from console_link.workflow.resource_tree import (
     format_resource_diagnostics, format_virtual_adoption,
 )
 from console_link.workflow.manage_tree_schema import group_plurals_for
+from console_link.workflow.manage_tree_status import (
+    adoption_style,
+    diagnostic_style,
+    format_change_count_badge,
+)
 from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 
@@ -233,11 +238,11 @@ class ResourceTreeStateManager:
 
     @classmethod
     def _section_label(cls, section: ResourceSection) -> str:
-        return f"[bold]{section.name}[/]{cls._change_count_badge(cls._section_change_summary(section))}"
+        return f"[bold]{section.name}[/]{format_change_count_badge(cls._section_change_summary(section))}"
 
     @classmethod
     def _group_label(cls, group: ResourceGroup) -> str:
-        return f"[bold]{group.display_name}[/]{cls._change_count_badge(cls._group_change_summary(group))}"
+        return f"[bold]{group.display_name}[/]{format_change_count_badge(cls._group_change_summary(group))}"
 
     @staticmethod
     def _resource_label(resource: ResourceNode) -> str:
@@ -255,19 +260,19 @@ class ResourceTreeStateManager:
         diagnostic = ResourceTreeStateManager._highest_priority_diagnostic(resource)
         if diagnostic:
             severity = diagnostic.get('severity') or 'error'
-            style = ResourceTreeStateManager._diagnostic_style(severity)
+            style = diagnostic_style(severity)
             label = 'required' if severity == 'required' else severity
             return f' [{style}]({label})[/{style}]'
         adoption_status = (resource.virtual_adoption or {}).get('status')
         if adoption_status and adoption_status not in ('deployed', 'unknown'):
-            style = ResourceTreeStateManager._adoption_style(adoption_status)
+            style = adoption_style(adoption_status)
             return f' [{style}]({adoption_status})[/{style}]'
         diff = resource.config_diff or {}
         if not diff:
-            return ResourceTreeStateManager._change_count_badge(
+            return format_change_count_badge(
                 ResourceTreeStateManager._resource_change_summary(resource)
             )
-        badge = ResourceTreeStateManager._change_count_badge(
+        badge = format_change_count_badge(
             ResourceTreeStateManager._resource_change_summary(resource)
         )
         if diff.get('has_pending_submit_changes'):
@@ -321,42 +326,12 @@ class ResourceTreeStateManager:
         left['pending_submit'] += right.get('pending_submit', 0)
 
     @staticmethod
-    def _change_count_badge(summary: Dict[str, int]) -> str:
-        count = summary.get('count', 0)
-        if not count:
-            return ''
-        style = 'green' if summary.get('pending_submit') else 'grey50'
-        return f' [{style}][{count} change{"s" if count != 1 else ""}][/{style}]'
-
-    @staticmethod
     def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict]:
         rank = {'error': 4, 'required': 3, 'blocked': 3, 'gated': 2, 'warning': 1}
         diagnostics = resource.diagnostics or []
         if not diagnostics:
             return None
         return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
-
-    @staticmethod
-    def _diagnostic_style(severity: str) -> str:
-        if severity in ('error', 'blocked'):
-            return 'red'
-        if severity == 'required':
-            return 'yellow'
-        if severity == 'gated':
-            return 'magenta'
-        return 'yellow'
-
-    @staticmethod
-    def _adoption_style(status: str) -> str:
-        if status == 'error':
-            return 'red'
-        if status in ('partial', 'outdated', 'missing'):
-            return 'yellow'
-        if status == 'pending':
-            return 'grey50'
-        if status == 'deployed':
-            return 'green'
-        return 'dim'
 
     @staticmethod
     def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
@@ -495,7 +470,7 @@ class ResourceTreeStateManager:
         for adoption in format_virtual_adoption(resource, rich_markup=True):
             resource_node.add(adoption, data=None)
         for diagnostic in format_resource_diagnostics(resource):
-            style = self._diagnostic_style(diagnostic.get('severity', 'error'))
+            style = diagnostic_style(diagnostic.get('severity', 'error'))
             resource_node.add(f"[{style}]{diagnostic['label']}[/{style}]", data=None)
 
     def _group_has_content(self, group: ResourceGroup) -> bool:

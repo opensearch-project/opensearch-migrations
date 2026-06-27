@@ -15,6 +15,7 @@ from .manage_tree_schema import (
     display_name_for_plural,
     group_plurals_for,
 )
+from .manage_tree_status import adoption_style, diagnostic_style
 from .tree_utils import (
     get_node_input_parameter, get_step_rich_label, is_approval_node, get_node_phase,
 )
@@ -551,22 +552,11 @@ def _virtual_adoption_status(counts: Dict[str, int]) -> str:
     return 'unknown'
 
 
-def _adoption_style(status: str) -> str:
-    if status == 'error':
-        return 'red'
-    if status in ('partial', 'outdated', 'missing'):
-        return 'yellow'
-    if status == 'pending':
-        return 'grey50'
-    if status == 'deployed':
-        return 'green'
-    return 'dim'
-
-
 def _style_adoption_line(line: str, status: str, rich_markup: bool) -> str:
     if not rich_markup:
         return line
-    return f"[{_adoption_style(status)}]{escape(line)}[/{_adoption_style(status)}]"
+    style = adoption_style(status)
+    return f"[{style}]{escape(line)}[/{style}]"
 
 
 def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
@@ -885,7 +875,7 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
     for adoption_line in format_virtual_adoption(resource):
         node.add(adoption_line)
     for diagnostic in format_resource_diagnostics(resource):
-        style = _diagnostic_style(diagnostic.get('severity', 'error'))
+        style = diagnostic_style(diagnostic.get('severity', 'error'))
         node.add(f"[{style}]{diagnostic['label']}[/{style}]")
     if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
         deps = ", ".join(resource.depends_on)
@@ -906,12 +896,12 @@ def _resource_change_label(resource: ResourceNode) -> str:
     diagnostic = _highest_priority_diagnostic(resource)
     if diagnostic:
         severity = diagnostic.get('severity') or 'error'
-        style = _diagnostic_style(severity)
+        style = diagnostic_style(severity)
         label = 'required' if severity == 'required' else severity
         return f' [{style}]({escape(str(label))})[/{style}]'
     adoption_status = (resource.virtual_adoption or {}).get('status')
     if adoption_status and adoption_status not in ('deployed', 'unknown'):
-        style = _adoption_style(adoption_status)
+        style = adoption_style(adoption_status)
         return f' [{style}]({escape(str(adoption_status))})[/{style}]'
     diff = resource.config_diff or {}
     if diff.get('has_pending_submit_changes') or _has_pending_presence_change(resource):
@@ -927,16 +917,6 @@ def _highest_priority_diagnostic(resource: ResourceNode) -> Optional[Dict[str, A
     if not diagnostics:
         return None
     return max(diagnostics, key=lambda item: rank.get(item.get('severity'), 0))
-
-
-def _diagnostic_style(severity: str) -> str:
-    if severity in ('error', 'blocked'):
-        return 'red'
-    if severity == 'required':
-        return 'yellow'
-    if severity == 'gated':
-        return 'magenta'
-    return 'yellow'
 
 
 def _should_show_step(step: Dict[str, Any]) -> bool:

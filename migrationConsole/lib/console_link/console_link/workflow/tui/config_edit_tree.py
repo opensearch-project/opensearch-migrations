@@ -1,11 +1,18 @@
 """Rendering helpers for schema-driven workflow config edit state."""
 
-import re
 from typing import Any, Dict, Iterable, Optional
 
 from rich.text import Text
 from textual.widgets import Static, Tree
 from textual.widgets._tree import TreeNode
+
+from console_link.workflow.manage_tree_status import (
+    STATUS_PRIORITY,
+    STATUS_STYLE,
+    format_status_badge,
+    payload_status,
+    strip_status_badge,
+)
 
 
 EDIT_NODE_TYPE = "config-edit"
@@ -36,44 +43,6 @@ _STATE_MODES = (
     EDIT_MODE_CURRENT_WORKFLOW,
     EDIT_MODE_PENDING_SUBMIT,
 )
-_STATUS_PRIORITY = {
-    "ok": 0,
-    "changed": 1,
-    "warning": 2,
-    "gated": 3,
-    "required": 4,
-    "error": 5,
-    "blocked": 6,
-}
-_STATUS_STYLE = {
-    "ok": "",
-    "changed": "",
-    "warning": "yellow",
-    "gated": "magenta",
-    "required": "yellow",
-    "error": "red",
-    "blocked": "bold red",
-}
-_STATUS_BADGE = {
-    "ok": "OK",
-    "changed": "CHG",
-    "warning": "WARN",
-    "gated": "GATED",
-    "required": "REQ",
-    "error": "ERR",
-    "blocked": "BLOCK",
-}
-_STATUS_COUNT_KEY = {
-    "changed": "changed",
-    "warning": "warnings",
-    "gated": "gated",
-    "required": "required",
-    "error": "errors",
-    "blocked": "blocked",
-}
-_BADGE_PREFIX_RE = re.compile(r"^\[[^\]]+\]\s*")
-
-
 def render_edit_state(
     tree: Tree,
     edit_state: Dict[str, Any],
@@ -205,7 +174,7 @@ def _is_optional_unset_block(edit_node: Dict[str, Any], visible_children: list[D
     if edit_node.get("valueKind") not in {"object", "array", "record", "union"}:
         return False
 
-    label = _strip_badge(str(edit_node.get("label", ""))).lower()
+    label = strip_status_badge(str(edit_node.get("label", ""))).lower()
     value_present = "value" in edit_node
     value = edit_node.get("value")
     if "<unset>" in label:
@@ -250,13 +219,13 @@ def _should_render_edit_node(
 def _node_label(edit_node: Dict[str, Any], value_mode: str, status_mode: str) -> Text:
     status, counts = _effective_status(edit_node, status_mode)
     body = _label_body(edit_node, value_mode)
-    badge = _badge(status, counts)
+    badge = format_status_badge(status, counts)
     label = f"{body} {badge}" if badge else body
-    return Text(label, style=_STATUS_STYLE.get(status, ""))
+    return Text(label, style=STATUS_STYLE.get(status, ""))
 
 
 def _label_body(edit_node: Dict[str, Any], value_mode: str) -> str:
-    label = _strip_badge(str(edit_node.get("label", "")))
+    label = strip_status_badge(str(edit_node.get("label", "")))
     mode_value = _formatted_mode_value(edit_node, value_mode)
     if mode_value is None:
         return label
@@ -312,51 +281,20 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
-def _strip_badge(label: str) -> str:
-    return _BADGE_PREFIX_RE.sub("", label)
-
-
-def _badge(status: str, counts: Dict[str, Any]) -> str:
-    name = _STATUS_BADGE.get(status, status.upper())
-    count_key = _STATUS_COUNT_KEY.get(status)
-    count = counts.get(count_key) if count_key else None
-    if status == "ok":
-        return ""
-    if count is None:
-        count = 1
-    if status == "changed":
-        return f"[{count} change{'s' if count != 1 else ''}]"
-    return f"[{name} {count}]"
-
-
 def _effective_status(edit_node: Dict[str, Any], status_mode: str) -> tuple[str, Dict[str, Any]]:
     states = edit_node.get("states") or {}
     if status_mode != EDIT_MODE_ALL:
         payload = states.get(status_mode)
         if payload:
-            return _payload_status(payload, edit_node)
-        return _payload_status(edit_node)
+            return payload_status(payload, edit_node)
+        return payload_status(edit_node)
 
-    candidates = [_payload_status(edit_node)]
+    candidates = [payload_status(edit_node)]
     for mode in _STATE_MODES:
         payload = states.get(mode)
         if payload:
-            candidates.append(_payload_status(payload, edit_node))
-    return max(candidates, key=lambda item: _STATUS_PRIORITY.get(item[0], 0))
-
-
-def _payload_status(payload: Dict[str, Any], fallback: Optional[Dict[str, Any]] = None) -> tuple[str, Dict[str, Any]]:
-    counts = payload.get("statusCounts") or {}
-    for status in ("blocked", "error", "required", "gated", "warning", "changed"):
-        count_key = _STATUS_COUNT_KEY[status]
-        if counts.get(count_key):
-            return status, counts
-    status = payload.get("status")
-    if status:
-        return status, counts
-    if fallback is not None:
-        return _payload_status(fallback)
-    return "ok", counts
+            candidates.append(payload_status(payload, edit_node))
+    return max(candidates, key=lambda item: STATUS_PRIORITY.get(item[0], 0))
 
 
 def _status_line(edit_node: Dict[str, Any], status_mode: str) -> str:
