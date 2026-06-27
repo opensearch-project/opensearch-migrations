@@ -168,6 +168,17 @@ describe('MigrationConfigTransformer validation', () => {
             .toThrow(/s3Source 'loaded-dump' references unknown kafka cluster 'missing'/);
     });
 
+    it('should reject omitted kafka refs when explicit kafka config does not include default', () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            kafka: {autoCreate: {}}
+        };
+        delete config.traffic.proxies.proxy1.kafka;
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Proxy 'proxy1' references unknown kafka cluster 'default'/);
+    });
+
     it('should transform s3 captured traffic sources without a live proxy', async () => {
         const config = cloneBaseConfig();
         delete config.kafkaClusterConfiguration;

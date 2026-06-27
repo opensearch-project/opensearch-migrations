@@ -36,34 +36,6 @@ PHASE_SYMBOLS = {
     'Unknown': ('?', 'white'),
 }
 
-# Key spec fields to display per resource type.
-# TODO: Derive these from the generated JSON schema instead of hardcoding here.
-# The Zod schemas in orchestrationSpecs/packages/schemas/src/userSchemas.ts already emit
-# x-change-restriction via getSchemaFromZod.ts; a similar x-user-visible annotation could
-# be added, then this code would filter the JSON schema (at runtime or build time).
-SPEC_DISPLAY_FIELDS = {
-    'sourceconfigs': [
-        'endpoint', 'version', 'allow_insecure',
-        'basic_auth.k8s_secret_name', 'sigv4.region', 'sigv4.service',
-    ],
-    'targetconfigs': [
-        'endpoint', 'version', 'allow_insecure',
-        'basic_auth.k8s_secret_name', 'sigv4.region', 'sigv4.service',
-    ],
-    'kafkaconfigs': [
-        'type', 'clusterName', 'authType', 'listenerName',
-    ],
-    'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
-    'capturedtraffics': ['topicName', 'partitions', 'replicas'],
-    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
-    'datasnapshots': ['snapshotPrefix', 'indexAllowlist'],
-    'snapshotmigrations': [
-        'documentBackfillPodReplicas', 'sourceVersion',
-        'documentBackfillIndexAllowlist', 'metadataMigrationIndexAllowlist',
-    ],
-    'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
-}
-
 RESOURCE_KIND_TO_PLURAL = {
     'KafkaCluster': 'kafkaclusters',
     'CapturedTraffic': 'capturedtraffics',
@@ -131,6 +103,7 @@ class ResourceNode:
     tree_default_expanded: Optional[bool] = None
     tree_change_summary: Optional[Dict[str, int]] = None
     tree_sort_index: Optional[int] = None
+    display_fields: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -199,6 +172,7 @@ def apply_config_overlays(
 
     for key, node in deployed.items():
         node.diagnostics = _merged_resource_diagnostics(submitted.get(key), pending.get(key))
+        node.display_fields = _merged_display_fields(deployed_config.get(key), submitted.get(key), pending.get(key))
         node.config_presence = _build_config_presence(
             deployed=True,
             submitted=key in submitted if submitted_available else None,
@@ -225,6 +199,7 @@ def apply_config_overlays(
             depends_on=parameters.get('dependsOn', []) or [],
             spec=(deployed_resource or {}).get('parameters') or {},
             status={},
+            display_fields=_merged_display_fields(deployed_resource, submitted.get(key), pending.get(key)),
             diagnostics=_merged_resource_diagnostics(deployed_resource, submitted.get(key), pending.get(key)),
             config_presence=_build_config_presence(
                 deployed=key in deployed_config,
@@ -245,6 +220,7 @@ def apply_config_overlays(
             deployed,
         )
         _add_virtual_resource(sections, virtual)
+    _nest_topics_under_kafka_sections(sections)
 
 
 def resource_visible_in_config_mode(resource: ResourceNode, value_mode: str) -> bool:
@@ -367,12 +343,28 @@ def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
     topics_to_remove = []
     for resource in resources:
         if resource.plural == 'capturedtraffics':
-            parent_name = resource.spec.get('kafkaClusterName') or ''
+            parent_name = _captured_traffic_kafka_parent_name(resource)
             if parent_name in kafka_by_name:
                 kafka_by_name[parent_name].children.append(resource)
                 topics_to_remove.append(resource)
     for topic in topics_to_remove:
         resources.remove(topic)
+
+
+def _nest_topics_under_kafka_sections(sections: List[ResourceSection]) -> None:
+    """Apply Kafka/CapturedTraffic nesting after virtual overlay resources are added."""
+    for section in sections:
+        for group in section.groups:
+            if {'kafkaclusters', 'capturedtraffics'}.issubset(set(group_plurals_for(group.plural))):
+                _nest_topics_under_kafka(group.resources)
+
+
+def _captured_traffic_kafka_parent_name(resource: ResourceNode) -> str:
+    return (
+        resource.spec.get('kafkaClusterName')
+        or _pending_field_value(resource.config_diff, 'kafkaClusterName')
+        or ''
+    )
 
 
 def _iter_resource_nodes(sections: List[ResourceSection]):
@@ -412,6 +404,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'SourceConfig',
                 'name': name,
                 'parameters': source.get('clientConfig') or {},
+                'displayFields': source.get('displayFields') or [],
                 'parameterProvenance': source.get('parameterProvenance') or {},
                 'diagnostics': source.get('diagnostics') or [],
                 'consumers': source.get('consumers') or [],
@@ -423,6 +416,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'TargetConfig',
                 'name': name,
                 'parameters': target.get('clientConfig') or {},
+                'displayFields': target.get('displayFields') or [],
                 'parameterProvenance': target.get('parameterProvenance') or {},
                 'diagnostics': target.get('diagnostics') or [],
                 'consumers': target.get('consumers') or [],
@@ -434,6 +428,7 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'kind': 'KafkaConfig',
                 'name': name,
                 'parameters': kafka.get('runtime') or {},
+                'displayFields': kafka.get('displayFields') or [],
                 'parameterProvenance': kafka.get('parameterProvenance') or {},
                 'diagnostics': kafka.get('diagnostics') or [],
                 'consumers': kafka.get('consumers') or [],
@@ -484,6 +479,14 @@ def _merged_resource_diagnostics(*resources: Optional[Dict[str, Any]]) -> List[D
             )
             result[key] = diagnostic
     return list(result.values())
+
+
+def _merged_display_fields(*resources: Optional[Dict[str, Any]]) -> List[str]:
+    for resource in reversed(resources):
+        fields = (resource or {}).get('displayFields') or []
+        if fields:
+            return [str(field) for field in fields]
+    return []
 
 
 def _build_virtual_adoption(
@@ -603,7 +606,12 @@ def _build_config_diff(
     if submitted_parameters is None and pending_parameters is None and not deployed_parameters:
         return None
 
-    paths = _ordered_config_paths(plural, deployed_parameters, submitted_parameters, pending_parameters)
+    paths = _ordered_config_paths(
+        _merged_display_fields(submitted_resource, pending_resource),
+        deployed_parameters,
+        submitted_parameters,
+        pending_parameters,
+    )
     fields = []
     has_submitted_changes = False
     has_pending_submit_changes = False
@@ -653,12 +661,12 @@ def _build_config_diff(
 
 
 def _ordered_config_paths(
-    plural: str,
+    display_fields: List[str],
     deployed_parameters: Dict[str, Any],
     submitted_parameters: Optional[Dict[str, Any]],
     pending_parameters: Optional[Dict[str, Any]],
 ) -> List[List[str]]:
-    configured = [field.split('.') for field in SPEC_DISPLAY_FIELDS.get(plural, [])]
+    configured = [field.split('.') for field in display_fields]
     discovered = set()
     for source in (deployed_parameters, submitted_parameters, pending_parameters):
         for path in _leaf_paths(source or {}):
@@ -1065,15 +1073,16 @@ def _node_phase(node: Dict[str, Any]) -> str:
 
 def format_spec_fields(resource: ResourceNode) -> List[str]:
     """Extract key spec fields for display. Returns list of 'field: value' strings."""
-    fields = SPEC_DISPLAY_FIELDS.get(resource.plural, [])
+    fields = resource.display_fields or ['.'.join(path) for path in sorted(_leaf_paths(resource.spec))]
     parts = []
     for field_path in fields:
         value = _get_nested(resource.spec, field_path)
         if value is not None and value != '' and value != []:
             label = field_path.split('.')[-1]
             if isinstance(value, list):
+                original = value
                 value = ', '.join(str(v) for v in value[:3])
-                if len(resource.spec.get(field_path, [])) > 3:
+                if len(original) > 3:
                     value += '...'
             parts.append(f"{label}: {value}")
     return parts

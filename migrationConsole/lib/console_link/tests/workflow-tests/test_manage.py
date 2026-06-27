@@ -9,7 +9,15 @@ from textual.app import App, ComposeResult
 from textual.widgets import Button, Input, Static, TextArea
 
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
-from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection, _build_tree_from_raw
+from console_link.workflow.resource_tree import (
+    ResourceGroup,
+    ResourceNode,
+    ResourceSection,
+    _build_tree_from_raw,
+    apply_config_overlays,
+    format_config_diff_fields,
+)
+from console_link.workflow.manage_tree_schema import RESOURCE_SECTIONS
 from console_link.workflow.tui.workflow_manage_app import (
     DISABLE_MOUSE_PIXELS_SEQUENCE,
     DISABLE_MOUSE_SEQUENCES,
@@ -1157,7 +1165,7 @@ def edit_state_with_workflow_config_kafka():
                     {
                         "id": "edit:kafkaClusterConfiguration",
                         "path": ["kafkaClusterConfiguration"],
-                        "label": "Kafka Clients",
+                        "label": "Kafka Configs",
                         "valueKind": "record",
                         "description": "Kafka cluster configurations.",
                         "status": "ok",
@@ -1182,6 +1190,95 @@ def edit_state_with_workflow_config_kafka():
                                         "status": "ok",
                                         "statusCounts": {},
                                         "variants": [{"label": "autoCreate", "value": "autoCreate"}],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
+def edit_state_with_changed_capture_and_snapshot_migration():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:snapshotMigration",
+                "path": ["snapshotMigration"],
+                "label": "Snapshot Migration",
+                "valueKind": "object",
+                "status": "changed",
+                "statusCounts": {"changed": 1},
+                "children": [
+                    {
+                        "id": "edit:snapshotMigrationConfigs",
+                        "path": ["snapshotMigrationConfigs"],
+                        "label": "Backfill",
+                        "valueKind": "record",
+                        "status": "changed",
+                        "statusCounts": {"changed": 1},
+                        "children": [
+                            {
+                                "id": "edit:snapshotMigrationConfigs.source-target",
+                                "path": ["snapshotMigrationConfigs", "source -> target"],
+                                "label": "snapshot migration: source -> target",
+                                "valueKind": "object",
+                                "status": "changed",
+                                "statusCounts": {"changed": 1},
+                                "children": [
+                                    {
+                                        "id": "edit:snapshotMigrationConfigs.source-target.fromSource",
+                                        "path": ["snapshotMigrationConfigs", "source -> target", "fromSource"],
+                                        "label": "fromSource: source",
+                                        "valueKind": "scalar",
+                                        "status": "changed",
+                                        "statusCounts": {"changed": 1},
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "changed",
+                "statusCounts": {"changed": 1},
+                "children": [
+                    {
+                        "id": "edit:traffic.proxies",
+                        "path": ["traffic", "proxies"],
+                        "label": "Capture",
+                        "valueKind": "record",
+                        "status": "changed",
+                        "statusCounts": {"changed": 1},
+                        "children": [
+                            {
+                                "id": "edit:traffic.proxies.cap",
+                                "path": ["traffic", "proxies", "cap"],
+                                "label": "cap",
+                                "valueKind": "object",
+                                "status": "changed",
+                                "statusCounts": {"changed": 1},
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.proxies.cap.proxyConfig",
+                                        "path": ["traffic", "proxies", "cap", "proxyConfig"],
+                                        "label": "proxyConfig",
+                                        "valueKind": "object",
+                                        "status": "changed",
+                                        "statusCounts": {"changed": 1},
                                     },
                                 ],
                             },
@@ -1385,6 +1482,58 @@ async def wait_until(pilot, predicate, timeout=5.0, interval=0.1):
 
 
 # --- Tests ---
+
+def test_manage_tree_schema_orders_roots_like_workflow_config():
+    """Top-level manage roots should track the authored config shape."""
+
+    assert [section_name for section_name, _ in RESOURCE_SECTIONS] == [
+        "Sources",
+        "Targets",
+        "Snapshot Migration",
+        "Kafka Configs",
+        "Live Traffic Migration",
+    ]
+
+
+def test_source_config_diff_order_matches_edit_schema_order():
+    """Status config diffs should follow the same field order as the edit schema."""
+
+    sections = [
+        ResourceSection(
+            name="Workflow Configuration",
+            groups=[ResourceGroup(plural="sourceconfigs", display_name="Sources")],
+        )
+    ]
+    apply_config_overlays(
+        sections,
+        pending_console_config={
+            "sources": [
+                {
+                    "refName": "source",
+                    "clientConfig": {
+                        "endpoint": "https://source.example.com:9200",
+                        "version": "ES 7.10.2",
+                        "allow_insecure": True,
+                        "basic_auth": {"k8s_secret_name": "source-creds"},
+                    },
+                    "parameterProvenance": {
+                        "endpoint": {"sourcePath": ["sourceClusters", "source", "endpoint"]},
+                        "allow_insecure": {"sourcePath": ["sourceClusters", "source", "allowInsecure"]},
+                        "version": {"sourcePath": ["sourceClusters", "source", "version"]},
+                        "basic_auth.k8s_secret_name": {
+                            "sourcePath": ["sourceClusters", "source", "authConfig", "basic", "secretName"]
+                        },
+                    },
+                    "displayFields": ["endpoint", "allow_insecure", "version", "basic_auth.k8s_secret_name"],
+                }
+            ]
+        },
+    )
+
+    source = sections[0].groups[0].resources[0]
+    labels = [line.split(":", 1)[0] for line in format_config_diff_fields(source)]
+    assert labels == ["endpoint", "allowInsecure", "version", "authConfig.basic.secretName"]
+
 
 @pytest.mark.asyncio
 async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
@@ -1856,6 +2005,9 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
 
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert app.screen.focused is tree
+            assert tree.cursor_node is not None
+            assert (tree.cursor_node.data or {}).get("type") == "config-edit"
 
             source_group = find_tree_node_by_id(tree.root, "edit:sourceClusters")
             assert source_group is not None
@@ -1874,6 +2026,99 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
 
             await pilot.press("escape")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_preserves_expanded_resource_nodes():
+    """Expanded status resources should stay expanded when projected into the edit tree."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "snapshotMigrationConfigs: []\ntraffic:\n  proxies: {}\n",
+                "edit_state": edit_state_with_changed_capture_and_snapshot_migration(),
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="snapshotmigrations",
+                    display_name="Backfill",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot migration: source -> target",
+                            plural="snapshotmigrations",
+                            phase="Pending Config",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                            config_diff={"has_pending_submit_changes": True, "fields": [{"label": "fromSource"}]},
+                        )
+                    ],
+                )
+            ],
+        ),
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="captureproxies",
+                    display_name="Capture",
+                    resources=[
+                        ResourceNode(
+                            name="cap",
+                            plural="captureproxies",
+                            phase="Pending Config",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                            config_diff={"has_pending_submit_changes": True, "fields": [{"label": "listenPort"}]},
+                        )
+                    ],
+                )
+            ],
+        ),
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    find_tree_node_by_id(tree.root, "resource:snapshot migration: source -> target") is not None
+                    and find_tree_node_by_id(tree.root, "resource:cap") is not None
+                ),
+                timeout=5.0,
+            )
+            assert find_tree_node_by_id(tree.root, "resource:snapshot migration: source -> target").is_expanded
+            assert find_tree_node_by_id(tree.root, "resource:cap").is_expanded
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            assert find_tree_node_by_id(tree.root, "edit:snapshotMigrationConfigs.source-target").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap").is_expanded
 
 
 @pytest.mark.asyncio
@@ -3107,11 +3352,11 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
     pod_scraper.fetch_pods_metadata.return_value = []
     sections = [
         ResourceSection(
-            name="Workflow Configuration",
+            name="Kafka Configs",
             groups=[
                 ResourceGroup(
                     plural="kafkaconfigs",
-                    display_name="Kafka Clients",
+                    display_name="Kafka Configs",
                     resources=[
                         ResourceNode(
                             name="kafka",
@@ -3148,8 +3393,11 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            assert find_tree_node_by_id(tree.root, "edit:workflowConfiguration").is_expanded
-            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration").is_expanded
+            kafka_root = find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration")
+            assert kafka_root is not None
+            assert kafka_root.parent is tree.root
+            assert kafka_root.is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:workflowConfiguration") is None
             assert not find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
 
 
@@ -3469,8 +3717,8 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
                     for child in find_tree_node_by_id(tree.root, "resource:default").children
                 ),
             )
-            assert find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
-            assert find_tree_node_by_id(tree.root, "resource:default").is_expanded
+            assert not find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+            assert not find_tree_node_by_id(tree.root, "resource:default").is_expanded
             await pilot.press("v")
             await pilot.press("v")
             assert await wait_until(
@@ -3668,9 +3916,15 @@ async def test_resource_view_preserves_collapsed_config_changes_after_edit_exit_
 
             find_tree_node_by_id(tree.root, "group:Buffer").collapse()
             find_tree_node_by_id(tree.root, "resource:default").collapse()
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: "Values: Deployed" in str(app.query_one("#pod-status").content),
+            )
 
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert "Values: All" in str(app.query_one("#pod-status").content)
             await pilot.press("escape")
             assert await wait_until(
                 pilot,
@@ -3678,6 +3932,7 @@ async def test_resource_view_preserves_collapsed_config_changes_after_edit_exit_
                     get_clean_text_label(tree.root) == "Migration Status"
                     and not find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
                     and not find_tree_node_by_id(tree.root, "resource:default").is_expanded
+                    and "Values: All" in str(app.query_one("#pod-status").content)
                 ),
             )
             assert "(to submit)" in get_clean_text_label(find_tree_node_by_id(tree.root, "group:Buffer"))

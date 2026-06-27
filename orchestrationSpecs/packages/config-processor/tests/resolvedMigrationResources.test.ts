@@ -213,6 +213,12 @@ describe("resolved migration resources", () => {
 
         const topic = resolvedMigrationResources.resources.find(resource =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic");
+        expect(topic?.displayFields).toEqual(expect.arrayContaining([
+            "kafkaClusterName",
+            "topicName",
+            "partitions",
+            "replicas",
+        ]));
         expect(topic?.parameterProvenance?.topicName).toEqual(expect.objectContaining({
             presence: "defaulted",
             sourcePath: ["traffic", "proxies", "source-proxy", "kafkaTopic"],
@@ -235,6 +241,28 @@ describe("resolved migration resources", () => {
         expect(replay?.parameterProvenance?.dependsOn).toEqual(expect.objectContaining({
             presence: "generated",
         }));
+    });
+
+    it("loosely projects implicit default kafka refs without inventing a missing explicit cluster", async () => {
+        const config = sampleConfig();
+        (config as any).kafkaClusterConfiguration = {
+            kafka: {autoCreate: {}},
+        };
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+        const kafkaClusters = resolved.resources.filter(resource => resource.kind === "KafkaCluster");
+        const topic = resolved.resources.find(resource =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic");
+
+        expect(resolved.projectionComplete).toBe(false);
+        expect(kafkaClusters.map(resource => resource.name)).toEqual(["kafka"]);
+        expect(topic?.parameters.kafkaClusterName).toBe("default");
+        expect(topic?.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: ["traffic", "proxies", "source-proxy", "kafka"],
+                message: expect.stringContaining("unknown kafka cluster 'default'"),
+            }),
+        ]));
     });
 
     it("dry-runs VAP-style decisions for safe, gated, impossible, and invariant changes", () => {

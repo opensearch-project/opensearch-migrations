@@ -740,6 +740,127 @@ export function singleKeyUnionMode(
     };
 }
 
+export function optionalSingleKeyUnionNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    options: {
+        unsetLabel: string;
+        unsetValue: unknown;
+        unsetDescription?: string;
+        description?: string;
+        unknownMessage?: string;
+        presence?: EditNode["presence"];
+        expert?: boolean;
+    },
+): EditNode {
+    const branches = singleKeyUnionBranches(schema);
+    const presentBranch = isPlainObject(value)
+        ? branches.find(branch => Object.hasOwn(value, branch.value))
+        : undefined;
+    const hasObjectValue = value !== undefined && value !== null;
+    const unknown = hasObjectValue && !presentBranch;
+    const selectedValue = presentBranch?.value ?? options.unsetValue;
+    const branchValue = presentBranch && isPlainObject(value) && isPlainObject(value[presentBranch.value])
+        ? value[presentBranch.value]
+        : {};
+    const diagnostics: EditDiagnostic[] = unknown
+        ? [{
+            severity: "error",
+            message: options.unknownMessage ?? `Unknown ${key} variant. Expected ${branches.map(branch => branch.value).join(" or ")} or omitted.`,
+            path,
+        }]
+        : [];
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${presentBranch ? presentBranch.value : options.unsetLabel} >`,
+        value: selectedValue,
+        valueKind: "union",
+        presence: options.presence ?? "optional",
+        expert: options.expert ?? false,
+        description: options.description,
+        status: unknown ? "error" : "ok",
+        diagnostics,
+        variants: [
+            {
+                label: options.unsetLabel,
+                value: options.unsetValue,
+                description: options.unsetDescription,
+            },
+            ...branches.map(branch => ({
+                label: branch.value,
+                value: branch.value,
+                description: branch.description,
+            })),
+        ],
+        children: presentBranch
+            ? schemaNestedObjectChildren(presentBranch.optionSchema, path, presentBranch.value, value)
+            : unknown ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
+export function optionalObjectToggleNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    options: {
+        disabledLabel: string;
+        disabledValue: unknown;
+        disabledDescription?: string;
+        enabledLabel: string;
+        enabledValue: unknown;
+        enabledDescription?: string;
+        description?: string;
+        unknownMessage?: string;
+        presence?: EditNode["presence"];
+        expert?: boolean;
+    },
+): EditNode {
+    const enabled = isPlainObject(value);
+    const disabled = value === undefined || value === null;
+    const unknown = !enabled && !disabled;
+    const objectValue = enabled ? value as Record<string, unknown> : {};
+    const diagnostics: EditDiagnostic[] = unknown
+        ? [{
+            severity: "error",
+            message: options.unknownMessage ?? `Unknown ${key} value. Expected an object or omission.`,
+            path,
+        }]
+        : [];
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${enabled ? options.enabledLabel : options.disabledLabel} >`,
+        value: enabled ? options.enabledValue : options.disabledValue,
+        valueKind: "union",
+        presence: options.presence ?? "optional",
+        expert: options.expert ?? false,
+        description: options.description,
+        status: unknown ? "error" : "ok",
+        diagnostics,
+        variants: [
+            {
+                label: options.disabledLabel,
+                value: options.disabledValue,
+                description: options.disabledDescription,
+            },
+            {
+                label: options.enabledLabel,
+                value: options.enabledValue,
+                description: options.enabledDescription,
+            },
+        ],
+        children: enabled
+            ? schemaObjectChildren(path, schema, objectValue)
+            : unknown ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
 export function discriminatorForSchema(schema: any): string | undefined {
     const discriminator = unwrapSchema(schema)?._def?.discriminator;
     return typeof discriminator === "string" ? discriminator : undefined;

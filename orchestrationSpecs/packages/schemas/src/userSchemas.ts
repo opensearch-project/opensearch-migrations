@@ -1995,21 +1995,21 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'source']
                     });
                 }
-                const kafkaRef = proxyConfig.kafka;
-                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                const kafkaRef = proxyConfig.kafka ?? 'default';
+                if (Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
-                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}. Set traffic.proxies.${proxyName}.kafka or add kafkaClusterConfiguration.${kafkaRef}.`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
-                const kafkaRef = s3Config.kafka;
-                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                const kafkaRef = s3Config.kafka ?? 'default';
+                if (Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
-                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}. Set traffic.s3Sources.${s3Name}.kafka or add kafkaClusterConfiguration.${kafkaRef}.`,
                         path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }

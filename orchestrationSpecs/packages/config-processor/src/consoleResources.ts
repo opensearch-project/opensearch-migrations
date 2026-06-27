@@ -3,6 +3,7 @@ import {
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import type {ResolvedMigrationResources, ResolvedParameterProvenanceMap} from "./resolvedMigrationResources";
+import {CLUSTER_CLIENT_DISPLAY_FIELDS, KAFKA_CONFIG_DISPLAY_FIELDS} from "./resourceDisplayFields";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SourceConfig = WorkflowConfig["proxies"][number]["sourceConfig"];
@@ -21,6 +22,7 @@ export interface ConsoleClusterResource {
     refName: string;
     aliases: string[];
     clientConfig: Record<string, unknown>;
+    displayFields?: string[];
     parameterProvenance?: ResolvedParameterProvenanceMap;
     consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
@@ -55,7 +57,8 @@ export interface ConsoleKafkaResource {
             secretName?: string;
             caSecretName?: string;
             kafkaUserName?: string;
-        };
+    };
+    displayFields?: string[];
     parameterProvenance?: ResolvedParameterProvenanceMap;
     consumers?: ConsoleResourceConsumer[];
     source?: "config" | "migrationRun";
@@ -225,6 +228,7 @@ function kafkaResource(
                 caSecret: kafkaConfig.caSecretName || undefined,
                 kafkaUserName: kafkaConfig.kafkaUserName || undefined,
             },
+            displayFields: [...KAFKA_CONFIG_DISPLAY_FIELDS],
             ...(consumers.length > 0 ? {consumers} : {}),
         };
     }
@@ -238,6 +242,7 @@ function kafkaResource(
             caSecretName: kafkaConfig.caSecretName || undefined,
             kafkaUserName: kafkaConfig.kafkaUserName || undefined,
         },
+        displayFields: [...KAFKA_CONFIG_DISPLAY_FIELDS],
         ...(consumers.length > 0 ? {consumers} : {}),
     };
 }
@@ -252,6 +257,7 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
             refName: sourceConfig.label,
             aliases: [sourceConfig.label],
             clientConfig: clusterClientConfig(sourceConfig),
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
             consumers: [consumer("CaptureProxy", proxy.name, "capture source", proxy.configChecksum)],
             proxy: {
                 refName: proxy.name,
@@ -278,6 +284,7 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
             refName: sourceConfig.label,
             aliases: [sourceConfig.label],
             clientConfig: clusterClientConfig(sourceConfig),
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
             consumers: snapshot.createSnapshotConfig.map(item =>
                 consumer("DataSnapshot", `${sourceConfig.label}-${item.label}`, "snapshot source", item.configChecksum)),
             ...(sourceConfig.proxy ? {
@@ -306,6 +313,7 @@ function sourcesFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleSourc
                     allow_insecure: migration.sourceAllowInsecure,
                     ...mapAuthConfig(migration.sourceAuth),
                 }),
+                displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
                 consumers: [consumer(
                     "SnapshotMigration",
                     [migration.sourceLabel, migration.targetConfig.label, migration.label, migration.migrationLabel].join("-"),
@@ -330,6 +338,7 @@ function targetsFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleClust
             refName: migration.targetConfig.label,
             aliases: [migration.targetConfig.label],
             clientConfig: clusterClientConfig(migration.targetConfig),
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
             consumers: [consumer(
                 "SnapshotMigration",
                 [migration.sourceLabel, migration.targetConfig.label, migration.label, migration.migrationLabel].join("-"),
@@ -343,6 +352,7 @@ function targetsFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleClust
             refName: replay.toTarget.label,
             aliases: [replay.toTarget.label],
             clientConfig: clusterClientConfig(replay.toTarget),
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
             consumers: [consumer("TrafficReplay", replay.name, "replay target", replay.configChecksum)],
         });
     }
@@ -381,6 +391,7 @@ function kafkasFromWorkflowConfig(workflowConfig: WorkflowConfig): ConsoleKafkaR
                 caSecret: authType === "scram-sha-512" ? `${kafkaCluster.name}-cluster-ca-cert` : undefined,
                 kafkaUserName: authType === "scram-sha-512" ? `${kafkaCluster.name}-migration-app` : undefined,
             },
+            displayFields: [...KAFKA_CONFIG_DISPLAY_FIELDS],
             consumers: [consumer("KafkaCluster", kafkaCluster.name, "managed kafka", kafkaCluster.configChecksum)],
         });
     }

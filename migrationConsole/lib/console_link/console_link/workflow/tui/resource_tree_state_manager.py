@@ -69,7 +69,7 @@ class ResourceTreeStateManager:
         """Expand the ancestors and resource nodes that contain rollout-phase differences."""
         if not self.tree:
             return
-        expansion_ids = self._config_difference_expansion_ids(sections)
+        expansion_ids = self.config_difference_expansion_ids(sections)
         if not expansion_ids:
             return
         self.tree.root.expand()
@@ -80,6 +80,10 @@ class ResourceTreeStateManager:
             if node_id in expansion_ids:
                 node.expand()
             stack.extend(node.children)
+
+    def config_difference_expansion_ids(self, sections: List[ResourceSection]) -> set:
+        """Return tree IDs that should be expanded to reveal rollout-phase differences."""
+        return self._config_difference_expansion_ids(sections)
 
     @classmethod
     def _config_difference_expansion_ids(cls, sections: List[ResourceSection]) -> set:
@@ -138,33 +142,56 @@ class ResourceTreeStateManager:
         """Diff sections against existing tree children."""
         new_sections = [s for s in sections if any(self._group_has_content(g) for g in s.groups)]
         existing = self._existing_by_id(root)
-        new_ids = [self._section_id(s) for s in new_sections]
+        new_ids = [self._section_root_id(s) for s in new_sections]
 
         if self._has_structural_change(existing, new_ids):
             collapsed = self._save_collapsed(root)
             self._remove_children(root)
             for section in new_sections:
-                sid = self._section_id(section)
-                data = {'id': sid}
-                if section.tree_data:
-                    data.update(section.tree_data)
-                node = root.add(self._section_label(section), data=data)
-                for group in section.groups:
-                    self._add_group(node, group)
-                if sid in collapsed:
-                    node.collapse()
-                elif section.tree_default_expanded is False:
-                    node.collapse()
-                else:
-                    node.expand()
+                self._add_section_root(root, section, collapsed)
         else:
             for section in new_sections:
-                sid = self._section_id(section)
+                sid = self._section_root_id(section)
                 section_node = existing[sid]
-                section_node.set_label(self._section_label(section))
-                if section.tree_data and isinstance(section_node.data, dict):
-                    section_node.data.update(section.tree_data)
-                self._update_groups(section_node, section.groups)
+                flat_group = self._flat_section_group(section)
+                if flat_group:
+                    section_node.set_label(self._group_label(flat_group))
+                    if flat_group.tree_data and isinstance(section_node.data, dict):
+                        section_node.data.update(flat_group.tree_data)
+                    if flat_group.not_configured:
+                        self._replace_not_configured_child(section_node)
+                    else:
+                        self._update_resources(section_node, flat_group)
+                else:
+                    section_node.set_label(self._section_label(section))
+                    if section.tree_data and isinstance(section_node.data, dict):
+                        section_node.data.update(section.tree_data)
+                    self._update_groups(section_node, section.groups)
+
+    def _add_section_root(self, root: TreeNode, section: ResourceSection, collapsed_ids: set) -> None:
+        flat_group = self._flat_section_group(section)
+        if flat_group:
+            node = self._add_group(root, flat_group)
+            if node is None:
+                return
+            node_id = self._group_id(flat_group)
+            default_expanded = flat_group.tree_default_expanded
+        else:
+            node_id = self._section_id(section)
+            data = {'id': node_id}
+            if section.tree_data:
+                data.update(section.tree_data)
+            node = root.add(self._section_label(section), data=data)
+            for group in section.groups:
+                self._add_group(node, group)
+            default_expanded = section.tree_default_expanded
+
+        if node_id in collapsed_ids:
+            node.collapse()
+        elif default_expanded is False:
+            node.collapse()
+        else:
+            node.expand()
 
     def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
         """Diff groups within a section."""
@@ -442,22 +469,12 @@ class ResourceTreeStateManager:
             section_has_content = any(self._group_has_content(g) for g in section.groups)
             if not section_has_content:
                 continue
-            data = {'id': self._section_id(section)}
-            if section.tree_data:
-                data.update(section.tree_data)
-            section_node = self.tree.root.add(
-                self._section_label(section), data=data)
-            if section.tree_default_expanded is False:
-                section_node.collapse()
-            else:
-                section_node.expand()
-            for group in section.groups:
-                self._add_group(section_node, group)
+            self._add_section_root(self.tree.root, section, set())
 
-    def _add_group(self, parent: TreeNode, group: ResourceGroup) -> None:
+    def _add_group(self, parent: TreeNode, group: ResourceGroup) -> Optional[TreeNode]:
         """Add a resource group to the tree."""
         if not self._group_has_content(group):
-            return
+            return None
         data = {'id': self._group_id(group)}
         if group.tree_data:
             data.update(group.tree_data)
@@ -469,12 +486,34 @@ class ResourceTreeStateManager:
             group_node.expand()
         if group.not_configured:
             group_node.add("[dim](not configured)[/dim]", data=None)
-            return
+            return group_node
 
         group_plurals = group_plurals_for(group.plural)
         plural_order = {p: i for i, p in enumerate(group_plurals)}
         for resource in self._sorted_resources(group, plural_order):
             self._add_resource(group_node, resource)
+        return group_node
+
+    def _flat_section_group(self, section: ResourceSection) -> Optional[ResourceGroup]:
+        visible_groups = [group for group in section.groups if self._group_has_content(group)]
+        if (
+            len(visible_groups) == 1
+            and visible_groups[0].display_name == section.name
+            and section.tree_id is None
+            and section.tree_label is None
+            and section.tree_data is None
+        ):
+            return visible_groups[0]
+        return None
+
+    def _section_root_id(self, section: ResourceSection) -> str:
+        flat_group = self._flat_section_group(section)
+        return self._group_id(flat_group) if flat_group else self._section_id(section)
+
+    @staticmethod
+    def _replace_not_configured_child(node: TreeNode) -> None:
+        ResourceTreeStateManager._remove_children(node)
+        node.add("[dim](not configured)[/dim]", data=None)
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
         """Add a resource node with its details and workflow subtree."""

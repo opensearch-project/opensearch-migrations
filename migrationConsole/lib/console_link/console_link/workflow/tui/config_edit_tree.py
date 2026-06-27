@@ -183,6 +183,7 @@ def edit_state_resource_sections(
     fallback_roots = [
         node for node in roots
         if str(node.get("id")) not in used_top_level_ids
+        and not _root_consumed_by_section_groups(node, used_top_level_ids, status_mode, show_optional, show_expert)
         and _should_render_edit_node(node, status_mode, show_optional, show_expert)
     ]
     if fallback_roots:
@@ -209,6 +210,22 @@ def edit_state_resource_sections(
         ))
 
     return sections
+
+
+def _root_consumed_by_section_groups(
+    root: Dict[str, Any],
+    used_ids: set[str],
+    status_mode: str,
+    show_optional: bool,
+    show_expert: bool,
+) -> bool:
+    children = [
+        child for child in root.get("children") or []
+        if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+    ]
+    if not children:
+        return False
+    return all(str(child.get("id")) in used_ids for child in children)
 
 
 def _index_edit_nodes(nodes: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:

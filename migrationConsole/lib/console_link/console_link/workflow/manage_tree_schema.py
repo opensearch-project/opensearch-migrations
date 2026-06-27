@@ -14,7 +14,7 @@ WORKFLOW_CONFIGURATION_SECTION = "Workflow Configuration"
 SNAPSHOT_MIGRATION_SECTION = "Snapshot Migration"
 LIVE_TRAFFIC_MIGRATION_SECTION = "Live Traffic Migration"
 
-KAFKA_CLIENTS_GROUP = "Kafka Clients"
+KAFKA_CLIENTS_GROUP = "Kafka Configs"
 SOURCES_GROUP = "Sources"
 TARGETS_GROUP = "Targets"
 SNAPSHOT_GROUP = "Snapshot"
@@ -25,15 +25,13 @@ REPLAY_GROUP = "Replay"
 
 
 RESOURCE_SECTIONS: List[Tuple[str, List[Tuple[List[str], str]]]] = [
-    (WORKFLOW_CONFIGURATION_SECTION, [
-        (["kafkaconfigs"], KAFKA_CLIENTS_GROUP),
-        (["sourceconfigs"], SOURCES_GROUP),
-        (["targetconfigs"], TARGETS_GROUP),
-    ]),
+    (SOURCES_GROUP, [(["sourceconfigs"], SOURCES_GROUP)]),
+    (TARGETS_GROUP, [(["targetconfigs"], TARGETS_GROUP)]),
     (SNAPSHOT_MIGRATION_SECTION, [
         (["datasnapshots"], SNAPSHOT_GROUP),
         (["snapshotmigrations"], BACKFILL_GROUP),
     ]),
+    (KAFKA_CLIENTS_GROUP, [(["kafkaconfigs"], KAFKA_CLIENTS_GROUP)]),
     (LIVE_TRAFFIC_MIGRATION_SECTION, [
         (["captureproxies"], CAPTURE_GROUP),
         (["kafkaclusters", "capturedtraffics"], BUFFER_GROUP),
@@ -66,6 +64,16 @@ EDIT_ID_BY_TREE_ID: Dict[str, str] = {
     f"group:{BUFFER_GROUP}": "edit:traffic.s3Sources",
     f"group:{REPLAY_GROUP}": "edit:traffic.replayers",
 }
+
+EDIT_RESOURCE_COLLECTION_PATHS: Tuple[Tuple[str, ...], ...] = (
+    ("kafkaClusterConfiguration",),
+    ("sourceClusters",),
+    ("targetClusters",),
+    ("snapshotMigrationConfigs",),
+    ("traffic", "proxies"),
+    ("traffic", "s3Sources"),
+    ("traffic", "replayers"),
+)
 
 
 def display_name_for_plural(plural: str) -> Optional[str]:

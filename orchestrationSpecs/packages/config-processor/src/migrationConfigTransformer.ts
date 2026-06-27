@@ -7,7 +7,7 @@ import {
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
+    ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
@@ -23,6 +23,14 @@ import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
+import {
+    KAFKA_VERSION,
+    kafkaClusterNameForReference,
+    normalizeKafkaClusterConfig,
+    resolveKafkaClusters,
+    resolveWorkflowManagedKafkaAuth,
+    WorkflowManagedKafkaClusterConfig,
+} from "./kafkaConfigResolution";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -32,8 +40,7 @@ export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
 };
 
-/** Kafka version deployed by auto-created clusters. Not user-configurable. */
-export const KAFKA_VERSION = "4.0.0";
+export {KAFKA_VERSION} from "./kafkaConfigResolution";
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
@@ -175,34 +182,6 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
             validateNoExtraKeys(value, (schema as z.ZodRecord<any, any>).valueType, [...path, `[${index}]`]);
         });
     }
-}
-
-const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
-const DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH = {type: "scram-sha-512" as const};
-
-function resolveWorkflowManagedKafkaAuth(
-    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
-) {
-    return cluster.autoCreate.auth ?? DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH;
-}
-
-function normalizeKafkaClusterConfig(
-    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG>
-): z.infer<typeof KAFKA_CLUSTER_CONFIG> {
-    // Keep the cluster in the user-config schema family while resolving
-    // workflow-managed defaults into an explicit canonical form.
-    if ("existing" in cluster) {
-        return cluster;
-    }
-
-    return {
-        autoCreate: {
-            ...cluster.autoCreate,
-            auth: resolveWorkflowManagedKafkaAuth(
-                cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
-            ),
-        }
-    };
 }
 
 function defaultProxyTlsConfig(proxyName: string) {
@@ -533,31 +512,6 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
     };
 }
 
-/** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
-function resolveKafkaClusters(userConfig: {
-    kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>,
-    traffic?: { proxies?: Record<string, { kafka?: string }>, s3Sources?: Record<string, { kafka?: string }> }
-}) {
-    const explicit = userConfig.kafkaClusterConfiguration ?? {};
-    if (Object.keys(explicit).length > 0) {
-        return explicit;
-    }
-    const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
-    for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
-        const key = proxy.kafka ?? "default";
-        if (!(key in clusters)) {
-            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
-        }
-    }
-    for (const s3 of Object.values(userConfig.traffic?.s3Sources || {})) {
-        const key = s3.kafka ?? "default";
-        if (!(key in clusters)) {
-            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
-        }
-    }
-    return clusters;
-}
-
 /** Build a NAMED_KAFKA_CLIENT_CONFIG from a kafka cluster reference and topic. */
 function buildKafkaClientConfig(
     kafkaClusterKey: string,
@@ -584,7 +538,7 @@ function buildKafkaClientConfig(
             label: kafkaClusterKey
         };
     }
-    const auth = resolveWorkflowManagedKafkaAuth(cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>});
+    const auth = resolveWorkflowManagedKafkaAuth(cluster as WorkflowManagedKafkaClusterConfig);
     const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
     const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
     // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
@@ -843,12 +797,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         // Aggregate topics per kafka cluster from proxies AND s3Sources
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
-            const clusterKey = proxy.kafka ?? "default";
+            const clusterKey = kafkaClusterNameForReference(proxy);
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
         }
         for (const [s3Name, s3] of Object.entries(userConfig.traffic?.s3Sources || {})) {
-            const clusterKey = s3.kafka ?? "default";
+            const clusterKey = kafkaClusterNameForReference(s3);
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(s3.kafkaTopic || s3Name);
         }
@@ -860,7 +814,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 version: KAFKA_VERSION,
                 config: {
                     ...(config as any).autoCreate,
-                    auth: resolveWorkflowManagedKafkaAuth(config as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}),
+                    auth: resolveWorkflowManagedKafkaAuth(config as WorkflowManagedKafkaClusterConfig),
                 },
                 topics: [...(topicsByCluster.get(name) ?? [])]
             }));
@@ -877,7 +831,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const topic = proxy.kafkaTopic || proxyName;
             return {
                 name: proxyName,
-                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                kafkaConfig: buildKafkaClientConfig(kafkaClusterNameForReference(proxy), kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig)
             };
@@ -1078,7 +1032,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             // proxy and s3Source share the same shape for what the replayer cares about:
             // a kafka cluster reference, a topic name, and a sourceLabel.
-            const kafkaCluster = (proxy?.kafka ?? s3Source?.kafka) ?? "default";
+            const kafkaCluster = kafkaClusterNameForReference(proxy ?? s3Source ?? {});
             const topicOverride = proxy?.kafkaTopic ?? s3Source?.kafkaTopic ?? "";
             const topic = topicOverride || sourceName;
             const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
@@ -1105,7 +1059,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const kafkaClusters = resolveKafkaClusters(userConfig);
         const s3Sources = userConfig.traffic?.s3Sources ?? {};
         return Object.entries(s3Sources).map(([name, s3]) => {
-            const kafkaCluster = s3.kafka ?? "default";
+            const kafkaCluster = kafkaClusterNameForReference(s3);
             const topic = s3.kafkaTopic || name;
             return {
                 name,

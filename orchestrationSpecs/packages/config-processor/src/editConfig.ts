@@ -50,6 +50,7 @@ import {
     childSchemaAtPath,
     defaultJsonValueForSchema,
     defaultValueForSchema,
+    discriminatedUnionBranches,
     descriptionOf,
     discriminatedUnionOption,
     discriminatedUnionValueForVariant,
@@ -66,17 +67,16 @@ import {
     jsonSchemaType,
     jsonDiscriminatedUnionValueForVariant,
     objectChildrenFromValue,
+    optionalObjectToggleNode,
+    optionalSingleKeyUnionNode,
     recordKeyHint,
     resolveJsonSchemaRef,
     schemaFieldDescription,
     schemaFieldNode,
     schemaFieldNodeFor,
-    schemaNestedObjectChildren,
     schemaObjectChildren,
     schemaDescription,
     schemaShape,
-    singleKeyUnionBranchFor,
-    singleKeyUnionBranches,
     singleKeyUnionMode,
     singleKeyUnionValueForVariant,
     uiHintAt,
@@ -105,9 +105,6 @@ const REPLAYER_DESCRIPTION = descriptionOf(REPLAYER_CONFIG);
 const SNAPSHOT_MIGRATION_DESCRIPTION = descriptionOf(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG);
 const AUTH_CONFIG_SCHEMA = schemaShape(CLUSTER_CONFIG)?.authConfig;
 const AUTH_DESCRIPTION = schemaDescription(AUTH_CONFIG_SCHEMA) || "Authentication configuration for connecting to the cluster.";
-const PROXY_TLS_CERT_MANAGER_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "certManager");
-const PROXY_TLS_EXISTING_SECRET_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "existingSecret");
-const PROXY_TLS_PLAINTEXT_SCHEMA = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", "plaintext");
 const S3_CAPTURED_TRAFFIC_DESCRIPTION = descriptionOf(S3_CAPTURED_TRAFFIC_SOURCE);
 const KAFKA_RECORD_HINT = uiHintOf(KAFKA_CLUSTERS_MAP);
 const SOURCE_RECORD_HINT = uiHintOf(SOURCE_CLUSTERS_MAP);
@@ -119,6 +116,7 @@ const SNAPSHOT_MIGRATION_ARRAY_HINT = uiHintAt(OVERALL_MIGRATION_CONFIG, ["snaps
     kind: "array" as const,
     addLabel: "snapshot migration",
 };
+const PROXY_TLS_VARIANT_ORDER = ["existingSecret", "certManager", "plaintext"];
 const DEFAULT_CONFIG_FACTORIES: Record<string, () => Record<string, unknown>> = {
     sourceClusters: () => ({
         endpoint: "",
@@ -205,58 +203,12 @@ function buildEditContext(config: any): EditContext {
     };
 }
 
-function authVariant(authConfig: unknown): "none" | "basic" | "sigv4" | "mtls" | "unknown" {
-    if (!authConfig || typeof authConfig !== "object") {
-        return "none";
-    }
-    const keys = Object.keys(authConfig as Record<string, unknown>);
-    if (keys.includes("basic")) {
-        return "basic";
-    }
-    if (keys.includes("sigv4")) {
-        return "sigv4";
-    }
-    if (keys.includes("mtls")) {
-        return "mtls";
-    }
-    return "unknown";
-}
-
-function authChildren(path: string[], variant: ReturnType<typeof authVariant>, authConfig: any): EditNode[] {
-    if (variant === "none" || variant === "unknown") {
-        return [];
-    }
-    const branch = singleKeyUnionBranchFor(AUTH_CONFIG_SCHEMA, variant);
-    return branch
-        ? schemaNestedObjectChildren(branch.optionSchema, path, variant, authConfig)
-        : [];
-}
-
 function authNode(path: string[], authConfig: unknown): EditNode {
-    const variant = authVariant(authConfig);
-    const diagnostics: EditDiagnostic[] = variant === "unknown"
-        ? [{severity: "error", message: "Unknown authConfig variant. Expected basic, sigv4, mtls, or omitted.", path}]
-        : [];
-    const authVariants = [
-        {label: "none", value: "none"},
-        ...singleKeyUnionBranches(AUTH_CONFIG_SCHEMA).map(branch => ({
-            label: branch.value,
-            value: branch.value,
-            description: branch.description,
-        })),
-    ];
-    return finalizeNode({
-        id: `edit:${path.join(".")}`,
-        path,
-        label: `authConfig: < ${variant} >`,
-        value: variant,
-        valueKind: "union",
-        presence: "optional",
+    return optionalSingleKeyUnionNode(path, "authConfig", AUTH_CONFIG_SCHEMA, authConfig, {
+        unsetLabel: "none",
+        unsetValue: "none",
         description: AUTH_DESCRIPTION,
-        status: variant === "unknown" ? "error" : "ok",
-        diagnostics,
-        variants: authVariants,
-        children: authChildren(path, variant, authConfig),
+        unknownMessage: "Unknown authConfig variant. Expected basic, sigv4, mtls, or omitted.",
     });
 }
 
@@ -271,75 +223,34 @@ function proxyTlsMode(config: unknown): "unset" | "certManager" | "existingSecre
     return "unknown";
 }
 
-function proxyClientAuthMode(config: unknown): "disabled" | "enabled" | "unknown" {
-    if (config === undefined || config === null) {
-        return "disabled";
-    }
-    if (isPlainObject(config)) {
-        return "enabled";
-    }
-    return "unknown";
-}
-
 function proxyClientAuthNode(path: string[], config: unknown): EditNode {
-    const mode = proxyClientAuthMode(config);
-    const clientAuth = isPlainObject(config) ? config as Record<string, unknown> : {};
-    const diagnostics: EditDiagnostic[] = mode === "unknown"
-        ? [{severity: "error", message: "Unknown clientAuth value. Expected an object or omission.", path}]
-        : [];
     const description = descriptionOf(PROXY_TLS_CLIENT_AUTH_CONFIG)
         ?? "Optional mutual TLS client-authentication configuration for the capture proxy listener.";
-    return finalizeNode({
-        id: `edit:${path.join(".")}`,
-        path,
-        label: `clientAuth: < ${mode} >`,
-        value: mode,
-        valueKind: "union",
-        presence: "optional",
+    return optionalObjectToggleNode(path, "clientAuth", PROXY_TLS_CLIENT_AUTH_CONFIG, config, {
+        disabledLabel: "disabled",
+        disabledValue: "disabled",
+        disabledDescription: "Do not require client certificates when console commands connect to the proxy.",
+        enabledLabel: "enabled",
+        enabledValue: "enabled",
+        enabledDescription: "Require client certificates signed by the configured trusted client CA.",
         description,
-        status: mode === "unknown" ? "error" : "ok",
-        diagnostics,
-        variants: [
-            {
-                label: "disabled",
-                value: "disabled",
-                description: "Do not require client certificates when console commands connect to the proxy.",
-            },
-            {
-                label: "enabled",
-                value: "enabled",
-                description: "Require client certificates signed by the configured trusted client CA.",
-            },
-        ],
-        children: mode === "enabled"
-            ? schemaObjectChildren(path, PROXY_TLS_CLIENT_AUTH_CONFIG, clientAuth)
-            : mode === "unknown" ? objectChildrenFromValue(path, config) : [],
+        unknownMessage: "Unknown clientAuth value. Expected an object or omission.",
     });
 }
 
 function proxyTlsChildren(path: string[], mode: ReturnType<typeof proxyTlsMode>, config: any): EditNode[] {
-    if (mode === "existingSecret") {
-        return [
-            schemaFieldNodeFor(PROXY_TLS_EXISTING_SECRET_SCHEMA, path, "secretName", config),
-            proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
-        ];
-    }
-    if (mode === "certManager") {
-        return [
-            ...schemaFieldNodes(PROXY_TLS_CERT_MANAGER_SCHEMA, path, config, [
-                "issuerRef",
-                "dnsNames",
-                "commonName",
-                "duration",
-                "renewBefore",
-            ]),
-            proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth),
-        ];
-    }
     if (mode === "unknown") {
         return objectChildrenFromValue(path, config);
     }
-    return [];
+    const branch = discriminatedUnionOption(PROXY_TLS_CONFIG, "mode", mode);
+    if (!branch) {
+        return [];
+    }
+    const children = schemaObjectChildren(path, branch, config, new Set(["mode", "clientAuth"]));
+    if (schemaShape(branch)?.clientAuth) {
+        children.push(proxyClientAuthNode([...path, "clientAuth"], config?.clientAuth));
+    }
+    return children;
 }
 
 function proxyTlsNode(
@@ -370,21 +281,15 @@ function proxyTlsNode(
                 value: "unset",
                 description: "Use the workflow's secure-by-default proxy TLS behavior.",
             },
-            {
-                label: "existingSecret",
-                value: "existingSecret",
-                description: descriptionOf(PROXY_TLS_EXISTING_SECRET_SCHEMA),
-            },
-            {
-                label: "certManager",
-                value: "certManager",
-                description: descriptionOf(PROXY_TLS_CERT_MANAGER_SCHEMA),
-            },
-            {
-                label: "plaintext",
-                value: "plaintext",
-                description: descriptionOf(PROXY_TLS_PLAINTEXT_SCHEMA),
-            },
+            ...discriminatedUnionBranches(PROXY_TLS_CONFIG, "mode")
+                .sort((left, right) =>
+                    PROXY_TLS_VARIANT_ORDER.indexOf(String(left.value)) -
+                    PROXY_TLS_VARIANT_ORDER.indexOf(String(right.value)))
+                .map(branch => ({
+                    label: String(branch.value),
+                    value: branch.value,
+                    description: branch.description,
+                })),
         ],
         children: proxyTlsChildren(path, mode, value),
     });
@@ -435,7 +340,7 @@ function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
     const path = ["kafkaClusterConfiguration"];
     return recordGroupNode({
         path,
-        label: "Kafka Clients",
+        label: "Kafka Configs",
         description: KAFKA_CLUSTERS_DESCRIPTION,
         inputHint: KAFKA_RECORD_HINT,
         config,

@@ -58,8 +58,10 @@ class TestBuildTreeFromRaw:
     def test_empty_input_returns_empty_sections(self):
         sections = _build_tree_from_raw({})
         assert [section.name for section in sections] == [
-            'Workflow Configuration',
+            'Sources',
+            'Targets',
             'Snapshot Migration',
+            'Kafka Configs',
             'Live Traffic Migration',
         ]
         for s in sections:
@@ -166,7 +168,14 @@ class TestFormatSpecFields:
 
     def test_unknown_plural_returns_empty(self):
         resource = make_resource('unknowntype', spec={'foo': 'bar'})
-        assert format_spec_fields(resource) == []
+        assert format_spec_fields(resource) == ['foo: bar']
+
+    def test_uses_projected_display_fields_when_available(self):
+        resource = make_resource('captureproxies', spec={
+            'listenPort': 9201, 'podReplicas': 2, 'internetFacing': True,
+        })
+        resource.display_fields = ['podReplicas', 'listenPort']
+        assert format_spec_fields(resource) == ['podReplicas: 2', 'listenPort: 9201']
 
 
 class TestConfigOverlays:
@@ -220,6 +229,33 @@ class TestConfigOverlays:
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_nests_virtual_captured_traffic_under_virtual_kafka_cluster(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [
+            {
+                'kind': 'CapturedTraffic',
+                'name': 'cap-topic',
+                'parameters': {
+                    'kafkaClusterName': 'default',
+                    'topicName': 'aa',
+                },
+            },
+            {
+                'kind': 'KafkaCluster',
+                'name': 'default',
+                'parameters': {
+                    'version': '4.0.0',
+                    'auth': {'type': 'none'},
+                },
+            },
+        ]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        buffer_group = group_by_plural(sections, 'kafkaclusters')
+        assert [resource.name for resource in buffer_group.resources] == ['default']
+        assert [child.name for child in buffer_group.resources[0].children] == ['cap-topic']
 
     def test_adds_virtual_snapshot_migration_from_saved_config(self):
         sections = _build_tree_from_raw({})
@@ -370,7 +406,7 @@ class TestConfigOverlays:
         )
 
         config_section = sections[0]
-        assert config_section.name == 'Workflow Configuration'
+        assert config_section.name == 'Sources'
         source_group = group_by_plural(sections, 'sourceconfigs')
         resource = source_group.resources[0]
         assert resource.name == 'legacy'
