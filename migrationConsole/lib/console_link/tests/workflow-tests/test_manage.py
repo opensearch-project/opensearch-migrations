@@ -1501,6 +1501,48 @@ async def test_resource_view_renders_resources_without_workflow():
 
 
 @pytest.mark.asyncio
+async def test_resource_view_left_right_expand_and_collapse_on_launch():
+    """Status mode should bind left/right to tree navigation before entering edit mode."""
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=object(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "group:Buffer") is not None,
+                timeout=5.0,
+            )
+
+            buffer_node = find_tree_node_by_id(tree.root, "group:Buffer")
+            assert buffer_node.is_expanded
+            tree.move_cursor(buffer_node)
+
+            await pilot.press("left")
+            assert not buffer_node.is_expanded
+
+            await pilot.press("right")
+            assert buffer_node.is_expanded
+
+
+@pytest.mark.asyncio
 async def test_manage_toggles_mouse_reporting_for_text_selection(mock_workflow_with_two_pods):
     """The manage UI can temporarily release terminal mouse handling for text selection."""
 

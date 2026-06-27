@@ -311,6 +311,7 @@ class WorkflowTreeApp(App):
             self._tree_state.rebuild(sections, workflow_data)
         else:
             self._tree_state.update(sections, workflow_data)
+        self.tree_root_widget.focus()
         if self._expand_changed_resources_on_next_render:
             self._expand_changed_resources_on_next_render = False
             self._expand_changed_resource_nodes(sections)
@@ -758,8 +759,20 @@ class WorkflowTreeApp(App):
             self.refresh_bindings()
             return
 
-        self.bind("left", "collapse_node", show=False)
-        self.bind("right", "expand_node", show=False)
+        self._bindings.bind(
+            "left",
+            "collapse_node",
+            "",
+            show=False,
+            priority=True,
+        )
+        self._bindings.bind(
+            "right",
+            "expand_node",
+            "",
+            show=False,
+            priority=True,
+        )
 
         if self._resource_view:
             self.bind("e", "edit_config", description="Edit Config")
