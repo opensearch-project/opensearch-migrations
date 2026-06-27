@@ -379,6 +379,38 @@ class TestConfigOverlays:
             'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
         ]
 
+    def test_virtual_source_config_labels_use_authored_config_paths(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {
+                'allow_insecure': True,
+                'basic_auth': {'k8s_secret_name': 'source-creds'},
+            },
+            'parameterProvenance': {
+                'allow_insecure': {
+                    'path': ['allow_insecure'],
+                    'value': True,
+                    'presence': 'authored',
+                    'sourcePath': ['sourceClusters', 'source', 'allowInsecure'],
+                },
+                'basic_auth.k8s_secret_name': {
+                    'path': ['basic_auth', 'k8s_secret_name'],
+                    'value': 'source-creds',
+                    'presence': 'authored',
+                    'sourcePath': ['sourceClusters', 'source', 'authConfig', 'basic', 'secretName'],
+                },
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'allowInsecure: deployed=<absent> | pending=<absent> | to-submit=true',
+            'authConfig.basic.secretName: deployed=<absent> | pending=<absent> | to-submit=source-creds',
+        ]
+
     def test_virtual_source_config_shows_partial_consumer_adoption(self):
         sections = _build_tree_from_raw({
             'captureproxies': [

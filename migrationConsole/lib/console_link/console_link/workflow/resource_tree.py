@@ -637,7 +637,7 @@ def _build_config_diff(
             has_pending_submit_changes = True
         fields.append({
             'path': '.'.join(path),
-            'label': path[-1],
+            'label': _config_diff_field_label(plural, path, values),
             'values': values,
         })
 
@@ -674,6 +674,30 @@ def _ordered_config_paths(
     for key in sorted(discovered - seen):
         ordered.append(list(key))
     return ordered
+
+
+def _config_diff_field_label(plural: str, path: List[str], values: Dict[str, Dict[str, Any]]) -> str:
+    if plural not in VIRTUAL_CONFIG_PLURALS:
+        return path[-1]
+    for phase in ('pending', 'submitted', 'deployed'):
+        provenance = (values.get(phase) or {}).get('provenance') or {}
+        source_path = provenance.get('sourcePath')
+        if source_path:
+            return _source_config_label(source_path, path[-1])
+    return path[-1]
+
+
+def _source_config_label(source_path: List[Any], fallback: str) -> str:
+    if not isinstance(source_path, list) or not source_path:
+        return fallback
+    parts = [str(part) for part in source_path]
+    if parts[0] in {'sourceClusters', 'targetClusters', 'kafkaClusterConfiguration'} and len(parts) > 2:
+        parts = parts[2:]
+    elif parts[0] == 'traffic' and len(parts) > 3 and parts[1] in {'proxies', 's3Sources', 'replayers'}:
+        parts = parts[3:]
+    elif parts[0] == 'snapshotMigrationConfigs' and len(parts) > 2:
+        parts = parts[2:]
+    return '.'.join(parts) or fallback
 
 
 def _leaf_paths(value: Any, prefix: Optional[List[str]] = None):
