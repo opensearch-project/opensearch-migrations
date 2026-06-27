@@ -1857,8 +1857,10 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            assert "Sources [REQ 1]" in get_clean_text_label(tree.root.children[0])
-            assert "yellow" in get_label_style(tree.root.children[0])
+            source_group = find_tree_node_by_id(tree.root, "edit:sourceClusters")
+            assert source_group is not None
+            assert "Sources [REQ 1]" in get_clean_text_label(source_group)
+            assert "yellow" in get_label_style(source_group)
 
             app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
             await pilot.pause()
@@ -2975,7 +2977,8 @@ async def test_resource_view_edit_mode_colors_and_fixed_data_modes(mock_workflow
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            source_node = tree.root.children[0]
+            source_node = find_tree_node_by_id(tree.root, "edit:sourceClusters")
+            assert source_node is not None
             assert "Sources (changed)" in get_clean_text_label(source_node)
             assert get_label_style(source_node) == ""
             assert not source_node.is_expanded

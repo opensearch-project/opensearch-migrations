@@ -125,6 +125,12 @@ class ResourceNode:
     config_presence: Dict[str, bool] = field(default_factory=dict)
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     virtual_adoption: Optional[Dict[str, Any]] = None
+    tree_id: Optional[str] = None
+    tree_label: Optional[Any] = None
+    tree_data: Optional[Dict[str, Any]] = None
+    tree_default_expanded: Optional[bool] = None
+    tree_change_summary: Optional[Dict[str, int]] = None
+    tree_sort_index: Optional[int] = None
 
 
 @dataclass
@@ -134,6 +140,10 @@ class ResourceGroup:
     display_name: str
     resources: List[ResourceNode] = field(default_factory=list)
     not_configured: bool = False
+    tree_id: Optional[str] = None
+    tree_label: Optional[Any] = None
+    tree_data: Optional[Dict[str, Any]] = None
+    tree_default_expanded: Optional[bool] = None
 
 
 @dataclass
@@ -141,6 +151,10 @@ class ResourceSection:
     """A top-level section grouping related resource groups."""
     name: str
     groups: List[ResourceGroup] = field(default_factory=list)
+    tree_id: Optional[str] = None
+    tree_label: Optional[Any] = None
+    tree_data: Optional[Dict[str, Any]] = None
+    tree_default_expanded: Optional[bool] = None
 
 
 def build_resource_tree(namespace: str) -> List[ResourceSection]:
