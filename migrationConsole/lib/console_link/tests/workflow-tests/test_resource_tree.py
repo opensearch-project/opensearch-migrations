@@ -61,7 +61,7 @@ class TestBuildTreeFromRaw:
             'Sources',
             'Targets',
             'Snapshot Migration',
-            'Kafka Configs',
+            'Kafka Clusters',
             'Live Traffic Migration',
         ]
         for s in sections:

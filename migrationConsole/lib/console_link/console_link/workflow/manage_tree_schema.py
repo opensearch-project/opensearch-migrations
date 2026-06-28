@@ -14,7 +14,7 @@ WORKFLOW_CONFIGURATION_SECTION = "Workflow Configuration"
 SNAPSHOT_MIGRATION_SECTION = "Snapshot Migration"
 LIVE_TRAFFIC_MIGRATION_SECTION = "Live Traffic Migration"
 
-KAFKA_CLIENTS_GROUP = "Kafka Configs"
+KAFKA_CLIENTS_GROUP = "Kafka Clusters"
 SOURCES_GROUP = "Sources"
 TARGETS_GROUP = "Targets"
 SNAPSHOT_GROUP = "Snapshot"

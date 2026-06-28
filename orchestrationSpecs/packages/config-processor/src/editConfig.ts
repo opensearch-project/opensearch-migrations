@@ -340,7 +340,7 @@ function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
     const path = ["kafkaClusterConfiguration"];
     return recordGroupNode({
         path,
-        label: "Kafka Configs",
+        label: "Kafka Clusters",
         description: KAFKA_CLUSTERS_DESCRIPTION,
         inputHint: KAFKA_RECORD_HINT,
         config,

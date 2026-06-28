@@ -1165,7 +1165,7 @@ def edit_state_with_workflow_config_kafka():
                     {
                         "id": "edit:kafkaClusterConfiguration",
                         "path": ["kafkaClusterConfiguration"],
-                        "label": "Kafka Configs",
+                        "label": "Kafka Clusters",
                         "valueKind": "record",
                         "description": "Kafka cluster configurations.",
                         "status": "ok",
@@ -1490,7 +1490,7 @@ def test_manage_tree_schema_orders_roots_like_workflow_config():
         "Sources",
         "Targets",
         "Snapshot Migration",
-        "Kafka Configs",
+        "Kafka Clusters",
         "Live Traffic Migration",
     ]
 
@@ -3352,11 +3352,11 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
     pod_scraper.fetch_pods_metadata.return_value = []
     sections = [
         ResourceSection(
-            name="Kafka Configs",
+            name="Kafka Clusters",
             groups=[
                 ResourceGroup(
                     plural="kafkaconfigs",
-                    display_name="Kafka Configs",
+                    display_name="Kafka Clusters",
                     resources=[
                         ResourceNode(
                             name="kafka",

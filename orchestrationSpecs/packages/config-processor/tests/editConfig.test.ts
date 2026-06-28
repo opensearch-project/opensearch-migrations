@@ -62,7 +62,7 @@ describe("editConfig state", () => {
             "Live Traffic Migration",
         ]);
         expect((state.nodes[0].children ?? []).map(cleanLabel)).toEqual([
-            "Kafka Configs",
+            "Kafka Clusters",
             "Sources",
             "Targets",
         ]);
