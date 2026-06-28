@@ -198,7 +198,38 @@ export function isRequiredSchema(schema: any): boolean {
 }
 
 export function defaultValueForSchema(schema: any): unknown {
-    return schema?.safeParse?.(undefined)?.data;
+    const parsed = schema?.safeParse?.(undefined);
+    if (parsed?.success && parsed.data !== undefined) {
+        return parsed.data;
+    }
+    return wrappedDefaultValueForSchema(schema);
+}
+
+function wrappedDefaultValueForSchema(schema: any, seen = new Set<any>()): unknown {
+    if (!schema || seen.has(schema)) {
+        return undefined;
+    }
+    seen.add(schema);
+
+    const constructorName = String(schema?.constructor?.name ?? "");
+    if (constructorName === "ZodDefault") {
+        const parsed = schema.safeParse?.(undefined);
+        if (parsed?.success) {
+            return parsed.data;
+        }
+    }
+
+    const inner = schema.unwrap?.() ?? schema._def?.innerType ?? schema.def?.innerType;
+    if (inner) {
+        return wrappedDefaultValueForSchema(inner, seen);
+    }
+
+    if (constructorName === "ZodPipe") {
+        const def = schema._def ?? schema.def;
+        return wrappedDefaultValueForSchema(def?.in?.constructor?.name === "ZodTransform" ? def.out : def?.in, seen);
+    }
+
+    return undefined;
 }
 
 export function schemaDescription(schema: any): string {

@@ -652,6 +652,7 @@ describe("editConfig state", () => {
         const captureGroup = findNode(state.nodes, "edit:traffic.proxies");
         const proxy = findNode(state.nodes, "edit:traffic.proxies.cap");
         const proxyConfig = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig");
+        const kafka = findNode(state.nodes, "edit:traffic.proxies.cap.kafka");
         const listenPort = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.listenPort");
         const kafkaTopic = findNode(state.nodes, "edit:traffic.proxies.cap.kafkaTopic");
         const podReplicas = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.podReplicas");
@@ -673,6 +674,8 @@ describe("editConfig state", () => {
         expect(proxyConfig?.statusCounts?.required).toBe(1);
         expect(proxyConfig?.required).toBe(true);
         expect(proxyConfig?.presence).toBe("required");
+        expect(kafka).toMatchObject({status: "ok", presence: "optional", value: "default"});
+        expect(kafka?.label).toContain("kafka: default");
         expect(listenPort?.status).toBe("required");
         expect(listenPort?.presence).toBe("required");
         expect(listenPort?.valueType).toBe("number");
