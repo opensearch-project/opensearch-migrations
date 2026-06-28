@@ -240,6 +240,9 @@ spec:
         - name: console
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          ports:
+            - name: manage-web
+              containerPort: 8000
           # Since the console may be used interactively, try to keep the migration
           # console on the same node so that it can be stable.  Keep the requests
           # and limits values the same to have k8s treat the pod as "Guranteed",

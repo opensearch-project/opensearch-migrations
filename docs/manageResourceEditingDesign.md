@@ -57,6 +57,46 @@ TS does not run on cursor movement, normal manage polling refreshes, or every ke
 
 A long-lived helper remains only a latency optimization. If added, it is a manage-scoped stdio child process with the same JSON contracts, not a cluster service and not a network daemon.
 
+## Browser Serve Mode
+
+`workflow manage --serve` runs the same Textual manage UI through `textual-serve` instead of taking over the current terminal. The command starts a local HTTP server and launches a fresh manage app subprocess for each browser session using Textual's web driver.
+
+The default serve bind is `127.0.0.1:8000`. The default browser-facing URL is `http://localhost:8000`. Those defaults are intended for `kubectl port-forward pod/...`; the server stays on loopback inside the pod, while the user's browser connects to local loopback on their workstation.
+
+Run directly inside the migration console:
+
+```bash
+workflow manage --serve
+```
+
+Then open:
+
+```text
+http://localhost:8000
+```
+
+For the usual Kubernetes console pod workflow, start the server in the pod and then port-forward to it with one shell command:
+
+```bash
+kubectl -n ma exec migration-console-0 -- sh -lc 'nohup workflow manage --serve >/tmp/workflow-manage-serve.log 2>&1 &' && kubectl -n ma port-forward pod/migration-console-0 8000:8000
+```
+
+Then open `http://localhost:8000`.
+
+If the browser reaches the server through a different hostname or port, set the public URL explicitly so websocket URLs are generated correctly:
+
+```bash
+workflow manage --serve --serve-host 0.0.0.0 --serve-port 8000 --serve-public-url http://localhost:18000
+```
+
+Use `--serve-host 0.0.0.0` only when exposing the pod through something other than `kubectl port-forward`, such as a Service or ingress.
+
+To stop a background server in the console pod:
+
+```bash
+kubectl -n ma exec migration-console-0 -- sh -lc "pkill -f 'workflow manage --serve' || true"
+```
+
 ## External Configuration References
 
 External Secret, ConfigMap, image, and cert-manager issuer references are handled as schema-guided edit fields, not as migration CRs. The detailed picker, create-form, and standalone validation design lives in [Manage External Configuration References](manageExternalConfigurationReferencesDesign.md).

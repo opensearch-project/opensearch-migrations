@@ -3,6 +3,7 @@
 import base64
 import gzip
 import json
+import sys
 
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
@@ -83,6 +84,69 @@ class TestWorkflowCLICommands:
         assert mock_app_class.call_args.kwargs["resource_view"] is False
         assert app.run.call_count == 2
         mock_reset_mouse.assert_called_once()
+
+    @patch('console_link.workflow.commands.manage.Server')
+    @patch('console_link.workflow.commands.manage.WorkflowTreeApp')
+    @patch('console_link.workflow.commands.manage._initialize_k8s_client')
+    @patch('console_link.workflow.commands.manage.reset_terminal_mouse_reporting')
+    def test_manage_serve_starts_textual_web_server(
+        self,
+        mock_reset_mouse,
+        mock_init_k8s,
+        mock_app_class,
+        mock_server_class,
+    ):
+        runner = CliRunner()
+        server = Mock()
+        mock_server_class.return_value = server
+
+        result = runner.invoke(workflow_cli, [
+            'manage',
+            '--namespace', 'ma',
+            '--workflow-name', 'migration-workflow',
+            '--argo-server', 'https://argo.example:2746',
+            '--token', 'tok en',
+            '--step-view',
+            '--serve',
+            '--serve-host', '0.0.0.0',
+            '--serve-port', '8123',
+            '--serve-public-url', 'http://localhost:8123',
+        ])
+
+        assert result.exit_code == 0
+        mock_app_class.assert_not_called()
+        mock_init_k8s.assert_not_called()
+        mock_reset_mouse.assert_not_called()
+        server.serve.assert_called_once_with(debug=False)
+        assert mock_server_class.call_args.kwargs == {
+            "host": "0.0.0.0",
+            "port": 8123,
+            "title": "Workflow Manage: migration-workflow",
+            "public_url": "http://localhost:8123",
+        }
+        app_command = mock_server_class.call_args.args[0]
+        assert app_command.startswith(f"{sys.executable} -m console_link.workflow.cli manage")
+        assert "--serve" not in app_command
+        assert "--step-view" in app_command
+        assert "--resource-view" not in app_command
+        assert "--namespace ma" in app_command
+        assert "--workflow-name migration-workflow" in app_command
+        assert "--argo-server https://argo.example:2746" in app_command
+        assert "--token 'tok en'" in app_command
+        assert "Serving workflow manage on http://localhost:8123" in result.output
+
+    @patch('console_link.workflow.commands.manage.Server')
+    def test_manage_serve_defaults_to_loopback_and_localhost_public_url(self, mock_server_class):
+        runner = CliRunner()
+        server = Mock()
+        mock_server_class.return_value = server
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'ma', '--serve', '--serve-port', '9000'])
+
+        assert result.exit_code == 0
+        assert mock_server_class.call_args.kwargs["host"] == "127.0.0.1"
+        assert mock_server_class.call_args.kwargs["port"] == 9000
+        assert mock_server_class.call_args.kwargs["public_url"] == "http://localhost:9000"
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
