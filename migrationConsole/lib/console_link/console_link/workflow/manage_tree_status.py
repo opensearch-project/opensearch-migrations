@@ -1,7 +1,10 @@
 """Shared status and badge formatting for workflow manage trees."""
 
+import json
 import re
 from typing import Any, Dict, Optional
+
+from rich.markup import escape
 
 
 STATUS_PRIORITY = {
@@ -105,3 +108,87 @@ def adoption_style(status: str) -> str:
     if status == "deployed":
         return "green"
     return "dim"
+
+
+def format_state_value(
+    state: Dict[str, Any],
+    *,
+    missing_value: Optional[str] = None,
+    absent_value: str = "<absent>",
+    none_value: str = "null",
+) -> Optional[str]:
+    if state.get("present") is False:
+        return absent_value
+    if "value" not in state:
+        return missing_value
+    return format_tree_value(state.get("value"), none_value=none_value)
+
+
+def same_value_state(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    if bool(left.get("present")) != bool(right.get("present")):
+        return False
+    if not left.get("present"):
+        return True
+    return json.dumps(left.get("value"), sort_keys=True) == json.dumps(right.get("value"), sort_keys=True)
+
+
+def format_tree_value(value: Any, *, none_value: str = "null") -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "[" + ", ".join(str(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    if value is None:
+        return none_value
+    return str(value)
+
+
+def format_phase_value_groups(
+    modes: tuple[str, ...],
+    states: Dict[str, Dict[str, Any]],
+    labels: Dict[str, str],
+    *,
+    missing_value: Optional[str] = None,
+    none_value: str = "null",
+) -> Optional[str]:
+    values = []
+    for mode in modes:
+        value = format_state_value(
+            states.get(mode) or {},
+            missing_value=missing_value,
+            none_value=none_value,
+        )
+        if value is not None:
+            values.append((labels.get(mode, mode), value))
+    if not values:
+        return None
+    if len({value for _, value in values}) == 1:
+        return values[0][1]
+
+    groups: list[tuple[list[str], str]] = []
+    for label, value in values:
+        if groups and groups[-1][1] == value:
+            groups[-1][0].append(label)
+        else:
+            groups.append(([label], value))
+    return " | ".join(f"{'/'.join(labels)}={value}" for labels, value in groups)
+
+
+def format_phase_value_segment(
+    mode: str,
+    state: Dict[str, Any],
+    labels: Dict[str, str],
+    styles: Optional[Dict[str, str]] = None,
+    *,
+    rich_markup: bool = False,
+    missing_value: Optional[str] = "<absent>",
+    none_value: str = "null",
+) -> str:
+    value = format_state_value(state, missing_value=missing_value, none_value=none_value)
+    segment = f"{labels.get(mode, mode)}={value}"
+    if not rich_markup:
+        return segment
+    escaped = escape(segment)
+    style = (styles or {}).get(mode)
+    return f"[{style}]{escaped}[/{style}]" if style else escaped

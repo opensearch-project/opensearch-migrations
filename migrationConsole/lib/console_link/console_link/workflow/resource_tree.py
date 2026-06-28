@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import json
 
 from rich.console import Console
 from rich.markup import escape
@@ -15,7 +14,12 @@ from .manage_tree_schema import (
     display_name_for_plural,
     group_plurals_for,
 )
-from .manage_tree_status import adoption_style, diagnostic_style
+from .manage_tree_status import (
+    adoption_style,
+    diagnostic_style,
+    format_phase_value_segment,
+    same_value_state,
+)
 from .tree_utils import (
     get_node_input_parameter, get_step_rich_label, is_approval_node, get_node_phase,
 )
@@ -663,9 +667,9 @@ def _build_config_diff(
         }
         submitted_changed = (
             compare_submitted_to_deployed and
-            not _same_state(values['deployed'], values['submitted'])
+            not same_value_state(values['deployed'], values['submitted'])
         )
-        pending_submit_changed = not _same_state(values['submitted'], values['pending'])
+        pending_submit_changed = not same_value_state(values['submitted'], values['pending'])
         if not submitted_changed and not pending_submit_changed:
             continue
         if _is_pending_only_auto_filled_change(values):
@@ -780,14 +784,6 @@ def _is_pending_only_auto_filled_change(values: Dict[str, Dict[str, Any]]) -> bo
         return False
     presence = (values['pending'].get('provenance') or {}).get('presence')
     return presence in {'defaulted', 'generated'}
-
-
-def _same_state(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
-    if bool(left.get('present')) != bool(right.get('present')):
-        return False
-    if not left.get('present'):
-        return True
-    return json.dumps(left.get('value'), sort_keys=True) == json.dumps(right.get('value'), sort_keys=True)
 
 
 def _has_nested(data: Dict[str, Any], path: List[str]) -> bool:
@@ -1154,27 +1150,15 @@ def format_config_diff_fields(
 
 
 def _format_config_value_segment(mode: str, state: Dict[str, Any], rich_markup: bool) -> str:
-    segment = f"{CONFIG_VALUE_LABELS.get(mode, mode)}={_format_config_value(state)}"
-    if not rich_markup:
-        return segment
-    style = CONFIG_VALUE_STYLES.get(mode)
-    escaped = escape(segment)
-    return f"[{style}]{escaped}[/{style}]" if style else escaped
-
-
-def _format_config_value(state: Dict[str, Any]) -> str:
-    if not state.get('present'):
-        return '<absent>'
-    value = state.get('value')
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, list):
-        return '[' + ', '.join(str(item) for item in value) + ']'
-    if isinstance(value, dict):
-        return json.dumps(value, sort_keys=True)
-    if value is None:
-        return 'null'
-    return str(value)
+    return format_phase_value_segment(
+        mode,
+        state,
+        CONFIG_VALUE_LABELS,
+        CONFIG_VALUE_STYLES,
+        rich_markup=rich_markup,
+        missing_value='<absent>',
+        none_value='null',
+    )
 
 
 def format_resource_diagnostics(resource: ResourceNode) -> List[Dict[str, str]]:

@@ -4,7 +4,6 @@ interactive tree navigation for status viewing and approval.
 """
 import base64
 import copy
-import json
 import logging
 import os
 import platform
@@ -56,7 +55,7 @@ from ..resource_tree import (
     resource_config_change_summary,
 )
 from ..manage_tree_schema import EDIT_ID_BY_TREE_ID, EDIT_RESOURCE_COLLECTION_PATHS
-from ..manage_tree_status import strip_status_badge
+from ..manage_tree_status import STATUS_PRIORITY, same_value_state, strip_status_badge
 from ..commands.show import read_managed_output
 from ..tree_utils import is_approval_node
 
@@ -1101,8 +1100,8 @@ class WorkflowTreeApp(App):
                 prefer_console=False,
             )
 
-            submitted_changed = not self._same_value_state(deployed, current)
-            pending_changed = not self._same_value_state(current, pending)
+            submitted_changed = not same_value_state(deployed, current)
+            pending_changed = not same_value_state(current, pending)
             own_changed = 1 if submitted_changed or pending_changed else 0
 
             states[EDIT_MODE_DEPLOYED] = self._edit_state_payload(deployed, changed=False)
@@ -1336,28 +1335,8 @@ class WorkflowTreeApp(App):
         counts = dict(node.get("statusCounts") or {})
         counts["changed"] = max(int(counts.get("changed") or 0), changed_count)
         node["statusCounts"] = counts
-        if WorkflowTreeApp._edit_status_rank(node.get("status")) < WorkflowTreeApp._edit_status_rank("changed"):
+        if STATUS_PRIORITY.get(node.get("status") or "ok", 0) < STATUS_PRIORITY["changed"]:
             node["status"] = "changed"
-
-    @staticmethod
-    def _edit_status_rank(status: Optional[str]) -> int:
-        return {
-            "ok": 0,
-            "changed": 1,
-            "warning": 2,
-            "gated": 3,
-            "required": 4,
-            "error": 5,
-            "blocked": 6,
-        }.get(status or "ok", 0)
-
-    @staticmethod
-    def _same_value_state(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
-        if bool(left.get("present")) != bool(right.get("present")):
-            return False
-        if not left.get("present"):
-            return True
-        return json.dumps(left.get("value"), sort_keys=True) == json.dumps(right.get("value"), sort_keys=True)
 
     @staticmethod
     def _lookup_workflow_config_path(workflow_config: Dict[str, Any], path: list[Any]) -> tuple[bool, Any]:

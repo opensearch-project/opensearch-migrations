@@ -2,7 +2,6 @@
 
 import base64
 import json
-import re
 import subprocess
 import tempfile
 import time
@@ -15,6 +14,11 @@ from kubernetes.client.rest import ApiException
 from ..commands.argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from ..commands.crd_utils import list_resources_full
 from ..commands.secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
+from ..external_resource_validation import (
+    looks_like_log4j_properties,
+    looks_like_pem_certificate_chain,
+    looks_like_pem_private_key,
+)
 from ..models.config import WorkflowConfig
 from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
@@ -679,32 +683,15 @@ def _external_content_validation_messages(k8s_hint: Dict[str, Any], values: Dict
     if "tls-certificate-key-pair" in validation_ids:
         certificate = values.get("tls.crt")
         private_key = values.get("tls.key")
-        if certificate and not _looks_like_pem_certificate_chain(certificate):
+        if certificate and not looks_like_pem_certificate_chain(certificate):
             messages.append("tls.crt is not a PEM certificate")
-        if private_key and not _looks_like_pem_private_key(private_key):
+        if private_key and not looks_like_pem_private_key(private_key):
             messages.append("tls.key is not a PEM private key")
     if "log4j-properties" in validation_ids:
         properties = values.get("log4j2.properties")
-        if properties is not None and not _looks_like_log4j_properties(properties):
+        if properties is not None and not looks_like_log4j_properties(properties):
             messages.append("log4j2.properties does not look like Log4j2 properties")
     return messages
-
-
-def _looks_like_pem_certificate_chain(value: str) -> bool:
-    return bool(re.search(r"-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----", value.strip()))
-
-
-def _looks_like_pem_private_key(value: str) -> bool:
-    return bool(re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----", value.strip()))
-
-
-def _looks_like_log4j_properties(value: str) -> bool:
-    lines = [
-        line.strip()
-        for line in value.splitlines()
-        if line.strip() and not line.lstrip().startswith(("#", "!"))
-    ]
-    return bool(lines) and any("=" in line for line in lines)
 
 
 def _sort_external_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:

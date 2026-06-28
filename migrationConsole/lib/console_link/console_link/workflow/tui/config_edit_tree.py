@@ -16,6 +16,8 @@ from console_link.workflow.manage_tree_status import (
     format_status_badge,
     payload_status,
     strip_status_badge,
+    format_phase_value_groups,
+    format_state_value,
 )
 from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection
 from console_link.workflow.tui.resource_tree_state_manager import ResourceTreeStateManager
@@ -435,46 +437,18 @@ def _formatted_mode_value(edit_node: Dict[str, Any], value_mode: str) -> Optiona
         return None
 
     if value_mode != EDIT_MODE_ALL:
-        payload = states.get(value_mode) or {}
-        value = _payload_value(payload)
-        if value is None:
-            return None
-        return value
-
-    values = []
-    for mode in _STATE_MODES:
-        payload = states.get(mode) or {}
-        value = _payload_value(payload)
-        if value is not None:
-            values.append((_STATE_LABELS[mode], value))
-    if not values:
-        return None
-    if len({value for _, value in values}) == 1:
-        return values[0][1]
-
-    groups: list[tuple[list[str], str]] = []
-    for label, value in values:
-        if groups and groups[-1][1] == value:
-            groups[-1][0].append(label)
-        else:
-            groups.append(([label], value))
-    return " | ".join(f"{'/'.join(labels)}={value}" for labels, value in groups)
-
-
-def _payload_value(payload: Dict[str, Any]) -> Optional[str]:
-    if payload.get("present") is False:
-        return "<absent>"
-    if "value" not in payload:
-        return None
-    return _format_value(payload.get("value"))
-
-
-def _format_value(value: Any) -> str:
-    if value is None:
-        return "<unset>"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
+        return format_state_value(
+            states.get(value_mode) or {},
+            missing_value=None,
+            none_value="<unset>",
+        )
+    return format_phase_value_groups(
+        _STATE_MODES,
+        states,
+        _STATE_LABELS,
+        missing_value=None,
+        none_value="<unset>",
+    )
 
 
 def _effective_status(edit_node: Dict[str, Any], status_mode: str) -> tuple[str, Dict[str, Any]]:

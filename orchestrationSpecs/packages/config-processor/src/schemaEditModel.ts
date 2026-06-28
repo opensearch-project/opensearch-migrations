@@ -590,10 +590,7 @@ function jsonSchemaFieldNode(
 ): EditNode {
     const resolved = resolveJsonSchemaRef(schema) ?? schema;
     const path = [...rootPath, key];
-    const hasValue = Object.hasOwn(config, key);
-    const defaultValue = resolved.default;
-    const valueDefaulted = !hasValue && shouldRenderSchemaDefault(defaultValue);
-    const value = hasValue ? config[key] : defaultValue;
+    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, resolved.default);
     const description = jsonSchemaDescription(resolved);
     const presence: EditNode["presence"] = required ? "required" : "optional";
     const expert = isExpertDescription(description);
@@ -640,6 +637,15 @@ function markValueDefaulted(node: EditNode, valueDefaulted: boolean): EditNode {
         node.valueDefaulted = true;
     }
     return node;
+}
+
+function effectiveConfigValue(config: Record<string, unknown>, key: string, defaultValue: unknown) {
+    const hasValue = Object.hasOwn(config, key);
+    return {
+        hasValue,
+        value: hasValue ? config[key] : defaultValue,
+        valueDefaulted: !hasValue && shouldRenderSchemaDefault(defaultValue),
+    };
 }
 
 function shouldRenderSchemaDefault(value: unknown): boolean {
@@ -1301,10 +1307,7 @@ export function schemaFieldNode(
     const required = isRequiredSchema(schema);
     const presence: EditNode["presence"] = required ? "required" : "optional";
     const expert = isExpertDescription(description);
-    const hasValue = Object.hasOwn(config, key);
-    const defaultValue = defaultValueForSchema(schema);
-    const valueDefaulted = !hasValue && shouldRenderSchemaDefault(defaultValue);
-    const value = hasValue ? config[key] : defaultValue;
+    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, defaultValueForSchema(schema));
     const inputHint = uiHintOf(schema);
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);

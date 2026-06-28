@@ -5,11 +5,12 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static, Button
 
-from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
-
-
-class MouseOnlyModalButton(ModalButton, can_focus=False):
-    pass
+from .modal_button_navigation import (
+    BUTTON_ARROW_BINDINGS,
+    ButtonArrowNavigationMixin,
+    ModalButton,
+    MouseOnlyModalButton,
+)
 
 
 class ContainerSelectModal(ButtonArrowNavigationMixin, ModalScreen[str]):

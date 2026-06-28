@@ -10,14 +10,22 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Button, Input, Static, TextArea
 
-from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
+from console_link.workflow.external_resource_validation import (
+    is_config_map_key,
+    is_k8s_name,
+    looks_like_log4j_properties,
+    looks_like_pem_certificate_chain,
+    looks_like_pem_private_key,
+)
+from .modal_button_navigation import (
+    BUTTON_ARROW_BINDINGS,
+    ButtonArrowNavigationMixin,
+    ModalButton,
+    MouseOnlyModalButton,
+)
 
 
 PICKER_PAGE_SIZE = 10
-
-
-class MouseOnlyModalButton(ModalButton, can_focus=False):
-    pass
 
 
 class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Dict[str, Any]]]):
@@ -737,15 +745,15 @@ def _field_validation_message(field: Dict[str, Any], value: str) -> Optional[str
     for validation_id in field.get("validationIds") or []:
         if validation_id == "non-empty" and not value.strip():
             return f"{label} is required."
-        if validation_id == "k8s-name" and value and not _is_k8s_name(value):
+        if validation_id == "k8s-name" and value and not is_k8s_name(value):
             return f"{label} must be a valid Kubernetes DNS name."
-        if validation_id == "configmap-key" and value and not _is_config_map_key(value):
+        if validation_id == "configmap-key" and value and not is_config_map_key(value):
             return f"{label} must be a valid ConfigMap key."
-        if validation_id == "pem-certificate-chain" and value and not _looks_like_pem_certificate_chain(value):
+        if validation_id == "pem-certificate-chain" and value and not looks_like_pem_certificate_chain(value):
             return f"{label} must include at least one PEM CERTIFICATE block."
-        if validation_id == "pem-private-key" and value and not _looks_like_pem_private_key(value):
+        if validation_id == "pem-private-key" and value and not looks_like_pem_private_key(value):
             return f"{label} must include a PEM PRIVATE KEY block."
-        if validation_id == "log4j-properties" and value and not _looks_like_log4j_properties(value):
+        if validation_id == "log4j-properties" and value and not looks_like_log4j_properties(value):
             return f"{label} must include at least one Log4j2 property assignment."
         if validation_id == "json" and value:
             try:
@@ -753,28 +761,3 @@ def _field_validation_message(field: Dict[str, Any], value: str) -> Optional[str
             except json.JSONDecodeError as e:
                 return f"{label} must be valid JSON: {e.msg}."
     return None
-
-
-def _is_k8s_name(value: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*", value))
-
-
-def _is_config_map_key(value: str) -> bool:
-    return bool(re.fullmatch(r"(?!\.{1,2}$)(?!\.\.)[A-Za-z0-9._-]+", value))
-
-
-def _looks_like_pem_certificate_chain(value: str) -> bool:
-    return bool(re.search(r"-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----", value.strip()))
-
-
-def _looks_like_pem_private_key(value: str) -> bool:
-    return bool(re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----", value.strip()))
-
-
-def _looks_like_log4j_properties(value: str) -> bool:
-    lines = [
-        line.strip()
-        for line in value.splitlines()
-        if line.strip() and not line.lstrip().startswith(("#", "!"))
-    ]
-    return bool(lines) and any("=" in line for line in lines)

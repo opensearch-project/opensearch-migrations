@@ -27,6 +27,10 @@ class ModalButton(Button):
             focus_modal_button(screen, delta)
 
 
+class MouseOnlyModalButton(ModalButton, can_focus=False):
+    pass
+
+
 class ButtonArrowNavigationMixin:
     BUTTON_NAV_SELECTOR = "Button"
 
