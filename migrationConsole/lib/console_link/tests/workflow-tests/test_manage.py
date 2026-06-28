@@ -1294,6 +1294,68 @@ def edit_state_with_changed_capture_and_snapshot_migration():
     }
 
 
+def edit_state_with_capture_defaulted_kafka():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:traffic.proxies",
+                        "path": ["traffic", "proxies"],
+                        "label": "Capture",
+                        "valueKind": "record",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:traffic.proxies.cap",
+                                "path": ["traffic", "proxies", "cap"],
+                                "label": "cap",
+                                "valueKind": "object",
+                                "status": "ok",
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.proxies.cap.source",
+                                        "path": ["traffic", "proxies", "cap", "source"],
+                                        "label": "source: source",
+                                        "value": "source",
+                                        "valueKind": "scalar",
+                                        "status": "ok",
+                                    },
+                                    {
+                                        "id": "edit:traffic.proxies.cap.kafka",
+                                        "path": ["traffic", "proxies", "cap", "kafka"],
+                                        "label": "kafka: default",
+                                        "value": "default",
+                                        "valueDefaulted": True,
+                                        "valueKind": "scalar",
+                                        "status": "ok",
+                                    },
+                                    {
+                                        "id": "edit:traffic.proxies.cap.kafkaTopic",
+                                        "path": ["traffic", "proxies", "cap", "kafkaTopic"],
+                                        "label": "kafkaTopic: aa",
+                                        "value": "aa",
+                                        "valueKind": "scalar",
+                                        "status": "ok",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_field_visibility():
     return {
         "formatVersion": 1,
@@ -3399,6 +3461,88 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
             assert kafka_root.is_expanded
             assert find_tree_node_by_id(tree.root, "edit:workflowConfiguration") is None
             assert not find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
+
+
+def test_workflow_config_value_state_uses_schema_default_only_when_parent_exists():
+    node = {
+        "path": ["traffic", "proxies", "cap", "kafka"],
+        "value": "default",
+        "valueDefaulted": True,
+        "valueKind": "scalar",
+    }
+
+    assert WorkflowTreeApp._workflow_config_value_state(
+        {"traffic": {"proxies": {"cap": {"source": "source"}}}},
+        node,
+        allow_node_default=True,
+    ) == {"present": True, "value": "default"}
+    assert WorkflowTreeApp._workflow_config_value_state(
+        {},
+        node,
+        allow_node_default=True,
+    ) == {"present": False}
+    assert WorkflowTreeApp._workflow_config_value_state(
+        {"traffic": {"proxies": {"cap": {"source": "source"}}}},
+        {**node, "valueDefaulted": False},
+        allow_node_default=True,
+    ) == {"present": False}
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_renders_defaulted_capture_kafka_value(mock_workflow_with_two_pods):
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": (
+                    "traffic:\n"
+                    "  proxies:\n"
+                    "    cap:\n"
+                    "      source: source\n"
+                    "      kafkaTopic: aa\n"
+                ),
+                "edit_state": edit_state_with_capture_defaulted_kafka(),
+            }
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "submitted": {"workflowConfig": {}},
+                "submitted_console": {},
+                "pending_console": {},
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            kafka = find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap.kafka")
+            assert kafka is not None
+            assert get_clean_text_label(kafka) == (
+                "kafka: deployed/workflow=<absent> | pending=default (changed)"
+            )
 
 
 @pytest.mark.asyncio

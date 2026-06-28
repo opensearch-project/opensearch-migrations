@@ -674,8 +674,9 @@ describe("editConfig state", () => {
         expect(proxyConfig?.statusCounts?.required).toBe(1);
         expect(proxyConfig?.required).toBe(true);
         expect(proxyConfig?.presence).toBe("required");
-        expect(kafka).toMatchObject({status: "ok", presence: "optional", value: "default"});
+        expect(kafka).toMatchObject({status: "ok", presence: "optional", value: "default", valueDefaulted: true});
         expect(kafka?.label).toContain("kafka: default");
+        expect(kafkaTopic?.valueDefaulted).toBeUndefined();
         expect(listenPort?.status).toBe("required");
         expect(listenPort?.presence).toBe("required");
         expect(listenPort?.valueType).toBe("number");

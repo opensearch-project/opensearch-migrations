@@ -1127,7 +1127,11 @@ class WorkflowTreeApp(App):
         if prefer_console and console_state is not None:
             return console_state
 
-        workflow_state = cls._workflow_config_value_state(workflow_config, node)
+        workflow_state = cls._workflow_config_value_state(
+            workflow_config,
+            node,
+            allow_node_default=True,
+        )
         if not prefer_console:
             if workflow_state.get("present") or console_state is None:
                 return workflow_state
@@ -1273,16 +1277,31 @@ class WorkflowTreeApp(App):
         return node.get("valueKind") == "union" and "value" in node
 
     @classmethod
-    def _workflow_config_value_state(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
+    def _workflow_config_value_state(
+        cls,
+        workflow_config: Dict[str, Any],
+        node: Dict[str, Any],
+        allow_node_default: bool = False,
+    ) -> Dict[str, Any]:
         mode_value = cls._single_key_union_mode_value(workflow_config, node)
         if mode_value is not None:
             return {"present": True, "value": mode_value}
         found, value = cls._lookup_workflow_config_path(workflow_config, node.get("path") or [])
         if not found:
+            if allow_node_default and cls._node_schema_default_applies(workflow_config, node):
+                return {"present": True, "value": node.get("value")}
             return {"present": False}
         if node.get("valueKind") == "union":
             value = cls._union_variant_value(value, node)
         return {"present": True, "value": value}
+
+    @classmethod
+    def _node_schema_default_applies(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> bool:
+        path = node.get("path") or []
+        if not node.get("valueDefaulted") or "value" not in node or not path:
+            return False
+        parent_found, _parent = cls._lookup_workflow_config_path(workflow_config, path[:-1])
+        return parent_found
 
     @classmethod
     def _single_key_union_mode_value(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> Optional[Any]:
