@@ -234,7 +234,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(result.trafficReplays).toHaveLength(1);
         expect(result.trafficReplays![0]).toEqual(expect.objectContaining({
-            name: "loaded-dump-target1-replay1",
+            name: "replay1",
             sourceLabel: "detached-source",
             fromCapturedTraffic: "loaded-dump",
             kafkaClusterName: "default",

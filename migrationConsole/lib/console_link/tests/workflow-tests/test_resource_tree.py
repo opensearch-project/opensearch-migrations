@@ -415,6 +415,46 @@ class TestConfigOverlays:
             'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
         ]
 
+    def test_virtual_kafka_config_uses_resolved_pending_auth(self):
+        sections = _build_tree_from_raw({})
+        deployed_console = {'kafkas': [{
+            'refName': 'default',
+            'runtime': {
+                'type': 'strimzi',
+                'clusterName': 'default',
+                'authType': 'none',
+                'listenerName': 'plain',
+            },
+            'displayFields': ['type', 'clusterName', 'authType', 'listenerName'],
+        }]}
+        pending = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'auth': {'type': 'scram-sha-512'}},
+            'parameterProvenance': {
+                'auth.type': {
+                    'sourcePath': ['kafkaClusterConfiguration', 'default', 'autoCreate', 'auth', 'type'],
+                    'presence': 'authored',
+                },
+            },
+        }]}
+
+        apply_config_overlays(
+            sections,
+            deployed_console_config=deployed_console,
+            pending_resolved_config=pending,
+        )
+
+        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'autoCreate.auth.type: deployed=none | pending=none | to-submit=scram-sha-512',
+            'listenerName: deployed=plain | pending=plain | to-submit=tls',
+        ]
+        assert format_config_diff_fields(resource, CONFIG_MODE_PENDING_SUBMIT) == [
+            'autoCreate.auth.type: to-submit=scram-sha-512',
+            'listenerName: to-submit=tls',
+        ]
+
     def test_virtual_source_config_labels_use_authored_config_paths(self):
         sections = _build_tree_from_raw({})
         pending_console = {'sources': [{

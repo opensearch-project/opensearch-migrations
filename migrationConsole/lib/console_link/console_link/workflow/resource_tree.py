@@ -156,6 +156,8 @@ def apply_config_overlays(
     pending = _resolved_resource_map(pending_resolved_config)
     submitted.update(_console_resource_map(submitted_console_config))
     pending.update(_console_resource_map(pending_console_config))
+    _merge_resolved_kafka_configs(submitted, submitted_resolved_config)
+    _merge_resolved_kafka_configs(pending, pending_resolved_config)
     deployed_config_available = deployed_console_config is not None
     submitted_available = submitted_resolved_config is not None or submitted_console_config is not None
     pending_available = pending_resolved_config is not None or pending_console_config is not None
@@ -416,6 +418,59 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'diagnostics': kafka.get('diagnostics') or [],
                 'consumers': kafka.get('consumers') or [],
             }
+    return result
+
+
+def _merge_resolved_kafka_configs(
+    target: Dict[tuple[str, str], Dict[str, Any]],
+    resolved_config: Optional[Dict[str, Any]],
+) -> None:
+    """Derive virtual Kafka config rows from canonical resolved KafkaCluster CRs."""
+    if not resolved_config:
+        return
+    for resource in resolved_config.get('resources') or []:
+        if resource.get('kind') != 'KafkaCluster' or not resource.get('name'):
+            continue
+        name = str(resource['name'])
+        parameters = resource.get('parameters') or {}
+        auth_type = _get_nested(parameters, 'auth.type') if _has_nested(parameters, ['auth', 'type']) else None
+        runtime = {
+            'type': 'strimzi',
+            'clusterName': name,
+        }
+        if auth_type:
+            runtime['authType'] = auth_type
+            runtime['listenerName'] = 'tls' if auth_type == 'scram-sha-512' else 'plain'
+
+        key = ('kafkaconfigs', name)
+        existing = target.get(key) or {}
+        target[key] = {
+            **existing,
+            'kind': 'KafkaConfig',
+            'name': name,
+            'parameters': {
+                **(existing.get('parameters') or {}),
+                **runtime,
+            },
+            'displayFields': existing.get('displayFields') or ['type', 'clusterName', 'authType', 'listenerName'],
+            'parameterProvenance': _resolved_kafka_config_provenance(
+                resource.get('parameterProvenance') or {},
+                existing.get('parameterProvenance') or {},
+            ),
+        }
+
+
+def _resolved_kafka_config_provenance(
+    resource_provenance: Dict[str, Any],
+    existing_provenance: Dict[str, Any],
+) -> Dict[str, Any]:
+    result = dict(existing_provenance)
+    auth = resource_provenance.get('auth.type')
+    if auth:
+        result['authType'] = {
+            **auth,
+            'path': ['authType'],
+        }
     return result
 
 

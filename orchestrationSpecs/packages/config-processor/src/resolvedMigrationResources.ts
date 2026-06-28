@@ -900,10 +900,7 @@ function userReplayEntryFor(
     replay: ReplayConfig,
 ): [string, Record<string, unknown>] | undefined {
     for (const [key, value] of recordEntries(sourceRecordAt(options, ["traffic", "replayers"]))) {
-        const fromCapturedTraffic = asString(value.fromCapturedTraffic);
-        const toTarget = asString(value.toTarget);
-        const expectedName = [fromCapturedTraffic, toTarget, key].filter(Boolean).join("-");
-        if (expectedName === replay.name || key === replay.name) {
+        if (key === replay.name) {
             return [key, value];
         }
     }
@@ -1448,7 +1445,7 @@ function buildLooseResourceList(
         const parameters = looseTrafficReplayParameters(replayer);
         resources.push(resourceWithDiagnostics(
             "TrafficReplay",
-            [fromCapturedTraffic, toTarget, replayName].join("-"),
+            replayName,
             parameters,
             validation,
             [["traffic", "replayers", replayName]],

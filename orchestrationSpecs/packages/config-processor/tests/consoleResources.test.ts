@@ -271,13 +271,13 @@ describe("console resources", () => {
                 name: "replayer-targetX",
                 targetRef: "targetX",
                 kafkaRef: "default",
-                replayRef: "proxy-a-targetX-replayA",
+                replayRef: "replayA",
             },
             {
                 name: "replayer-targetY",
                 targetRef: "targetY",
                 kafkaRef: "my-kafka",
-                replayRef: "proxy-b-targetY-replayB",
+                replayRef: "replayB",
             },
         ]);
         expect(resources.sources[0].proxy?.aliases).not.toContain(

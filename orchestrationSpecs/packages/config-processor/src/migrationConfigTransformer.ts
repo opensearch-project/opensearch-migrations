@@ -1042,7 +1042,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             );
 
             return {
-                name: [sourceName, replayer.toTarget, name].join('-'),
+                name,
                 sourceLabel,
                 fromCapturedTraffic: sourceName,
                 kafkaClusterName: kafkaCluster,

@@ -296,7 +296,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "fileSourceVolumeMounts",
     ],
     "kind": "TrafficReplay",
-    "name": "source-proxy-target-replay",
+    "name": "replay",
     "parameters": {
       "dependsOn": [
         "source-proxy",

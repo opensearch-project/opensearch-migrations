@@ -177,7 +177,7 @@ describe("resolved migration resources", () => {
         );
 
         const replay = resolvedMigrationResources.resources.find(resource =>
-            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+            resource.kind === "TrafficReplay" && resource.name === "replay");
         expect(replay?.parameterPolicies).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 specPath: ["speedupFactor"],
@@ -232,7 +232,7 @@ describe("resolved migration resources", () => {
         }));
 
         const replay = resolvedMigrationResources.resources.find(resource =>
-            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+            resource.kind === "TrafficReplay" && resource.name === "replay");
         expect(replay?.parameterProvenance?.speedupFactor).toEqual(expect.objectContaining({
             presence: "authored",
             sourcePath: ["traffic", "replayers", "replay", "replayerConfig", "speedupFactor"],
@@ -339,7 +339,7 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.resources).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 kind: "TrafficReplay",
-                name: "source-proxy-target-replay",
+                name: "replay",
                 parameters: expect.objectContaining({speedupFactor: 5}),
             }),
         ]));
@@ -365,7 +365,7 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.workflowName).toBe("workflow-from-cli");
         expect(resolvedMigrationResources.resources).toContainEqual(expect.objectContaining({
             kind: "TrafficReplay",
-            name: "source-proxy-target-replay",
+            name: "replay",
             parameters: expect.objectContaining({speedupFactor: 5}),
         }));
         expect(resolvedMigrationResources.resources.every((resource: any) =>
@@ -389,7 +389,7 @@ describe("resolved migration resources", () => {
 
         const resolvedMigrationResources = JSON.parse(await fs.readFile(outputFile, "utf8"));
         const replay = resolvedMigrationResources.resources.find((resource: any) =>
-            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+            resource.kind === "TrafficReplay" && resource.name === "replay");
         expect(replay.parameterPolicies).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 specPath: ["tupleMaxFileSizeMb"],
