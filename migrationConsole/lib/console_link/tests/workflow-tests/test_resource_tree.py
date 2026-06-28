@@ -177,6 +177,23 @@ class TestFormatSpecFields:
         resource.display_fields = ['podReplicas', 'listenPort']
         assert format_spec_fields(resource) == ['podReplicas: 2', 'listenPort: 9201']
 
+    def test_hides_static_fields_that_have_config_diffs(self):
+        resource = make_resource('kafkaconfigs', spec={
+            'type': 'strimzi',
+            'clusterName': 'default',
+            'authType': 'none',
+            'listenerName': 'plain',
+        })
+        resource.display_fields = ['type', 'clusterName', 'authType', 'listenerName']
+        resource.config_diff = {
+            'fields': [
+                {'path': 'authType', 'values': {}},
+                {'path': 'listenerName', 'values': {}},
+            ],
+        }
+
+        assert format_spec_fields(resource) == ['type: strimzi', 'clusterName: default']
+
 
 class TestConfigOverlays:
     def test_attaches_pending_and_to_submit_values(self):

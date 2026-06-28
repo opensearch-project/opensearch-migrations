@@ -1103,8 +1103,15 @@ def _node_phase(node: Dict[str, Any]) -> str:
 def format_spec_fields(resource: ResourceNode) -> List[str]:
     """Extract key spec fields for display. Returns list of 'field: value' strings."""
     fields = resource.display_fields or ['.'.join(path) for path in sorted(_leaf_paths(resource.spec))]
+    changed_paths = {
+        str(field.get('path'))
+        for field in (resource.config_diff or {}).get('fields', [])
+        if field.get('path')
+    }
     parts = []
     for field_path in fields:
+        if field_path in changed_paths:
+            continue
         value = _get_nested(resource.spec, field_path)
         if value is not None and value != '' and value != []:
             label = field_path.split('.')[-1]

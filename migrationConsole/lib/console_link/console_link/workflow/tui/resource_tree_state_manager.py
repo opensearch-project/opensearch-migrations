@@ -144,7 +144,7 @@ class ResourceTreeStateManager:
         new_ids = [self._section_root_id(s) for s in new_sections]
 
         if self._has_structural_change(existing, new_ids):
-            collapsed = self._save_collapsed(root)
+            collapsed = self._save_collapsed_recursive(root)
             self._remove_children(root)
             for section in new_sections:
                 self._add_section_root(root, section, collapsed)
@@ -191,6 +191,8 @@ class ResourceTreeStateManager:
             node.collapse()
         else:
             node.expand()
+        if collapsed_ids:
+            self._restore_collapse_state_recursive(node, collapsed_ids)
 
     def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
         """Diff groups within a section."""
