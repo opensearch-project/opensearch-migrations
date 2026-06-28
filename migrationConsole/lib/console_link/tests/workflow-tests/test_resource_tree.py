@@ -12,7 +12,7 @@ from console_link.workflow.resource_tree import (
     apply_config_overlays,
     format_config_diff_fields,
     format_resource_diagnostics,
-    format_virtual_adoption,
+    format_rollout_status_suffix,
     resource_config_change_summary,
     resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
@@ -470,11 +470,7 @@ class TestConfigOverlays:
         assert resource.phase == 'Deployed Config'
         assert resource.config_presence == {'deployed': True}
         assert resource.virtual_adoption['status'] == 'partial'
-        assert format_virtual_adoption(resource) == [
-            'Adoption: partial (1 deployed, 1 outdated)',
-            'uses CaptureProxy cap: deployed (Ready)',
-            'uses CaptureProxy c2: outdated (Ready)',
-        ]
+        assert format_rollout_status_suffix(resource.virtual_adoption['status']) == ' (rollout partial)'
 
     def test_virtual_source_config_prioritizes_errored_consumers(self):
         sections = _build_tree_from_raw({
@@ -496,7 +492,7 @@ class TestConfigOverlays:
 
         resource = group_by_plural(sections, 'sourceconfigs').resources[0]
         assert resource.virtual_adoption['status'] == 'error'
-        assert format_virtual_adoption(resource)[0] == 'Adoption: error (1 deployed, 1 error)'
+        assert format_rollout_status_suffix(resource.virtual_adoption['status']) == ' (rollout error)'
 
 
 # --- format_live_status ---

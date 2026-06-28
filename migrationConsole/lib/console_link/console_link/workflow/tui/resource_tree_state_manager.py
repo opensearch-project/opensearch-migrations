@@ -10,11 +10,10 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step, resource_visible_in_config_mode,
-    format_resource_diagnostics, format_virtual_adoption,
+    format_resource_diagnostics, format_rollout_status_suffix,
 )
 from console_link.workflow.manage_tree_schema import group_plurals_for
 from console_link.workflow.manage_tree_status import (
-    adoption_style,
     diagnostic_style,
     format_change_flag,
 )
@@ -323,9 +322,9 @@ class ResourceTreeStateManager:
             label = 'required' if severity == 'required' else severity
             return f' [{style}]({label})[/{style}]'
         adoption_status = (resource.virtual_adoption or {}).get('status')
-        if adoption_status and adoption_status not in ('deployed', 'unknown'):
-            style = adoption_style(adoption_status)
-            return f' [{style}]({adoption_status})[/{style}]'
+        rollout_label = format_rollout_status_suffix(adoption_status, rich_markup=True)
+        if rollout_label:
+            return rollout_label
         diff = resource.config_diff or {}
         if not diff:
             return format_change_flag(
@@ -558,8 +557,6 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{field}[/dim]", data=None)
         for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
             resource_node.add(field, data=None)
-        for adoption in format_virtual_adoption(resource, rich_markup=True):
-            resource_node.add(adoption, data=None)
         for diagnostic in format_resource_diagnostics(resource):
             style = diagnostic_style(diagnostic.get('severity', 'error'))
             resource_node.add(f"[{style}]{diagnostic['label']}[/{style}]", data=None)

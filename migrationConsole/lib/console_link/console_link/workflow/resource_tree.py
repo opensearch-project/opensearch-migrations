@@ -285,31 +285,14 @@ def _has_pending_presence_change(resource: ResourceNode) -> bool:
     return presence.get('pending') != baseline
 
 
-def format_virtual_adoption(resource: ResourceNode, rich_markup: bool = False) -> List[str]:
-    adoption = resource.virtual_adoption or {}
-    consumers = adoption.get('consumers') or []
-    if not consumers:
-        return []
-    status = adoption.get('status') or 'unknown'
-    counts = adoption.get('counts') or {}
-    count_text = ', '.join(
-        f"{count} {label}"
-        for label, count in counts.items()
-        if count
-    )
-    summary = f"Adoption: {status}"
-    if count_text:
-        summary += f" ({count_text})"
-    result = [_style_adoption_line(summary, status, rich_markup)]
-    for consumer in consumers:
-        line = (
-            f"uses {consumer.get('kind')} {consumer.get('name')}: "
-            f"{consumer.get('status') or 'unknown'}"
-        )
-        if consumer.get('phase'):
-            line += f" ({consumer.get('phase')})"
-        result.append(_style_adoption_line(line, consumer.get('status') or 'unknown', rich_markup))
-    return result
+def format_rollout_status_suffix(status: Optional[str], rich_markup: bool = False) -> str:
+    if not status or status in ('deployed', 'unknown'):
+        return ''
+    text = f"rollout {status}"
+    if not rich_markup:
+        return f" ({text})"
+    style = adoption_style(status)
+    return f" [{style}]({escape(text)})[/{style}]"
 
 
 def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceSection]:
@@ -567,13 +550,6 @@ def _virtual_adoption_status(counts: Dict[str, int]) -> str:
     if counts.get('deployed'):
         return 'deployed'
     return 'unknown'
-
-
-def _style_adoption_line(line: str, status: str, rich_markup: bool) -> str:
-    if not rich_markup:
-        return line
-    style = adoption_style(status)
-    return f"[{style}]{escape(line)}[/{style}]"
 
 
 def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
@@ -918,8 +894,6 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
         node.add(f"[dim]{spec_line}[/dim]")
     for config_line in format_config_diff_fields(resource):
         node.add(f"[cyan]{config_line}[/cyan]")
-    for adoption_line in format_virtual_adoption(resource):
-        node.add(adoption_line)
     for diagnostic in format_resource_diagnostics(resource):
         style = diagnostic_style(diagnostic.get('severity', 'error'))
         node.add(f"[{style}]{diagnostic['label']}[/{style}]")
@@ -946,9 +920,9 @@ def _resource_change_label(resource: ResourceNode) -> str:
         label = 'required' if severity == 'required' else severity
         return f' [{style}]({escape(str(label))})[/{style}]'
     adoption_status = (resource.virtual_adoption or {}).get('status')
-    if adoption_status and adoption_status not in ('deployed', 'unknown'):
-        style = adoption_style(adoption_status)
-        return f' [{style}]({escape(str(adoption_status))})[/{style}]'
+    rollout_label = format_rollout_status_suffix(adoption_status, rich_markup=True)
+    if rollout_label:
+        return rollout_label
     diff = resource.config_diff or {}
     if diff.get('has_pending_submit_changes') or _has_pending_presence_change(resource):
         return ' [green](to submit)[/green]'
