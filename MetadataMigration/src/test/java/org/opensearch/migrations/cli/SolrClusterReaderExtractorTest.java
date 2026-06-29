@@ -38,7 +38,7 @@ class SolrClusterReaderExtractorTest {
     private MigrateOrEvaluateArgs fsArgs(Path repoPath) {
         var args = new MigrateOrEvaluateArgs();
         args.sourceVersion = SOLR_7;
-        args.fileSystemRepoPath = repoPath.toString();
+        args.repoUri = repoPath.toString();
         return args;
     }
 

@@ -145,9 +145,9 @@ public class SolrS3SnapshotReadFailureProcessTest {
         createArgs.sourceType = "solr";
         createArgs.snapshotName = snapshotName;
         createArgs.snapshotRepoName = "s3";
-        createArgs.s3RepoUri = s3RepoUri;
+        createArgs.repoUri = s3RepoUri;
         createArgs.s3Region = REGION;
-        createArgs.s3Endpoint = localStackEndpoint();
+        createArgs.endpoint = localStackEndpoint();
         createArgs.solrCollections = List.of(collName);
         createArgs.noWait = false;
 

@@ -237,33 +237,33 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "additionalProperties": {
                             "type": "object",
                             "properties": {
+                              "repoPathUri": {
+                                "type": "string",
+                                "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                              },
                               "awsRegion": {
                                 "type": "string",
-                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                                "default": "",
+                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
                               },
                               "endpoint": {
                                 "type": "string",
                                 "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                                 "default": "",
-                                "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                              },
-                              "s3RepoPathUri": {
-                                "type": "string",
-                                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                                "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                               },
                               "s3RoleArn": {
                                 "type": "string",
                                 "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                 "default": "",
-                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                               }
                             },
                             "required": [
-                              "awsRegion",
-                              "s3RepoPathUri"
+                              "repoPathUri"
                             ],
-                            "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                            "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                           },
                           "description": "S3 snapshot repositories registered with the source cluster."
                         },
@@ -1360,19 +1360,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo": {
                         "type": "object",
                         "properties": {
+                          "repoPathUri": {
+                            "type": "string",
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          },
                           "awsRegion": {
                             "type": "string",
-                            "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                            "default": ""
                           },
                           "endpoint": {
                             "type": "string",
                             "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                             "default": ""
-                          },
-                          "s3RepoPathUri": {
-                            "type": "string",
-                            "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                           },
                           "s3RoleArn": {
                             "type": "string",
@@ -1388,8 +1388,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           }
                         },
                         "required": [
-                          "awsRegion",
-                          "s3RepoPathUri",
+                          "repoPathUri",
                           "repoName"
                         ]
                       },
@@ -2245,19 +2244,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "repoConfig": {
                       "type": "object",
                       "properties": {
+                        "repoPathUri": {
+                          "type": "string",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
                         "awsRegion": {
                           "type": "string",
-                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                          "default": ""
                         },
                         "endpoint": {
                           "type": "string",
                           "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                           "default": ""
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                         },
                         "s3RoleArn": {
                           "type": "string",
@@ -2273,8 +2272,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "required": [
-                        "awsRegion",
-                        "s3RepoPathUri",
+                        "repoPathUri",
                         "repoName"
                       ]
                     }
@@ -2311,6 +2309,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "resourceUid": {
                   "type": "string"
+                },
+                "resourceName": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -2325,7 +2326,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "configChecksum",
                 "checksumForReplayer",
                 "workloadIdentityChecksum",
-                "resourceUid"
+                "resourceUid",
+                "resourceName"
               ]
             },
             "default": []
@@ -2365,13 +2367,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "configChecksum": {
                         "type": "string"
+                      },
+                      "resourceName": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
                       "snapshot",
                       "migrationLabel",
-                      "configChecksum"
+                      "configChecksum",
+                      "resourceName"
                     ]
                   }
                 },
@@ -3220,33 +3226,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "repoPathUri": {
+                      "type": "string",
+                      "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                      "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                    },
                     "awsRegion": {
                       "type": "string",
-                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                      "default": "",
+                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
                     },
                     "endpoint": {
                       "type": "string",
                       "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                       "default": "",
-                      "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                    },
-                    "s3RepoPathUri": {
-                      "type": "string",
-                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                      "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                     },
                     "s3RoleArn": {
                       "type": "string",
                       "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": "",
-                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                     }
                   },
                   "required": [
-                    "awsRegion",
-                    "s3RepoPathUri"
+                    "repoPathUri"
                   ],
-                  "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                  "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                 },
                 "description": "S3 snapshot repositories registered with the source cluster."
               },

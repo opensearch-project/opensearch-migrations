@@ -98,10 +98,10 @@ class SolrBareS3MetadataMigrationTest {
             var metaArgs = new MigrateOrEvaluateArgs();
             metaArgs.sourceVersion = Version.fromString("SOLR " + SolrClusterContainer.SOLR_7.tag());
             metaArgs.snapshotName = SNAPSHOT_NAME;
-            metaArgs.s3RepoUri = "s3://" + BUCKET_NAME;
+            metaArgs.repoUri = "s3://" + BUCKET_NAME;
             metaArgs.s3Region = REGION;
-            metaArgs.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
-            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.endpoint = LOCAL_STACK.getEndpoint().toString();
+            metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();

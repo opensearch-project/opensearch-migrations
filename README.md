@@ -18,6 +18,7 @@
   - [Getting Started](#getting-started)
     - [Local Deployment](#local-deployment)
     - [AWS Deployment](#aws-deployment)
+    - [GCP Deployment](#gcp-deployment)
   - [Continuous Integration and Deployment](#continuous-integration-and-deployment)
   - [Contributing](#contributing)
   - [Security](#security)
@@ -46,6 +47,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
+  - **[GCP Deployment](deployment/terraform/gcp/README.md)**: Terraform module that provisions a GKE cluster, GCS snapshot bucket, and the Workload Identity bindings required by the migration workflows, deployed via the [GKE Helm overlay](deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml).
   - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
 
@@ -137,6 +139,10 @@ User guide documentation is available in the [OpenSearch Migration Assistant doc
 ### AWS Deployment
 
 To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
+
+### GCP Deployment
+
+To deploy the solution on Google Cloud, use the GCP Terraform module to provision a GKE cluster with GCS-backed snapshots via Workload Identity. See the [GCP Terraform README](deployment/terraform/gcp/README.md) for full instructions, variables, and sizing guidance.
 
 
 ## Continuous Integration and Deployment
