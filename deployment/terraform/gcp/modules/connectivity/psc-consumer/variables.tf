@@ -33,3 +33,20 @@ variable "leg" {
   description = "Leg label used to disambiguate resource names (e.g. source, target)."
   type        = string
 }
+
+variable "dns_name" {
+  description = "Optional FQDN to resolve to the PSC endpoint IP via a private Cloud DNS zone (e.g. myservice-myproj.example.com). When null, no DNS zone is created and callers connect by IP."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dns_name == null || length(split(".", var.dns_name)) >= 3
+    error_message = "dns_name must be a host under a domain with at least 3 labels (e.g. host.example.com) so a valid parent zone can be derived. Managed-service endpoints meet this; an apex like example.com is not supported."
+  }
+}
+
+variable "dns_zone_domain" {
+  description = "Optional managed-zone domain for dns_name (e.g. example.com). When null and dns_name is set, the parent domain is derived by stripping dns_name's first label."
+  type        = string
+  default     = null
+}
