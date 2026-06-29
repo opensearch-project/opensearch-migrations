@@ -185,7 +185,95 @@ class SolrBackupLayoutHelpersTest {
         assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), nullValue());
     }
 
+    // ---- classifyBareBackup: branches the cloud/standalone fixtures don't reach ----
+
+    @Test
+    void classifyBareBackup_standaloneFlatRoot_segmentsDirectlyAtRoot() throws IOException {
+        Files.createFile(tempDir.resolve("segments_1"));
+
+        var layout = SolrBackupLayout.classifyBareBackup(tempDir, null);
+
+        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(layout.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void classifyBareBackup_cloudFromNumberedZkBackupMarker() throws IOException {
+        Files.createDirectories(tempDir.resolve("zk_backup_0"));
+
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir, null).mode(), equalTo(SolrBackupMode.CLOUD));
+    }
+
+    @Test
+    void classifyBareBackup_cloudFromShardBackupMetadataMarker() throws IOException {
+        Files.createDirectories(tempDir.resolve("shard_backup_metadata"));
+
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir, null).mode(), equalTo(SolrBackupMode.CLOUD));
+    }
+
+    @Test
+    void classifyBareBackup_cloudFromNumberedBackupPropertiesMarker() throws IOException {
+        Files.writeString(tempDir.resolve("backup_0.properties"), "collection=events\n");
+
+        var layout = SolrBackupLayout.classifyBareBackup(tempDir, null);
+
+        assertThat(layout.mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(layout.collectionName(), equalTo("events"));
+    }
+
+    @Test
+    void classifyBareBackup_nullForNonExistentRoot() {
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir.resolve("missing"), null), nullValue());
+    }
+
+    // ---- resolveCollectionDataDir ----
+
+    @Test
+    void resolveCollectionDataDir_returnsDirWhenMarkersAtTopLevel() throws IOException {
+        Files.createDirectories(tempDir.resolve("index"));
+        assertThat(SolrBackupLayout.resolveCollectionDataDir(tempDir), equalTo(tempDir));
+    }
+
+    @Test
+    void resolveCollectionDataDir_descendsOneLevelForTwoLevelLayout() throws IOException {
+        var inner = Files.createDirectories(tempDir.resolve("inner"));
+        Files.createDirectories(inner.resolve("zk_backup_0"));
+
+        assertThat(SolrBackupLayout.resolveCollectionDataDir(tempDir), equalTo(inner));
+    }
+
+    @Test
+    void resolveCollectionDataDir_returnsInputForNonExistentDir() {
+        var missing = tempDir.resolve("missing");
+        assertThat(SolrBackupLayout.resolveCollectionDataDir(missing), equalTo(missing));
+    }
+
+    // ---- readCollectionNameFromBackupProperties: skip-blank + non-.properties branches ----
+
+    @Test
+    void readCollectionName_skipsBlankCollectionAndUsesCollectionName() throws IOException {
+        Files.writeString(tempDir.resolve("backup.properties"), "collection=   \ncollectionName=products\n");
+        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("products"));
+    }
+
+    @Test
+    void readCollectionName_ignoresBackupPrefixedNonPropertiesFile() throws IOException {
+        Files.writeString(tempDir.resolve("backup_notes.txt"), "ignore me\n");
+        Files.writeString(tempDir.resolve("backup_0.properties"), "collection=picked\n");
+        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("picked"));
+    }
+
     // ---- countShards ----
+
+    @Test
+    void countShards_fromNestedDataIndexSegments() throws IOException {
+        var shard = Files.createDirectories(tempDir.resolve("shard1/data/index"));
+        Files.createFile(shard.resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(tempDir), equalTo(1));
+    }
+
+    // ---- countShards (original) ----
 
     @Test
     void countShards_fromShardBackupMetadata_latestPerShard() throws IOException {
