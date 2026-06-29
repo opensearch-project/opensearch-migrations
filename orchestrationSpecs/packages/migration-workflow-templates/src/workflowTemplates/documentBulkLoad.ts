@@ -44,6 +44,13 @@ import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from 
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 import {ResourceManagement} from "./resourceManagement";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {
+    minAvailableForSingleReplicaDependency,
+    SCALABLE_WORKLOAD_INPUTS,
+    scalingFromOptions,
+    workflowParameterAsNumber,
+} from "./commonUtils/scalableWorkload";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -106,7 +113,7 @@ const startHistoricalBackfillInputs = {
     rfsJsonConfig: defineRequiredParam<string>(),
     targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
-    podReplicas: defineRequiredParam<number>(),
+    ...SCALABLE_WORKLOAD_INPUTS,
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
@@ -153,8 +160,8 @@ function getRfsDeploymentManifest
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "SnapshotMigration",
-        name: makeDirectTypeProxy(args.crdName),
-        uid: makeDirectTypeProxy(args.crdUid),
+        name: makeStringTypeProxy(args.crdName),
+        uid: makeStringTypeProxy(args.crdUid),
         controller: false,
         blockOwnerDeletion: true
     }];
@@ -288,7 +295,7 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 CONSOLE_IMAGE: c.inputs.imageMigrationConsoleLocation,
                 CONSOLE_IMAGE_PULL_POLICY: c.inputs.imageMigrationConsolePullPolicy,
                 FROM_SNAPSHOT_MIGRATION_LABEL: c.inputs.fromSnapshotMigrationK8sLabel,
-                CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(c.inputs.consoleConfigContents)),
+                CONSOLE_CONFIG_BASE64: expr.toBase64YamlSafe(expr.asString(c.inputs.consoleConfigContents)),
                 RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
                 RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
@@ -323,7 +330,7 @@ function makeRfsDeploymentDefinition(
             rfsImageName: inputs.imageReindexFromSnapshotLocation,
             rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64(inputs.rfsJsonConfig),
+            jsonConfig: expr.toBase64YamlSafe(inputs.rfsJsonConfig),
             resources: expr.deserializeRecord(inputs.resources),
             crdName: inputs.crdName,
             crdUid: inputs.crdUid,
@@ -336,13 +343,62 @@ function makeRfsDeploymentDefinition(
     };
 }
 
+function makeRfsPodDisruptionBudgetDefinition(
+    inputs: StartHistoricalBackfillInputExpressions
+) {
+    const deploymentName = getRfsDeploymentName(inputs.sessionName);
+    const labels = {
+        "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
+        "migrations.opensearch.org/source": inputs.sourceK8sLabel,
+        "migrations.opensearch.org/target": inputs.targetK8sLabel,
+        "migrations.opensearch.org/snapshot": inputs.snapshotK8sLabel,
+        "migrations.opensearch.org/from-snapshot-migration": inputs.fromSnapshotMigrationK8sLabel,
+        "migrations.opensearch.org/task": inputs.taskK8sLabel,
+    };
+    const ownerReferences: OwnerReference[] = [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "SnapshotMigration",
+        name: makeStringTypeProxy(inputs.crdName),
+        uid: makeStringTypeProxy(inputs.crdUid),
+        controller: false,
+        blockOwnerDeletion: true
+    }];
+    return makePodDisruptionBudgetDefinition({
+        name: deploymentName,
+        minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
+        matchLabels: {
+            app: "bulk-loader",
+            "deployment-name": deploymentName
+        },
+        labels,
+        ownerReferences,
+    });
+}
+
 export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
-    .addTemplate("startHistoricalBackfill", t => t
+    .addTemplate("createRfsPodDisruptionBudget", t => t
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addResourceTask(b => b
+            .setDefinition(makeRfsPodDisruptionBudgetDefinition(b.inputs)))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("createRfsDeployment", t => t
         .addInputsFromRecord(startHistoricalBackfillInputs)
         .addResourceTask(b => b
             .setDefinition(makeRfsDeploymentDefinition(b.inputs)))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("startHistoricalBackfill", t => t
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addSteps(b => b
+            .addStep("createPodDisruptionBudget", INTERNAL, "createRfsPodDisruptionBudget", c =>
+                c.register({...selectInputsForRegister(b, c)}))
+            .addStep("createDeployment", INTERNAL, "createRfsDeployment", c =>
+                c.register({...selectInputsForRegister(b, c)}))
+        )
     )
 
 
@@ -360,10 +416,12 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
-            .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
-                c.register({
+            .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c => {
+                const scaling = scalingFromOptions(b.inputs.documentBackfillConfig);
+                return c.register({
                     ...selectInputsForRegister(b, c),
-                    podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
+                    podReplicas: scaling.podReplicas,
+                    minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
@@ -386,8 +444,8 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
-                })
-            )
+                });
+            })
         )
     )
 
@@ -417,6 +475,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                 expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
                 b.inputs.targetConfig
             );
+            const scaling = scalingFromOptions(b.inputs.documentBackfillConfig);
             return b
                 .addStep("setupRfsConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                     c.register({
@@ -448,7 +507,8 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation,
                             ownerName: b.inputs.crdName,
-                            ownerUid: b.inputs.crdUid
+                            ownerUid: b.inputs.crdUid,
+                            minPodReplicas: minAvailableForSingleReplicaDependency(scaling.minPodReplicas)
                         }),
                     {when: {templateExp: createRfsCluster}}
                 )

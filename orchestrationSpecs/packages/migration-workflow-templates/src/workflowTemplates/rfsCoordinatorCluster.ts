@@ -13,6 +13,8 @@ import {
     K8S_INFRA_READY_TIMEOUT_SECONDS,
     K8S_RESOURCE_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {workflowParameterAsNumber} from "./commonUtils/scalableWorkload";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -25,8 +27,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "SnapshotMigration",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: false,
         blockOwnerDeletion: true,
     }];
@@ -318,11 +320,33 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
+    .addTemplate("createRfsCoordinatorPodDisruptionBudget", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition(makePodDisruptionBudgetDefinition({
+                name: b.inputs.clusterName,
+                minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
+                matchLabels: {
+                    app: b.inputs.clusterName,
+                },
+                labels: {
+                    app: b.inputs.clusterName,
+                },
+                ownerReferences: makeOwnerReferences(b.inputs.ownerName, b.inputs.ownerUid),
+            }))
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
     .addTemplate("createRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
         .addRequiredInput("ownerName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
         .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
@@ -335,6 +359,13 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
+                        ownerName: b.inputs.ownerName,
+                        ownerUid: b.inputs.ownerUid
+                    }))
+                .addStep("createPodDisruptionBudget", INTERNAL, "createRfsCoordinatorPodDisruptionBudget", c =>
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        minPodReplicas: b.inputs.minPodReplicas,
                         ownerName: b.inputs.ownerName,
                         ownerUid: b.inputs.ownerUid
                     }))

@@ -1,5 +1,15 @@
 import {expectTypeOf} from "expect-type";
-import {BaseExpression, expr, INTERNAL, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
+import {
+    BaseExpression,
+    expr,
+    INTERNAL,
+    makeDirectTypeProxy,
+    makeParameterLoop,
+    typeToken,
+    UnquotedTypeWrapper,
+    WorkflowBuilder,
+    YamlPlainSafeString
+} from '../../src';
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
@@ -20,6 +30,29 @@ describe("expression type contracts", () => {
 
         // @ts-expect-error - nested record literals must use expr.makeDict(...)
         expr.literal([{foo: 2}]);
+    });
+
+    it("makeDirectTypeProxy rejects string expressions", () => {
+        expectTypeOf(makeDirectTypeProxy(expr.literal(5))).toEqualTypeOf<number>();
+        expectTypeOf(makeDirectTypeProxy(expr.makeDict({enabled: true})))
+            .toEqualTypeOf<{ enabled: boolean }>();
+        expectTypeOf(makeDirectTypeProxy(expr.serialize(expr.makeDict({enabled: true}))))
+            .toEqualTypeOf<{ enabled: boolean }>();
+
+        // @ts-expect-error - string expressions must use makeStringTypeProxy / yamlSafeString so manifest rendering can escape them
+        makeDirectTypeProxy(expr.literal("unsafe-string"));
+
+        new UnquotedTypeWrapper(expr.literal(5));
+        new UnquotedTypeWrapper(expr.serialize(expr.makeDict({enabled: true})), "yaml-safe-json");
+
+        // @ts-expect-error - yaml-safe-json wrappers must wrap a toJSON expression
+        new UnquotedTypeWrapper(expr.literal(5), "yaml-safe-json");
+
+        // @ts-expect-error - raw unquoted string wrappers are compile-time rejected
+        new UnquotedTypeWrapper(expr.concat(expr.literal("unsafe"), expr.literal("-string")));
+
+        expectTypeOf(expr.toBase64YamlSafe(expr.literal("json")))
+            .toMatchTypeOf<BaseExpression<YamlPlainSafeString>>();
     });
 
     it("expr.literal() rejects bare Argo template delimiters", () => {

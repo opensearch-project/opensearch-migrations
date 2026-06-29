@@ -13,6 +13,7 @@ generateTypes({
         { apiVersion: 'apps/v1', kind: 'StatefulSet' },
         { apiVersion: 'batch/v1', kind: 'Job' },
         { apiVersion: 'batch/v1', kind: 'CronJob' },
+        { apiVersion: 'policy/v1', kind: 'PodDisruptionBudget' },
     ],
     additionalTypes: [
         { name: 'Container',               schemaKey: 'io.k8s.api.core.v1.Container' },
@@ -23,6 +24,7 @@ generateTypes({
         { name: 'ResourceRequirements',    schemaKey: 'io.k8s.api.core.v1.ResourceRequirements' },
         { name: 'PodSpec',                 schemaKey: 'io.k8s.api.core.v1.PodSpec' },
         { name: 'ObjectMeta',              schemaKey: 'io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta' },
+        { name: 'OwnerReference',          schemaKey: 'io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference' },
         { name: 'JobTemplateSpec',         schemaKey: 'io.k8s.api.batch.v1.JobTemplateSpec' },
     ],
 }).catch(console.error);

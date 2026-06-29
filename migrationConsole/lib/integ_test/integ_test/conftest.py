@@ -26,6 +26,7 @@ from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
 from .test_cases.cdc_tests import *
+from .test_cases.cdc_pem_env_var_tests import *
 from .test_cases.cdc_generate_data_tests import *
 from .test_cases.cdc_mixed_operations_tests import *
 from .test_cases.cdc_simple_bulk_e2e_tests import *

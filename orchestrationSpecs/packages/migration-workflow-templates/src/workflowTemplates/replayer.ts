@@ -33,10 +33,19 @@ import {
     K8S_RESOURCE_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {
+    MIN_POD_REPLICAS_INPUTS,
+    POD_REPLICAS_INPUTS,
+    scalingFromOptions,
+    workflowParameterAsNumber,
+} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
+const REPLAYER_APP_LABEL = "replayer";
+const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -45,8 +54,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "TrafficReplay",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: true,
         blockOwnerDeletion: true,
     }];
@@ -236,11 +245,11 @@ function getReplayerDeploymentManifest
         apiVersion: "apps/v1",
         kind: "Deployment",
         metadata: {
-            name: makeDirectTypeProxy(args.name),
+            name: makeStringTypeProxy(args.name),
             ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
-                app: "replayer",
-                "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
+                app: REPLAYER_APP_LABEL,
+                "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
@@ -253,14 +262,15 @@ function getReplayerDeploymentManifest
             },
             selector: {
                 matchLabels: {
-                    app: "replayer",
+                    app: REPLAYER_APP_LABEL,
                 },
             },
             template: {
                 metadata: {
                     labels: {
-                        app: "replayer",
-                        "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
+                        app: REPLAYER_APP_LABEL,
+                        [REPLAYER_SELECTOR_LABEL]: makeStringTypeProxy(args.name),
+                        "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                         "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
@@ -284,7 +294,7 @@ const createDeploymentInputs = {
     kafkaSecretName: defineRequiredParam<string>(),
     kafkaCaSecretName: defineRequiredParam<string>(),
     ownerUid: defineRequiredParam<string>(),
-    podReplicas: defineRequiredParam<number>(),
+    ...POD_REPLICAS_INPUTS,
     useLocalStack: defineRequiredParam<boolean>(),
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
@@ -298,12 +308,22 @@ const createDeploymentInputs = {
     resources: defineRequiredParam<ResourceRequirementsType>()
 };
 
+const createPodDisruptionBudgetInputs = {
+    name: defineRequiredParam<string>(),
+    ownerUid: defineRequiredParam<string>(),
+    ...MIN_POD_REPLICAS_INPUTS,
+    sourceK8sLabel: defineRequiredParam<string>(),
+    targetK8sLabel: defineRequiredParam<string>(),
+    taskK8sLabel: defineParam<string>({expression: expr.literal("trafficReplayer")}),
+};
+
 const replayerBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "replayer",
     serviceAccountName: "argo-workflow-executor",
 }).addParams(CommonWorkflowParameters);
 
 type CreateDeploymentInputExpressions = InputParamsToExpressions<typeof createDeploymentInputs>;
+type CreatePodDisruptionBudgetInputExpressions = InputParamsToExpressions<typeof createPodDisruptionBudgetInputs>;
 
 function makeReplayerDeploymentDefinition(
     inputs: CreateDeploymentInputExpressions
@@ -326,7 +346,7 @@ function makeReplayerDeploymentDefinition(
             replayerImageName: inputs.imageTrafficReplayerLocation,
             replayerImagePullPolicy: inputs.imageTrafficReplayerPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64(inputs.jsonConfig),
+            jsonConfig: expr.toBase64YamlSafe(inputs.jsonConfig),
             resources: expr.deserializeRecord(inputs.resources),
             kafkaAuthConfigMapName: inputs.kafkaAuthConfigMapName,
             kafkaAuthType: inputs.kafkaAuthType,
@@ -340,12 +360,41 @@ function makeReplayerDeploymentDefinition(
     };
 }
 
+function makeReplayerPodDisruptionBudgetDefinition(
+    inputs: CreatePodDisruptionBudgetInputExpressions
+) {
+    const labels = {
+        app: REPLAYER_APP_LABEL,
+        "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
+        "migrations.opensearch.org/source": inputs.sourceK8sLabel,
+        "migrations.opensearch.org/target": inputs.targetK8sLabel,
+        "migrations.opensearch.org/task": inputs.taskK8sLabel,
+    };
+    return makePodDisruptionBudgetDefinition({
+        name: inputs.name,
+        minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
+        matchLabels: {
+            [REPLAYER_SELECTOR_LABEL]: inputs.name,
+        },
+        labels,
+        ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
+    });
+}
+
 export const Replayer = replayerBaseBuilder
   .addTemplate("createDeployment", (t) =>
     t
       .addInputsFromRecord(createDeploymentInputs)
       .addResourceTask(b => b
           .setDefinition(makeReplayerDeploymentDefinition(b.inputs)))
+      .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+  )
+
+  .addTemplate("createPodDisruptionBudget", (t) =>
+    t
+      .addInputsFromRecord(createPodDisruptionBudgetInputs)
+      .addResourceTask(b => b
+          .setDefinition(makeReplayerPodDisruptionBudgetDefinition(b.inputs)))
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
   )
 
@@ -403,6 +452,7 @@ export const Replayer = replayerBaseBuilder
           b.inputs.name,
           expr.literal("-kafka-auth"),
         );
+        const scaling = scalingFromOptions(b.inputs.replayerOptions);
         return b
           .addStep(
             "createKafkaClientConfig",
@@ -420,6 +470,15 @@ export const Replayer = replayerBaseBuilder
               }),
               {when: {templateExp: shouldUseScramAuth}}
           )
+          .addStep("createPodDisruptionBudget", INTERNAL, "createPodDisruptionBudget", (c) =>
+            c.register({
+              name: b.inputs.name,
+              ownerUid: b.inputs.ownerUid,
+              minPodReplicas: scaling.minPodReplicas,
+              sourceK8sLabel: b.inputs.sourceLabel,
+              targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+            }),
+          )
           .addStep("deployReplayer", INTERNAL, "createDeployment", (c) =>
             c.register({
               ...selectInputsForRegister(b, c),
@@ -436,11 +495,7 @@ export const Replayer = replayerBaseBuilder
                 expr.literal("empty"),
               ),
               ownerUid: b.inputs.ownerUid,
-              podReplicas: expr.dig(
-                expr.deserializeRecord(b.inputs.replayerOptions),
-                ["podReplicas"],
-                1,
-              ),
+              podReplicas: scaling.podReplicas,
               useLocalStack: b.inputs.useLocalStack,
               jvmArgs: expr.dig(
                 expr.deserializeRecord(b.inputs.replayerOptions),
