@@ -318,6 +318,8 @@ module "source_connectivity_psc" {
   subnet_id           = local.subnet_id
   service_attachment  = var.source_connectivity.service_attachment
   allow_global_access = var.source_connectivity.allow_global_access
+  dns_name            = var.source_connectivity.dns_name
+  dns_zone_domain     = var.source_connectivity.dns_zone_domain
 }
 
 module "target_connectivity_psc" {
@@ -331,6 +333,8 @@ module "target_connectivity_psc" {
   subnet_id           = local.subnet_id
   service_attachment  = var.target_connectivity.service_attachment
   allow_global_access = var.target_connectivity.allow_global_access
+  dns_name            = var.target_connectivity.dns_name
+  dns_zone_domain     = var.target_connectivity.dns_zone_domain
 }
 
 module "source_connectivity_peering" {

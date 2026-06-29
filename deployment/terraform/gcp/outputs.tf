@@ -27,3 +27,13 @@ output "target_peering_state" {
   description = "State of the target-leg VPC peering (null unless mode = vpc_peering)."
   value       = length(module.target_connectivity_peering) > 0 ? module.target_connectivity_peering[0].peering_state : null
 }
+
+output "source_private_fqdn" {
+  description = "Hostname that resolves to the source PSC endpoint over the private DNS zone; null unless mode = psc_consumer with dns_name set. Use this (not the IP) as the source cluster endpoint for valid TLS."
+  value       = length(module.source_connectivity_psc) > 0 ? module.source_connectivity_psc[0].endpoint_fqdn : null
+}
+
+output "target_private_fqdn" {
+  description = "Hostname that resolves to the target PSC endpoint over the private DNS zone; null unless mode = psc_consumer with dns_name set. Use this (not the IP) as the target cluster endpoint for valid TLS."
+  value       = length(module.target_connectivity_psc) > 0 ? module.target_connectivity_psc[0].endpoint_fqdn : null
+}

@@ -143,3 +143,29 @@ run "private_endpoint_can_be_enabled" {
     error_message = "enable_private_endpoint must be settable to true."
   }
 }
+
+run "psc_consumer_target_with_dns_exposes_fqdn" {
+  command = plan
+
+  variables {
+    target_connectivity = {
+      mode               = "psc_consumer"
+      service_attachment = "projects/producer/regions/us-central1/serviceAttachments/sa"
+      dns_name           = "myservice-myproj.example.com"
+    }
+  }
+
+  assert {
+    condition     = output.target_private_fqdn == "myservice-myproj.example.com"
+    error_message = "target_private_fqdn must surface the configured dns_name."
+  }
+}
+
+run "none_mode_outputs_null_fqdns" {
+  command = plan
+
+  assert {
+    condition     = output.source_private_fqdn == null && output.target_private_fqdn == null
+    error_message = "none mode must output null for both private FQDNs."
+  }
+}

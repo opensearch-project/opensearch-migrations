@@ -216,6 +216,9 @@ variable "source_connectivity" {
     allow_global_access = optional(bool, false)
     # vpc_peering:
     peer_vpc_self_link = optional(string)
+    # psc_consumer DNS (optional):
+    dns_name        = optional(string)
+    dns_zone_domain = optional(string)
   })
   default = { mode = "none" }
 
@@ -238,10 +241,15 @@ variable "source_connectivity" {
 variable "target_connectivity" {
   description = "Private connectivity for the target-write leg. mode = none (default) | psc_consumer | vpc_peering."
   type = object({
-    mode                = optional(string, "none")
+    mode = optional(string, "none")
+    # psc_consumer:
     service_attachment  = optional(string)
     allow_global_access = optional(bool, false)
-    peer_vpc_self_link  = optional(string)
+    # vpc_peering:
+    peer_vpc_self_link = optional(string)
+    # psc_consumer DNS (optional):
+    dns_name        = optional(string)
+    dns_zone_domain = optional(string)
   })
   default = { mode = "none" }
 
