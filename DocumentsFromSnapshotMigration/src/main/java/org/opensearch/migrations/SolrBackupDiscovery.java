@@ -114,43 +114,51 @@ public class SolrBackupDiscovery {
             // Flat standalone index: download the whole data dir up front.
             s3Repo.downloadPrefix(dataDirByCollection.get(collection));
         } else if (s3Repo != null) {
-            String dataDir = null;
-            String zkBackupName = null;
-            if (dataDirByCollection.containsKey(collection)) {
-                dataDir = dataDirByCollection.get(collection);
-                zkBackupName = SolrBackupLayout.findLatestZkBackupName(s3Repo.listSubDirectories(dataDir));
-            } else {
-                var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
-                    collection, s3Repo::listSubDirectories);
-                if (resolved == null) {
-                    log.warn("No zk_backup directories found for collection '{}' in S3", collection);
-                } else {
-                    dataDir = resolved.joinWith(collection);
-                    zkBackupName = resolved.latestZkBackupName();
-                    dataDirByCollection.put(collection, dataDir);
-                }
-            }
-            if (dataDir != null) {
-                if (zkBackupName != null) {
-                    s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkBackupName));
-                }
-                log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, "shard_backup_metadata"));
-                // Solr 6: stub out snapshot.shardN/ dirs so shards can be counted before download.
-                var dataDirFinal = dataDir;
-                s3Repo.listSubDirectories(dataDir).stream()
-                    .filter(name -> name.startsWith("snapshot."))
-                    .forEach(snapshotDirName -> {
-                        try {
-                            Files.createDirectories(backupDir.resolve(dataDirFinal).resolve(snapshotDirName));
-                        } catch (IOException e) {
-                            log.warn("Failed to create snapshot stub dir {}/{}", dataDirFinal, snapshotDirName, e);
-                        }
-                    });
-            }
+            downloadCloudCollectionMetadata(collection);
         }
         var dataDir = backupDir.resolve(dataDirByCollection.getOrDefault(collection, collection));
         schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
+    }
+
+    private void downloadCloudCollectionMetadata(String collection) {
+        var dataDir = resolveCloudDataDir(collection);
+        if (dataDir == null) {
+            return;
+        }
+        var zkBackupName = SolrBackupLayout.findLatestZkBackupName(s3Repo.listSubDirectories(dataDir));
+        if (zkBackupName != null) {
+            s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkBackupName));
+        }
+        log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
+        s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, "shard_backup_metadata"));
+        createSnapshotStubDirs(dataDir);
+    }
+
+    private String resolveCloudDataDir(String collection) {
+        if (dataDirByCollection.containsKey(collection)) {
+            return dataDirByCollection.get(collection);
+        }
+        var resolved = SolrBackupLayout.resolveCollectionDataPrefix(collection, s3Repo::listSubDirectories);
+        if (resolved == null) {
+            log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+            return null;
+        }
+        var dataDir = resolved.joinWith(collection);
+        dataDirByCollection.put(collection, dataDir);
+        return dataDir;
+    }
+
+    // Solr 6: stub out snapshot.shardN/ dirs so shards can be counted before download.
+    private void createSnapshotStubDirs(String dataDir) {
+        s3Repo.listSubDirectories(dataDir).stream()
+            .filter(name -> name.startsWith("snapshot."))
+            .forEach(snapshotDirName -> {
+                try {
+                    Files.createDirectories(backupDir.resolve(dataDir).resolve(snapshotDirName));
+                } catch (IOException e) {
+                    log.warn("Failed to create snapshot stub dir {}/{}", dataDir, snapshotDirName, e);
+                }
+            });
     }
 
     public void prepareShard(SolrShardPartition partition) {
