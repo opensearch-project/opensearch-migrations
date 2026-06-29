@@ -15,8 +15,13 @@
 # so the retained snapshot reflects the cumulative state after the final cycle.
 #
 # When --s3-upload is used, each snapshot is copied from ./backups/standalone/ into
-# ./s3_upload/standalone/, where v7/v8/v9 snapshots are reshaped into the layout MA
-# expects before syncing to S3.
+# ./s3_upload/standalone/ and reshaped into the layout MA expects before syncing to
+# S3 (see reshape_snapshot):
+#   * v8/v9: nyc_taxis/index/ + shard_backup_metadata manifest (SIP-12 incremental).
+#   * v6/v7: nyc_taxis/snapshot.shard1/ (non-incremental). RFS gates the incremental
+#     reader to Solr 8.9+, and its S3 reader can only discover a non-incremental
+#     shard via a per-shard snapshot.shardN/ dir (not a plain index/), so 6/7 use the
+#     1-shard SolrCloud-style layout.
 #
 # Step 7 (Migration Assistant) is interactive and is intentionally NOT automated here.
 
@@ -213,22 +218,56 @@ backup_core() {
     wait_for_backup "$name"
 }
 
+# Wait for the replication-handler backup to FULLY finish copying before we let
+# the caller stop Solr / package the snapshot. The old code returned as soon as a
+# segments_N file appeared in the snapshot dir — but segments_N lands early in the
+# copy, so we'd package a half-written snapshot (missing .doc/.tim files) and
+# stop_solr would kill the copy mid-flight, leaving a permanently corrupt backup.
+#
+# Authoritative signal: Solr's replication `details` reports the backup as
+# status=success for this snapshot, and the fileCount it copied is on disk. A
+# portable file-count+size stability check is the fallback if the status field
+# can't be matched. On timeout we die rather than upload a partial snapshot.
 wait_for_backup() {
     local name="$1"
+    local snapdir="${BACKUP_BASE}/snapshot.${name}"
     echo "Waiting for backup '${name}' to complete..."
-    for _ in $(seq 1 120); do
-        local details
+    local _ details prev_sig="" stable=0 want have sig
+    for _ in $(seq 1 300); do
         details="$(curl -fsS "${SOLR_URL}/solr/nyc_taxis/replication?command=details&wt=json" 2>/dev/null || true)"
+
+        if echo "$details" | grep -q '"status":"failed"'; then
+            die "Replication backup '${name}' reported status=failed: ${details}"
+        fi
+
+        # Authoritative: Solr says this snapshot succeeded AND the copied fileCount
+        # is present on disk (guards against an early/stale success).
         if echo "$details" | grep -q '"status":"success"' \
            && echo "$details" | grep -q "snapshot.${name}"; then
-            echo "Backup '${name}' complete."; return 0
+            want="$(echo "$details" | grep -oE '"fileCount":[0-9]+' | grep -oE '[0-9]+' | head -1)"
+            have="$(find "$snapdir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')"
+            if [[ -z "$want" || "$have" -ge "$want" ]]; then
+                echo "Backup '${name}' complete (${have} files${want:+/${want}})."
+                return 0
+            fi
         fi
-        if compgen -G "${BACKUP_BASE}/snapshot.${name}/segments_*" >/dev/null 2>&1; then
-            echo "Backup '${name}' complete (segments present)."; return 0
+
+        # Fallback: trust the snapshot only once its file count AND total size have
+        # stopped changing for 3 consecutive polls (~6s). du/wc are portable across
+        # macOS and Linux hosts.
+        sig="$(find "$snapdir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' '):$(du -sk "$snapdir" 2>/dev/null | awk '{print $1}')"
+        if [[ "$sig" == "$prev_sig" && "$sig" != "0:" && "$sig" != "0:0" ]]; then
+            stable=$((stable + 1))
+            if [[ "$stable" -ge 3 ]]; then
+                echo "Backup '${name}' complete (stable at ${sig})."; return 0
+            fi
+        else
+            stable=0
         fi
+        prev_sig="$sig"
         sleep 2
     done
-    warn "Timed out waiting for backup '${name}'; continuing anyway"
+    die "Timed out waiting for backup '${name}' to complete; refusing to package a partial snapshot"
 }
 
 stop_solr() {
@@ -244,22 +283,46 @@ reshape_snapshot() {
     local version="$2"
     local dir="${S3_UPLOAD_BASE}/${name}"
 
-    log "Reshaping snapshot ${dir} into the MA layout"
-    mkdir -p "$dir/nyc_taxis/index"
-    find "$dir" -maxdepth 1 -mindepth 1 \
-        ! -name nyc_taxis ! -name shard_backup_metadata \
-        -exec mv {} "$dir/nyc_taxis/index/" \;
+    # Where the Lucene index files land under nyc_taxis/ depends on how RFS will
+    # discover shards FROM S3 (it pre-downloads only zk_backup_N/ and
+    # shard_backup_metadata/ before discoverShardDirs runs — never a plain index/):
+    #
+    #   * v8/v9 (incremental): nyc_taxis/index/ + a shard_backup_metadata manifest.
+    #     RFS enumerates files from the manifest (UUID-mapped path, Solr >= 8.9 only).
+    #   * v6/v7 (non-incremental): nyc_taxis/snapshot.shard1/  (NO manifest — that
+    #     would hit the SIP-12 < 8.9 gate). RFS's S3 path discovers a non-incremental
+    #     shard only via per-shard `snapshot.shardN/` dirs: collectionPreparer creates
+    #     a local stub by name, discoverShardDirs keeps it, shardPreparer then
+    #     downloads it and reads with IndexReader6/7. A single `index/` dir is NOT
+    #     discoverable over S3 (its segments aren't pre-downloaded), so we must use
+    #     the snapshot.shard1 layout (what a 1-shard SolrCloud 6/7 backup looks like).
+    local index_subdir
+    if [[ "$version" == "6" || "$version" == "7" ]]; then
+        index_subdir="snapshot.shard1"
+    else
+        index_subdir="index"
+    fi
 
-    log "Generating shard_backup_metadata manifest"
-    mkdir -p "$dir/nyc_taxis/shard_backup_metadata"
-    local out="$dir/nyc_taxis/shard_backup_metadata/md_shard1_0.json"
-    printf '{' > "$out"
-    local first=true f
-    for f in $(ls "$dir/nyc_taxis/index"); do
-        if [[ "$first" == true ]]; then first=false; else printf ',' >> "$out"; fi
-        printf '"%s":{"fileName":"%s"}' "$f" "$f" >> "$out"
-    done
-    printf '}' >> "$out"
+    log "Reshaping snapshot ${dir} into the MA layout (index dir: ${index_subdir})"
+    mkdir -p "$dir/nyc_taxis/${index_subdir}"
+    find "$dir" -maxdepth 1 -mindepth 1 \
+        ! -name nyc_taxis \
+        -exec mv {} "$dir/nyc_taxis/${index_subdir}/" \;
+
+    if [[ "$index_subdir" == "index" ]]; then
+        log "Generating shard_backup_metadata manifest"
+        mkdir -p "$dir/nyc_taxis/shard_backup_metadata"
+        local out="$dir/nyc_taxis/shard_backup_metadata/md_shard1_0.json"
+        printf '{' > "$out"
+        local first=true f
+        for f in $(ls "$dir/nyc_taxis/index"); do
+            if [[ "$first" == true ]]; then first=false; else printf ',' >> "$out"; fi
+            printf '"%s":{"fileName":"%s"}' "$f" "$f" >> "$out"
+        done
+        printf '}' >> "$out"
+    else
+        log "Non-incremental layout for Solr ${version}: index files in ${index_subdir}/, no manifest"
+    fi
 
     log "Storing schema for version ${version}"
     mkdir -p "$dir/nyc_taxis/zk_backup_0/configs/nyc_taxies"
@@ -322,9 +385,10 @@ prepare_s3_upload() {
             log "Copying ${src} -> ${dst}"
             rm -rf "$dst"
             cp -a "$src" "$dst"
-            if [[ "$v" == "7" || "$v" == "8" || "$v" == "9" ]]; then
-                reshape_snapshot "$name" "$v"
-            fi
+            # Reshape every version into the MA layout (nyc_taxis/index/ + schema).
+            # reshape_snapshot itself only adds the incremental shard_backup_metadata
+            # manifest for v8/v9; v6/v7 are left non-incremental.
+            reshape_snapshot "$name" "$v"
         done
     done
 }
