@@ -147,7 +147,7 @@ public class ClusterReaderExtractor {
      *
      * Delegates layout resolution to {@link SolrBackupLayout#resolveCollectionDataPrefix}.
      */
-    private void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
+    void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
         var resolved = SolrBackupLayout.resolveCollectionDataPrefix(collection, s3Repo::listSubDirectories);
         if (resolved == null) {
             log.warn("No zk_backup directories found for collection '{}' in S3", collection);
@@ -156,7 +156,7 @@ public class ClusterReaderExtractor {
         s3Repo.downloadPrefix(resolved.joinWith(collection) + "/" + resolved.latestZkBackupName());
     }
 
-    private void downloadZkBackupForDataDir(S3Repo s3Repo, String dataDir) {
+    void downloadZkBackupForDataDir(S3Repo s3Repo, String dataDir) {
         var zkName = SolrBackupLayout.findLatestZkBackupName(s3Repo.listSubDirectories(dataDir));
         if (zkName == null) {
             log.warn("No zk_backup found at bare Solr backup root '{}'", dataDir);
@@ -165,7 +165,7 @@ public class ClusterReaderExtractor {
         s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkName));
     }
 
-    private static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
+    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
         var bare = SolrBackupLayout.detectBareLayoutFromListing(s3Repo.listTopLevelDirectories());
         if (bare == null) {
             return null;
