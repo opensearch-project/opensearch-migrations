@@ -424,7 +424,6 @@ export const FullMigration = WorkflowBuilder.create({
         )
     )
 
-
     // ── Section 4: Snapshot Migrations ───────────────────────────────────
 
     .addTemplate("migrateFromSnapshot", t => t
@@ -586,21 +585,22 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.makeDict({}) as any
                         )),
                         crdName: b.inputs.resourceName,
-                        resourceUid: b.inputs.resourceUid,
+                        // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
+                        // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
+                        // for BYOS/imported-cluster flows). This is required so ownerReferences on
+                        // RFS coordinator Secret/Service/StatefulSet point at the real owner UID;
+                        // otherwise Kubernetes GC deletes those resources within ~1s.
+                        resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
                 }
             )
-            // Metadata-only path: workflow patches SM.status itself. On the
-            // RFS-enabled path, the RFS-completion CronJob is the sole writer
-            // of SM.status (INV-1), so this step is suppressed when a
-            // documentBackfillConfig is present.
             .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
                 c => c.register({
                     resourceName: b.inputs.resourceName,
@@ -611,12 +611,7 @@ export const FullMigration = WorkflowBuilder.create({
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
-                    expr.not(expr.hasKey(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        "documentBackfillConfig"))
-                )})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
         })
     )
@@ -659,19 +654,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: expr.concat(
-                            expr.asString(expr.get(c.item, "source")),
-                            expr.literal("-"),
-                            expr.dig(
-                                expr.deserializeRecord(b.inputs.targetConfig),
-                                ["label"],
-                                ""
-                            ),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "snapshot")),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "migrationLabel"))
-                        ),
+                        resourceName: expr.asString(expr.get(c.item, "resourceName")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
                         checksumField: expr.literal("checksumForReplayer"),
                     });
@@ -929,19 +912,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
-                        expr.get(c.item, "sourceLabel"),
-                        expr.literal("-"),
-                        expr.dig(
-                            expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                            ["label"],
-                            ""
-                        ),
-                        expr.literal("-"),
-                        expr.get(c.item, "label"),
-                        expr.literal("-"),
-                        expr.get(c.item, "migrationLabel")
-                    ),
+                    resourceName: expr.get(c.item, "resourceName"),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal(" → "),

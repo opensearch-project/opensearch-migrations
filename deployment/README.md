@@ -14,6 +14,18 @@ See the [user guide](https://github.com/opensearch-project/opensearch-migrations
 to install Migration Assistant into EKS.  
 More information to deploy in a development environment can be found [here](./k8s/aws/README.md)
 
+### Deploying the Migration Assistant (GKE) Solution
+
+The Migration Assistant can also be deployed to Google Kubernetes Engine (GKE) using
+the GCP Terraform module, which provisions a GKE cluster, GCS snapshot bucket, and
+the Google Service Account / Workload Identity bindings required by the migration
+workflows. The Helm chart is installed with the GKE-specific overlay
+[`valuesGke.yaml`](./k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml).
+
+See [deployment/terraform/gcp/README.md](./terraform/gcp/README.md) for the full
+walkthrough, and [deployment/k8s/README.md](./k8s/README.md#gke) for the GKE
+Kubernetes quick start.
+
 ### Deploying Migration solution with Docker
 
 A containerized end-to-end solution (including a source and target cluster as well as the migration services) can be deployed locally using the

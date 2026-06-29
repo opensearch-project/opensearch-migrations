@@ -21,6 +21,7 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for minikube/kind testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -66,6 +67,12 @@ aws:
   region: us-east-2
   account: "123456789012"
 
+cloudProvider: ""
+
+gcp:
+  project: ""
+  serviceAccountEmail: ""
+
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
@@ -107,6 +114,25 @@ defaultBucketConfiguration:
   serviceAccountName: "migrations-service-account"
   bucketOperationImage: "amazon/aws-cli:2.25.11"
   bucketOperationImagePullPolicy: "IfNotPresent"
+
+gcsBucketConfiguration:
+  create: false
+  deleteOnUninstall: false
+  emptyBeforeDelete: true
+  endpoint: ""
+  bucketName: ""
+  bucketOperationImage: "google/cloud-sdk:latest"
+  bucketOperationImagePullPolicy: "IfNotPresent"
+  serviceAccountName: "migrations-service-account"
+  useLocalGcs: false   # set true for minikube/kind; wires fake-gcs-server as the GCS endpoint
+  localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
+
+kafkaExternal:
+  enabled: false
+  brokers: ""
+  authType: scram-sha-512
+  userName: ""
+  password: ""
 
 logs:
   sharedLogsVolume:
