@@ -25,27 +25,37 @@ is unchanged from the standard GCP deployment.
 Use this when the cluster is published as a GCP PSC service attachment (for example a
 managed OpenSearch service that offers a private endpoint).
 
-1. Obtain the producer's **service-attachment URI** and ask them to add your project to
-   the service attachment's consumer accept-list (or confirm it auto-accepts).
-2. Configure the leg:
+1. Obtain the producer's **service-attachment URI** and the **hostname** its TLS
+   certificate is issued for, and ask them to add your project to the service
+   attachment's consumer accept-list (or confirm it auto-accepts).
+2. Configure the leg, supplying `dns_name` so the endpoint is reachable by hostname
+   with valid TLS:
 
    ```hcl
    target_connectivity = {
      mode               = "psc_consumer"
      service_attachment = "projects/PRODUCER/regions/REGION/serviceAttachments/NAME"
+     dns_name           = "myservice-myproj.example.com"
    }
    ```
 
-3. Apply, then read the endpoint Terraform provisioned:
+   When `dns_name` is set, Terraform creates a **private Cloud DNS zone** that resolves
+   that hostname to the PSC endpoint's internal IP, so clients validate TLS against the
+   real certificate. Omit `dns_name` only if you intend to connect by IP with relaxed
+   TLS verification.
+3. Apply, then read the hostname (preferred) or raw IP:
 
    ```bash
-   terraform output target_private_endpoint   # e.g. 10.0.0.42
+   terraform output target_private_fqdn       # e.g. myservice-myproj.example.com
+   terraform output target_private_endpoint   # e.g. 10.0.0.42 (IP fallback)
    ```
 
 4. **Use the endpoint in your migration.** Endpoints are not injected automatically —
-   put the value into your workflow user config's `targetClusters` (or `sourceClusters`)
-   entry as the cluster `endpoint`, e.g. `https://10.0.0.42:9200`. The migration workflow
-   reads cluster endpoints from this config at submission time.
+   put the **hostname** into your workflow user config's `targetClusters` (or
+   `sourceClusters`) entry as the cluster `endpoint`, e.g.
+   `https://myservice-myproj.example.com:9200`. (If you omitted `dns_name`, use the IP
+   with relaxed TLS instead.) The migration workflow reads cluster endpoints from this
+   config at submission time.
 
 ## Target/Source over VPC peering (`vpc_peering`)
 
