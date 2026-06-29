@@ -69,6 +69,8 @@ spec:
         value: "LoadBalancer"
       - name: otel-trace-collector-endpoint
         value: ""
+      - name: client-auth-pem-base64
+        value: ""
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -200,6 +202,8 @@ spec:
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
 
         - - name: run-proxy-only-migration-with-workflow-cli
             templateRef:
@@ -260,6 +264,8 @@ spec:
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
 
         # Run the full migration using the CDC-enabled config.
         - - name: run-full-migration-with-workflow-cli

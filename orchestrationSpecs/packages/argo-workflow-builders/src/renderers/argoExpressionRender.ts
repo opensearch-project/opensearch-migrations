@@ -16,6 +16,7 @@ import {
     TemplateReplacementExpression,
     TernaryExpression,
     WorkflowValueExpression,
+    YamlPlainSafeStringExpression,
 } from "../models/expression";
 
 export const REMOVE_PREVIOUS_QUOTE_SENTINEL = "REMOVE_PREVIOUS_QUOTE_SENTINEL";
@@ -31,6 +32,16 @@ export type ArgoFormatted = {
 };
 
 const formattedResult = (text: string, compound = false): ArgoFormatted => ({text, compound});
+
+/** Escapes a value for a single-quoted expr-lang / govaluate string literal. */
+function escapeGovaluateStringLiteral(s: string): string {
+    return s
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t");
+}
 
 function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, renderedResult: ArgoFormatted) {
     return (useMarkers && !(isLiteralExpression(expr)))
@@ -65,10 +76,14 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
         return formatExpression(expr.source, useIdentifierMarkers, scopeType, true);
     }
 
+    if (isYamlPlainSafeStringExpression(expr)) {
+        return formatExpression(expr.source, useIdentifierMarkers, scopeType, top);
+    }
+
     if (isLiteralExpression(expr)) {
         const le = expr as LiteralExpression<any>;
         if (typeof le.value === "string") {
-            return top ? formattedResult(le.value) : formattedResult(`'${le.value}'`);
+            return top ? formattedResult(le.value) : formattedResult(`'${escapeGovaluateStringLiteral(le.value)}'`);
         } else if (typeof le.value === "number" || typeof le.value === "boolean") {
             return formattedResult(String(le.value));
         } else if (le.value === null) {
@@ -81,7 +96,8 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
         const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers, scopeType));
-        const text = parts.map(p => p.text).join(ce.separator ? " + '" + ce.separator + "' + " : "+");
+        const separator = ce.separator ? ` + '${escapeGovaluateStringLiteral(ce.separator)}' + ` : "+";
+        const text = parts.map(p => p.text).join(separator);
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
     }
@@ -96,9 +112,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
 
     if (isFunctionExpression(expr)) {
         const e = expr as FunctionExpression<any, any>;
-        if (e.functionName === "toJSON" && isParameterExpression(e.args[0] as AnyExpr)) {
-            return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
-        } else if (e.functionName === "fromJSON" && top) {
+        if (e.functionName === "fromJSON" && top) {
             return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
         }
         const formattedArgs =
@@ -158,8 +172,6 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
             parts.push(`"${k}"`, fv.text);
         }
         const args = parts.join(", ");
-        // Using function-call form for consistency with other sprig.* calls here:
-        // sprig.dict("k1", v1, "k2", v2)
         const text = parts.length ? `sprig.dict(${args})` : `sprig.dict()`;
         return formattedResult(text, true);
     }
@@ -283,4 +295,8 @@ export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression {
 
 export function isSpecialStripQuotesDirective(e: AnyExpr): e is UnquotedTypeWrapper<any> {
     return e.kind === "strip_surrounding_quotes_in_serialized_output";
+}
+
+export function isYamlPlainSafeStringExpression(e: AnyExpr): e is YamlPlainSafeStringExpression<BaseExpression<string, any>> {
+    return e.kind === "yaml_plain_safe_string";
 }

@@ -152,7 +152,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 CONSOLE_IMAGE_PULL_POLICY: b.inputs.imageMigrationConsolePullPolicy,
                 SOURCE_LABEL: b.inputs.sourceK8sLabel,
                 SNAPSHOT_LABEL: b.inputs.snapshotK8sLabel,
-                CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(b.inputs.configContents)),
+                CONSOLE_CONFIG_BASE64: expr.toBase64YamlSafe(expr.asString(b.inputs.configContents)),
                 SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL: expr.literal(SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL),
                 SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
