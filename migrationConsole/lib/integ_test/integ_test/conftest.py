@@ -5,9 +5,12 @@
 #   0004-0005  Multi-type index tests (union, split)
 #   0006       Benchmark backfill (OpenSearch Benchmark)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0020       GCS snapshot migration tests
 #   0021-0029  AOSS collection tests (search, time-series, vector)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
+#   0050-0059  Observability tests (metrics/tracing backends)
+#   0060-0069  BYOC captured-traffic tests
 #
 import json
 import os
@@ -24,6 +27,7 @@ from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
 from .test_cases.cdc_tests import *
+from .test_cases.cdc_pem_env_var_tests import *
 from .test_cases.cdc_generate_data_tests import *
 from .test_cases.cdc_mixed_operations_tests import *
 from .test_cases.cdc_simple_bulk_e2e_tests import *
@@ -31,6 +35,9 @@ from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
+from .test_cases.observability_tests import *
+from .test_cases.byoc_captured_traffic_tests import *
+from .test_cases.gcs_snapshot_tests import *
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +63,8 @@ def pytest_addoption(parser):
                      help="Target type: 'OS' (default) or 'AOSS' for Amazon OpenSearch Serverless")
     parser.addoption("--keep_workflows", action="store_true", default=False,
                      help="If set, will not delete Argo workflows created by tests")
+    parser.addoption("--skip_workflow_reset", action="store_true", default=False,
+                     help="If set, will not reset Migration Assistant resources during test teardown")
     parser.addoption("--reuse_clusters", action="store_true", default=False,
                      help="If set, will reuse source and target clusters if they already exist")
     parser.addoption("--config_file_path", action="store", default="/config/migration_services.yaml",
@@ -74,6 +83,13 @@ def pytest_addoption(parser):
                      help="Digest-pinned transform image containing the basic transform fixture bank")
     parser.addoption("--transform_image_sequence", action="store", default="",
                      help="Digest-pinned transform image containing the sequence transform fixture bank")
+    parser.addoption("--transform_image_context", action="store", default="",
+                     help="Digest-pinned transform image containing the context-only transform fixture bank")
+    parser.addoption("--capture_proxy_service_type", action="store", default="LoadBalancer",
+                     choices=("LoadBalancer", "ClusterIP"),
+                     help="Capture proxy Kubernetes Service type for CDC workflow tests")
+    parser.addoption("--dump_all_workflow_output_artifacts", action="store_true", default=False,
+                     help="On failure, additionally read every output artifact from current workflow nodes")
 
 
 def pytest_configure(config):
@@ -108,13 +124,17 @@ def pytest_generate_tests(metafunc):
         observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
         transform_image_basic = metafunc.config.getoption("transform_image_basic")
         transform_image_sequence = metafunc.config.getoption("transform_image_sequence")
+        transform_image_context = metafunc.config.getoption("transform_image_context")
+        capture_proxy_service_type = metafunc.config.getoption("capture_proxy_service_type")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix,
                                         speedup_factor=speedup_factor,
                                         observed_packet_timeout=observed_packet_timeout,
                                         transform_image_basic=transform_image_basic,
-                                        transform_image_sequence=transform_image_sequence)
+                                        transform_image_sequence=transform_image_sequence,
+                                        transform_image_context=transform_image_context,
+                                        capture_proxy_service_type=capture_proxy_service_type)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
         if not test_cases_param and not test_ids_list:
@@ -129,22 +149,22 @@ def pytest_generate_tests(metafunc):
 def _filter_test_cases(test_ids_list: List[str]) -> List:
     """
     Filter test cases based on test_ids_list.
-    
+
     - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
-    - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
-    
-    Note: Matching uses substring search (e.g., '000' matches Test0001, Test0002, etc.).
+    - If test_ids_list is provided: return only tests whose class name begins with Test{id}.
+
+    Matching is anchored on the Test{id} prefix so a stray substring
+    (e.g. '004' inside a longer numeric, description, or file path)
+    cannot leak into the selection set. Test IDs are themselves expected
+    to be unique per class.
     """
     if not test_ids_list:
         # Default run: exclude tests that require explicit selection
         return [case for case in ALL_TEST_CASES if not getattr(case, 'requires_explicit_selection', False)]
-    
+
     # Explicit selection: include matching tests regardless of requires_explicit_selection
-    filtered_cases = []
-    for case in ALL_TEST_CASES:
-        if any(tid in str(case) for tid in test_ids_list):
-            filtered_cases.append(case)
-    return filtered_cases
+    prefixes = tuple(f"Test{tid}" for tid in test_ids_list)
+    return [case for case in ALL_TEST_CASES if case.__name__.startswith(prefixes)]
 
 
 def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
@@ -224,3 +244,13 @@ def unique_id(pytestconfig):
 @pytest.fixture
 def keep_workflows(pytestconfig):
     return pytestconfig.getoption("keep_workflows")
+
+
+@pytest.fixture
+def skip_workflow_reset(pytestconfig):
+    return pytestconfig.getoption("skip_workflow_reset")
+
+
+@pytest.fixture
+def dump_all_workflow_output_artifacts(pytestconfig):
+    return pytestconfig.getoption("dump_all_workflow_output_artifacts")

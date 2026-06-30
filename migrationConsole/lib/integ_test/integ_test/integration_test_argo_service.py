@@ -13,8 +13,15 @@ import tempfile
 import os
 import yaml
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from urllib.parse import quote
+from typing import Optional, Dict, Any, List, Tuple
 
+from console_link.workflow.commands.artifact_store import (
+    ArtifactStoreError,
+    artifact_uri,
+    list_artifacts,
+    read_artifact_text,
+)
 from console_link.models.cluster import Cluster
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.command_result import CommandResult
@@ -22,6 +29,10 @@ from console_link.models.command_result import CommandResult
 logger = logging.getLogger(__name__)
 
 ENDING_ARGO_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
+ARGO_SERVER_URL_ENV = "ARGO_SERVER_URL"
+ARGO_TOKEN_ENV = "ARGO_TOKEN"
+ARGO_SERVER_INSECURE_ENV = "ARGO_SERVER_INSECURE"
+DIAGNOSTIC_ARTIFACT_PREFIX = "diagnostics/"
 
 
 def _utc_now_for_kubernetes() -> str:
@@ -29,8 +40,14 @@ def _utc_now_for_kubernetes() -> str:
 
 
 def _command_stdout(result: CommandResult) -> str:
-    if result.output and result.output.stdout:
-        return result.output.stdout
+    parts = []
+    if result.output:
+        if result.output.stdout:
+            parts.append(result.output.stdout)
+        if result.output.stderr:
+            parts.append(f"STDERR:\n{result.output.stderr}")
+    if parts:
+        return "\n".join(parts)
     return result.display()
 
 
@@ -44,11 +61,22 @@ class IntegrationTestArgoService:
     def __init__(self, namespace: str = "ma"):
         self.namespace = namespace
 
-    def start_workflow(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> CommandResult:
+    def start_workflow(
+        self,
+        workflow_template_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        workflow_name: Optional[str] = None,
+        service_account_name: Optional[str] = None,
+    ) -> CommandResult:
         temp_file = None
         try:
             # Create temporary workflow file
-            temp_file = self._create_workflow_yaml(workflow_template_name, parameters)
+            temp_file = self._create_workflow_yaml(
+                workflow_template_name,
+                parameters,
+                workflow_name=workflow_name,
+                service_account_name=service_account_name,
+            )
 
             # Use kubectl create to start the workflow
             kubectl_args = {
@@ -155,64 +183,300 @@ class IntegrationTestArgoService:
         except Exception as e:
             logger.error(f"Failed to get workflow logs: {e}")
 
-    def save_namespace_diagnostics(self, output_dir: str, workflow_name: Optional[str] = None) -> Optional[str]:
+    def print_workflow_status(self, workflow_name: str) -> None:
+        """Print the final Argo workflow status before teardown deletes it."""
+        try:
+            workflow_data = self._get_workflow_status_json(workflow_name)
+            logger.info(
+                "Workflow %s status before cleanup:\n%s",
+                workflow_name,
+                json.dumps(workflow_data.get("status", {}), indent=2, sort_keys=True),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get workflow status for {workflow_name}: {e}")
+
+    def print_migration_resource_status(self) -> None:
+        """Print migration CR statuses before reset removes them."""
+        migration_resources = (
+            "kafkaclusters,capturedtraffics,captureproxies,datasnapshots,"
+            "snapshotmigrations,trafficreplays,approvalgates,migrationruns"
+        )
+        sections: List[str] = []
+        self._append_kubectl_output(sections, f"kubectl get {migration_resources} -o yaml", {
+            "get": migration_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        logger.info("Migration resource status before cleanup:\n%s", "\n".join(sections))
+
+    def print_namespace_diagnostics(
+        self,
+        workflow_name: Optional[str] = None,
+        include_all_workflow_output_artifacts: bool = False,
+    ) -> None:
+        """Log the same diagnostics that are written to disk before teardown deletes resources."""
+        try:
+            logger.info(self.collect_namespace_diagnostics(
+                workflow_name=workflow_name,
+                include_all_workflow_output_artifacts=include_all_workflow_output_artifacts,
+            ))
+        except Exception as e:
+            logger.error(f"Failed to print namespace diagnostics: {e}")
+
+    def save_namespace_diagnostics(
+        self,
+        output_dir: str,
+        workflow_name: Optional[str] = None,
+        include_all_workflow_output_artifacts: bool = False,
+    ) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
-        diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
         try:
             os.makedirs(output_dir, exist_ok=True)
             output_file = os.path.join(output_dir, f"namespace-{self.namespace}-diagnostics.txt")
 
             with open(output_file, 'w') as f:
-                f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
-
-                # kubectl get resources
-                f.write(f"===== kubectl get {diagnostic_resources} =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "get": diagnostic_resources,
-                        "--namespace": self.namespace,
-                        "-o": "wide"
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                # kubectl describe resources
-                f.write(f"===== kubectl describe {diagnostic_resources} =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "describe": diagnostic_resources,
-                        "--namespace": self.namespace
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                # kubectl get events
-                f.write("===== kubectl get events =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "get": "events",
-                        "--namespace": self.namespace,
-                        "--sort-by": ".lastTimestamp"
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                if workflow_name:
-                    f.write(f"===== kubectl logs for workflow {workflow_name} =====\n")
-                    try:
-                        result = self._get_workflow_logs(workflow_name)
-                        f.write((result.output.stdout if result.output else "") + "\n\n")
-                    except Exception as e:
-                        f.write(f"Error: {e}\n\n")
+                f.write(self.collect_namespace_diagnostics(
+                    workflow_name=workflow_name,
+                    include_all_workflow_output_artifacts=include_all_workflow_output_artifacts,
+                ))
 
             logger.info(f"Saved namespace diagnostics to {output_file}")
             return output_file
         except Exception as e:
             logger.error(f"Failed to save namespace diagnostics: {e}")
             return None
+
+    def collect_namespace_diagnostics(
+        self,
+        workflow_name: Optional[str] = None,
+        include_all_workflow_output_artifacts: bool = False,
+    ) -> str:
+        """Collect workflow, migration CR, workload, event, and pod log state before test cleanup."""
+        sections: List[str] = [f"===== Namespace {self.namespace} Diagnostics =====\n"]
+
+        core_resources = "pods,services,deployments,statefulsets,pvc,configmaps,secrets,workflows"
+        migration_resources = (
+            "kafkaclusters,capturedtraffics,captureproxies,datasnapshots,"
+            "snapshotmigrations,trafficreplays,approvalgates,migrationruns"
+        )
+        strimzi_resources = (
+            "kafkas.kafka.strimzi.io,kafkanodepools.kafka.strimzi.io,"
+            "strimzipodsets.core.strimzi.io,kafkatopics.kafka.strimzi.io"
+        )
+
+        self._append_kubectl_output(sections, f"kubectl get {core_resources} -o wide", {
+            "get": core_resources,
+            "--namespace": self.namespace,
+            "-o": "wide"
+        })
+        self._append_kubectl_output(sections, f"kubectl get {migration_resources} -o yaml", {
+            "get": migration_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        self._append_kubectl_output(sections, f"kubectl describe {migration_resources}", {
+            "describe": migration_resources,
+            "--namespace": self.namespace
+        })
+        self._append_kubectl_output(sections, f"kubectl get {strimzi_resources} -o yaml", {
+            "get": strimzi_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        self._append_kubectl_output(sections, f"kubectl describe {core_resources}", {
+            "describe": core_resources,
+            "--namespace": self.namespace
+        })
+        self._append_kubectl_output(sections, "kubectl get events --sort-by=.lastTimestamp", {
+            "get": "events",
+            "--namespace": self.namespace,
+            "--sort-by": ".lastTimestamp"
+        })
+
+        if workflow_name:
+            sections.append(f"===== kubectl logs for workflow {workflow_name} =====")
+            try:
+                result = self._get_workflow_logs(workflow_name)
+                sections.append(_command_stdout(result))
+            except Exception as e:
+                sections.append(f"Error: {e}")
+            sections.append("")
+            if include_all_workflow_output_artifacts:
+                self._append_all_workflow_output_artifacts(sections, workflow_name)
+
+        self._append_diagnostic_artifacts(sections)
+
+        self._append_all_pod_logs(sections)
+        return "\n".join(sections)
+
+    def _append_diagnostic_artifacts(self, sections: List[str]) -> None:
+        try:
+            artifacts = list_artifacts(DIAGNOSTIC_ARTIFACT_PREFIX)
+        except ArtifactStoreError as e:
+            logger.warning("Failed to list diagnostic artifacts under %s: %s", DIAGNOSTIC_ARTIFACT_PREFIX, e)
+            return
+
+        if not artifacts:
+            return
+
+        sections.append(f"===== Diagnostic artifacts under {DIAGNOSTIC_ARTIFACT_PREFIX} =====")
+        for artifact in sorted(artifacts, key=lambda item: str(item.get("key", ""))):
+            key = str(artifact.get("key", ""))
+            if not key:
+                continue
+            sections.append(f"----- diagnostic artifact {key} -----")
+            sections.append(f"uri: {artifact_uri(key)}")
+            artifact_text, artifact_error = self._read_artifact_store_text(
+                artifact_name=key,
+                s3_key=key,
+            )
+            if artifact_text is not None:
+                sections.append(artifact_text)
+            elif artifact_error:
+                sections.append(artifact_error)
+            sections.append("")
+
+    def _append_all_workflow_output_artifacts(
+        self,
+        sections: List[str],
+        workflow_name: str,
+    ) -> None:
+        sections.append(f"===== All Argo output artifacts for workflow {workflow_name} =====")
+        try:
+            workflow_data = self._get_workflow_status_json(workflow_name)
+        except Exception as e:
+            sections.append(f"Error listing all workflow output artifacts: {e}")
+            sections.append("")
+            return
+
+        artifact_refs = []
+        for node_id, node in sorted((workflow_data.get("status", {}).get("nodes", {}) or {}).items()):
+            for artifact in node.get("outputs", {}).get("artifacts", []) or []:
+                artifact_refs.append({
+                    "node_id": node_id,
+                    "display_name": node.get("displayName") or node.get("name") or node_id,
+                    "artifact": artifact,
+                })
+
+        if not artifact_refs:
+            sections.append("No workflow output artifacts found.")
+            sections.append("")
+            return
+
+        for ref in artifact_refs:
+            artifact = ref["artifact"]
+            artifact_name = artifact.get("name", "<unnamed>")
+            s3_key = (artifact.get("s3") or {}).get("key")
+            sections.append(
+                f"----- artifact {artifact_name} from {ref['display_name']} ({ref['node_id']}) -----"
+            )
+            if artifact.get("path"):
+                sections.append(f"path: {artifact['path']}")
+            if s3_key:
+                sections.append(f"s3Key: {s3_key}")
+                sections.append(f"uri: {artifact_uri(s3_key)}")
+
+            artifact_text = self._read_workflow_artifact(
+                workflow_name=workflow_name,
+                node_id=ref["node_id"],
+                artifact_name=artifact_name,
+                s3_key=s3_key,
+            )
+            if artifact_text is not None:
+                sections.append(artifact_text)
+            else:
+                sections.append(
+                    f"Artifact content unavailable; raw reference: {json.dumps(artifact, sort_keys=True)}"
+                )
+            sections.append("")
+
+    def _read_workflow_artifact(
+        self,
+        workflow_name: str,
+        node_id: str,
+        artifact_name: str,
+        s3_key: Optional[str],
+    ) -> Optional[str]:
+        if s3_key:
+            artifact_text, _ = self._read_artifact_store_text(artifact_name, s3_key)
+            if artifact_text is not None:
+                return artifact_text
+
+        argo_server = os.getenv(ARGO_SERVER_URL_ENV) or os.getenv("ARGO_SERVER")
+        if not argo_server:
+            return None
+
+        try:
+            import requests
+            headers = {}
+            token = os.getenv(ARGO_TOKEN_ENV)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            insecure = os.getenv(ARGO_SERVER_INSECURE_ENV, "").lower() in ("1", "true", "yes")
+            url = (
+                f"{argo_server.rstrip('/')}/api/v1/workflows/{quote(self.namespace)}/"
+                f"{quote(workflow_name)}/artifacts/{quote(node_id)}/{quote(artifact_name)}"
+            )
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
+            if response.status_code == 200:
+                return response.text
+            logger.warning(
+                "Failed to read workflow artifact %s from Argo Server: HTTP %s",
+                artifact_name,
+                response.status_code,
+            )
+        except Exception as e:
+            logger.warning("Failed to read workflow artifact %s from Argo Server: %s", artifact_name, e)
+        return None
+
+    def _read_artifact_store_text(self, artifact_name: str, s3_key: str) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            return read_artifact_text(s3_key), None
+        except ArtifactStoreError as e:
+            error_message = f"Failed to read artifact {artifact_name} from artifact store key {s3_key}: {e}"
+            logger.warning(error_message)
+            return None, error_message
+
+    def _append_kubectl_output(self, sections: List[str], heading: str, kubectl_args: Dict[str, Any]) -> None:
+        sections.append(f"===== {heading} =====")
+        try:
+            result = self._run_kubectl_command(kubectl_args)
+            sections.append(_command_stdout(result))
+        except Exception as e:
+            sections.append(f"Error: {e}")
+        sections.append("")
+
+    def _append_all_pod_logs(self, sections: List[str], tail_lines: int = 500) -> None:
+        sections.append(f"===== kubectl logs for all namespace pods (tail={tail_lines}) =====")
+        try:
+            result = self._run_kubectl_command({
+                "get": "pods",
+                "--namespace": self.namespace,
+                "-o": "json"
+            })
+            pods = json.loads(result.output.stdout if result.output else "{}").get("items", [])
+        except Exception as e:
+            sections.append(f"Error listing pods: {e}")
+            sections.append("")
+            return
+
+        for pod in pods:
+            pod_name = pod.get("metadata", {}).get("name")
+            if not pod_name:
+                continue
+            sections.append(f"----- logs for pod/{pod_name} -----")
+            try:
+                log_result = self._run_kubectl_command({
+                    "logs": f"pod/{pod_name}",
+                    "--namespace": self.namespace,
+                    "--all-containers=true": FlagOnlyArgument,
+                    "--prefix=true": FlagOnlyArgument,
+                    "--tail": str(tail_lines)
+                })
+                sections.append(_command_stdout(log_result))
+            except Exception as e:
+                sections.append(f"Error: {e}")
+            sections.append("")
 
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)
@@ -237,7 +501,10 @@ class IntegrationTestArgoService:
             "has_suspended_nodes": has_suspended_nodes
         }
 
-        logger.info(f"Workflow {workflow_name} status: {status_info}")
+        # debug, not info: this is polled repeatedly (finish-wait loop, teardown pre-check) and
+        # at info it prints the same line several times per run. Callers that want a one-shot
+        # record of the final phase can log it themselves.
+        logger.debug(f"Workflow {workflow_name} status: {status_info}")
 
         return CommandResult(
             success=True,
@@ -405,21 +672,37 @@ class IntegrationTestArgoService:
             parameter["value"] = value_from["default"]
             parameter.pop("valueFrom", None)
 
-    def _create_workflow_yaml(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> str:
+    def _create_workflow_yaml(
+        self,
+        workflow_template_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        workflow_name: Optional[str] = None,
+        service_account_name: Optional[str] = None,
+    ) -> str:
         """Create a temporary workflow YAML file based on the template structure."""
+        metadata = (
+            {"name": workflow_name}
+            if workflow_name
+            else {"generateName": f"{workflow_template_name}-"}
+        )
         workflow_data = {
             "apiVersion": "argoproj.io/v1alpha1",
             "kind": "Workflow",
-            "metadata": {
-                "generateName": f"{workflow_template_name}-"
-            },
+            "metadata": metadata,
             "spec": {
+                "podMetadata": {
+                    "annotations": {
+                        "karpenter.sh/do-not-disrupt": "true"
+                    }
+                },
                 "workflowTemplateRef": {
                     "name": workflow_template_name
                 },
                 "entrypoint": "main"
             }
         }
+        if service_account_name:
+            workflow_data["spec"]["serviceAccountName"] = service_account_name
 
         # Add parameters if provided
         if parameters:

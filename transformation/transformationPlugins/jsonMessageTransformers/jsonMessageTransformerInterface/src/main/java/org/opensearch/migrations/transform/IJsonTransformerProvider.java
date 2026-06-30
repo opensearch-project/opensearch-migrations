@@ -21,4 +21,19 @@ public interface IJsonTransformerProvider {
     default @NonNull String getName() {
         return this.getClass().getSimpleName();
     }
+
+    /**
+     * Materialization type for a file-backed provider config key.
+     *
+     * <p>The workflow and user schema only identify files. Providers own the
+     * meaning of each config key and can ask the loader to materialize a file
+     * as JSON, text, bytes, base64 text, or a runtime path string before
+     * createTransformer is called.
+     *
+     * @param configKey provider config key, or the file name for directory-loaded values
+     * @return expected materialized value type
+     */
+    default @NonNull ConfigFileValueType getFileBackedConfigValueType(@NonNull String configKey) {
+        return ConfigFileValueType.TEXT;
+    }
 }

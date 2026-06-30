@@ -120,7 +120,7 @@ Metadata migration needs to modify data from the source to the target versions t
 #### Deprecation of Mapping Types
 In Elasticsearch 6.8 the mapping types feature was discontinued in Elasticsearch 7.0+ which has created complexity in migrating to newer versions of Elasticsearch and OpenSearch, [learn more](https://www.elastic.co/guide/en/elasticsearch/reference/7.17/removal-of-types.html).
 
-As Metadata migration supports migrating from ES 6.8 on to the latest versions of OpenSearch this scenario is handled by removing the type mapping types and restructuring the template or index properties.  Note that, at the time of this writing multiple type mappings are not supported, [tracking task](https://opensearch.atlassian.net/browse/MIGRATIONS-1778).
+As Metadata migration supports migrating from ES 6.8 on to the latest versions of OpenSearch this scenario is handled by removing the type mapping types and restructuring the template or index properties.  Indices with multiple mapping types are unioned into a single mapping by default.
 
 
 **Example starting state with mapping type foo (ES 6):**
@@ -151,7 +151,7 @@ As Metadata migration supports migrating from ES 6.8 on to the latest versions o
 }
 ```
 
-*Technical details are available, [view source code](../transformation/src/main/java/org/opensearch/migrations/transformation/rules/IndexMappingTypeRemoval.java).*
+*Technical details are available, [view source code](../transformation/standardJavascriptTransforms/src/typeMappingsSanitizer.js).*
 
 ### Output formats
 

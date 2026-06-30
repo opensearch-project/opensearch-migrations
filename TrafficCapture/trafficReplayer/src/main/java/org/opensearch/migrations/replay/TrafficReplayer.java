@@ -29,9 +29,11 @@ import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.PredicateLoader;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -192,6 +194,23 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = {"--request-filter-config", "--requestFilterConfig"},
+            arity = 1,
+            description = "Configuration for request filtering. JSON array with one entry whose key is the "
+                + "predicate provider name. Requests failing the predicate are skipped (not sent to target).")
+        private String requestFilterConfig;
+
+        @Parameter(
+            required = false,
+            names = {"--response-post-processor-config", "--responsePostProcessorConfig"},
+            arity = 1,
+            description = "Configuration for response post-processing. Transforms target responses before "
+                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
+                + "Same JSON format as --transformerConfig.")
+        private String responsePostProcessorConfig;
+
+        @Parameter(
+            required = false,
             names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
@@ -321,11 +340,19 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--otelCollectorEndpoint", "--otel-collector-endpoint" },
+            names = { "--otelTraceCollectorEndpoint", "--otel-trace-collector-endpoint" },
             arity = 1,
-            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-                + "forwarded. If no value is provided, metrics will not be forwarded.")
-        String otelCollectorEndpoint;
+            description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+                "Omit this option to disable trace export.")
+        String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--otelMetricsCollectorEndpoint", "--otel-metrics-collector-endpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+                "Omit this option to disable metric export.")
+        String otelMetricsCollectorEndpoint;
 
         @Parameter(
             required = false,
@@ -549,7 +576,10 @@ public class TrafficReplayer {
 
     private static void runDumpMode(Parameters params) throws Exception {
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(null, "dump", ProcessHelpers.getNodeInstanceName()),
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                OtelCollectorEndpoints.empty(),
+                "dump",
+                ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
@@ -576,8 +606,12 @@ public class TrafficReplayer {
         }
     }
 
-    private static void runReplayMode(Parameters params) throws Exception {
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+    /**
+     * Parse and validate the replay target URI and timing params. On invalid input this prints the
+     * error and calls System.exit (matching the prior inline behavior); it returns null only on the
+     * exit paths so the caller can stop without duplicating the exit handling.
+     */
+    private static URI parseAndValidateReplayTarget(Parameters params) {
         URI uri;
         try {
             uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
@@ -587,7 +621,7 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
-            return;
+            return null;
         }
         if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
@@ -601,6 +635,15 @@ public class TrafficReplayer {
             System.err.println(msg);
             log.error(msg);
             System.exit(4);
+            return null;
+        }
+        return uri;
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+        URI uri = parseAndValidateReplayTarget(params);
+        if (uri == null) {
             return;
         }
         var globalContextTracker = new ActiveContextTracker();
@@ -611,13 +654,15 @@ public class TrafficReplayer {
         );
         var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
                 "replay",
                 ProcessHelpers.getNodeInstanceName()),
             contextTrackers
         );
 
         ActiveContextMonitor activeContextMonitor = null;
+        ThreadLocalTupleWriter tupleWriter = null;
         try (
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
@@ -650,11 +695,13 @@ public class TrafficReplayer {
                 : new BulkItemErrorClassifier();
 
             var transformationLoader = new TransformationLoader();
+            var effectiveTransformerSupplier = buildTransformerSupplier(
+                transformationLoader, hostname, params.userAgent, requestTransformerConfig, params.requestFilterConfig);
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                () -> transformationLoader.getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                effectiveTransformerSupplier,
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
@@ -664,6 +711,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
+            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
@@ -704,7 +752,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(
+            tupleWriter = createS3TupleWriterIfConfigured(
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
@@ -732,6 +780,9 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
+            if (tupleWriter != null) {
+                tupleWriter.close();
+            }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()
@@ -744,6 +795,32 @@ public class TrafficReplayer {
         }
     }
 
+    static Supplier<IJsonTransformer> buildTransformerSupplier(
+        TransformationLoader transformationLoader,
+        String hostname,
+        String userAgent,
+        String requestTransformerConfig,
+        String requestFilterConfig
+    ) {
+        Supplier<IJsonTransformer> base = () -> transformationLoader.getTransformerFactoryLoader(
+            hostname, userAgent, requestTransformerConfig);
+        if (requestFilterConfig == null || requestFilterConfig.isBlank()) {
+            return base;
+        }
+        var requestFilter = new PredicateLoader().getPredicateFactoryLoader(requestFilterConfig);
+        log.atInfo().setMessage("Request filter configured").log();
+        return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
+    }
+
+    static void configureResponsePostProcessor(
+        TrafficReplayerTopLevel tr, TransformationLoader loader, String config
+    ) {
+        if (config != null && !config.isBlank()) {
+            tr.responsePostProcessor = loader.getTransformerFactoryLoader(null, null, config);
+            log.atInfo().setMessage("Response post-processor configured").log();
+        }
+    }
+
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
         Parameters params,
         Supplier<IJsonTransformer> tupleTransformerSupplier
@@ -753,14 +830,14 @@ public class TrafficReplayer {
         }
         log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
             params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
-        var s3ClientBuilder = S3AsyncClient.crtBuilder()
+        var credentialsProvider = DefaultCredentialsProvider.builder().build();
+        var s3ClientBuilder = S3AsyncClient.builder()
             .region(Region.of(params.tupleS3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
-            .targetThroughputInGbps(2.0)
-            .minimumPartSizeInBytes(8L * 1024 * 1024);
+            .credentialsProvider(credentialsProvider);
         if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
-            s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
-            s3ClientBuilder.forcePathStyle(true);
+            s3ClientBuilder
+                .endpointOverride(URI.create(params.tupleS3Endpoint))
+                .forcePathStyle(true);
         }
         var s3Client = s3ClientBuilder.build();
         var replayerId = ProcessHelpers.getNodeInstanceName();

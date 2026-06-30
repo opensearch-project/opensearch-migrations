@@ -33,22 +33,20 @@ spec:
       - name: replayer-config
         value: |
           {"batchSize": 1000, "concurrency": 4}
-      - name: transforms-sources
-        value: "{}"
       - name: skip-cleanup
         value: "false"
+      - name: skip-approvals
+        value: "true"
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
       - name: image-registry-prefix
         value: ""
       # Any references to workflow.parameters must come from top level workflow
-      - name: s3-snapshot-configmap
+      - name: snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "33"
-      - name: otel-collector-endpoint
-        value: "http://otel-collector:4317"
 
   templates:
     # Main workflow template
@@ -134,8 +132,8 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
-                - name: transforms-sources
-                  value: "{{workflow.parameters.transforms-sources}}"
+                - name: skip-approvals
+                  value: "{{workflow.parameters.skip-approvals}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -220,22 +218,11 @@ spec:
         command: [sh, -c]
         args:
           - |
+            set -e
             echo "Waiting for {{inputs.parameters.cluster-type}} cluster to be ready..."
-            
-            # Try StatefulSet pod first (for helm-based clusters)
-            if kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
-              --namespace={{inputs.parameters.namespace}} \
-              --timeout=10s 2>/dev/null; then
-              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
-            else
-              # Fallback to Deployment rollout status (for ES 1.5/2.4)
-              echo "StatefulSet pod not found, checking Deployment..."
-              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
-                --namespace={{inputs.parameters.namespace}} \
-                --timeout=200s
-              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
-            fi
-            # Check if StatefulSet pod exists first
+            # Each cluster template creates exactly one of (StatefulSet pod, Deployment)
+            # under this name; the prior `--timeout=10s` short-probe block was buggy
+            # (printed success on timeout), so kubectl's own wait is the only gate.
             if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
                  --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
               echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
@@ -264,32 +251,35 @@ spec:
           - name: target-config
           - name: snapshot-and-migration-configs
           - name: replayer-config
-          - name: transforms-sources
+          - name: skip-approvals
+            default: "true"
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
-          - name: s3Region
+          - name: bucketUri
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: AWS_REGION
-          - name: s3Endpoint
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: BUCKET_URI
+          - name: bucketEndpoint
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: ENDPOINT
                 optional: true
-          - name: s3BucketName
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: BUCKET_NAME
           - name: snapshotRoleArn
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: SNAPSHOT_ROLE_ARN
+                optional: true
+          - name: awsRegion
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: AWS_REGION
                 optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
@@ -302,30 +292,27 @@ spec:
             SOURCE_CONFIG='{{inputs.parameters.source-config}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
-            TRANSFORMS_SOURCES='{{inputs.parameters.transforms-sources}}'
-            S3_REGION='{{inputs.parameters.s3Region}}'
-            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
-            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            SKIP_APPROVALS='{{inputs.parameters.skip-approvals}}'
+            BUCKET_URI='{{inputs.parameters.bucketUri}}'
+            BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
-            
+            AWS_REGION='{{inputs.parameters.awsRegion}}'
+
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
-            
-            # Build snapshot repo config
+
+            # Build snapshot repo config from the full URI (s3://... or gs://...)
             SNAPSHOT_REPO=$(jq -n \
-              --arg region "$S3_REGION" \
-              --arg endpoint "$S3_ENDPOINT" \
-              --arg bucket "$S3_BUCKET" \
+              --arg uri "$BUCKET_URI" \
+              --arg endpoint "$BUCKET_ENDPOINT" \
               --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+              --arg region "$AWS_REGION" \
               '{
-                "awsRegion": $region,
-                "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-              }')
-            
-            # Add s3RoleArn only if provided
-            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-              SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
-            fi
+                "repoPathUri": ($uri + "/" + $suffix)
+              }
+              + (if $endpoint != "" then {"endpoint": $endpoint} else {} end)
+              + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)
+              + (if $region != "" then {"awsRegion": $region} else {} end)')
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
               # Add snapshotInfo with repo and snapshot definition
@@ -348,16 +335,15 @@ spec:
               --argjson source "$SOURCE_WITH_REPO" \
               --argjson target "$TARGET_CONFIG" \
               --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
-              --argjson transformsSources "$TRANSFORMS_SOURCES" \
+              --argjson skipApprovals "$SKIP_APPROVALS" \
               '{
-                "skipApprovals": true,
+                "skipApprovals": $skipApprovals,
                 "sourceClusters": {
                   "source1": $source
                 },
                 "targetClusters": {
                   "target1": $target
                 },
-                "transformsSources": $transformsSources,
                 "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",

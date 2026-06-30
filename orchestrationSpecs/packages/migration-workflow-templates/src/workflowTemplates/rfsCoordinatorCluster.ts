@@ -9,7 +9,12 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {workflowParameterAsNumber} from "./commonUtils/scalableWorkload";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -22,8 +27,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "SnapshotMigration",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: false,
         blockOwnerDeletion: true,
     }];
@@ -208,9 +213,9 @@ function createRfsCoordinatorStatefulSetManifest(
                                 periodSeconds: 15,
                                 // Must be >= the curl internal timeout (10s) to allow the API to respond
                                 timeoutSeconds: 15,
-                                // 20 failures * 15s = 300s (5m). Provides a 5min window for the
+                                // 40 failures * 15s = 600s (10m). Provides a 10min window for the
                                 // single-node cluster to reach 'yellow' status during bootstrap.
-                                failureThreshold: 20
+                                failureThreshold: 40
                             },
                             volumeMounts: [
                                 {
@@ -302,6 +307,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: createRfsCoordinatorStatefulSetManifest(
@@ -314,11 +320,33 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
+    .addTemplate("createRfsCoordinatorPodDisruptionBudget", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition(makePodDisruptionBudgetDefinition({
+                name: b.inputs.clusterName,
+                minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
+                matchLabels: {
+                    app: b.inputs.clusterName,
+                },
+                labels: {
+                    app: b.inputs.clusterName,
+                },
+                ownerReferences: makeOwnerReferences(b.inputs.ownerName, b.inputs.ownerUid),
+            }))
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
     .addTemplate("createRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
         .addRequiredInput("ownerName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addRequiredInput("minPodReplicas", typeToken<number>())
         .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
@@ -331,6 +359,13 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
+                        ownerName: b.inputs.ownerName,
+                        ownerUid: b.inputs.ownerUid
+                    }))
+                .addStep("createPodDisruptionBudget", INTERNAL, "createRfsCoordinatorPodDisruptionBudget", c =>
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        minPodReplicas: b.inputs.minPodReplicas,
                         ownerName: b.inputs.ownerName,
                         ownerUid: b.inputs.ownerUid
                     }))

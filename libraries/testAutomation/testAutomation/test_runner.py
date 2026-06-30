@@ -17,7 +17,8 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_8.19", "OS_1.3", "SOLR_8.11"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_8.19", "OS_1.3", "SOLR_6.6", "SOLR_7.7",
+                         "SOLR_8.11", "SOLR_9.8"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
@@ -62,7 +63,11 @@ class TestRunner:
                  combinations: List[Tuple[str, str]],
                  registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
                  speedup_factor: int = 20, observed_packet_timeout: int = 30,
-                 transform_image_basic: str = "", transform_image_sequence: str = "") -> None:
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 transform_image_context: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer",
+                 trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
+                 trace_backend: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -75,6 +80,11 @@ class TestRunner:
         self.observed_packet_timeout = observed_packet_timeout
         self.transform_image_basic = transform_image_basic
         self.transform_image_sequence = transform_image_sequence
+        self.transform_image_context = transform_image_context
+        self.capture_proxy_service_type = capture_proxy_service_type
+        self.trace_test_ids = trace_test_ids or []
+        self.trace_values_file = trace_values_file
+        self.trace_backend = trace_backend
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -131,12 +141,15 @@ class TestRunner:
         summary_data = {k: v for k, v in data.get("summary", {}).items() if k in summary_fields}
         return TestReport(tests=tests, summary=TestSummary(**summary_data))
 
-    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
+    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str,
+                             unique_id: str = None, report_suffix: str = None):
         dir_normal = base_dir.rstrip("/")
         source_version_normal = source_version.lower().replace("_", "-").replace(".", "-")
         target_version_normal = target_version.lower().replace("_", "-").replace(".", "-")
-        file_name = (f"{dir_normal}/test-report-{source_version_normal}-to-{target_version_normal}-"
-                     f"{self.unique_id}.json")
+        active_unique_id = unique_id or self.unique_id
+        suffix = f"-{report_suffix}" if report_suffix else ""
+        file_name = (f"{dir_normal}/test-report-{source_version_normal}-to-{target_version_normal}"
+                     f"{suffix}-{active_unique_id}.json")
         with open(file_name, "w", encoding="utf-8") as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
 
@@ -158,25 +171,31 @@ class TestRunner:
         self._print_summary_table(reports=reports)
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
-                  reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
+                  reuse_clusters: bool = False, skip_workflow_reset: bool = False,
+                  test_reports_dir: str = None, test_ids: Optional[List[str]] = None,
+                  unique_id: str = None, report_suffix: str = None) -> TestReport:
         """Runs pytest tests via background exec + poll to survive WebSocket drops."""
-        logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
+        active_test_ids = self.test_ids if test_ids is None else test_ids
+        active_unique_id = unique_id or self.unique_id
+        logger.info(f"Executing migration test cases with pytest and test ID filters: {active_test_ids}")
         command_list = [
             "pipenv",
             "run",
             "pytest",
             "/root/lib/integ_test/integ_test/ma_workflow_test.py",
-            f"--unique_id={self.unique_id}",
+            f"--unique_id={active_unique_id}",
             f"--source_version={source_version}",
         ]
         if target_version == TargetType.AOSS.value:
             command_list.append("--target_type=AOSS")
         else:
             command_list.append(f"--target_version={target_version}")
-        if self.test_ids:
-            command_list.append(f"--test_ids={','.join(self.test_ids)}")
+        if active_test_ids:
+            command_list.append(f"--test_ids={','.join(active_test_ids)}")
         if keep_workflows:
             command_list.append("--keep_workflows")
+        if skip_workflow_reset:
+            command_list.append("--skip_workflow_reset")
         if reuse_clusters:
             command_list.append("--reuse_clusters")
         if self.registry_prefix:
@@ -185,20 +204,23 @@ class TestRunner:
             command_list.append(f"--transform_image_basic={self.transform_image_basic}")
         if self.transform_image_sequence:
             command_list.append(f"--transform_image_sequence={self.transform_image_sequence}")
+        if self.transform_image_context:
+            command_list.append(f"--transform_image_context={self.transform_image_context}")
+        command_list.append(f"--capture_proxy_service_type={self.capture_proxy_service_type}")
         command_list.append(f"--speedup_factor={self.speedup_factor}")
         command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
         command_list.append("-s")
 
-        log_file = f"/tmp/{self.unique_id}_pytest.log"
-        exit_code_file = f"/tmp/{self.unique_id}_exit_code"
+        log_file = f"/tmp/{active_unique_id}_pytest.log"
+        exit_code_file = f"/tmp/{active_unique_id}_exit_code"
 
-        self.k8s_service.exec_background_cmd(
+        background_pod = self.k8s_service.exec_background_cmd(
             command_list=command_list, log_file=log_file, exit_code_file=exit_code_file)
 
         exit_code = self.k8s_service.poll_cmd_completion(
-            log_file=log_file, exit_code_file=exit_code_file)
+            log_file=log_file, exit_code_file=exit_code_file, expected_console_pod=background_pod)
 
-        output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
+        output_file_path = f"/root/lib/integ_test/results/{active_unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
                                                                    unbuffered=False)
@@ -206,7 +228,8 @@ class TestRunner:
         logger.debug(f"Received the following test data: {test_data}")
         if test_reports_dir:
             self.write_report_to_file(base_dir=test_reports_dir, report_data=test_data, source_version=source_version,
-                                      target_version=target_version)
+                                      target_version=target_version, unique_id=active_unique_id,
+                                      report_suffix=report_suffix)
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
@@ -234,6 +257,53 @@ class TestRunner:
                 ], ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
+
+    def _report_failed(self, test_report: TestReport) -> bool:
+        expected = test_report.summary.expected
+        if expected is not None and expected == 0 and test_report.summary.failed == 0:
+            logger.info(f"No compatible tests for {test_report.summary.source_version} → "
+                        f"{test_report.summary.target_version}, skipping")
+            return False
+
+        tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+        if expected is not None and test_report.summary.passed != expected:
+            logger.warning(f"Expected {test_report.summary.expected} tests but only "
+                           f"{test_report.summary.passed} passed "
+                           f"({test_report.summary.failed} failed)")
+            tests_failed = True
+        return tests_failed
+
+    def _enable_trace_collection(self) -> None:
+        logger.info("Enabling trace collection for second-phase observability tests")
+        self.k8s_service.reset_migration_resources()
+        self.k8s_service.helm_upgrade(
+            chart_path=self.ma_chart_path,
+            release_name=MA_RELEASE_NAME,
+            values_file=self.trace_values_file,
+            reuse_values=True,
+            wait=True,
+            timeout="10m",
+        )
+        self.k8s_service.wait_for_daemonset_rollout("otel-trace-collector", timeout_seconds=600)
+        if self.trace_backend == "jaeger":
+            self.k8s_service.wait_for_service("jaeger-query", timeout_seconds=300)
+        self.k8s_service.wait_for_all_healthy_pods(timeout=600)
+
+    def _run_trace_phase(self, source_version: str, target_version: str, keep_workflows: bool,
+                         reuse_clusters: bool, test_reports_dir: str = None) -> TestReport:
+        self._enable_trace_collection()
+        trace_unique_id = f"{self.unique_id}-trace"
+        return self.run_tests(
+            source_version=source_version,
+            target_version=target_version,
+            keep_workflows=keep_workflows,
+            reuse_clusters=reuse_clusters,
+            skip_workflow_reset=keep_workflows,
+            test_reports_dir=test_reports_dir,
+            test_ids=self.trace_test_ids,
+            unique_id=trace_unique_id,
+            report_suffix="trace",
+        )
 
     def cleanup_deployment(self) -> bool:
         """Tear down the Migration Assistant deployment.
@@ -383,10 +453,15 @@ class TestRunner:
                             mc_repo = f"{prefix}migrations/migration_console"
                             chart_values.update({
                                 "images.captureProxy.repository": f"{prefix}migrations/capture_proxy",
+                                "images.captureProxy.pullPolicy": "Always",
                                 "images.trafficReplayer.repository": f"{prefix}migrations/traffic_replayer",
+                                "images.trafficReplayer.pullPolicy": "Always",
                                 "images.reindexFromSnapshot.repository": f"{prefix}migrations/reindex_from_snapshot",
+                                "images.reindexFromSnapshot.pullPolicy": "Always",
                                 "images.migrationConsole.repository": mc_repo,
+                                "images.migrationConsole.pullPolicy": "Always",
                                 "images.installer.repository": mc_repo,
+                                "images.installer.pullPolicy": "Always",
                                 # Kyverno image overrides
                                 "charts.kyverno.values.webhooksCleanup.image.repository": mc_repo,
                                 "charts.kyverno.values.test.image.repository": mc_repo,
@@ -402,29 +477,34 @@ class TestRunner:
                                              target_version=target_version,
                                              keep_workflows=keep_workflows,
                                              reuse_clusters=reuse_clusters,
+                                             skip_workflow_reset=keep_workflows,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
 
-                expected = test_report.summary.expected
-                # Version pairs with no compatible tests (expected==0) are not failures
-                if expected is not None and expected == 0 and test_report.summary.failed == 0:
-                    logger.info(f"No compatible tests for {source_version} → {target_version}, skipping")
+                if self._report_failed(test_report):
+                    logger.warning(f"Tests failed (or no tests executed) for migrations "
+                                   f"from {source_version} to {target_version}.")
+                    combos_with_failures.append(f"{source_version} -> {target_version}")
                 else:
-                    tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+                    logger.info(f"Tests passed successfully for migrations "
+                                f"from {source_version} to {target_version}.")
 
-                    if expected is not None and test_report.summary.passed != expected:
-                        logger.warning(f"Expected {test_report.summary.expected} tests but only "
-                                       f"{test_report.summary.passed} passed "
-                                       f"({test_report.summary.failed} failed)")
-                        tests_failed = True
-
-                    if tests_failed:
-                        logger.warning(f"Tests failed (or no tests executed) for migrations "
-                                       f"from {source_version} to {target_version}.")
-                        combos_with_failures.append(f"{source_version} -> {target_version}")
-                    else:
-                        logger.info(f"Tests passed successfully for migrations "
-                                    f"from {source_version} to {target_version}.")
+                    if self.trace_test_ids:
+                        trace_report = self._run_trace_phase(
+                            source_version=source_version,
+                            target_version=target_version,
+                            keep_workflows=keep_workflows,
+                            reuse_clusters=reuse_clusters,
+                            test_reports_dir=test_reports_dir,
+                        )
+                        test_reports.append(trace_report)
+                        if self._report_failed(trace_report):
+                            logger.warning(f"Trace tests failed (or no tests executed) for migrations "
+                                           f"from {source_version} to {target_version}.")
+                            combos_with_failures.append(f"{source_version} -> {target_version} (trace)")
+                        else:
+                            logger.info(f"Trace tests passed successfully for migrations "
+                                        f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
                 combos_with_failures.append(f"{source_version} -> {target_version}")
@@ -561,6 +641,24 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
     )
     parser.add_argument(
+        "--trace-test-ids",
+        type=_parse_test_ids,
+        default=[],
+        help="Optional comma-separated test IDs to run after enabling trace collection with helm upgrade."
+    )
+    parser.add_argument(
+        "--trace-values-file",
+        type=str,
+        default=None,
+        help="Optional Helm values overlay used for the trace test phase."
+    )
+    parser.add_argument(
+        "--trace-backend",
+        choices=("jaeger", "xray"),
+        default=None,
+        help="Trace backend expected in the trace test phase. Use jaeger for local tests and xray for EKS."
+    )
+    parser.add_argument(
         "--registry-prefix",
         type=str,
         default="",
@@ -611,7 +709,27 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Digest-pinned transform image containing the sequence transform fixture bank."
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--transform-image-context",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the context-only transform fixture bank."
+    )
+    parser.add_argument(
+        "--capture-proxy-service-type",
+        choices=("LoadBalancer", "ClusterIP"),
+        default="LoadBalancer",
+        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
+    )
+    args = parser.parse_args()
+    if args.trace_test_ids:
+        if not args.trace_values_file:
+            parser.error("--trace-values-file is required when --trace-test-ids is provided")
+        if not args.trace_backend:
+            parser.error("--trace-backend is required when --trace-test-ids is provided")
+    elif args.trace_values_file or args.trace_backend:
+        parser.error("--trace-values-file and --trace-backend require --trace-test-ids")
+    return args
 
 
 def main() -> None:
@@ -653,7 +771,12 @@ def main() -> None:
                              speedup_factor=args.speedup_factor,
                              observed_packet_timeout=args.observed_packet_timeout,
                              transform_image_basic=args.transform_image_basic,
-                             transform_image_sequence=args.transform_image_sequence)
+                             transform_image_sequence=args.transform_image_sequence,
+                             transform_image_context=args.transform_image_context,
+                             capture_proxy_service_type=args.capture_proxy_service_type,
+                             trace_test_ids=args.trace_test_ids,
+                             trace_values_file=args.trace_values_file,
+                             trace_backend=args.trace_backend or "")
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()

@@ -51,20 +51,26 @@ spec:
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
       - name: image-registry-prefix
         value: ""
-      - name: s3-snapshot-configmap
+      - name: snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "120"
-      - name: otel-collector-endpoint
-        value: "http://otel-collector:4317"
       - name: speedup-factor
         value: "20"
       - name: observed-packet-timeout
         value: "30"
-      - name: transforms-sources
+      - name: replayer-config-overrides
         value: "{}"
+      - name: pre-snapshot-proxy-submit
+        value: "false"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
+      - name: otel-trace-collector-endpoint
+        value: ""
+      - name: client-auth-pem-base64
+        value: ""
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -160,8 +166,6 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
-                - name: transforms-sources
-                  value: "{{workflow.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -172,6 +176,62 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+
+        # Optionally submit a proxy-only migration first so tests can load data
+        # through the capture proxy before snapshot creation is allowed to start.
+        - - name: add-proxy-only-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-proxy-only-traffic-config
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: baseConfigBase64
+                  value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
+
+        - - name: run-proxy-only-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.add-proxy-only-traffic-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+        - - name: pause-for-pre-snapshot-data
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
 
         # Overlay CDC traffic config (Kafka, capture-proxy, replayer) onto the base config.
         # Delegates to the shared cdc-overlay template so that changes to the CDC
@@ -198,6 +258,14 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+                - name: replayer-config-overrides
+                  value: "{{workflow.parameters.replayer-config-overrides}}"
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
 
         # Run the full migration using the CDC-enabled config.
         - - name: run-full-migration-with-workflow-cli

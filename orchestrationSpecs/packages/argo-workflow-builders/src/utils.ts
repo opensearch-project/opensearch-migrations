@@ -1,6 +1,19 @@
 import {PlainObject} from "./models/plainObject";
 import {ExpressionOrConfigMapValue} from "./models/workflowTypes";
-import {stringify as toYaml, Scalar} from "yaml";
+import {stringify as toYaml, Scalar, ScalarTag} from "yaml";
+
+/** YAML scalar that must be emitted verbatim, used for Argo expression placeholders. */
+export class RawYaml {
+    constructor(public readonly text: string) {}
+}
+
+const RAW_YAML_TAG: ScalarTag = {
+    identify: (v: unknown) => v instanceof RawYaml,
+    tag: "tag:yaml.org,2002:str",
+    default: true,
+    resolve: (value: string) => value,
+    stringify: (item: Scalar) => (item.value as RawYaml).text,
+};
 
 export type TypescriptError<Message extends string> = {
     readonly __error: Message;
@@ -118,6 +131,6 @@ export function toSafeYamlOutput(workflowConfig: any) {
             }
             return v;
         },
-        {lineWidth: 0}
+        {lineWidth: 0, customTags: [RAW_YAML_TAG]}
     );
 }

@@ -20,10 +20,8 @@ describe('semaphore configuration', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -98,10 +96,8 @@ describe('semaphore configuration', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -176,10 +172,8 @@ describe('semaphore configuration', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -202,10 +196,8 @@ describe('semaphore configuration', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -271,7 +263,7 @@ describe('semaphore configuration', () => {
         });
 
         // Test that initializer produces consistent semaphore keys between workflow and ConfigMap
-        const bundle = await initializer.generateMigrationBundle(config);
+        const bundle = await initializer.generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
 
         // Extract semaphore keys from transformed workflow
         const workflowSemaphoreKeys = new Set();
@@ -300,10 +292,8 @@ describe('semaphore configuration', () => {
                     snapshotInfo: {
                         serializeSnapshotCreation: false,
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -380,10 +370,8 @@ describe('semaphore configuration', () => {
                     snapshotInfo: {
                         serializeSnapshotCreation: true,
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {

@@ -22,7 +22,7 @@
             "memory": "4000Mi"
           }
         },
-        "otelCollectorEndpoint": "http://otel-collector:4317",
+        "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
         "destinationConnectionPoolSize": 0,
         "destinationConnectionPoolTimeout": "PT30S",
         "kafkaClientId": "HttpCaptureProxyProducer",
@@ -53,10 +53,10 @@
           "repo": {
             "awsRegion": "us-east-2",
             "endpoint": "http://localhost:4566",
-            "s3RepoPathUri": "s3://migration-bucket",
             "s3RoleArn": "",
             "useLocalStack": false,
-            "repoName": "default"
+            "repoName": "default",
+            "repoPathUri": "s3://migration-bucket"
           },
           "dependsOnProxySetups": [
             "proxy1"
@@ -89,8 +89,7 @@
             "allowLooseVersionMatching": true,
             "clusterAwarenessAttributes": 1,
             "loggingConfigurationOverrideConfigMap": "",
-            "multiTypeBehavior": "NONE",
-            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "output": "HUMAN_READABLE",
             "transformerConfigBase64": ""
           }
@@ -113,17 +112,17 @@
         "repoConfig": {
           "awsRegion": "us-east-2",
           "endpoint": "http://localhost:4566",
-          "s3RepoPathUri": "s3://migration-bucket",
           "s3RoleArn": "",
           "useLocalStack": false,
-          "repoName": "default"
+          "repoName": "default",
+          "repoPathUri": "s3://migration-bucket"
         }
       }
     }
   ],
   "trafficReplays": [
     {
-      "fromProxy": "proxy1",
+      "fromCapturedTraffic": "proxy1",
       "kafkaConfig": {
         "enableMSKAuth": true,
         "kafkaConnection": "broker.a:9092,broker.b:9092",

@@ -1,0 +1,54 @@
+sourceClusters:
+  prod-solr:
+    version: "SOLR 8.11.4"
+    endpoint: "https://solr.example.com:8983"
+
+targetClusters:
+  prod-os:
+    endpoint: "https://target.example.com:9200"
+
+traffic:
+  proxies:
+    capture:
+      source: prod-solr
+      proxyConfig:
+        tls:
+          mode: certManager
+          issuerRef:
+            name: migrations-ca
+          dnsNames:
+            - capture.ma.svc.cluster.local
+          clientAuth:
+            trustedClientCaFile:
+              configMap: prod-client-root-cas
+              path: client-ca.pem
+  replayers:
+    replay:
+      fromCapturedTraffic: capture
+      toTarget: prod-os
+      replayerConfig:
+        requestTransforms:
+          - transformName: TypeMappingSanitizationTransformerProvider
+            context:
+              values:
+                sourceProperties:
+                  value:
+                    version:
+                      major: 7
+                      minor: 10
+                regexMappings:
+                  fromFile:
+                    configMap: type-mappings-settings
+                    path: regexMappings.json
+                featureFlags:
+                  fromFile:
+                    configMap: type-mappings-settings
+                    path: featureFlags.json
+          - entryPoint:
+              javascriptFile:
+                image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:abc123"
+                path: request.js
+            context:
+              values:
+                mode:
+                  value: request

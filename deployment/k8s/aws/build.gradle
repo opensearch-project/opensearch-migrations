@@ -1,0 +1,7 @@
+plugins {
+    id 'base'
+}
+// CLI build infrastructure removed — see PR description.
+// The Rust CLI source remains under cli/ for development use (`cargo build`
+// from the crate directory). The packaged-tarball and cross-compile Gradle
+// tasks are removed until the CLI is ready for release distribution.

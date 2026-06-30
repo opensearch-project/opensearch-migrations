@@ -1,4 +1,4 @@
-{{- if get .Values.conditionalPackageInstalls "otel-collector-daemonset" }}
+{{- if .Values.metrics.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ .Values.otelConfiguration.serviceAccountName }}
       containers:
         - name: otel-collector
-          image: {{ .Values.otelCollectorImage | default "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3" }}
+          image: {{ .Values.otelCollectorImage }}
           env:
             - name: K8S_NODE_NAME
               valueFrom:
@@ -30,10 +30,8 @@ spec:
               value: "debug"
             - name: QUALIFIER
               value: {{ .Values.stageName }}
-            - name: TRACE_SAMPLING_PERCENTAGE
-              value: "1"
-{{- if .Values.otelConfiguration.env }}
-{{ toYaml .Values.otelConfiguration.env | indent 12 }}
+{{- if .Values.metrics.env }}
+{{ toYaml .Values.metrics.env | indent 12 }}
 {{- end }}
           args:
             - "--config=/etc/otel/collector.yaml"
@@ -49,12 +47,7 @@ spec:
             - name: pprof
               containerPort: 1888
           resources:
-            limits:
-              cpu: 500m
-              memory: 1Gi
-            requests:
-              cpu: 100m
-              memory: 200Mi
+{{ toYaml .Values.metrics.collectorResources | indent 12 }}
           volumeMounts:
             - name: otel-collector-config
               mountPath: /etc/otel/
@@ -81,7 +74,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   collector.yaml: |
-{{ .Values.otelConfiguration.collectorConfig | indent 4 }}
+{{ tpl .Values.metrics.collectorConfig . | indent 4 }}
 
 ---
 apiVersion: v1
@@ -104,6 +97,7 @@ spec:
     - name: prometheus
       port: 8889
       targetPort: prometheus
+{{- if .Values.metrics.serviceMonitor.enabled }}
 ---
 # ServiceMonitor CRD comes from kube-prometheus-stack, which is installed by the
 # pre-install chart installer job. Helm caches API discovery before running hooks,
@@ -119,6 +113,16 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   activeDeadlineSeconds: 120
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: apply-monitor
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       annotations:
@@ -131,6 +135,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -e
           echo "Waiting for ServiceMonitor CRD to be established..."
           kubectl wait --for=condition=Established crd/servicemonitors.monitoring.coreos.com --timeout=120s
           echo "Creating ServiceMonitor for otel-collector..."
@@ -158,4 +163,5 @@ spec:
           echo "ServiceMonitor created successfully."
       restartPolicy: Never
   backoffLimit: 2
+{{- end }}
 {{- end }}

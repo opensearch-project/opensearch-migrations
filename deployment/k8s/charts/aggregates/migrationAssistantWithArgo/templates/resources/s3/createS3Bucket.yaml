@@ -1,4 +1,4 @@
-{{- if .Values.defaultBucketConfiguration.create }}
+{{- if and (or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "")) .Values.defaultBucketConfiguration.create }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -10,6 +10,17 @@ metadata:
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 2
+  activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: aws-cli
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       labels:
@@ -18,7 +29,7 @@ spec:
         karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.defaultBucketConfiguration.serviceAccountName }}
-      restartPolicy: OnFailure
+      restartPolicy: Never
       containers:
         - name: aws-cli
           image: {{ .Values.defaultBucketConfiguration.bucketOperationImage }}

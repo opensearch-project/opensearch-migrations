@@ -26,6 +26,11 @@ from ..models.utils import load_k8s_config, get_current_namespace
 
 logger = logging.getLogger(__name__)
 _RESOURCE_OUTPUT_LABELS = {'strimzi.io/cluster'}
+# Labels present on CRs but not propagated to workflow pods.
+_LABELS_NOT_PROPAGATED_TO_PODS = {
+    'migrations.opensearch.org/run-number',
+    'migrations.opensearch.org/workflow-name',
+}
 
 # `workflow log` is intentionally for pod logs only. Durable command output is
 # handled by the workflow templates instead: the few output-producing steps
@@ -179,7 +184,8 @@ def _resource_label_selectors(ctx, namespace, resource_name, prefix):
     selectors = [
         f"{key}={value}"
         for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and value
+        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
+        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
     ]
     if not selectors:
         click.echo(f"Migration resource '{resource_name}' has no output labels.", err=True)

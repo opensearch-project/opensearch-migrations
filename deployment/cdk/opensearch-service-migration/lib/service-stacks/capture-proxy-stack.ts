@@ -21,7 +21,8 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly destinationConfig: DestinationConfig,
-    readonly otelCollectorEnabled: boolean,
+    readonly otelMetricsCollectorEnabled: boolean,
+    readonly otelTraceCollectorEnabled: boolean,
     readonly skipClusterCertCheck?: boolean,
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
@@ -137,8 +138,11 @@ export class CaptureProxyStack extends MigrationServiceCore {
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--enableMSKAuth")
         }
-        if (props.otelCollectorEnabled) {
-            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        if (props.otelTraceCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelTraceCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        if (props.otelMetricsCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelMetricsCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
         commandArgs.push(...parseArgsStringToArray(props.extraArgs))
 

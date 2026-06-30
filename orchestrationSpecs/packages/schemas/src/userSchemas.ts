@@ -40,10 +40,40 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const MIN_POD_REPLICAS_DESC = "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. " +
+    "This renders a PodDisruptionBudget minAvailable value for the service. " +
+    "The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
+}
+
+function validateMinPodReplicas(
+    ctx: z.RefinementCtx,
+    data: {podReplicas?: number, minPodReplicas?: number}
+) {
+    if (data.minPodReplicas !== undefined && data.podReplicas !== undefined
+        && data.minPodReplicas > data.podReplicas) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
+            path: ["minPodReplicas"]
+        });
+    }
+}
+
+function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
+    return z.object({
+        podReplicas: z.number().int().nonnegative().default(1).optional()
+            .describe(podReplicasDescription),
+        minPodReplicas: z.number().int().nonnegative().default(0).optional()
+            .describe(MIN_POD_REPLICAS_DESC.replace("the service", `the ${serviceName} service`)),
+    });
+}
+
+function withScalableServiceValidation<T extends z.ZodObject<any>>(schema: T): T {
+    return schema.superRefine((data, ctx) => validateMinPodReplicas(ctx, data)) as T;
 }
 class SchemaValidationError extends Error {
     constructor(message: string, public path: string[]) {
@@ -133,20 +163,27 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
-export const S3_REPO_CONFIG = z.object({
-    awsRegion: z.string()
-        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
+// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
+// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+export const REPO_CONFIG = z.object({
+    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    awsRegion: z.string().default("").optional()
+        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
-        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The bucket must already exist and be accessible from the source cluster."),
+        .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
+            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "This is passed to the cluster when registering the snapshot repository. " +
+            "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
-}).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
+}).describe("Configuration for a snapshot repository used by the source cluster. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -158,43 +195,87 @@ export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 export const K8S_IMAGE_PULL_POLICY = z.enum(["Always", "Never", "IfNotPresent"]);
 
-export const TRANSFORMS_IMAGE_SOURCE = z.object({
-    image: z.string().min(1)
-        .describe("OCI image reference (preferably with digest) whose root contains transform files. " +
-            "The workflow mounts the image at /transforms/. Build with deployment/k8s/package-transforms.sh."),
-    pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
-        .describe("Kubernetes image pull policy for the transforms image. Use 'Always' for mutable tags like 'latest'; " +
-            "leave as 'IfNotPresent' for immutable tags or digests.")
-}).strict();
-
-export const TRANSFORMS_CONFIGMAP_SOURCE = z.object({
-    configMap: z.string().min(1)
-        .describe("Name of a pre-existing Kubernetes ConfigMap. Each key becomes a file in /transforms/.")
-}).strict();
-
-export const TRANSFORMS_SOURCE = z.union([
-    TRANSFORMS_IMAGE_SOURCE,
-    TRANSFORMS_CONFIGMAP_SOURCE
-]).describe("Source for user-defined transform files. Exactly one of 'image' or 'configMap'.");
-
-export const TRANSFORMS_SOURCES_MAP = z.record(
-    z.string().regex(K8S_NAMING_PATTERN),
-    TRANSFORMS_SOURCE
-).describe("Map of transform source names to their definitions.");
-
-export const TRANSFORM_LANGUAGE = z.enum(["javascript", "python"]);
-
-export const TRANSFORM_RELATIVE_FILE = z.string()
+export const FILE_RELATIVE_PATH = z.string()
     .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/)
-    .describe("Script path relative to /transforms, e.g. 'request.js' or 'lib/request.py'.");
+    .describe("Path relative to the mounted image root. Absolute paths and '..' traversal are rejected.");
+
+export const CONFIGMAP_FILE_KEY = z.string()
+    .regex(/^(?!\.{1,2}$)(?!\.\.)[A-Za-z0-9._-]+$/)
+    .describe("ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs.");
+
+export const FILE_REF_FROM_IMAGE = z.object({
+    image: z.string().min(1)
+        .describe("OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."),
+    pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
+        .describe("Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."),
+    path: FILE_RELATIVE_PATH
+}).strict();
+
+export const FILE_REF_FROM_CONFIGMAP = z.object({
+    configMap: z.string().min(1)
+        .describe("Name of a pre-existing Kubernetes ConfigMap."),
+    path: CONFIGMAP_FILE_KEY
+}).strict();
+
+export const FILE_REF = z.union([
+    FILE_REF_FROM_IMAGE,
+    FILE_REF_FROM_CONFIGMAP
+]).describe("Reference to one file from a ConfigMap key or mountable OCI image.");
+
+export const INLINE_JSON_VALUE = z.any()
+    .refine(value => value !== undefined, {message: "value is required"});
+
+export const TRANSFORM_CONTEXT_VALUE_DIRECTORY = z.union([
+    z.object({
+        configMap: z.string().min(1)
+    }).strict(),
+    z.object({
+        image: z.string().min(1),
+        pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional(),
+        path: FILE_RELATIVE_PATH.optional()
+    }).strict()
+]).describe("Directory whose immediate files become transform context values.");
+
+export const CONFIG_VALUE_FROM_FILE = z.object({
+    fromFile: FILE_REF
+}).strict();
+
+export const TRANSFORM_CONTEXT_VALUE = z.union([
+    z.object({value: INLINE_JSON_VALUE}).strict(),
+    CONFIG_VALUE_FROM_FILE
+]);
+
+export const TRANSFORM_CONTEXT = z.union([
+    z.string(),
+    z.object({
+        valueDirectories: z.array(TRANSFORM_CONTEXT_VALUE_DIRECTORY).default([]).optional(),
+        values: z.record(z.string(), TRANSFORM_CONTEXT_VALUE).default({}).optional()
+    }).strict()
+]).describe("Optional transform provider context. Values are either inline or loaded at runtime from mounted files.");
+
+export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
+    z.object({javascript: z.string().min(1)}).strict(),
+    z.object({javascriptFile: FILE_REF}).strict(),
+    z.object({python: z.string().min(1)}).strict(),
+    z.object({pythonFile: FILE_REF}).strict()
+]);
 
 export const TRANSFORM_SPEC = z.object({
-    language: TRANSFORM_LANGUAGE
-        .describe("Runtime for this transform script."),
-    file: TRANSFORM_RELATIVE_FILE.optional()
-        .describe("Script path relative to /transforms. Defaults by transform kind and language."),
-    bindingsObject: GENERIC_JSON_OBJECT.default({}).optional()
-        .describe("Optional JSON object passed to the transform at initialization.")
+    entryPoint: SCRIPT_TRANSFORM_ENTRY_POINT.optional(),
+    transformName: z.string().optional(),
+    context: TRANSFORM_CONTEXT.optional()
+}).strict().superRefine((value, ctx) => {
+    const selectorCount = [
+        value.entryPoint !== undefined,
+        value.transformName !== undefined
+    ].filter(Boolean).length;
+
+    if (selectorCount !== 1) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exactly one of entryPoint or transformName is required"
+        });
+    }
 });
 
 export const TRANSFORM_PIPELINE = z.preprocess(
@@ -229,23 +310,30 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-function validateTransformsSourceForPipelines(
-    ctx: z.RefinementCtx,
-    data: Record<string, unknown>,
-    pipelineKeys: string[]
-) {
-    const hasPipeline = pipelineKeys.some(key => hasTransformPipelineEntries(data[key]));
-    if (hasPipeline && !hasConfiguredString(data.transformsSource)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "'transformsSource' is required when transform pipelines are configured.",
-            path: ["transformsSource"]
-        });
-    }
-}
+const blankStringAsDisabled = (value: unknown) =>
+    typeof value === "string" && value.trim().length === 0 ? "" : value;
 
-const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
+const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+
+const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+
+// Default is applied in the preprocess step rather than via .default().optional():
+// under zod >=4.4 that ordering no longer applies the default for an absent key,
+// and .optional().default() makes the input type required. Empty/blank strings
+// stay explicit disables, while omitted values default to the collector. The
+// metadata default keeps generated JSON/OpenAPI schemas useful for schema-driven
+// clients such as interactive config viewers.
+const optionalEndpointWithDefault = (defaultValue: string) =>
+    z.preprocess(
+        (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
+        OPTIONAL_ENDPOINT.optional()
+    ).meta({default: defaultValue});
+
+const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
+    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");
+
+const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
+    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.");
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -323,13 +411,10 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                 failureThreshold: 8,
             },
             config: {
-                // RF=3 + minISR=2 on a 3-broker cluster: survives one broker
-                // down (rolling restart, single node loss) without losing
-                // writes or quorum. ISR = replicas fully caught up to the
-                // leader; acks=all blocks until every ISR member has written,
-                // and writes fail (NotEnoughReplicasException) if |ISR|<minISR.
-                // auto.create.topics.enable stays false — all migration topics
-                // are declared explicitly via KafkaTopic CRs.
+                // RF=3 + minISR=2 on a 3-broker cluster survives one broker down
+                // during a rolling restart, drain, or single-node loss without losing
+                // writes or quorum. auto.create.topics.enable stays false because
+                // migration topics are declared explicitly via KafkaTopic CRs.
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 3,
                 "transaction.state.log.replication.factor": 3,
@@ -340,43 +425,35 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
-        // 3-broker, combined (controller+broker) KRaft pool. 3 is the minimum
-        // that satisfies RF=3/minISR=2 above.
+        // 3 is the minimum broker count that satisfies RF=3/minISR=2 above.
         replicas: 3,
         roles: ["controller", "broker"],
         storage: {
             type: "persistent-claim",
-            // Smoke-test size (raised 1Gi → 2Gi with the 1→3 broker bump;
-            // internal topics are now RF=3). Real deployments should override.
+            // Smoke-test size. Real deployments should override.
             size: "2Gi",
             deleteClaim: true,
         },
         template: {
             pod: {
-                // Soft anti-affinity — prefers spreading brokers across nodes
-                // but still schedules on single-node dev clusters. Required
-                // anti-affinity would wedge broker rescheduling during an EKS
-                // node rotation if the new pool temporarily has <3 nodes.
-                affinity: {
-                    podAntiAffinity: {
-                        preferredDuringSchedulingIgnoredDuringExecution: [
-                            {
-                                weight: 100,
-                                podAffinityTerm: {
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
-                                    topologyKey: "kubernetes.io/hostname",
+                // Spread brokers one-per-node so a single node disruption can only take
+                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
+                // schedule instead of wedging Pending.
+                topologySpreadConstraints: [
+                    {
+                        maxSkew: 1,
+                        topologyKey: "kubernetes.io/hostname",
+                        whenUnsatisfiable: "ScheduleAnyway",
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: "strimzi.io/name",
+                                    operator: "Exists",
                                 },
-                            },
-                        ],
+                            ],
+                        },
                     },
-                },
+                ],
             },
         },
     },
@@ -432,6 +509,27 @@ export const CERT_MANAGER_ISSUER_REF = z.object({
         .describe("API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."),
 }).describe("Reference to a cert-manager issuer that will sign TLS certificates for the proxy.");
 
+export const PROXY_TLS_CLIENT_AUTH_CONFIG = z.object({
+    trustedClientCaFile: FILE_REF.optional()
+        .describe("PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."),
+    trustedClientCaPem: z.string().min(1).optional()
+        .describe("Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."),
+    required: z.boolean().default(true).optional()
+        .describe("When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.")
+}).strict().superRefine((value, ctx) => {
+    const trustSourceCount = [
+        value.trustedClientCaFile !== undefined,
+        value.trustedClientCaPem !== undefined
+    ].filter(Boolean).length;
+
+    if (trustSourceCount !== 1) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exactly one of trustedClientCaFile or trustedClientCaPem is required"
+        });
+    }
+}).describe("Optional mutual TLS client-authentication configuration for the capture proxy listener.");
+
 export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("certManager")
@@ -445,12 +543,14 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
             .describe("Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
         renewBefore: z.string().default("360h").optional()
             .describe("How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
+        clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
     }).describe("Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."),
     z.object({
         mode: z.literal("existingSecret")
             .describe("Use a pre-existing Kubernetes TLS secret."),
         secretName: z.string()
             .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."),
+        clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
     }).describe("Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."),
     z.object({
         mode: z.literal("plaintext")
@@ -458,24 +558,33 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Explicitly disable TLS termination on the capture proxy."),
 ]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
-export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
+export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "capture proxy",
+        "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+    ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    internetFacing: z.boolean().default(false).optional()
-        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
+    serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
+        .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
+            "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
+            "'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.")
         .changeRestriction('impossible'),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
+    internetFacing: z.boolean().default(false).optional()
+        .describe("When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
+        .changeRestriction('impossible'),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Kubernetes resource limits and requests for the capture proxy container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
         .default(DEFAULT_RESOURCES.PROXY),
-}).describe("Kubernetes deployment-level options for the capture proxy.");
+}))
+    .describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
@@ -528,18 +637,21 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = z.object({
+export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}).describe("Process-level and deployment-level configuration options for the capture proxy.");
+}))
+    .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
-export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
+export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "traffic replayer",
+        "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -547,12 +659,10 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
-}).describe("Kubernetes deployment-level options for the traffic replayer.");
+}))
+    .describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the replayer pod.")
-        .changeRestriction('impossible'),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),
@@ -576,7 +686,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -642,7 +753,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
-    validateTransformsSourceForPipelines(ctx, data, ["requestTransforms", "tupleTransforms"]);
+    validateMinPodReplicas(ctx, data);
     validatePipelineRawConfigConflict(ctx, data, "requestTransforms", [
         "transformerConfig",
         "transformerConfigEncoded",
@@ -683,6 +794,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -721,10 +834,6 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the metadata migration pod.")
-        .checksumFor('snapshot', 'replayer')
-        .changeRestriction('impossible'),
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of component template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
@@ -744,12 +853,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
-        .describe("Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). " +
-            "'NONE': fail if multi-type indices are encountered. " +
-            "'UNION': merge all types into a single mapping. " +
-            "'SPLIT': create separate indices for each type."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -765,11 +870,13 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     enableSourcelessMigrations: z.boolean().default(false).optional()
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
-            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."),
+            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.")
+        .changeRestriction('impossible'),
     useRecoverySource: z.boolean().default(false).optional()
         .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
             "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
-            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient."),
+            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -779,7 +886,6 @@ export const USER_METADATA_OPTIONS = z.object({
     ...USER_METADATA_WORKFLOW_OPTIONS.shape,
     ...USER_METADATA_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
-    validateTransformsSourceForPipelines(ctx, data, ["metadataTransforms"]);
     validatePipelineRawConfigConflict(ctx, data, "metadataTransforms", [
         "transformerConfig",
         "transformerConfigBase64",
@@ -787,10 +893,12 @@ export const USER_METADATA_OPTIONS = z.object({
     ]);
 });
 
-export const USER_RFS_WORKFLOW_OPTIONS = z.object({
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" + 
-            " throughput scales linearly up to the total number of source shards."),
+export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "RFS document backfill",
+        "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" +
+            " throughput scales linearly up to the total number of source shards."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -815,13 +923,10 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
-}).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+}))
+    .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the RFS pod.")
-        .checksumFor('replayer')
-        .changeRestriction('impossible'),
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
@@ -867,12 +972,20 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
+    emitDocType: z.enum(["AUTO", "ON", "OFF"]).default("AUTO").optional()
+        .describe("Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+            "'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer " +
+            "is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+            "'ON': always emit _type. 'OFF': never emit _type.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
         .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
             "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
@@ -899,6 +1012,19 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    positionGapStopword: z.string().default("a").optional()
+        .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
+            "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
+            "at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without filler the " +
+            "reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently " +
+            "changing slop / proximity / phrase semantics on migrated documents. The reconstructor splices this token " +
+            "into the gap so OS — assumed to have the same token configured as a stopword — re-creates the original " +
+            "[0,1,3] postings while indexing. The token MUST be on the target's stopword list or it leaks into search " +
+            "results; 'a' is a safe default for the english / standard analyzers. " +
+            "Pass an empty string to opt out and fall back to the legacy multi-space behaviour. " +
+            "Default: 'a'.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
@@ -909,7 +1035,7 @@ export const USER_RFS_OPTIONS = z.object({
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .superRefine((data, ctx) => {
-        validateTransformsSourceForPipelines(ctx, data, ["documentTransforms"]);
+        validateMinPodReplicas(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -988,11 +1114,11 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
 );
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
+        .describe("Use an existing Kafka cluster by providing connection details."),
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
-            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
-    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
-        .describe("Use an existing Kafka cluster by providing connection details.")
+            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 
 export const HTTP_AUTH_BASIC = z.object({
@@ -1021,7 +1147,7 @@ export const HTTP_AUTH_MTLS = z.object({
 }).describe("Mutual TLS (mTLS) authentication using client certificates.");
 
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]|SOLR [6789])(?:\.[0-9]+)+$/)
-    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'.");
+    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.");
 
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
@@ -1038,8 +1164,8 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
-    z.record(z.string(), S3_REPO_CONFIG)
-    .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
+    z.record(z.string(), REPO_CONFIG)
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1052,6 +1178,28 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
 
+export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
+    s3Uri: z.string()
+        .regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/.+\.proto\.gz$/)
+        .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
+    awsRegion: z.string()
+        .describe("AWS region of the S3 bucket holding the export."),
+    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
+        .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
+    sourceLabel: z.string()
+        .describe("Label of the source cluster this dump was originally captured from. " +
+            "Used for resource labeling. Does NOT need to match a sourceClusters key " +
+            "(the original source may be long gone by the time the dump is replayed)."),
+}).describe("Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. " +
+    "When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. " +
+    "The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, " +
+    "and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow.");
+
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
         .describe("Name of the source cluster. Must match a key in sourceClusters."),
@@ -1060,28 +1208,79 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
-    fromProxy: z.string()
-        .describe("Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."),
+    fromCapturedTraffic: z.string()
+        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."),
     toTarget: z.string()
         .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters."),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
         .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
-}).describe("Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster.");
+}).describe("Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster.");
 
 export const TRAFFIC_CONFIG = z.object({
-    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG)
-        .describe("Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
+        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
+        .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
+            "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
+            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
-        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster.")
+        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
 }).superRefine((data, ctx) => {
-    for (const [name, rc] of Object.entries(data.replayers)) {
-        if (!(rc.fromProxy in data.proxies)) {
+    const proxies = data.proxies ?? {};
+    const s3Sources = data.s3Sources ?? {};
+    for (const name of Object.keys(s3Sources)) {
+        if (name in proxies) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
-                path: ['replayers', name, 'fromProxy']
+                message: `Name '${name}' is used in both traffic.proxies and traffic.s3Sources. Each captured-traffic source must have a unique name.`,
+                path: ['s3Sources', name]
+            });
+        }
+    }
+    // Two captured-traffic sources cannot land in the same Kafka topic on the
+    // same Kafka cluster. The effective topic is `kafkaTopic ?? sourceName`,
+    // so name collisions across sources, explicit-topic collisions, and any
+    // mix that maps to the same (cluster, topic) tuple all need to be caught.
+    // Without this, two producers would share one topic — any replayer reading
+    // that topic would interleave records from both, with no way to tell them
+    // apart, and `kafkaImport.sh`-style reloads would write into a topic the
+    // proxy is also feeding.
+    type Origin = { kind: 'proxy' | 's3Source'; name: string };
+    const claims = new Map<string, Origin>();
+    const recordClaim = (cluster: string, topic: string, origin: Origin, path: (string | number)[]) => {
+        const key = `${cluster}\0${topic}`;
+        const existing = claims.get(key);
+        if (existing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `traffic.${origin.kind}s['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${existing.kind}s['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
+                path
+            });
+        } else {
+            claims.set(key, origin);
+        }
+    };
+    for (const [name, p] of Object.entries(proxies)) {
+        const cluster = p.kafka ?? "default";
+        const topic = (p.kafkaTopic && p.kafkaTopic !== "") ? p.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
+    }
+    for (const [name, s3] of Object.entries(s3Sources)) {
+        const cluster = s3.kafka ?? "default";
+        const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
+    }
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        const inProxies = rc.fromCapturedTraffic in proxies;
+        const inS3 = rc.fromCapturedTraffic in s3Sources;
+        if (!inProxies && !inS3) {
+            const available = [...Object.keys(proxies), ...Object.keys(s3Sources)];
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown captured-traffic source '${rc.fromCapturedTraffic}'. Available (proxies + s3Sources): ${available.join(', ')}`,
+                path: ['replayers', name, 'fromCapturedTraffic']
             });
         }
     }
@@ -1134,7 +1333,7 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
-}).describe("Connection and snapshot configuration for a source Elasticsearch or OpenSearch cluster.").superRefine((data, ctx) => {
+}).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
     const repos = data.snapshotInfo?.repos;
     const snapshots = data.snapshotInfo?.snapshots ?? {};
     for (const [snapName, snapConfig] of Object.entries(snapshots)) {
@@ -1168,12 +1367,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         }
     }
 
-    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced S3 repo.
+    // (GCS repos are not affected — they authenticate via the cluster's GCS keystore / Workload Identity.)
     if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
             if ("createSnapshotConfig" in snapConfig.config) {
                 const repo = repos?.[snapConfig.repoName];
-                if (repo && !repo.s3RoleArn) {
+                if (repo && repo.repoPathUri.startsWith("s3://") && !repo.s3RoleArn) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,
@@ -1251,8 +1451,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),
-        transformsSources: TRANSFORMS_SOURCES_MAP.default({}).optional()
-            .describe("Named transform sources. Define once, reference by key in transform-eligible tool options."),
         sourceClusters: SOURCE_CLUSTERS_MAP
             .describe("Source Elasticsearch or OpenSearch clusters to migrate from."),
         targetClusters: TARGET_CLUSTERS_MAP
@@ -1264,16 +1462,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
-        const transformSources = data.transformsSources ?? {};
-        const validateTransformSourceReference = (sourceName: string | undefined, path: (string | number)[]) => {
-            if (sourceName !== undefined && !(sourceName in transformSources)) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message: `Unknown transformsSource '${sourceName}'. Available: ${Object.keys(transformSources).join(', ') || '(none)'}`,
-                    path
-                });
-            }
-        };
+        const duplicateClusterNames = Object.keys(data.sourceClusters)
+            .filter(name => name in data.targetClusters);
+        for (const name of duplicateClusterNames) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Cluster name '${name}' is used in both sourceClusters and targetClusters. Source and target cluster names must be unique.`,
+                path: ['targetClusters', name]
+            });
+        }
 
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
@@ -1306,23 +1503,14 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         });
                     }
                 }
-                for (const [snapName, migrations] of Object.entries(mc.perSnapshotConfig)) {
-                    migrations.forEach((migration, migrationIndex) => {
-                        validateTransformSourceReference(
-                            migration.metadataMigrationConfig?.transformsSource,
-                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, migrationIndex, 'metadataMigrationConfig', 'transformsSource']
-                        );
-                        validateTransformSourceReference(
-                            migration.documentBackfillConfig?.transformsSource,
-                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, migrationIndex, 'documentBackfillConfig', 'transformsSource']
-                        );
-                    });
-                }
             }
         }
 
         if (data.traffic) {
-            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+            const proxies = data.traffic.proxies ?? {};
+            const s3Sources = data.traffic.s3Sources ?? {};
+            const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
@@ -1331,7 +1519,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
                 const kafkaRef = proxyConfig.kafka;
-                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
                 if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
@@ -1340,13 +1527,18 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
             }
+            for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
+                const kafkaRef = s3Config.kafka;
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 's3Sources', s3Name, 'kafka']
+                    });
+                }
+            }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
-                validateTransformSourceReference(
-                    rc.replayerConfig?.transformsSource,
-                    ['traffic', 'replayers', replayerName, 'replayerConfig', 'transformsSource']
-                );
-
                 if (!(rc.toTarget in data.targetClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,

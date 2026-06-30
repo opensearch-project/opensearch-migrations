@@ -35,5 +35,5 @@ traffic:
           renewBefore: "360h"
   replayers:
     replay1:
-      fromProxy: "capture-proxy"
+      fromCapturedTraffic: "capture-proxy"
       toTarget: "target"

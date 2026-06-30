@@ -2,16 +2,21 @@ import * as yaml from "js-yaml";
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
 import {SetupCapture} from "../src/workflowTemplates/setupCapture";
 
-/** Ensures capture proxy Deployments have a readinessProbe that gates on real init. */
 describe("Capture proxy Deployments declare a readinessProbe", () => {
     const setupCapture = renderWorkflowTemplate(SetupCapture) as any;
 
     function getResourceManifest(rendered: any, templateName: string): any {
+        const manifest = getRawManifest(rendered, templateName)
+            .replace(/^(\s*)(volumeMounts|volumes): \{\{=.*$/gm, "$1$2: []");
+        return yaml.load(manifest);
+    }
+
+    function getRawManifest(rendered: any, templateName: string): string {
         const templates: any[] = rendered.spec?.templates ?? [];
         const t = templates.find(x => x.name === templateName);
         expect(t).toBeDefined();
         expect(t.resource?.manifest).toBeDefined();
-        return yaml.load(t.resource.manifest as string);
+        return t.resource.manifest as string;
     }
 
     function getFirstContainer(deployment: any): any {
@@ -27,6 +32,7 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         expect(typeof mrs).toBe("number");
         expect(mrs).toBeGreaterThanOrEqual(1);
     }
+
 
     it("deployProxyDeployment container has a tcpSocket readinessProbe on listenPort with minReadySeconds", () => {
         const deployment = getResourceManifest(setupCapture, "deployproxydeployment");
@@ -51,5 +57,22 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         const ports = container.ports;
         expect(probe.tcpSocket.port).toEqual(ports[0].containerPort);
         assertMinReadySecondsIsSet(deployment);
+    });
+
+    it("proxy deployment templates expose inline client CA PEM through the expected env var, YAML-safely", () => {
+        for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
+            const manifest = getRawManifest(setupCapture, templateName);
+            expect(manifest).toContain("- name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
+            expect(manifest).toContain("value: {{=toJSON(inputs.parameters.sslTrustCertPem)}}");
+            expect(manifest).not.toContain('value: "{{inputs.parameters.sslTrustCertPem}}"');
+        }
+    });
+
+    it("proxy deployment templates append dynamic file-source volumes and mounts", () => {
+        for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
+            const manifest = getRawManifest(setupCapture, templateName);
+            expect(manifest).toContain("fromJSON(inputs.parameters.fileSourceVolumeMounts)");
+            expect(manifest).toContain("fromJSON(inputs.parameters.fileSourceVolumes)");
+        }
     });
 });

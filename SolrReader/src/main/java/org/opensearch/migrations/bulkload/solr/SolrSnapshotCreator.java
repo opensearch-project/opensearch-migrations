@@ -65,17 +65,20 @@ public class SolrSnapshotCreator {
             // downstream reader expects (<baseLocation>/<snapshotName>/<collection>/...), we
             // set Solr's `location` to <baseLocation>/<snapshotName> and `name` to <collection>
             // so each call writes to a distinct subdirectory under the shared snapshot folder.
+            // NOTE: if on solr 6 or 7 (which both do not come with S3 backup config, but only local one out of the box),
+            // this requires the location to exist on the disk before  making the call otherwise this will throw
+            // Exception
             var asyncId = asyncIdFor(collection);
             var urlBuilder = new StringBuilder(String.format(
                 "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
                 solrBaseUrl, collection, collection, asyncId
             ));
             var perCollectionLocation = buildPerCollectionLocation(backupLocation, backupName);
-            if (backupLocation != null && backupLocation.startsWith("s3://") && repositoryName != null) {
-                // For S3 backups, Solr's S3BackupRepository writes under the configured bucket
-                // (in solr.xml) using `location` as the prefix path. Extract the path portion
-                // from s3://<bucket>/<path>/<snapshotName> — e.g. /foo/<snapshotName> — so
-                // Solr writes to <bucket>/<path>/<snapshotName>/<collection>/.
+            if (backupLocation != null && isCloudRepoUri(backupLocation) && repositoryName != null) {
+                // For cloud backups (S3/GCS), Solr's backup repository writes under the bucket
+                // configured in solr.xml using `location` as the bucket-relative prefix. Extract
+                // the path portion from <scheme>://<bucket>/<path>/<snapshotName> — e.g.
+                // /foo/<snapshotName> — so Solr writes to <bucket>/<path>/<snapshotName>/<collection>/.
                 urlBuilder.append("&repository=").append(repositoryName)
                     .append("&location=").append(perCollectionLocation);
             } else if (backupLocation != null) {
@@ -94,11 +97,16 @@ public class SolrSnapshotCreator {
         }
     }
 
+    /** True when the backup location is a cloud object-store URI (S3 or GCS). */
+    static boolean isCloudRepoUri(String location) {
+        return location != null && (location.startsWith("s3://") || location.startsWith("gs://"));
+    }
+
     /**
      * Build the Solr backup `location` parameter for a specific collection.
      *
-     * <p>For S3 locations, strips the scheme/bucket and appends the snapshot name so that
-     * Solr writes collection subdirectories directly under <snapshotName>/ (matching the
+     * <p>For cloud locations (S3/GCS), strips the scheme/bucket and appends the snapshot name so
+     * that Solr writes collection subdirectories directly under <snapshotName>/ (matching the
      * reader's expectation). For filesystem locations, appends the snapshot name to the
      * configured path. Returns {@code null} when {@code location} is null.
      */
@@ -106,7 +114,10 @@ public class SolrSnapshotCreator {
         if (location == null) {
             return null;
         }
-        if (location.startsWith("s3://")) {
+        if (isCloudRepoUri(location)) {
+            // Both s3:// and gs:// resolve to a bucket-relative path; the bucket itself is set in
+            // solr.xml (s3.bucket.name / gcsBucket), so `location` must omit scheme and bucket.
+            // extractS3Path is scheme-agnostic (URI.getPath()), so it works for gs:// too.
             var base = extractS3Path(location);
             if ("/".equals(base)) {
                 return "/" + snapshotName;

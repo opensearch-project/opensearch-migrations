@@ -77,9 +77,30 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
-    // see
-    // https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
-    public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
+    // Match the kafka-clients library default (5 minutes). This is the broker-enforced fence
+    // threshold — how long the consumer can go between poll() calls before the group coordinator
+    // reassigns its partitions. PR #3013 made round-trip reassignment handling correct, so the
+    // historical "fence aggressively" rationale (the previous 60s override) is no longer needed.
+    // The TOUCH frequency that keeps us inside this window is decoupled from the fence value and
+    // pinned in DEFAULT_KEEP_ALIVE_PERIOD below; raising the fence threshold does NOT slow down
+    // our heartbeat. Operators can still override via --kafkaPropertyFile, and subclasses can
+    // override via {@link #defaultPollIntervalMs()} (note: a static field would be hidden, not
+    // overridden — the value is exposed through a method so subclass intent is honored).
+    public static final String DEFAULT_POLL_INTERVAL_MS = "300000";
+
+    /**
+     * Default value for {@code max.poll.interval.ms} when no operator-supplied properties file
+     * sets it. Subclasses may override to vary the broker-enforced fence threshold.
+     */
+    protected static String defaultPollIntervalMs() {
+        return DEFAULT_POLL_INTERVAL_MS;
+    }
+
+    // Touch period used to keep the consumer inside the max.poll.interval.ms window when the read
+    // loop is back-pressured. Pinned to 30s so behavior matches what shipped with the historical
+    // 60s default (60s / 2 = 30s). Decoupling this from max.poll.interval.ms preserves the
+    // tight heartbeat cadence while letting the fence threshold be more lenient.
+    static final Duration DEFAULT_KEEP_ALIVE_PERIOD = Duration.ofSeconds(30);
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
     private final ExecutorService kafkaExecutor;
@@ -98,6 +119,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      * The first onNetworkConnectionClosed call for a given key decrements the counter.
      */
     final ConcurrentHashMap<String, Boolean> pendingTrafficSourceReaderInterruptedCloses = new ConcurrentHashMap<>();
+    /**
+     * Placeholder sessionNumber used at synthetic-close registration AND at the matching close-callback
+     * lookup. Both sites must use this exact value or the close-callback's
+     * pendingTrafficSourceReaderInterruptedCloses.remove will miss, leak the outstanding counter, and
+     * permanently block the empty-batch drain in readNextTrafficStreamSynchronously. Replace at both
+     * sites together when wiring the real Accumulation.startingSourceRequestIndex through to
+     * GenerationalSessionKey (Phase A4 in the architecture doc's Planned Work section).
+     */
+    public static final int PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER = 0;
     /** Consistent counter of registered-but-not-yet-closed synthetic closes. Uses AtomicInteger
      *  for volatile visibility — decrementAndGet() on the Netty thread is immediately visible
      *  to get() on kafkaExecutor, preventing a premature isEmpty() race. */
@@ -152,7 +182,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
+                var sessionKey = connKey.connectionId + ":" + PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER
+                    + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
                 if (pendingTrafficSourceReaderInterruptedCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
                     outstandingTrafficSourceReaderInterruptedCloseSessions.incrementAndGet();
                     batch.add(new TrafficSourceReaderInterruptedClose(key));
@@ -224,28 +255,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         @NonNull KafkaBehavioralPolicy behavioralPolicy
     ) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
-        kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
-        var pollPeriod = Duration.ofMillis(Long.valueOf((String) kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
-        var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
+        kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, defaultPollIntervalMs());
         return new KafkaTrafficCaptureSource(
             globalContext,
             new KafkaConsumer<>(kafkaProps),
             topic,
-            keepAlivePeriod,
+            DEFAULT_KEEP_ALIVE_PERIOD,
             clock,
             behavioralPolicy
         );
-    }
-
-    /**
-     * We'll have to 'maintain' touches more frequently than the poll period, otherwise the
-     * consumer will fall out of the group, putting all the commits in-flight at risk.  Notice
-     * that this doesn't have a bearing on heartbeats, which themselves are maintained through
-     * Kafka Consumer poll() calls.  When those poll calls stop, so does the heartbeat, which
-     * is more sensitive, but managed via the 'session.timeout.ms' property.
-     */
-    private static Duration getKeepAlivePeriodFromPollPeriod(Duration pollPeriod) {
-        return pollPeriod.dividedBy(2);
     }
 
     public static Properties buildKafkaProperties(

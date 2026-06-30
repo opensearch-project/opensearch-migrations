@@ -283,8 +283,29 @@ def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[
     if (values.shard_total is None and values.shard_complete is None and
             values.shard_in_progress is None and values.shard_waiting is None):
         return "Shards are initializing"
-    
-    return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
+
+    eta_str = _format_duration_ms(values.eta_ms) if values.eta_ms else "N/A"
+    start_time = values.started.isoformat(sep=" ", timespec="seconds") if values.started else ''
+    finish_time = values.finished.isoformat(sep=" ", timespec="seconds") if values.finished else ''
+    return (
+        f"Backfill status: {values.status.value}\n"
+        f"Start time: {start_time}\n"
+        f"Finished time: {finish_time}\n"
+        f"Percent completed: {values.percentage_completed:.1f}%\n"
+        f"Estimated time to completion: {eta_str}\n"
+        f"Total shards: {values.shard_total}\n"
+        f"Completed shards: {values.shard_complete}\n"
+        f"In progress shards: {values.shard_in_progress}\n"
+        f"Waiting shards: {values.shard_waiting}"
+    )
+
+
+def _format_duration_ms(millis: float) -> str:
+    """Format milliseconds as human-readable duration."""
+    seconds = int(millis / 1000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {seconds}s"
 
 
 def _get_shard_setup_started_epoch(cluster, index_name: str) -> Optional[int]:

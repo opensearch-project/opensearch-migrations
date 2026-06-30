@@ -10,9 +10,10 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -21,6 +22,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -129,9 +131,9 @@ public class SnapshotReaderEndToEndTest {
             .insecure(true)
             .build()
             .toConnectionContext());
-        var snapshotCreator = new FileSystemSnapshotCreator(
+        var snapshotCreator = new SnapshotCreator(
             SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
-            SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+            RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
             snapshotContext.createSnapshotCreateContext()
         );
         SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
@@ -168,7 +170,7 @@ public class SnapshotReaderEndToEndTest {
         ShardMetadata shardMeta = snapshotReader.getShardMetadata().fromRepo(SNAPSHOT_NAME, indexName, shardId);
         Path shardPath = luceneDir.resolve(indexName).resolve(String.valueOf(shardId));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shardMeta.getSegmentFileName());
+        return LuceneReader.streamDocumentChanges(indexReader, shardMeta.getSegmentFileName());
     }
 
     private static void deleteDir(Path dir) {

@@ -10,7 +10,7 @@ from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, 
 from console_link.models.cluster import Cluster
 from console_link.models.kafka import MSK, StandardKafka, ScramKafka
 from console_link.models.replayer_ecs import ECSReplayer
-from console_link.models.snapshot import FileSystemSnapshot, S3Snapshot
+from console_link.models.snapshot import FileSystemSnapshot, GcsSnapshot, S3Snapshot
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,8 @@ def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
         return FileSystemSnapshot(config, source_cluster)
     elif 's3' in config:
         return S3Snapshot(config, source_cluster)
+    elif 'gcs' in config:
+        return GcsSnapshot(config, source_cluster)
     logger.error(f"An unsupported snapshot type was provided: {config.keys()}")
     raise UnsupportedSnapshotError(', '.join(config.keys()) if config else '<empty>')
 
@@ -65,13 +67,13 @@ def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     raise UnsupportedReplayerError(', '.join(config.keys()) if config else '<empty>')
 
 
-def get_kafka(config: Dict):
+def get_kafka(config: Dict, scram_password: Optional[str] = None):
     if 'msk' in config:
         return MSK(config)
     if 'standard' in config:
         return StandardKafka(config)
     if 'scram' in config:
-        return ScramKafka(config)
+        return ScramKafka(config, password=scram_password)
     config.pop("broker_endpoints", None)
     logger.error(f"An unsupported kafka source type was provided: {config.keys()}")
     raise UnsupportedKafkaError(', '.join(config.keys()))

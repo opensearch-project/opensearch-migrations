@@ -3,6 +3,7 @@
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
-  "otelCollectorEnabled": true,
+  "otelMetricsCollectorEnabled": true,
+  "otelTraceCollectorEnabled": false,
   "reindexFromSnapshotWorkerSize": "default"
 }

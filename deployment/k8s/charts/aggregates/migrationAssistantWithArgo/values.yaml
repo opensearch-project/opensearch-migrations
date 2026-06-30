@@ -12,12 +12,8 @@ conditionalPackageInstalls:
   aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
   ack-cloudwatch-controller: false  # opt-in: manages CloudWatch dashboards as K8s resources via ACK
 
-  # Simpler alternative to the opentelemetry-operator.
-  # ONLY set up the otel-collector and require manual instrumentation
-  # Mutually exclusive with otel-collector
-  otel-collector-daemonset: true
   # EXPERIMENTAL!  Needed for auto-instrumenting and general observability.
-  # Mutually exclusive with otel-collector-daemonset
+  # Mutually exclusive with metrics.enabled
   opentelemetry-operator: false
 
   # Support packages - installed as direct dependencies to this chart as opposed to via the installer job
@@ -25,10 +21,11 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for minikube/kind testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
-  jaeger: true
+  jaeger: false
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -69,6 +66,12 @@ aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+
+cloudProvider: ""
+
+gcp:
+  project: ""
+  serviceAccountEmail: ""
 
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
@@ -112,6 +115,25 @@ defaultBucketConfiguration:
   bucketOperationImage: "amazon/aws-cli:2.25.11"
   bucketOperationImagePullPolicy: "IfNotPresent"
 
+gcsBucketConfiguration:
+  create: false
+  deleteOnUninstall: false
+  emptyBeforeDelete: true
+  endpoint: ""
+  bucketName: ""
+  bucketOperationImage: "google/cloud-sdk:latest"
+  bucketOperationImagePullPolicy: "IfNotPresent"
+  serviceAccountName: "migrations-service-account"
+  useLocalGcs: false   # set true for minikube/kind; wires fake-gcs-server as the GCS endpoint
+  localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
+
+kafkaExternal:
+  enabled: false
+  brokers: ""
+  authType: scram-sha-512
+  userName: ""
+  password: ""
+
 logs:
   sharedLogsVolume:
     enabled: true
@@ -122,6 +144,9 @@ logs:
 
 
 installer:
+  # Child chart installs wait by default. Per-chart waitForInstallation values
+  # override this, including explicit false in developer overlays.
+  defaultWaitForInstallation: true
   serviceAccount:
     create: true
     name: "migrations-service-account"
@@ -139,9 +164,26 @@ extraOtelConfiguration:
       - jaeger
       - xray
 
-# For OTEL Daemonset
+# Shared OTEL collector image used by the metrics and trace collectors.
+otelCollectorImage: "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+
+# For OTEL Operator
 otelConfiguration:
   serviceAccountName: "otel-collector"
+
+metrics:
+  enabled: true
+  metricsCollectorEndpoint: "http://otel-collector:4317"
+  env: []
+  collectorResources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  serviceMonitor:
+    enabled: true
   collectorConfig: |
     receivers:
       otlp:
@@ -193,10 +235,6 @@ otelConfiguration:
         send_timestamps: true
         metric_expiration: 5m
         enable_open_metrics: true
-      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
-        endpoint: jaeger-collector:4317
-        tls:
-          insecure: true
     service:
       telemetry:
         logs:
@@ -207,14 +245,69 @@ otelConfiguration:
           receivers: [ otlp, prometheus ]
           processors: [ batch ]
           exporters: [ prometheus ]
-        traces:
-          receivers: [ otlp ]
-          processors: [ batch ]
-          exporters: [ otlp/jaeger ]
         logs:
           receivers: [ otlp ]
           processors:
           exporters: [ debug ]
+
+tracing:
+  enabled: false
+  backend: jaeger
+  samplingPercentage: "10"
+  traceCollectorEndpoint: "http://otel-trace-collector:4317"
+  jaegerEndpoint: "jaeger-collector:4317"
+  env: []
+  collectorResources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  collectorConfig: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      probabilistic_sampler/traces:
+        sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE}
+      batch:
+        timeout: 10s
+        send_batch_size: 8192
+        send_batch_max_size: 10000
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    exporters:
+    {{ if eq .Values.tracing.backend "jaeger" }}
+      otlp/jaeger:
+        endpoint: {{ .Values.tracing.jaegerEndpoint | quote }}
+        tls:
+          insecure: true
+    {{ else if eq .Values.tracing.backend "xray" }}
+      awsxray:
+        index_all_attributes: true
+    {{ else }}
+      debug:
+        verbosity: detailed
+    {{ end }}
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [probabilistic_sampler/traces, batch]
+    {{ if eq .Values.tracing.backend "jaeger" }}
+          exporters: [otlp/jaeger]
+    {{ else if eq .Values.tracing.backend "xray" }}
+          exporters: [awsxray]
+    {{ else }}
+          exporters: [debug]
+    {{ end }}
 
 # AWS Private CA configuration for TLS certificate issuance
 awsPrivateCA:
@@ -234,18 +327,62 @@ charts:
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
-    waitForInstallation: true
     values:
       crds:
         enabled: true
+      replicaCount: 2
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
+      # Soft anti-affinity so the 2 replicas + PDB above can actually keep at
+      # least one ready endpoint across node loss. Without this both replicas
+      # may land on one node, defeating the HA budget.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: cert-manager
+                    app.kubernetes.io/component: controller
+                topologyKey: kubernetes.io/hostname
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits:   { cpu: 250m, memory: 128Mi }
       cainjector:
+        replicaCount: 2
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: cert-manager
+                      app.kubernetes.io/component: cainjector
+                  topologyKey: kubernetes.io/hostname
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 250m, memory: 128Mi }
       webhook:
+        replicaCount: 2
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: cert-manager
+                      app.kubernetes.io/component: webhook
+                  topologyKey: kubernetes.io/hostname
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 100m, memory: 128Mi }
@@ -272,7 +409,6 @@ charts:
   ack-cloudwatch-controller:
     version: "1.4.2"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
-    waitForInstallation: true
     deletionPolicy: delete
     values:
       serviceAccount:
@@ -708,6 +844,8 @@ charts:
 #          label: grafana_dashboard
 
   jaeger:
+    # Jaeger is optional and memory storage defaults to an unbounded trace count.
+    # Keep installs bounded so trace collection cannot consume a whole node.
     version: "3.2.0"
     repository: "https://jaegertracing.github.io/helm-charts"
     values:
@@ -715,6 +853,21 @@ charts:
         cassandra: false
       allInOne:
         enabled: true
+        args:
+          - "--memory.max-traces"
+          - "5000"
+        extraEnv:
+          - name: GOMEMLIMIT
+            value: "384MiB"
+          - name: GOGC
+            value: "80"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 450Mi
       storage:
         type: memory
       agent:

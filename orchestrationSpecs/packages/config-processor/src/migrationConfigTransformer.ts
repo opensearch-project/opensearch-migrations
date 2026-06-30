@@ -2,25 +2,28 @@ import {
     ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
-    DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
-    S3_REPO_CONFIG,
+    REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
-    TRANSFORMS_SOURCE,
+    ARGO_PROXY_OPTIONS,
     TRANSFORM_PIPELINE,
+    TRANSFORM_CONTEXT_VALUE,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
+import {FileSourceRegistry} from "./fileSourceUtils";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -49,10 +52,12 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 }
 
 async function rewriteRepoEndpointIfLocalStack(
-    snapshotRepo: z.infer<typeof S3_REPO_CONFIG>,
+    snapshotRepo: z.infer<typeof REPO_CONFIG>,
     repoName: string
-): Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
+): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
+    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
+    // for gs:// URIs and the resulting useLocalStack stays false.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -223,111 +228,222 @@ function defaultProxyTlsConfig(proxyName: string) {
     };
 }
 
-type TransformSourceMap = Record<string, z.infer<typeof TRANSFORMS_SOURCE>>;
 type TransformPipeline = z.infer<typeof TRANSFORM_PIPELINE>;
-type TransformKind = "metadata" | "document" | "request" | "tuple";
+type TransformContextValue = z.infer<typeof TRANSFORM_CONTEXT_VALUE>;
 
-const TRANSFORMS_MOUNT_PATH = "/transforms";
 const PROVIDER_BY_LANGUAGE = {
     javascript: "JsonJSTransformerProvider",
     python: "JsonPythonTransformerProvider",
 } as const;
 
-function resolveTransformsSource(
-    sourceName: string | undefined,
-    transformSources: TransformSourceMap
-) {
-    if (!sourceName) {
-        return {};
-    }
-
-    const source = transformSources[sourceName];
-    if (!source) {
-        throw new Error(`Transforms source '${sourceName}' not found in transformsSources`);
-    }
-
-    if ("image" in source) {
-        return {transformsImage: source.image};
-    }
-    return {transformsConfigMap: source.configMap};
-}
-
-function defaultTransformFile(kind: TransformKind, language: TransformPipeline[number]["language"]) {
-    const extension = language === "javascript" ? "js" : "py";
-    return `${kind}.${extension}`;
-}
-
-function mountedTransformPath(relativeFile: string) {
-    return `${TRANSFORMS_MOUNT_PATH}/${relativeFile}`;
-}
+const CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM";
 
 function lowerTransformPipeline(
     pipeline: TransformPipeline | undefined,
-    kind: TransformKind
+    fileSourceRegistry: FileSourceRegistry
 ) {
     if (pipeline === undefined || pipeline.length === 0) {
         return undefined;
     }
 
     return JSON.stringify(pipeline.map(transform => {
-        const providerName = PROVIDER_BY_LANGUAGE[transform.language];
-        const relativeFile = transform.file ?? defaultTransformFile(kind, transform.language);
+        const lowered = lowerTransformSpec(transform, fileSourceRegistry);
         return {
-            [providerName]: {
-                initializationScriptFile: mountedTransformPath(relativeFile),
-                bindingsObject: JSON.stringify(transform.bindingsObject ?? {}),
-            }
+            [lowered.providerName]: lowered.config
         };
     }));
 }
 
+function lowerTransformSpec(
+    transform: TransformPipeline[number],
+    fileSourceRegistry: FileSourceRegistry
+): {providerName: string; config: unknown} {
+    if (transform.transformName !== undefined) {
+        return {
+            providerName: transform.transformName,
+            config: lowerNamedTransformContext(transform.context, fileSourceRegistry)
+        };
+    }
+
+    if (transform.entryPoint === undefined) {
+        throw new Error("Transform spec is missing entryPoint or transformName after schema validation.");
+    }
+
+    const entryPoint = transform.entryPoint;
+    const scriptConfig: Record<string, unknown> =
+        "javascript" in entryPoint ? {
+            initializationScript: entryPoint.javascript
+        } :
+        "javascriptFile" in entryPoint ? {
+            initializationScriptFile: fileSourceRegistry.resolveFileRef(entryPoint.javascriptFile)
+        } :
+        "python" in entryPoint ? {
+            initializationScript: entryPoint.python
+        } : {
+            initializationScriptFile: fileSourceRegistry.resolveFileRef(entryPoint.pythonFile)
+        };
+
+    lowerScriptTransformContext(scriptConfig, transform.context, fileSourceRegistry);
+
+    return {
+        providerName: "javascript" in entryPoint || "javascriptFile" in entryPoint
+            ? PROVIDER_BY_LANGUAGE.javascript
+            : PROVIDER_BY_LANGUAGE.python,
+        config: scriptConfig
+    };
+}
+
+function lowerNamedTransformContext(
+    context: TransformPipeline[number]["context"],
+    fileSourceRegistry: FileSourceRegistry
+) {
+    if (context === undefined) {
+        return {};
+    }
+    if (typeof context === "string") {
+        return context;
+    }
+
+    const config: Record<string, unknown> = {};
+    const dirs = context.valueDirectories?.map(directory => ({
+        path: fileSourceRegistry.resolveDirectory(directory)
+    })) ?? [];
+    if (dirs.length > 0) {
+        config.providerConfigDirs = dirs;
+    }
+
+    const providerConfigFiles = lowerFileBackedContextValues(context.values ?? {}, fileSourceRegistry);
+    if (Object.keys(providerConfigFiles.files).length > 0) {
+        config.providerConfigFiles = providerConfigFiles.files;
+    }
+    Object.assign(config, providerConfigFiles.literalValues);
+    return config;
+}
+
+function lowerScriptTransformContext(
+    scriptConfig: Record<string, unknown>,
+    context: TransformPipeline[number]["context"],
+    fileSourceRegistry: FileSourceRegistry
+) {
+    if (context === undefined) {
+        return;
+    }
+    if (typeof context === "string") {
+        scriptConfig.bindingsObject = JSON.stringify(context);
+        return;
+    }
+
+    const dirs = context.valueDirectories?.map(directory => ({
+        path: fileSourceRegistry.resolveDirectory(directory)
+    })) ?? [];
+    if (dirs.length > 0) {
+        scriptConfig.bindingsObjectDirs = dirs;
+    }
+
+    const loweredValues = lowerFileBackedContextValues(context.values ?? {}, fileSourceRegistry);
+    if (Object.keys(loweredValues.files).length > 0) {
+        scriptConfig.bindingsObjectFiles = loweredValues.files;
+    }
+    if (Object.keys(loweredValues.literalValues).length > 0) {
+        scriptConfig.bindingsObject = loweredValues.literalValues;
+    }
+}
+
+function lowerFileBackedContextValues(
+    values: Record<string, TransformContextValue>,
+    fileSourceRegistry: FileSourceRegistry
+) {
+    const files: Record<string, {path: string}> = {};
+    const literalValues: Record<string, unknown> = {};
+    for (const [key, contextValue] of Object.entries(values)) {
+        if ("value" in contextValue) {
+            literalValues[key] = contextValue.value;
+        } else {
+            files[key] = {
+                path: fileSourceRegistry.resolveFileRef(contextValue.fromFile)
+            };
+        }
+    }
+    return {files, literalValues};
+}
+
 function prepareMetadataConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
-    transformSources: TransformSourceMap
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"]
 ) {
     if (config === undefined) {
         return undefined;
     }
 
-    const {transformsSource, metadataTransforms, ...rest} = config;
-    const generatedConfig = lowerTransformPipeline(metadataTransforms, "metadata");
+    const {metadataTransforms, ...rest} = config;
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
 
 function prepareDocumentBackfillConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
-    transformSources: TransformSourceMap
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"]
 ) {
     if (config === undefined) {
         return undefined;
     }
 
-    const {transformsSource, documentTransforms, ...rest} = config;
-    const generatedConfig = lowerTransformPipeline(documentTransforms, "document");
+    const {documentTransforms, ...rest} = config;
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
 }
 
 function prepareReplayerConfig(
-    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined,
-    transformSources: TransformSourceMap
+    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
-    const {transformsSource, requestTransforms, tupleTransforms, ...rest} = config ?? {};
-    const generatedRequestConfig = lowerTransformPipeline(requestTransforms, "request");
-    const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, "tuple");
+    const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
+    const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, fileSourceRegistry);
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedRequestConfig === undefined ? {} : {transformerConfig: generatedRequestConfig}),
         ...(generatedTupleConfig === undefined ? {} : {tupleTransformerConfig: generatedTupleConfig}),
+    });
+}
+
+function prepareProxyConfig(
+    config: z.infer<typeof CAPTURE_CONFIG>["proxyConfig"]
+) {
+    const fileSourceRegistry = new FileSourceRegistry();
+    const tls = config.tls;
+
+    if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
+        const {clientAuth} = tls;
+        const trustCertConfig = clientAuth.trustedClientCaFile !== undefined
+            ? {
+                sslTrustCertFile: fileSourceRegistry.resolveFileRef(clientAuth.trustedClientCaFile)
+            }
+            : {
+                sslTrustCertPem: clientAuth.trustedClientCaPem,
+                sslTrustCertPemEnvVar: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR
+            };
+        return ARGO_PROXY_OPTIONS.parse({
+            ...config,
+            ...trustCertConfig,
+            requireClientAuth: clientAuth.required ?? true,
+            ...fileSourceRegistry.resolvedFields,
+        });
+    }
+
+    return ARGO_PROXY_OPTIONS.parse({
+        ...config,
+        ...fileSourceRegistry.resolvedFields,
     });
 }
 
@@ -368,9 +484,21 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
         normalizedProxies[key] = normalized;
     }
 
+    const normalizedS3Sources: NonNullable<InputConfig["traffic"]>["s3Sources"] = {};
+    for (const [key, s3] of Object.entries(traffic.s3Sources ?? {})) {
+        // Same sentinel-placeholder strip as proxies — empty-string kafkaTopic
+        // means "default to the source name", and the unified schema rejects
+        // empty strings for that field.
+        const normalized = s3.kafkaTopic === ""
+            ? (({kafkaTopic, ...rest}) => rest)(s3)
+            : s3;
+        normalizedS3Sources[key] = normalized;
+    }
+
     return {
         ...traffic,
         proxies: normalizedProxies,
+        s3Sources: normalizedS3Sources,
     };
 }
 
@@ -389,7 +517,10 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
 }
 
 /** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
-function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
+function resolveKafkaClusters(userConfig: {
+    kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>,
+    traffic?: { proxies?: Record<string, { kafka?: string }>, s3Sources?: Record<string, { kafka?: string }> }
+}) {
     const explicit = userConfig.kafkaClusterConfiguration ?? {};
     if (Object.keys(explicit).length > 0) {
         return explicit;
@@ -397,6 +528,12 @@ function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<s
     const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
     for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
         const key = proxy.kafka ?? "default";
+        if (!(key in clusters)) {
+            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
+        }
+    }
+    for (const s3 of Object.values(userConfig.traffic?.s3Sources || {})) {
+        const key = s3.kafka ?? "default";
         if (!(key in clusters)) {
             clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
         }
@@ -503,6 +640,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
+        const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
@@ -526,6 +664,23 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
 
+        const s3LoadersWithChecksums = s3TrafficLoaders.map(s => {
+            const kafkaCs = kafkaChecksums.get(s.kafkaConfig.label) ?? '';
+            // Replayer & topic checksums are derived from the loader's identity:
+            // s3Uri + topic + kafka cluster. Editing the URI would force a reset
+            // of the CapturedTraffic resource (VAP-protected); the resulting
+            // checksum change is what flags the replayer to re-evaluate.
+            const checksum = cs(s.s3Uri, s.kafkaConfig.kafkaTopic, kafkaCs);
+            return {
+                ...s,
+                kafkaConfig: { ...s.kafkaConfig, configChecksum: kafkaCs },
+                topicConfigChecksum: cs(s.kafkaConfig.kafkaTopic, s.kafkaConfig.topicSpecOverrides, kafkaCs),
+                checksumForReplayer: checksum,
+                configChecksum: checksum,
+            };
+        });
+        const s3LoaderChecksumForReplayer = new Map(s3LoadersWithChecksums.map(s => [s.name, s.checksumForReplayer]));
+
         const snapshotsWithChecksums = snapshots.map(s => ({
             ...s,
             createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
@@ -533,10 +688,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...dep,
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
+                const sourceConnectionIdentity =
+                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
-                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                    configChecksum: cs(
+                        sourceConnectionIdentity,
+                        item.config,
+                        item.repo,
+                        ...enrichedDeps.map(d => d.configChecksum)
+                    ),
                 };
             }),
         }));
@@ -548,53 +710,92 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
+            const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
+            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                label: m.sourceLabel,
+                version: m.sourceVersion,
+                endpoint: m.sourceEndpoint,
+                allowInsecure: m.sourceAllowInsecure,
+                authConfig: m.sourceAuth,
+            });
+            const targetConnectionIdentity =
+                MigrationConfigTransformer.clusterConnectionIdentity(m.targetConfig as Record<string, unknown>);
             const replayerMaterialPart = m.documentBackfillConfig
                 ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
                 : '';
+            const workloadIdentityMaterialPart = m.documentBackfillConfig
+                ? MigrationConfigTransformer.checksumForChangeRestriction(
+                    RFS_SCHEMA,
+                    m.documentBackfillConfig as Record<string, unknown>,
+                    'impossible'
+                )
+                : '';
             return {
                 ...m,
-                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                snapshotConfigChecksum,
+                resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
+                    sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
                     m.documentBackfillConfig ?? {},
                     m.targetConfig,
-                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                    snapshotConfigChecksum,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig
                 ),
                 checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+                workloadIdentityChecksum: cs(
+                    sourceConnectionIdentity,
+                    targetConnectionIdentity,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig,
+                    snapshotConfigChecksum,
+                    m.migrationLabel,
+                    workloadIdentityMaterialPart
+                ),
             };
         });
 
-        const replaysWithChecksums = trafficReplays.map(r => ({
-            ...r,
-            dependsOn: [
-                r.fromProxy,
-                ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+        const replaysWithChecksums = trafficReplays.map(r => {
+            // Resolve the upstream checksum from either the proxy or the s3 loader.
+            // (One and only one will exist; super-refine guarantees no name collisions.)
+            const fromCapturedTrafficChecksum =
+                proxyChecksumForReplayer.get(r.fromCapturedTraffic) ??
+                s3LoaderChecksumForReplayer.get(r.fromCapturedTraffic) ??
+                '';
+            return ({
+                ...r,
+                dependsOn: [
+                    r.fromCapturedTraffic,
+                    ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                        migrationsWithChecksums
+                            .filter(m =>
+                                m.sourceLabel === dep.source &&
+                                m.targetConfig.label === r.toTarget.label &&
+                                m.label === dep.snapshot
+                            )
+                            .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
+                    ))
+                ],
+                kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
+                fromCapturedTrafficConfigChecksum: fromCapturedTrafficChecksum,
+                configChecksum: cs(r.replayerConfig, r.toTarget, fromCapturedTrafficChecksum),
+                dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
                     migrationsWithChecksums
                         .filter(m =>
                             m.sourceLabel === dep.source &&
                             m.targetConfig.label === r.toTarget.label &&
                             m.label === dep.snapshot
                         )
-                        .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
-                ))
-            ],
-            kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
-            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
-            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
-            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                migrationsWithChecksums
-                    .filter(m =>
-                        m.sourceLabel === dep.source &&
-                        m.targetConfig.label === r.toTarget.label &&
-                        m.label === dep.snapshot
-                    )
-                    .map(m => ({
-                        ...dep,
-                        migrationLabel: m.migrationLabel,
-                        configChecksum: m.checksumForReplayer,
-                    }))
-            ),
-        }));
+                        .map(m => ({
+                            ...dep,
+                            migrationLabel: m.migrationLabel,
+                            configChecksum: m.checksumForReplayer,
+                            resourceName: m.resourceName,
+                        }))
+                ),
+            });
+        });
 
         const kafkasWithChecksums = kafkaClusters.map(k => ({
             ...k,
@@ -604,6 +805,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const output = {
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
+            ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
             ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
             ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
             ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
@@ -617,15 +819,20 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
     }
 
-    /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
+    /** Collect auto-created kafka clusters with their aggregated topics from proxies and s3Sources. */
     private buildKafkaClusters(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        // Aggregate topics per kafka cluster from proxies
+        // Aggregate topics per kafka cluster from proxies AND s3Sources
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const clusterKey = proxy.kafka ?? "default";
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
+        }
+        for (const [s3Name, s3] of Object.entries(userConfig.traffic?.s3Sources || {})) {
+            const clusterKey = s3.kafka ?? "default";
+            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
+            topicsByCluster.get(clusterKey)!.add(s3.kafkaTopic || s3Name);
         }
 
         return Object.entries(kafkaClusters)
@@ -654,7 +861,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
-                proxyConfig: proxy.proxyConfig
+                proxyConfig: prepareProxyConfig(proxy.proxyConfig)
             };
         });
     }
@@ -795,12 +1002,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 for (const migration of autoLabelMigrations(migrations)) {
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        migration.metadataMigrationConfig,
-                        userConfig.transformsSources ?? {}
+                        migration.metadataMigrationConfig
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        migration.documentBackfillConfig,
-                        userConfig.transformsSources ?? {}
+                        migration.documentBackfillConfig
                     );
                     results.push({
                         label: snapshotName,
@@ -811,6 +1016,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         documentBackfillConfig,
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
+                        ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
+                        ...(sourceCluster.allowInsecure !== undefined ? {sourceAllowInsecure: sourceCluster.allowInsecure} : {}),
+                        ...(sourceCluster.authConfig ? {sourceAuth: sourceCluster.authConfig} : {}),
                         targetConfig: { ...targetCluster, label: toTarget },
                         snapshotConfig: {
                             label: snapshotName,
@@ -828,15 +1036,21 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return results;
     }
 
-    /** Build traffic replay configs by resolving proxy → kafka chain. */
+    /** Build traffic replay configs by resolving captured-traffic source → kafka chain.
+     * The source can be either a live capture proxy or a one-time S3 load — both
+     * appear identical to the replayer (kafka cluster + topic). */
     private buildTrafficReplays(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        const proxies = userConfig.traffic?.proxies;
+        const proxies = userConfig.traffic?.proxies ?? {};
+        const s3Sources = userConfig.traffic?.s3Sources ?? {};
 
         return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
-            const proxy = proxies?.[replayer.fromProxy];
-            if (!proxy) {
-                throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
+            const sourceName = replayer.fromCapturedTraffic;
+            const proxy = proxies[sourceName];
+            const s3Source = s3Sources[sourceName];
+
+            if (!proxy && !s3Source) {
+                throw new Error(`Replayer references unknown captured-traffic source '${sourceName}'`);
             }
 
             const targetCluster = userConfig.targetClusters[replayer.toTarget];
@@ -844,21 +1058,46 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Replayer references unknown target cluster '${replayer.toTarget}'`);
             }
 
-            const topic = proxy.kafkaTopic || replayer.fromProxy;
+            // proxy and s3Source share the same shape for what the replayer cares about:
+            // a kafka cluster reference, a topic name, and a sourceLabel.
+            const kafkaCluster = (proxy?.kafka ?? s3Source?.kafka) ?? "default";
+            const topicOverride = proxy?.kafkaTopic ?? s3Source?.kafkaTopic ?? "";
+            const topic = topicOverride || sourceName;
+            const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
+
             const replayerConfig = prepareReplayerConfig(
-                replayer.replayerConfig,
-                userConfig.transformsSources ?? {}
+                replayer.replayerConfig
             );
 
             return {
-                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
-                sourceLabel: proxy.source,
-                fromProxy: replayer.fromProxy,
-                kafkaClusterName: proxy.kafka ?? "default",
-                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                name: [sourceName, replayer.toTarget, name].join('-'),
+                sourceLabel,
+                fromCapturedTraffic: sourceName,
+                fromCapturedTrafficSourceKind: proxy ? "proxy" : "s3",
+                kafkaClusterName: kafkaCluster,
+                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
+            };
+        });
+    }
+
+    /** Build one denormalized loader entry per traffic.s3Sources item. */
+    private buildS3TrafficLoaders(userConfig: NormalizedUserConfig) {
+        const kafkaClusters = resolveKafkaClusters(userConfig);
+        const s3Sources = userConfig.traffic?.s3Sources ?? {};
+        return Object.entries(s3Sources).map(([name, s3]) => {
+            const kafkaCluster = s3.kafka ?? "default";
+            const topic = s3.kafkaTopic || name;
+            return {
+                name,
+                sourceLabel: s3.sourceLabel,
+                s3Uri: s3.s3Uri,
+                awsRegion: s3.awsRegion,
+                ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
+                kafkaClusterName: kafkaCluster,
+                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
             };
         });
     }
@@ -894,6 +1133,37 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
         }
         return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    /**
+     * Pick only fields whose schema annotation matches a change restriction.
+     * Used for stable workload identity, where gated fields must not create
+     * parallel Kubernetes workloads.
+     */
+    static checksumForChangeRestriction(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        restriction: NonNullable<FieldMeta["changeRestriction"]>,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.changeRestriction === restriction) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            label: clusterConfig.label,
+            version: clusterConfig.version,
+            endpoint: clusterConfig.endpoint ?? "",
+            allowInsecure: clusterConfig.allowInsecure ?? false,
+            authConfig: clusterConfig.authConfig ?? {},
+        };
     }
 
     static configChecksum(...parts: unknown[]): string {

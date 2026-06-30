@@ -19,15 +19,21 @@ import uuid
 
 import requests
 
-from ..cluster_version import SolrV8_X, OpensearchV2_X, OpensearchV3_X
+from ..cluster_version import SolrV8_X, OpensearchV2_X, OpensearchV3_X, SolrV7_X, SolrV9_X, SolrV6_X
 from ..common_utils import execute_api_call
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
 
 SOLR_ALLOW_COMBINATIONS = [
+    (SolrV9_X, OpensearchV2_X),
+    (SolrV9_X, OpensearchV3_X),
     (SolrV8_X, OpensearchV2_X),
     (SolrV8_X, OpensearchV3_X),
+    (SolrV7_X, OpensearchV2_X),
+    (SolrV7_X, OpensearchV3_X),
+    (SolrV6_X, OpensearchV2_X),
+    (SolrV6_X, OpensearchV3_X)
 ]
 
 

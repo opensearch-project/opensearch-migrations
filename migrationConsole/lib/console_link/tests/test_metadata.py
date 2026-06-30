@@ -5,7 +5,7 @@ import subprocess
 
 from console_link.models.cluster import AuthMethod
 from console_link.models.metadata import generate_tmp_dir, MAX_FILENAME_LEN, Metadata
-from console_link.models.snapshot import FileSystemSnapshot, S3Snapshot
+from console_link.models.snapshot import FileSystemSnapshot, GcsSnapshot, S3Snapshot
 from tests.utils import create_valid_cluster
 
 MOCK_SOURCE_VERSION = "ES_5.6"
@@ -21,6 +21,17 @@ def s3_snapshot():
         }
     }
     return S3Snapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+
+@pytest.fixture()
+def gcs_snapshot():
+    snapshot_config = {
+        "snapshot_name": "reindex_from_snapshot",
+        "gcs": {
+            "repo_uri": "gs://my-bucket/path",
+        }
+    }
+    return GcsSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
 
 
 @pytest.fixture()
@@ -231,7 +242,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
                 "aws_region": "us-east-1"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
@@ -243,13 +255,14 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
@@ -265,7 +278,8 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
@@ -277,12 +291,13 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -312,7 +327,7 @@ def test_metadata_with_cluster_awareness_attributes_makes_correct_subprocess_cal
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", "2",
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
@@ -327,7 +342,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
         "index_allowlist": ["index1", "index2"],
         "index_template_allowlist": ["index_template1", "index_template2"],
         "component_template_allowlist": ["component_template1", "component_template2"]
@@ -342,12 +358,13 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
@@ -383,8 +400,8 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-username", auth_details.username,
         "--target-password", auth_details.password,
@@ -422,8 +439,8 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-aws-service-signing-name", service_name,
         "--target-aws-region", signing_region,
@@ -461,8 +478,8 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         '--target-host', 'https://opensearchtarget:9200',
         '--cluster-awareness-attributes', '0',
-        "--s3-local-dir", mocker.ANY,
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", mocker.ANY,
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         '--target-username', 'admin',
         '--target-password', 'myStrongPassword123!',
@@ -472,6 +489,178 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         '--flag',
         '--bar', 'baz'
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
+def test_metadata_init_with_fully_specified_gcs_config_succeeds():
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/gcs",
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._config == config
+    assert metadata._snapshot_location == "gcs"
+    assert metadata._gcs_uri == "gs://my-bucket/path"
+
+
+def test_metadata_init_with_minimal_gcs_config_succeeds():
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._snapshot_location == "gcs"
+    assert metadata._gcs_uri == "gs://my-bucket/path"
+
+
+def test_metadata_init_with_partial_gcs_config_fails():
+    config = {
+        "from_snapshot": {
+            "gcs": {
+                "region": "us-central1"
+            },
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert 'snapshot_name' in excinfo.value.args[0]['from_snapshot'][0]
+    assert 'repo_uri' in excinfo.value.args[0]['from_snapshot'][0]['gcs'][0]
+
+
+def test_metadata_init_with_gcs_external_snapshot_succeeds(gcs_snapshot):
+    config = {
+        "from_snapshot": None,
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION),
+                        gcs_snapshot)
+    assert metadata._snapshot_location == "gcs"
+    assert metadata._snapshot_name == gcs_snapshot.snapshot_name
+    assert metadata._gcs_uri == gcs_snapshot.gcs_repo_uri
+
+
+def test_metadata_with_gcs_snapshot_makes_correct_subprocess_call(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/gcs",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+            },
+        },
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once_with([
+        "/root/metadataMigration/bin/MetadataMigration",
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
+        "migrate",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        "--target-host", target.endpoint,
+        "--cluster-awareness-attributes", '0',
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["gcs"]["repo_uri"],
+        "--target-insecure",
+        "--source-version", MOCK_SOURCE_VERSION,
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+    )
+
+
+def test_metadata_with_minimal_gcs_snapshot_omits_optional_flags(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+            },
+        },
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_args = mock.call_args.args[0]
+    assert "--repo-uri" in actual_args
+    assert "gs://my-bucket/path" in actual_args
+    assert "--gcs-region" not in actual_args
+    assert "--gcs-endpoint" not in actual_args
+
+
+def test_metadata_init_with_gcs_endpoint_in_config_stores_endpoint():
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+                "endpoint": "http://fake-gcs-server:4443",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._gcs_uri == "gs://my-bucket/path"
+    assert metadata._gcs_endpoint == "http://fake-gcs-server:4443"
+
+
+def test_metadata_init_with_gcs_external_snapshot_preserves_endpoint():
+    snapshot_config = {
+        "snapshot_name": "reindex_from_snapshot",
+        "gcs": {
+            "repo_uri": "gs://my-bucket/path",
+            "endpoint": "http://fake-gcs-server:4443",
+        },
+    }
+    snapshot = GcsSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    config = {"from_snapshot": None}
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), snapshot)
+    assert metadata._gcs_uri == snapshot.gcs_repo_uri
+    assert metadata._gcs_endpoint == "http://fake-gcs-server:4443"
+
+
+def test_metadata_with_gcs_snapshot_and_endpoint_passes_endpoint_flag(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/gcs",
+            "gcs": {
+                "repo_uri": "gs://my-bucket/path",
+                "endpoint": "http://fake-gcs-server:4443",
+            },
+        },
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_args = mock.call_args.args[0]
+    assert "--endpoint" in actual_args
+    endpoint_idx = actual_args.index("--endpoint")
+    assert actual_args[endpoint_idx + 1] == "http://fake-gcs-server:4443"
 
 
 def test_generate_tmp_dir_truncates_long_name():
