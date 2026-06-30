@@ -39,7 +39,6 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
-import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
@@ -1158,24 +1157,29 @@ public class RfsMigrateDocuments {
                 );
             }
 
-            var discovery = SolrBackupDiscovery.discover(
-                s3Repo, backupDir, arguments.solrCollectionName, arguments.indexAllowlist);
-            var schemas = discovery.schemas();
-            var dataDirByCollection = discovery.dataDirByCollection();
-
-            Consumer<String> collectionPreparer = discovery::prepareCollection;
-            Consumer<SolrShardPartition> shardPreparer = discovery.shardPreparationNeeded()
-                ? discovery::prepareShard : null;
-
-            var solrMajor = arguments.sourceVersion.getMajor();
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, dataDirByCollection);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
+            var documentSource = buildSolrDocumentSource(arguments, backupDir, s3Repo);
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
                 useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context);
         };
+    }
+
+    static SolrMultiCollectionSource buildSolrDocumentSource(Args arguments, Path backupDir, S3Repo s3Repo)
+        throws IOException {
+        var discovery = SolrBackupDiscovery.discover(
+            s3Repo, backupDir, arguments.solrCollectionName, arguments.indexAllowlist);
+        var schemas = discovery.schemas();
+        var dataDirByCollection = discovery.dataDirByCollection();
+
+        Consumer<String> collectionPreparer = discovery::prepareCollection;
+        Consumer<SolrShardPartition> shardPreparer = discovery.shardPreparationNeeded()
+            ? discovery::prepareShard : null;
+
+        var solrMajor = arguments.sourceVersion.getMajor();
+        return new SolrMultiCollectionSource(
+            backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
     }
 
     /**
