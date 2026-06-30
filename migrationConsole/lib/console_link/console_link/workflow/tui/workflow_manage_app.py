@@ -154,6 +154,10 @@ class WorkflowTreeApp(App):
         self._edit_validation_delay = 0.4
         self._mouse_input_enabled = True
         self._mouse_pixels_was_enabled = False
+        self._last_pod_status_text: Optional[str] = None
+        self._last_binding_signature: Optional[tuple] = None
+        self._managed_output_ref_cache: Dict[str, list[tuple[str, str]]] = {}
+        self._workflow_output_refs_by_resource: Optional[Dict[str, list[tuple[str, str]]]] = None
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
@@ -301,6 +305,7 @@ class WorkflowTreeApp(App):
         is_restart = self.current_run_id != new_run_id
         self._last_resource_sections = sections
         self._last_resource_workflow_data = workflow_data
+        self._clear_managed_output_ref_caches()
         self._resource_change_summary = resource_config_change_summary(sections)
         if hasattr(self._tree_state, "set_config_value_mode"):
             self._tree_state.set_config_value_mode(self._resource_value_mode)
@@ -338,6 +343,7 @@ class WorkflowTreeApp(App):
 
         new_run_id = new_data.get('status', {}).get('startedAt')
         is_restart = self.current_run_id != new_run_id
+        self._clear_managed_output_ref_caches()
 
         if is_restart:
             self.current_run_id = new_run_id
@@ -449,15 +455,28 @@ class WorkflowTreeApp(App):
         if not tree_node:
             logger.info("Show output requested with no selected tree node")
             return []
+        refs = self._managed_output_refs_for_tree_node(tree_node, log=True)
+        logger.info("Collected %s managed output ref(s)", len(refs))
+        return refs
 
+    def _has_managed_output_refs(self, tree_node) -> bool:
+        return bool(self._managed_output_refs_for_tree_node(tree_node, log=False))
+
+    def _managed_output_refs_for_tree_node(self, tree_node, log: bool = False):
+        if not tree_node:
+            return []
+        cache_key = self._managed_output_ref_cache_key(tree_node)
+        if cache_key in self._managed_output_ref_cache:
+            return self._managed_output_ref_cache[cache_key]
         selected_data = tree_node.data or {}
-        logger.info(
-            "Collecting managed output refs from selected node id=%s name=%s type=%s phase=%s",
-            selected_data.get('id'),
-            selected_data.get('display_name') or selected_data.get('displayName'),
-            selected_data.get('type'),
-            selected_data.get('phase'),
-        )
+        if log:
+            logger.info(
+                "Collecting managed output refs from selected node id=%s name=%s type=%s phase=%s",
+                selected_data.get('id'),
+                selected_data.get('display_name') or selected_data.get('displayName'),
+                selected_data.get('type'),
+                selected_data.get('phase'),
+            )
 
         refs = []
         stack = [tree_node]
@@ -472,15 +491,16 @@ class WorkflowTreeApp(App):
                 resource_name = self._input_parameter(data, 'resourceName')
                 if resource_name:
                     resource_path = resource_display_name(plural, resource_name)
-                    logger.info(
-                        "Found managed output ref patch_step=%s node_id=%s resource=%s output=%s",
-                        step_name,
-                        data.get('id'),
-                        resource_path,
-                        output_name,
-                    )
+                    if log:
+                        logger.info(
+                            "Found managed output ref patch_step=%s node_id=%s resource=%s output=%s",
+                            step_name,
+                            data.get('id'),
+                            resource_path,
+                            output_name,
+                        )
                     refs.append((resource_path, output_name))
-                else:
+                elif log:
                     logger.warning(
                         "Managed output patch step %s node_id=%s had no resourceName input",
                         step_name,
@@ -492,15 +512,32 @@ class WorkflowTreeApp(App):
         if not refs and selected_data.get('id', '').startswith(RESOURCE_ID_PREFIX):
             resource_name = selected_data.get('id', '').removeprefix(RESOURCE_ID_PREFIX)
             refs = self._find_output_refs_in_workflow_data(resource_name)
-        logger.info("Collected %s managed output ref(s)", len(refs))
+        self._managed_output_ref_cache[cache_key] = refs
         return refs
+
+    @staticmethod
+    def _managed_output_ref_cache_key(tree_node) -> str:
+        data = tree_node.data or {}
+        node_id = data.get("id")
+        return str(node_id) if node_id else f"tree:{id(tree_node)}"
+
+    def _clear_managed_output_ref_caches(self) -> None:
+        self._managed_output_ref_cache.clear()
+        self._workflow_output_refs_by_resource = None
+        self._last_binding_signature = None
 
     def _find_output_refs_in_workflow_data(self, resource_name: str):
         """Search raw workflow nodes for patch-output steps matching a resource."""
+        return list(self._workflow_output_ref_map().get(resource_name, []))
+
+    def _workflow_output_ref_map(self) -> Dict[str, list[tuple[str, str]]]:
+        if self._workflow_output_refs_by_resource is not None:
+            return self._workflow_output_refs_by_resource
         workflow_data = self._tree_state._workflow_data
         if not workflow_data:
-            return []
-        refs = []
+            self._workflow_output_refs_by_resource = {}
+            return self._workflow_output_refs_by_resource
+        refs: Dict[str, list[tuple[str, str]]] = {}
         for node in (workflow_data.get('status', {}).get('nodes', {}) or {}).values():
             display_name = node.get('displayName', '')
             step_name = display_name.split('(')[0].strip()
@@ -509,9 +546,10 @@ class WorkflowTreeApp(App):
                 continue
             plural, output_name = patch_spec
             node_resource = self._input_parameter(node, 'resourceName')
-            if node_resource == resource_name:
+            if node_resource:
                 resource_path = resource_display_name(plural, node_resource)
-                refs.append((resource_path, output_name))
+                refs.setdefault(node_resource, []).append((resource_path, output_name))
+        self._workflow_output_refs_by_resource = refs
         return refs
 
     def action_view_output(self) -> None:
@@ -652,7 +690,6 @@ class WorkflowTreeApp(App):
                 tree.focus()
 
     def update_pod_status(self) -> None:
-        status_bar = self.query_one("#pod-status", Static)
         if self._edit_mode:
             node = selected_edit_node(self.tree_root_widget)
             dirty = "dirty" if self._edit_dirty else "clean"
@@ -662,13 +699,13 @@ class WorkflowTreeApp(App):
             expert_state = "expert on" if self._edit_show_expert else "expert off"
             if node:
                 status = node.get("status", "ok")
-                status_bar.update(
+                self._set_pod_status(
                     f"Config edit: [bold cyan]{status}[/]  [{dirty}]  "
                     f"Values: {value_mode}  Status: {status_mode}  "
                     f"{optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
                 )
             else:
-                status_bar.update(
+                self._set_pod_status(
                     f"Config edit: [{dirty}]  Values: {value_mode}  "
                     f"Status: {status_mode}  {optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
                 )
@@ -677,37 +714,57 @@ class WorkflowTreeApp(App):
             summary = self._resource_change_summary
             value_mode = CONFIG_MODE_LABELS.get(self._resource_value_mode, self._resource_value_mode)
             if self._submitting_workflow:
-                status_bar.update(f"Submitting workflow...  Values: {value_mode}")
+                self._set_pod_status(f"Submitting workflow...  Values: {value_mode}")
                 return
             if summary.get('resources'):
-                status_bar.update(
+                self._set_pod_status(
                     f"Config changes: [green]{summary.get('to_submit', 0)} to submit[/], "
                     f"[grey50]{summary.get('pending', 0)} pending[/]  Values: {value_mode}"
                 )
                 return
-            status_bar.update(f"Values: {value_mode}")
+            self._set_pod_status(f"Values: {value_mode}")
             return
-        if not self.current_node_data:
-            status_bar.update("")
+        node = self.current_node_data
+        if not node:
+            self._set_pod_status("")
             return
         
-        node_type = self.current_node_data.get('type')
-        if is_approval_node(self.current_node_data):
+        node_type = node.get('type')
+        if is_approval_node(node):
             name_param = None
-            for p in self.current_node_data.get('inputs', {}).get('parameters', []):
+            for p in node.get('inputs', {}).get('parameters', []):
                 if p.get('name') in ('resourceName', 'name'):
                     name_param = p.get('value')
                     break
-            status_bar.update(f"Name: [bold cyan]{name_param}[/]" if name_param else "")
+            self._set_pod_status(f"Name: [bold cyan]{name_param}[/]" if name_param else "")
         elif node_type == NODE_TYPE_POD:
-            node_id = self.current_node_data.get('id')
+            node_id = node.get('id')
             name = self._pods.get_name(node_id) if node_id else None
-            status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
+            self._set_pod_status(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
         else:
-            status_bar.update("")
+            self._set_pod_status("")
+
+    def _set_pod_status(self, content: str) -> None:
+        if content == self._last_pod_status_text:
+            return
+        self._last_pod_status_text = content
+        self.query_one("#pod-status", Static).update(content)
 
     def _update_dynamic_bindings(self) -> None:
         """Reconfigures the Footer and keys based on the currently selected node."""
+        tree_node = self.tree_root_widget.cursor_node
+        edit_node = selected_edit_node(self.tree_root_widget) if self._edit_mode else None
+        node = edit_node if self._edit_mode else (tree_node.data if tree_node and tree_node.data else None)
+        output_available = (
+            False
+            if self._edit_mode or not node
+            else self._has_managed_output_refs(tree_node)
+        )
+        signature = self._dynamic_binding_signature(node, output_available)
+        if signature == self._last_binding_signature:
+            return
+        self._last_binding_signature = signature
+
         self._bindings = self._bindings.__class__()
 
         self.bind("ctrl+p", "command_palette", show=False)
@@ -720,7 +777,6 @@ class WorkflowTreeApp(App):
         )
 
         if self._edit_mode:
-            node = selected_edit_node(self.tree_root_widget)
             self.bind("escape", "exit_config_edit", description="Exit Edit")
             self.bind("s", "save_config_edit", description="Save")
             self.bind("ctrl+s", "save_config_edit", description="Save")
@@ -783,31 +839,59 @@ class WorkflowTreeApp(App):
             self.bind("s", "submit_workflow", description="Submit")
             self.bind("v", "cycle_resource_value_mode", description="Value Mode")
 
-        node = self.current_node_data
         if node:
-            self._bind_node_actions(node)
+            self._bind_node_actions(node, output_available)
 
         self.refresh_bindings()
 
-    def _bind_node_actions(self, node: Dict) -> None:
+    def _dynamic_binding_signature(self, node: Optional[Dict], output_available: bool) -> tuple:
+        base = (
+            self._edit_mode,
+            self._resource_view,
+            self._mouse_input_enabled,
+        )
+        if self._edit_mode:
+            return (
+                *base,
+                self._edit_show_optional,
+                self._edit_show_expert,
+                (node or {}).get("valueKind"),
+                bool((node or {}).get("command")),
+                self._is_removable_edit_node(node),
+            )
+
+        node = node or {}
+        node_id = node.get('id') or ''
+        node_type = node.get('type')
+        return (
+            *base,
+            node_id.startswith(RESOURCE_ID_PREFIX),
+            node_type,
+            node.get('phase'),
+            is_approval_node(node),
+            bool(self._pods.get_name(node_id)) if node_type == NODE_TYPE_POD else False,
+            output_available,
+        )
+
+    def _bind_node_actions(self, node: Dict, output_available: bool) -> None:
         """Bind context-sensitive keys for the selected node."""
         node_id = node.get('id') or ''
         ntype = node.get('type')
 
         if node_id.startswith(RESOURCE_ID_PREFIX):
             self.bind("l", "view_resource_logs", description="View Logs")
-            if self._collect_managed_output_refs():
+            if output_available:
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
         elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
             self.bind("l", "view_logs", description="View Logs")
-            if self._collect_managed_output_refs():
+            if output_available:
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
             if node.get('phase') == PHASE_RUNNING:
                 self.bind("f", "follow_logs", description="Follow Logs")
             self.bind("c", "copy_pod_name", description="Copy Pod Name")
         elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
             self.bind("a", "approve_step", description="Approve")
-        elif self._collect_managed_output_refs():
+        elif output_available:
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 
     def action_toggle_mouse_input(self) -> None:

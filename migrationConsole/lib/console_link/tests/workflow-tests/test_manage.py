@@ -4697,6 +4697,35 @@ async def test_show_output_falls_back_to_artifact_s3_key(mock_workflow_with_pod_
             assert mock_output_pager.call_args.kwargs == {"clean": True}
 
 
+def test_managed_output_ref_map_indexes_all_patch_steps(mock_workflow_with_pod_and_suspend):
+    workflow = copy.deepcopy(mock_workflow_with_pod_and_suspend)
+    workflow["status"]["nodes"]["node-3-patch"] = {
+        "id": "node-3-patch",
+        "displayName": "patchMetadataMigrateOutput",
+        "type": "Pod",
+        "phase": PHASE_SUCCEEDED,
+        "children": [],
+        "inputs": {"parameters": [{"name": "resourceName", "value": "migration-1"}]},
+    }
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=MagicMock(spec=ArgoService(None, None)),
+        pod_scraper=MagicMock(spec=PodScraperInterface(None, None, None)),
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+    )
+    app._tree_state._workflow_data = workflow
+
+    assert app._find_output_refs_in_workflow_data("migration-0") == [
+        ("snapshotmigration.migration-0", "metadataEvaluate")
+    ]
+    assert app._find_output_refs_in_workflow_data("migration-1") == [
+        ("snapshotmigration.migration-1", "metadataMigrate")
+    ]
+
+
 @pytest.mark.asyncio
 async def test_follow_logs_binding_responds_to_phase_changes(mock_workflow_with_two_pods):
     """Verify follow logs only works for Running pods and updates as phase changes."""

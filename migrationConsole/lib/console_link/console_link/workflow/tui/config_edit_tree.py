@@ -91,7 +91,7 @@ def update_help_panel(
 ) -> None:
     """Update the bottom help/status panel for the selected edit node."""
     if not edit_node:
-        panel.update("")
+        _update_static_if_changed(panel, "")
         return
 
     path = " > ".join(str(part) for part in edit_node.get("path", [])) or "workflow config"
@@ -103,7 +103,12 @@ def update_help_panel(
     ]
     if description:
         lines.append(description)
-    panel.update("\n".join(lines[:4]))
+    _update_static_if_changed(panel, "\n".join(lines[:4]))
+
+
+def _update_static_if_changed(panel: Static, content: str) -> None:
+    if str(getattr(panel, "content", "")) != content:
+        panel.update(content)
 
 
 def edit_state_resource_sections(
