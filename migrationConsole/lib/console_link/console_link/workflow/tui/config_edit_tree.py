@@ -396,7 +396,7 @@ def _should_render_edit_node(
     visible_children: Optional[list[Dict[str, Any]]] = None,
 ) -> bool:
     if edit_node.get("valueKind") == "command":
-        return True
+        return field_visibility == FIELD_VISIBILITY_ALL or not edit_node.get("expert")
     if len(edit_node.get("path") or []) <= 1:
         return True
     status, counts = _effective_status(edit_node, status_mode)

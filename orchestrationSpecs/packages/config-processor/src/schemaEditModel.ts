@@ -1625,7 +1625,8 @@ export function addRow(
     label: string,
     description: string,
     requiresName = true,
-    inputHint?: EditInputHint
+    inputHint?: EditInputHint,
+    expert = false,
 ): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
@@ -1633,6 +1634,7 @@ export function addRow(
         label: `+ Add ${label}`,
         valueKind: "command",
         description,
+        expert,
         inputHint,
         validation: validationFromHint(inputHint),
         command: {requiresName},

@@ -149,6 +149,7 @@ interface RecordGroupSpec {
     label: string;
     description?: string;
     inputHint?: EditInputHint;
+    expert?: boolean;
     config: Record<string, any> | undefined;
     itemNode: (name: string, value: any) => EditNode;
     addLabel: string;
@@ -167,6 +168,7 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
         spec.addDescription,
         spec.addRequiresName ?? true,
         spec.addInputHint,
+        spec.expert ?? false,
     ));
     return finalizeNode({
         id: `edit:${spec.path.join(".")}`,
@@ -174,6 +176,7 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
         label: spec.label,
         valueKind: "record",
         description: spec.description,
+        expert: spec.expert ?? false,
         inputHint: spec.inputHint,
         status: "ok",
         children,
@@ -498,13 +501,14 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 description: schemaFieldDescription(
                     TRAFFIC_CONFIG,
                     "s3Sources",
-                    "Captured traffic buffers and pre-recorded traffic archives loaded into Kafka for replay.",
+                    "Optional S3 archives loaded into Kafka for replay when you already have captured traffic and do not need a live capture proxy.",
                 ),
                 inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
+                expert: true,
                 config: traffic?.s3Sources,
                 itemNode: (name, value) => s3CapturedTrafficSourceNode(name, value, ctx),
-                addLabel: "S3 captured traffic source",
-                addDescription: "Create a pre-recorded traffic source from an S3 archive in pending workflow YAML.",
+                addLabel: "optional S3 archive source (no capture proxy)",
+                addDescription: "Create an optional pre-recorded traffic source from an S3 archive instead of configuring a live capture proxy.",
                 addInputHint: recordKeyHint(TRAFFIC_S3_SOURCES_RECORD_HINT),
             }),
             recordGroupNode({

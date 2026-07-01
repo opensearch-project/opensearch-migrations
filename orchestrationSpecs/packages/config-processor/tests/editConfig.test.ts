@@ -72,6 +72,13 @@ describe("editConfig state", () => {
             "Buffer",
             "Replay",
         ]);
+        expect(findNode(state.nodes, "edit:traffic.s3Sources")).toMatchObject({
+            expert: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.s3Sources:add")).toMatchObject({
+            expert: true,
+            label: "+ Add optional S3 archive source (no capture proxy)",
+        });
     });
 
     it("shows missing basic auth children as required on the branch and parent", () => {
@@ -556,6 +563,12 @@ describe("editConfig state", () => {
             status: "ok",
             valueDefaulted: true,
         });
+        expect(findNode(state.nodes, "edit:traffic.s3Sources")).toMatchObject({
+            expert: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.s3Sources:add")?.label).toBe(
+            "+ Add optional S3 archive source (no capture proxy)"
+        );
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.s3Sources.archive"))).toBe("archive");
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.replayers.replay"))).toBe("replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");

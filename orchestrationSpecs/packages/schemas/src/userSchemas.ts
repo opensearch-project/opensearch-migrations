@@ -1784,15 +1784,15 @@ export const TRAFFIC_CONFIG = z.object({
             message: "Use a valid Kubernetes DNS name for the capture proxy.",
         }),
     s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
-        .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
+        .describe("[Expert] Optional map of pre-recorded traffic source names to their S3 archive configurations. " +
             "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
             "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps).")
         .uiHint({
             kind: 'record',
-            addLabel: 'S3 captured traffic source',
+            addLabel: 'optional S3 archive source (no capture proxy)',
             keyFormat: 'k8s-name',
             keyPattern: K8S_NAMING_PATTERN.source,
-            message: "Use a valid Kubernetes DNS name for the S3 captured traffic source.",
+            message: "Use a valid Kubernetes DNS name for the optional S3 archive source.",
         }),
     replayers: z.record(z.string(), REPLAYER_CONFIG).default({}).optional()
         .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")

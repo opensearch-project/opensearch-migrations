@@ -1446,6 +1446,29 @@ def edit_state_with_field_visibility():
                                     }
                                 ],
                             },
+                            {
+                                "id": "edit:sourceClusters.legacy.expertAliases",
+                                "path": ["sourceClusters", "legacy", "expertAliases"],
+                                "label": "[OK] expertAliases: 0 items",
+                                "value": [],
+                                "valueKind": "array",
+                                "description": "Expert source aliases.",
+                                "presence": "optional",
+                                "expert": True,
+                                "status": "ok",
+                                "statusCounts": {},
+                                "children": [
+                                    {
+                                        "id": "edit:sourceClusters.legacy.expertAliases:add",
+                                        "path": ["sourceClusters", "legacy", "expertAliases"],
+                                        "label": "+ Add expert alias",
+                                        "valueKind": "command",
+                                        "description": "Add an expert alias.",
+                                        "expert": True,
+                                        "status": "ok",
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ],
@@ -3794,6 +3817,7 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.description") is None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.aliases") is None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.expertAliases") is None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None
             assert "Fields: Essential" in str(app.query_one("#pod-status").content)
             assert binding_descriptions(app, "f") == ["Show Standard Fields"]
@@ -3809,6 +3833,7 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.description") is not None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.aliases") is not None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.expertAliases") is None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None
             assert "Fields: Standard" in str(app.query_one("#pod-status").content)
             assert binding_descriptions(app, "f") == ["Show All Fields"]
@@ -3820,6 +3845,7 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             )
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.allowInsecure") is not None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.description") is not None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.expertAliases") is not None
             assert "Fields: All" in str(app.query_one("#pod-status").content)
             assert binding_descriptions(app, "f") == ["Show Essential"]
 
@@ -3830,6 +3856,7 @@ async def test_resource_view_edit_mode_optional_and_expert_visibility(mock_workf
             )
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.description") is None
             assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.serviceType") is None
+            assert find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy.expertAliases") is None
             assert "Fields: Essential" in str(app.query_one("#pod-status").content)
 
 

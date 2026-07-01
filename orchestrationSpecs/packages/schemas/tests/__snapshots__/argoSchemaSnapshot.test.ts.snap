@@ -7213,14 +7213,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "description": "Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow."
           },
           "default": {},
-          "description": "Map of pre-recorded traffic source names to their S3 archive configurations. Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps).",
+          "description": "[Expert] Optional map of pre-recorded traffic source names to their S3 archive configurations. Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps).",
           "x-ui-hint": {
             "kind": "record",
-            "addLabel": "S3 captured traffic source",
+            "addLabel": "optional S3 archive source (no capture proxy)",
             "keyFormat": "k8s-name",
             "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-            "message": "Use a valid Kubernetes DNS name for the S3 captured traffic source."
-          }
+            "message": "Use a valid Kubernetes DNS name for the optional S3 archive source."
+          },
+          "x-expert": true
         },
         "replayers": {
           "type": "object",
