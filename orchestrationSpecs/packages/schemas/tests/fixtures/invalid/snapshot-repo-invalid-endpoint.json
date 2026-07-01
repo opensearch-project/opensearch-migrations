@@ -8,7 +8,7 @@
           "my-repo": {
             "awsRegion": "us-east-1",
             "endpoint": "not-a-storage-endpoint",
-            "s3RepoPathUri": "s3://my-bucket/snapshots"
+            "repoPathUri": "s3://my-bucket/snapshots"
           }
         },
         "snapshots": {

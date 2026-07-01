@@ -11,8 +11,9 @@ import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -148,11 +149,11 @@ public class RoutingShardColocationTest extends SourceTestBase {
                 .build()
                 .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 MIGRATION_SNAPSHOT_NAME,
                 REPO_NAME,
                 sourceClient,
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
@@ -256,7 +257,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
     @SneakyThrows
     private void migrateMetadata(Version sourceVersion, String localDirPath, SearchClusterContainer targetCluster) {
         var arguments = new MigrateOrEvaluateArgs();
-        arguments.fileSystemRepoPath = localDirPath;
+        arguments.repoUri = localDirPath;
         arguments.snapshotName = MIGRATION_SNAPSHOT_NAME;
         arguments.sourceVersion = sourceVersion;
         arguments.targetArgs.host = targetCluster.getUrl();
