@@ -947,7 +947,66 @@ def edit_state_with_editable_source_fields():
     }
 
 
-def edit_state_with_array_items():
+def edit_state_with_array_items(include_provisional_item=False):
+    children = [
+        {
+            "id": "edit:roles.0",
+            "path": ["roles", "0"],
+            "label": "[OK] item 1: configured",
+            "valueKind": "object",
+            "description": "Kafka node role.",
+            "status": "ok",
+            "statusCounts": {},
+            "collapsed": True,
+            "children": [
+                {
+                    "id": "edit:roles.0.name",
+                    "path": ["roles", "0", "name"],
+                    "label": "[OK] name: broker",
+                    "value": "broker",
+                    "valueKind": "scalar",
+                    "presence": "required",
+                    "description": "Role name.",
+                    "status": "ok",
+                    "statusCounts": {},
+                },
+            ],
+        },
+    ]
+    if include_provisional_item:
+        children.append({
+            "id": "edit:roles.1",
+            "path": ["roles", "1"],
+            "label": "[REQ 1] item 2: configured",
+            "valueKind": "object",
+            "description": "Kafka node role.",
+            "status": "required",
+            "statusCounts": {"required": 1},
+            "collapsed": True,
+            "children": [
+                {
+                    "id": "edit:roles.1.name",
+                    "path": ["roles", "1", "name"],
+                    "label": "[REQ] name: <required>",
+                    "valueKind": "scalar",
+                    "presence": "required",
+                    "required": True,
+                    "description": "Role name.",
+                    "status": "required",
+                    "statusCounts": {"required": 1},
+                },
+            ],
+        })
+    children.append({
+        "id": "edit:roles:add",
+        "path": ["roles"],
+        "label": "[OK] + Add item",
+        "valueKind": "command",
+        "description": "Create a new array item in pending workflow YAML.",
+        "status": "ok",
+        "statusCounts": {},
+        "command": {"requiresName": False},
+    })
     return {
         "formatVersion": 1,
         "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
@@ -955,46 +1014,12 @@ def edit_state_with_array_items():
             {
                 "id": "edit:roles",
                 "path": ["roles"],
-                "label": "[OK] roles: 1 item",
+                "label": f"[OK] roles: {'2 items' if include_provisional_item else '1 item'}",
                 "valueKind": "array",
                 "description": "Kafka node roles.",
                 "status": "ok",
                 "statusCounts": {},
-                "children": [
-                    {
-                        "id": "edit:roles.0",
-                        "path": ["roles", "0"],
-                        "label": "[OK] item 1: configured",
-                        "valueKind": "object",
-                        "description": "Kafka node role.",
-                        "status": "ok",
-                        "statusCounts": {},
-                        "collapsed": True,
-                        "children": [
-                            {
-                                "id": "edit:roles.0.name",
-                                "path": ["roles", "0", "name"],
-                                "label": "[OK] name: broker",
-                                "value": "broker",
-                                "valueKind": "scalar",
-                                "presence": "required",
-                                "description": "Role name.",
-                                "status": "ok",
-                                "statusCounts": {},
-                            },
-                        ],
-                    },
-                    {
-                        "id": "edit:roles:add",
-                        "path": ["roles"],
-                        "label": "[OK] + Add item",
-                        "valueKind": "command",
-                        "description": "Create a new array item in pending workflow YAML.",
-                        "status": "ok",
-                        "statusCounts": {},
-                        "command": {"requiresName": False},
-                    },
-                ],
+                "children": children,
             },
         ],
         "pendingSubmitChanges": [],
@@ -4392,9 +4417,14 @@ async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_wo
 
         def apply_operation(self, raw_yaml, operation):
             self.apply_calls.append((raw_yaml, operation))
+            include_provisional_item = operation == {
+                "op": "add",
+                "path": ["roles"],
+                "value": {},
+            }
             return {
                 "raw_yaml": f"updated-yaml-{len(self.apply_calls)}",
-                "edit_state": edit_state_with_array_items(),
+                "edit_state": edit_state_with_array_items(include_provisional_item=include_provisional_item),
             }
 
     service = FakeConfigEditService()
@@ -4452,6 +4482,18 @@ async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_wo
                     "value": {},
                 },
             )
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#value").value == ""
+            assert "Role name." in str(app.screen.query_one("#documentation").content)
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
+            assert service.apply_calls[1] == (
+                "updated-yaml-1",
+                {
+                    "op": "removeConfig",
+                    "path": ["roles", "1"],
+                },
+            )
 
             app._select_tree_node_by_id("edit:roles.0")
             app._update_dynamic_bindings()
@@ -4460,9 +4502,9 @@ async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_wo
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
             await pilot.press("y")
 
-            assert await wait_until(pilot, lambda: len(service.apply_calls) == 2)
-            assert service.apply_calls[1] == (
-                "updated-yaml-1",
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 3)
+            assert service.apply_calls[2] == (
+                "updated-yaml-2",
                 {
                     "op": "removeConfig",
                     "path": ["roles", "0"],
