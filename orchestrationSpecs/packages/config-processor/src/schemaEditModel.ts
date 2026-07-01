@@ -29,6 +29,7 @@ export interface EditNode {
     label: string;
     value?: unknown;
     valueDefaulted?: boolean;
+    valueAuthored?: boolean;
     valueType?: "string" | "number" | "boolean";
     valueKind: "object" | "record" | "array" | "union" | "boolean" | "scalar" | "command";
     presence?: "required" | "optional";
@@ -630,21 +631,22 @@ function jsonSchemaFieldNode(
     const path = [...rootPath, key];
     const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, resolved.default);
     const description = jsonSchemaDescription(resolved);
-    const presence: EditNode["presence"] = required ? "required" : "optional";
+    const userRequired = jsonSchemaRequiredForUser(resolved, required, resolved.default);
+    const presence: EditNode["presence"] = userRequired ? "required" : "optional";
     const expert = isExpertDescription(description);
-    const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, required, expert, presence);
+    const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence);
     if (unionNode) {
-        return markValueDefaulted(unionNode, valueDefaulted);
+        return markValueState(unionNode, valueDefaulted, hasValue);
     }
     if (jsonSchemaEnumValues(resolved).length > 0) {
-        return markValueDefaulted(jsonEnumNode(path, key, resolved, value, required, expert, presence), valueDefaulted);
+        return markValueState(jsonEnumNode(path, key, resolved, value, userRequired, expert, presence), valueDefaulted, hasValue);
     }
     const valueType = jsonScalarValueType(resolved);
     if (valueType === "boolean") {
-        return markValueDefaulted(booleanNode(path, key, value === true, description, expert, presence), valueDefaulted);
+        return markValueState(booleanNode(path, key, value === true, description, expert, presence), valueDefaulted, hasValue);
     }
     if (valueType === "number" || valueType === "string") {
-        return markValueDefaulted(scalarNode(path, key, value ?? "", description, required, jsonSchemaInputHint(resolved), valueType, expert, presence), valueDefaulted);
+        return markValueState(scalarNode(path, key, value ?? "", description, userRequired, jsonSchemaInputHint(resolved), valueType, expert, presence), valueDefaulted, hasValue);
     }
 
     const containerKind = jsonSchemaType(resolved) === "array" ? "array" : "object";
@@ -652,8 +654,8 @@ function jsonSchemaFieldNode(
         ? jsonSchemaObjectChildren(path, resolved, value)
         : jsonSchemaArrayChildren(path, resolved, value);
     const minItems = containerKind === "array" ? jsonSchemaMinItems(resolved) : undefined;
-    const missingArrayItems = required && minItems !== undefined && Array.isArray(value) && value.length < minItems;
-    const missing = required && (value === undefined || value === null || missingArrayItems);
+    const missingArrayItems = userRequired && minItems !== undefined && Array.isArray(value) && value.length < minItems;
+    const missing = userRequired && (value === undefined || value === null || missingArrayItems);
     const diagnostics: EditDiagnostic[] = missing
         ? [{
             severity: "required",
@@ -664,50 +666,78 @@ function jsonSchemaFieldNode(
         }]
         : [];
     if (childNodes.length || value === undefined || value === null || isPlainObject(value) || Array.isArray(value)) {
-        return markValueDefaulted(finalizeNode({
+        return markValueState(finalizeNode({
             id: `edit:${path.join(".")}`,
             path,
-            label: `${key}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (Object.keys(value).length ? "configured" : "{}") : String(value)}`,
+            label: `${key}: ${value === undefined || value === null ? (userRequired ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (Object.keys(value).length ? "configured" : "{}") : String(value)}`,
             value,
             valueKind: containerKind,
             presence,
             expert,
             description,
-            required,
+            required: userRequired,
             status: missing ? "required" : "ok",
             diagnostics,
             children: childNodes,
-        }), valueDefaulted);
+        }), valueDefaulted, hasValue);
     }
 
-    return markValueDefaulted(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted);
+    return markValueState(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted, hasValue);
 }
 
-function markValueDefaulted(node: EditNode, valueDefaulted: boolean): EditNode {
+function markValueState(node: EditNode, valueDefaulted: boolean, valueAuthored: boolean): EditNode {
     if (valueDefaulted) {
         node.valueDefaulted = true;
+    }
+    if (valueAuthored) {
+        node.valueAuthored = true;
     }
     return node;
 }
 
-function effectiveConfigValue(config: Record<string, unknown>, key: string, defaultValue: unknown) {
-    const hasValue = Object.hasOwn(config, key);
+function effectiveConfigValue(
+    config: Record<string, unknown>,
+    key: string,
+    defaultValue: unknown,
+    authoredConfig: Record<string, unknown> = config,
+) {
+    const hasValue = Object.hasOwn(authoredConfig, key);
+    const hasEffectiveValue = Object.hasOwn(config, key);
     return {
         hasValue,
-        value: hasValue ? config[key] : defaultValue,
-        valueDefaulted: !hasValue && shouldRenderSchemaDefault(defaultValue),
+        value: hasEffectiveValue ? config[key] : defaultValue,
+        valueDefaulted: !hasValue && (hasEffectiveValue || defaultValue !== undefined),
     };
 }
 
-function shouldRenderSchemaDefault(value: unknown): boolean {
-    if (value === undefined || value === null || value === "") {
+function jsonSchemaRequiredForUser(schema: JsonSchema, required: boolean, defaultValue: unknown): boolean {
+    if (!required) {
         return false;
     }
-    if (Array.isArray(value) && value.length === 0) {
+    const resolved = resolveJsonSchemaRef(schema) ?? schema;
+    if (isJsonSchemaObject(resolved?.["x-effective-default"])) {
         return false;
     }
-    if (isPlainObject(value) && Object.keys(value).length === 0) {
+    return !defaultSatisfiesRequiredField(defaultValue, resolved);
+}
+
+function zodSchemaRequiredForUser(schema: any, required: boolean, defaultValue: unknown): boolean {
+    if (!required) {
         return false;
+    }
+    if (effectiveDefaultOf(schema)) {
+        return false;
+    }
+    return !defaultSatisfiesRequiredField(defaultValue);
+}
+
+function defaultSatisfiesRequiredField(defaultValue: unknown, schema?: JsonSchema): boolean {
+    if (defaultValue === undefined || defaultValue === null || defaultValue === "") {
+        return false;
+    }
+    if (Array.isArray(defaultValue)) {
+        const minItems = jsonSchemaMinItems(schema);
+        return minItems === undefined || defaultValue.length >= minItems;
     }
     return true;
 }
@@ -1352,13 +1382,17 @@ export function schemaFieldNode(
     key: string,
     schema: any,
     config: Record<string, unknown>,
+    authoredConfig: Record<string, unknown> = config,
 ): EditNode {
     const path = [...rootPath, key];
     const description = schemaDescription(schema);
     const required = isRequiredSchema(schema);
-    const presence: EditNode["presence"] = required ? "required" : "optional";
+    const defaultValue = defaultValueForSchema(schema);
+    const userRequired = zodSchemaRequiredForUser(schema, required, defaultValue);
+    const presence: EditNode["presence"] = userRequired ? "required" : "optional";
     const expert = isExpertDescription(description);
-    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, defaultValueForSchema(schema));
+    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, defaultValue, authoredConfig);
+    const authoredValue = hasValue ? authoredConfig[key] : undefined;
     const inputHint = uiHintOf(schema);
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
@@ -1366,9 +1400,9 @@ export function schemaFieldNode(
     if (schemaConstructorName(schema) === "ZodArray") {
         const jsonSchema = jsonSchemaForConfigPath(path);
         if (jsonSchema && jsonSchemaType(jsonSchema) === "array") {
-            return markValueDefaulted(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required), valueDefaulted);
+            return markValueState(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required), valueDefaulted, hasValue);
         }
-        return markValueDefaulted(zodArrayNode(path, key, schema, value, required, inputHint, description, expert, presence), valueDefaulted);
+        return markValueState(zodArrayNode(path, key, schema, value, userRequired, inputHint, description, expert, presence), valueDefaulted, hasValue);
     }
     if (schemaConstructorName(schema) === "ZodRecord") {
         const jsonSchema = jsonSchemaForConfigPath(path);
@@ -1380,26 +1414,29 @@ export function schemaFieldNode(
             return jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required);
         }
     }
-    const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, required, expert, presence);
+    const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
     if (unionNode) {
-        return markValueDefaulted(unionNode, valueDefaulted);
+        return markValueState(unionNode, valueDefaulted, hasValue);
     }
     if (scalarType === "boolean") {
-        return markValueDefaulted(booleanNode(path, key, value === true, description, expert, presence), valueDefaulted);
+        return markValueState(booleanNode(path, key, value === true, description, expert, presence), valueDefaulted, hasValue);
     }
     if (scalarType === "number") {
-        return markValueDefaulted(scalarNode(path, key, value, description, required, inputHint, "number", expert, presence, externalRef), valueDefaulted);
+        return markValueState(scalarNode(path, key, value, description, userRequired, inputHint, "number", expert, presence, externalRef), valueDefaulted, hasValue);
     }
     if (scalarType === "string") {
-        return markValueDefaulted(scalarNode(path, key, value ?? "", description, required, inputHint, "string", expert, presence, externalRef), valueDefaulted);
+        return markValueState(scalarNode(path, key, value ?? "", description, userRequired, inputHint, "string", expert, presence, externalRef), valueDefaulted, hasValue);
     }
     if (externalRef?.selection?.target === "objectRef") {
-        return markValueDefaulted(objectRefNode(path, key, value, description, required, externalRef), valueDefaulted);
+        return markValueState(objectRefNode(path, key, value, description, userRequired, externalRef), valueDefaulted, hasValue);
+    }
+    if (schemaShape(schema) && isPlainObject(value)) {
+        return markValueState(zodObjectNode(path, key, schema, value, authoredValue, userRequired, description, expert, presence), valueDefaulted, hasValue);
     }
     if (value === undefined || value === null) {
         const containerKind = schemaContainerKind(schema);
         if (containerKind) {
-            return markValueDefaulted(finalizeNode({
+            return markValueState(finalizeNode({
                 id: `edit:${path.join(".")}`,
                 path,
                 label: `${key}: <unset>`,
@@ -1409,11 +1446,58 @@ export function schemaFieldNode(
                 expert,
                 description,
                 status: "ok",
-            }), valueDefaulted);
+            }), valueDefaulted, hasValue);
         }
-        return markValueDefaulted(scalarNode(path, key, "", description, required, inputHint, "string", expert, presence, externalRef), valueDefaulted);
+        return markValueState(scalarNode(path, key, "", description, userRequired, inputHint, "string", expert, presence, externalRef), valueDefaulted, hasValue);
     }
-    return markValueDefaulted(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted);
+    return markValueState(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted, hasValue);
+}
+
+function zodObjectNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: Record<string, unknown>,
+    authoredValue: unknown,
+    required: boolean,
+    description: string,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode {
+    const shape = schemaShape(schema) ?? {};
+    const authoredObject = isPlainObject(authoredValue) ? authoredValue : {};
+    const knownKeys = new Set(Object.keys(shape));
+    const children = [
+        ...Object.entries(shape).map(([childKey, childSchema]) =>
+            schemaFieldNode(path, childKey, childSchema, value, authoredObject)
+        ),
+        ...Object.keys(value)
+            .filter(childKey => !knownKeys.has(childKey))
+            .sort((a, b) => a.localeCompare(b))
+            .map(childKey => genericDisplayNode(
+                [...path, childKey],
+                childKey,
+                value[childKey],
+                "optional",
+                false,
+                "",
+            )),
+    ];
+    const missing = required && (value === undefined || value === null);
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: ${Object.keys(value).length ? "configured" : "{}"}`,
+        value,
+        valueKind: "object",
+        presence,
+        expert,
+        description,
+        required,
+        status: missing ? "required" : "ok",
+        diagnostics: missing ? [{severity: "required", message: `${key} is required.`, path}] : [],
+        children,
+    });
 }
 
 function zodArrayNode(

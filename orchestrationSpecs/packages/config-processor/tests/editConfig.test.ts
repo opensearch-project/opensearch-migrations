@@ -487,6 +487,8 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")).toMatchObject({
             valueKind: "union",
             value: "unset",
+            presence: "optional",
+            status: "ok",
             effectiveDefault: {
                 label: "scram-sha-512",
                 source: "workflow policy",
@@ -512,6 +514,21 @@ describe("editConfig state", () => {
             presence: "optional",
         });
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.proxies.capture"))).toBe("capture");
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture.proxyConfig.resources")).toMatchObject({
+            valueKind: "object",
+            valueDefaulted: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture.proxyConfig.resources.limits.cpu")).toMatchObject({
+            valueKind: "scalar",
+            status: "ok",
+            valueDefaulted: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture.proxyConfig.resources.limits.cpu")?.valueAuthored).toBeUndefined();
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture.proxyConfig.resources.requests.memory")).toMatchObject({
+            valueKind: "scalar",
+            status: "ok",
+            valueDefaulted: true,
+        });
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.s3Sources.archive"))).toBe("archive");
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.replayers.replay"))).toBe("replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
@@ -676,7 +693,8 @@ describe("editConfig state", () => {
         expect(proxyConfig?.presence).toBe("required");
         expect(kafka).toMatchObject({status: "ok", presence: "optional", value: "default", valueDefaulted: true});
         expect(kafka?.label).toContain("kafka: default");
-        expect(kafkaTopic?.valueDefaulted).toBeUndefined();
+        expect(kafkaTopic?.valueDefaulted).toBe(true);
+        expect(kafkaTopic?.valueAuthored).toBeUndefined();
         expect(listenPort?.status).toBe("required");
         expect(listenPort?.presence).toBe("required");
         expect(listenPort?.valueType).toBe("number");

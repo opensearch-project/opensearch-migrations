@@ -29,6 +29,9 @@ from .config_edit_tree import (
     EDIT_MODE_LABELS,
     EDIT_MODES,
     EDIT_MODE_PENDING_SUBMIT,
+    FIELD_VISIBILITY_ESSENTIAL,
+    FIELD_VISIBILITY_LABELS,
+    FIELD_VISIBILITY_MODES,
     render_edit_state,
     selected_edit_node,
     update_help_panel,
@@ -137,8 +140,7 @@ class WorkflowTreeApp(App):
         self._edit_dirty = False
         self._edit_value_mode = EDIT_MODE_ALL
         self._edit_status_mode = EDIT_MODE_ALL
-        self._edit_show_optional = True
-        self._edit_show_expert = False
+        self._edit_field_visibility = FIELD_VISIBILITY_ESSENTIAL
         self._after_config_edit_save: Optional[str] = None
         self._resource_value_mode = EDIT_MODE_ALL
         self._resource_change_summary = {'pending': 0, 'to_submit': 0, 'resources': 0}
@@ -695,19 +697,21 @@ class WorkflowTreeApp(App):
             dirty = "dirty" if self._edit_dirty else "clean"
             value_mode = EDIT_MODE_LABELS.get(self._edit_value_mode, self._edit_value_mode)
             status_mode = EDIT_MODE_LABELS.get(self._edit_status_mode, self._edit_status_mode)
-            optional_state = "optional on" if self._edit_show_optional else "optional off"
-            expert_state = "expert on" if self._edit_show_expert else "expert off"
+            field_visibility = FIELD_VISIBILITY_LABELS.get(
+                self._edit_field_visibility,
+                self._edit_field_visibility,
+            )
             if node:
                 status = node.get("status", "ok")
                 self._set_pod_status(
                     f"Config edit: [bold cyan]{status}[/]  [{dirty}]  "
                     f"Values: {value_mode}  Status: {status_mode}  "
-                    f"{optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
+                    f"Fields: {field_visibility}  s/Ctrl+s saves, Esc exits"
                 )
             else:
                 self._set_pod_status(
                     f"Config edit: [{dirty}]  Values: {value_mode}  "
-                    f"Status: {status_mode}  {optional_state}, {expert_state}  s/Ctrl+s saves, Esc exits"
+                    f"Status: {status_mode}  Fields: {field_visibility}  s/Ctrl+s saves, Esc exits"
                 )
             return
         if self._resource_view:
@@ -781,12 +785,7 @@ class WorkflowTreeApp(App):
             self.bind("s", "save_config_edit", description="Save")
             self.bind("ctrl+s", "save_config_edit", description="Save")
             self.bind("?", "show_config_edit_help", description="Help")
-            optional_description = "Hide Optional" if self._edit_show_optional else "Show Optional"
-            expert_description = "Hide Expert" if self._edit_show_expert else "Show Expert"
-            self.bind("o", "toggle_config_optional_fields", description=optional_description)
-            self.bind("O", "toggle_config_optional_fields", description=optional_description)
-            self.bind("x", "toggle_config_expert_fields", description=expert_description)
-            self.bind("X", "toggle_config_expert_fields", description=expert_description)
+            self.bind("f", "cycle_config_field_visibility", description=self._next_field_visibility_description())
             self.bind("i", "edit_selected_config_node", show=False)
             self._bindings.bind(
                 "enter",
@@ -853,8 +852,7 @@ class WorkflowTreeApp(App):
         if self._edit_mode:
             return (
                 *base,
-                self._edit_show_optional,
-                self._edit_show_expert,
+                self._edit_field_visibility,
                 (node or {}).get("valueKind"),
                 bool((node or {}).get("command")),
                 self._is_removable_edit_node(node),
@@ -1102,16 +1100,14 @@ class WorkflowTreeApp(App):
         self._edit_dirty = False
         self._edit_value_mode = EDIT_MODE_ALL
         self._edit_status_mode = EDIT_MODE_ALL
-        self._edit_show_optional = True
-        self._edit_show_expert = False
+        self._edit_field_visibility = FIELD_VISIBILITY_ESSENTIAL
         expansion_state = self._edit_expansion_state_for_render(edit_state)
         render_edit_state(
             self.tree_root_widget,
             edit_state,
             self._edit_value_mode,
             self._edit_status_mode,
-            self._edit_show_optional,
-            self._edit_show_expert,
+            self._edit_field_visibility,
             expansion_state=expansion_state,
         )
         self._focus_config_edit_tree()
@@ -1184,8 +1180,8 @@ class WorkflowTreeApp(App):
                 prefer_console=False,
             )
 
-            submitted_changed = not same_value_state(deployed, current)
-            pending_changed = not same_value_state(current, pending)
+            submitted_changed = self._edit_state_changed(deployed, current)
+            pending_changed = self._edit_state_changed(current, pending)
             own_changed = 1 if submitted_changed or pending_changed else 0
 
             states[EDIT_MODE_DEPLOYED] = self._edit_state_payload(deployed, changed=False)
@@ -1372,11 +1368,23 @@ class WorkflowTreeApp(App):
         found, value = cls._lookup_workflow_config_path(workflow_config, node.get("path") or [])
         if not found:
             if allow_node_default and cls._node_schema_default_applies(workflow_config, node):
-                return {"present": True, "value": node.get("value")}
+                return {"present": True, "value": node.get("value"), "defaulted": True}
             return {"present": False}
         if node.get("valueKind") == "union":
             value = cls._union_variant_value(value, node)
         return {"present": True, "value": value}
+
+    @staticmethod
+    def _edit_state_changed(previous: Dict[str, Any], next_state: Dict[str, Any]) -> bool:
+        if same_value_state(previous, next_state):
+            return False
+        if (
+            not previous.get("present")
+            and next_state.get("present")
+            and next_state.get("defaulted")
+        ):
+            return False
+        return True
 
     @classmethod
     def _node_schema_default_applies(cls, workflow_config: Dict[str, Any], node: Dict[str, Any]) -> bool:
@@ -1529,8 +1537,7 @@ class WorkflowTreeApp(App):
         self._edit_dirty = False
         self._edit_value_mode = EDIT_MODE_ALL
         self._edit_status_mode = EDIT_MODE_ALL
-        self._edit_show_optional = True
-        self._edit_show_expert = False
+        self._edit_field_visibility = FIELD_VISIBILITY_ESSENTIAL
         self._after_config_edit_save = None
         self._cancel_config_edit_validation()
         self._set_resource_value_mode(EDIT_MODE_ALL)
@@ -1686,12 +1693,8 @@ class WorkflowTreeApp(App):
         self._edit_status_mode = self._next_edit_mode(self._edit_status_mode)
         self._rerender_config_edit_state()
 
-    def action_toggle_config_optional_fields(self) -> None:
-        self._edit_show_optional = not self._edit_show_optional
-        self._rerender_config_edit_state()
-
-    def action_toggle_config_expert_fields(self) -> None:
-        self._edit_show_expert = not self._edit_show_expert
+    def action_cycle_config_field_visibility(self) -> None:
+        self._edit_field_visibility = self._next_field_visibility(self._edit_field_visibility)
         self._rerender_config_edit_state()
 
     @staticmethod
@@ -1701,6 +1704,21 @@ class WorkflowTreeApp(App):
         except ValueError:
             index = 0
         return EDIT_MODES[(index + 1) % len(EDIT_MODES)]
+
+    @staticmethod
+    def _next_field_visibility(current: str) -> str:
+        try:
+            index = FIELD_VISIBILITY_MODES.index(current)
+        except ValueError:
+            index = 0
+        return FIELD_VISIBILITY_MODES[(index + 1) % len(FIELD_VISIBILITY_MODES)]
+
+    def _next_field_visibility_description(self) -> str:
+        next_mode = self._next_field_visibility(self._edit_field_visibility)
+        label = FIELD_VISIBILITY_LABELS.get(next_mode, next_mode)
+        if next_mode == FIELD_VISIBILITY_ESSENTIAL:
+            return f"Show {label}"
+        return f"Show {label} Fields"
 
     def _rerender_config_edit_state(self) -> None:
         if not self._edit_mode or self._edit_state is None:
@@ -1714,8 +1732,7 @@ class WorkflowTreeApp(App):
             self._edit_state,
             self._edit_value_mode,
             self._edit_status_mode,
-            self._edit_show_optional,
-            self._edit_show_expert,
+            self._edit_field_visibility,
             expansion_state=self._edit_expansion_state_for_render(self._edit_state),
         )
         if selected_id:
@@ -2465,8 +2482,7 @@ class WorkflowTreeApp(App):
             edit_state,
             self._edit_value_mode,
             self._edit_status_mode,
-            self._edit_show_optional,
-            self._edit_show_expert,
+            self._edit_field_visibility,
             expansion_state=expansion_state,
         )
         if auto_edit_id:

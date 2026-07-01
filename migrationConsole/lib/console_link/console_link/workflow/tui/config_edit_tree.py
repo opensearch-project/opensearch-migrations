@@ -41,6 +41,19 @@ EDIT_MODE_LABELS = {
     EDIT_MODE_CURRENT_WORKFLOW: "After Workflow",
     EDIT_MODE_PENDING_SUBMIT: "After Submit",
 }
+FIELD_VISIBILITY_ESSENTIAL = "essential"
+FIELD_VISIBILITY_STANDARD = "standard"
+FIELD_VISIBILITY_ALL = "all"
+FIELD_VISIBILITY_MODES = (
+    FIELD_VISIBILITY_ESSENTIAL,
+    FIELD_VISIBILITY_STANDARD,
+    FIELD_VISIBILITY_ALL,
+)
+FIELD_VISIBILITY_LABELS = {
+    FIELD_VISIBILITY_ESSENTIAL: "Essential",
+    FIELD_VISIBILITY_STANDARD: "Standard",
+    FIELD_VISIBILITY_ALL: "All",
+}
 _STATE_LABELS = {
     EDIT_MODE_DEPLOYED: "deployed",
     EDIT_MODE_CURRENT_WORKFLOW: "workflow",
@@ -56,8 +69,7 @@ def render_edit_state(
     edit_state: Dict[str, Any],
     value_mode: str = EDIT_MODE_ALL,
     status_mode: str = EDIT_MODE_ALL,
-    show_optional: bool = True,
-    show_expert: bool = False,
+    field_visibility: str = FIELD_VISIBILITY_ESSENTIAL,
     expansion_state: Optional[Dict[str, bool]] = None,
 ) -> None:
     """Render a TS-provided EditStateV1 through the shared manage resource tree renderer."""
@@ -65,8 +77,7 @@ def render_edit_state(
         edit_state,
         value_mode,
         status_mode,
-        show_optional,
-        show_expert,
+        field_visibility,
         expansion_state,
     )
     ResourceTreeStateManager(tree_widget=tree).rebuild(
@@ -115,8 +126,7 @@ def edit_state_resource_sections(
     edit_state: Dict[str, Any],
     value_mode: str,
     status_mode: str,
-    show_optional: bool,
-    show_expert: bool,
+    field_visibility: str,
     expansion_state: Optional[Dict[str, bool]] = None,
 ) -> list[ResourceSection]:
     """Convert edit nodes to the same section/group/resource model used by status view."""
@@ -135,13 +145,12 @@ def edit_state_resource_sections(
             used_top_level_ids.add(str(group_edit_node.get("id")))
             visible_children = [
                 child for child in group_edit_node.get("children") or []
-                if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+                if _should_render_edit_node(child, status_mode, field_visibility)
             ]
             if not visible_children and not _should_render_edit_node(
                 group_edit_node,
                 status_mode,
-                show_optional,
-                show_expert,
+                field_visibility,
                 visible_children,
             ):
                 continue
@@ -154,8 +163,7 @@ def edit_state_resource_sections(
                         index,
                         value_mode,
                         status_mode,
-                        show_optional,
-                        show_expert,
+                        field_visibility,
                         expansion_state,
                     )
                     for index, child in enumerate(visible_children)
@@ -190,8 +198,8 @@ def edit_state_resource_sections(
     fallback_roots = [
         node for node in roots
         if str(node.get("id")) not in used_top_level_ids
-        and not _root_consumed_by_section_groups(node, used_top_level_ids, status_mode, show_optional, show_expert)
-        and _should_render_edit_node(node, status_mode, show_optional, show_expert)
+        and not _root_consumed_by_section_groups(node, used_top_level_ids, status_mode, field_visibility)
+        and _should_render_edit_node(node, status_mode, field_visibility)
     ]
     if fallback_roots:
         sections.append(ResourceSection(
@@ -206,8 +214,7 @@ def edit_state_resource_sections(
                             index,
                             value_mode,
                             status_mode,
-                            show_optional,
-                            show_expert,
+                            field_visibility,
                             expansion_state,
                         )
                         for index, node in enumerate(fallback_roots)
@@ -223,12 +230,11 @@ def _root_consumed_by_section_groups(
     root: Dict[str, Any],
     used_ids: set[str],
     status_mode: str,
-    show_optional: bool,
-    show_expert: bool,
+    field_visibility: str,
 ) -> bool:
     children = [
         child for child in root.get("children") or []
-        if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+        if _should_render_edit_node(child, status_mode, field_visibility)
     ]
     if not children:
         return False
@@ -259,13 +265,12 @@ def _edit_node_to_resource_node(
     sort_index: int,
     value_mode: str,
     status_mode: str,
-    show_optional: bool,
-    show_expert: bool,
+    field_visibility: str,
     expansion_state: Optional[Dict[str, bool]] = None,
 ) -> ResourceNode:
     visible_children = [
         child for child in edit_node.get("children") or []
-        if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+        if _should_render_edit_node(child, status_mode, field_visibility)
     ]
     should_expand = _edit_node_should_expand(
         edit_node,
@@ -287,8 +292,7 @@ def _edit_node_to_resource_node(
                 index,
                 value_mode,
                 status_mode,
-                show_optional,
-                show_expert,
+                field_visibility,
                 expansion_state,
             )
             for index, child in enumerate(visible_children)
@@ -388,8 +392,7 @@ def _is_optional_unset_block(edit_node: Dict[str, Any], visible_children: list[D
 def _should_render_edit_node(
     edit_node: Dict[str, Any],
     status_mode: str,
-    show_optional: bool,
-    show_expert: bool,
+    field_visibility: str,
     visible_children: Optional[list[Dict[str, Any]]] = None,
 ) -> bool:
     if edit_node.get("valueKind") == "command":
@@ -402,19 +405,48 @@ def _should_render_edit_node(
         or counts.get("required")
         or counts.get("errors")
         or counts.get("blocked")
+        or status == "changed"
+        or counts.get("changed")
     ):
         return True
     if visible_children is None:
         visible_children = [
             child for child in edit_node.get("children") or []
-            if _should_render_edit_node(child, status_mode, show_optional, show_expert)
+            if _should_render_edit_node(child, status_mode, field_visibility)
         ]
-    if visible_children:
+    if visible_children and not _has_only_command_children(visible_children, field_visibility):
+        return True
+    if _has_authored_edit_value(edit_node):
         return True
     is_expert = bool(edit_node.get("expert"))
-    if is_expert and not show_expert:
+    if field_visibility == FIELD_VISIBILITY_ESSENTIAL:
         return False
-    if edit_node.get("presence") == "optional" and not show_optional and not is_expert:
+    if is_expert and field_visibility != FIELD_VISIBILITY_ALL:
+        return False
+    return True
+
+
+def _has_only_command_children(children: list[Dict[str, Any]], field_visibility: str) -> bool:
+    if field_visibility != FIELD_VISIBILITY_ESSENTIAL:
+        return False
+    if not children:
+        return False
+    return all(child.get("valueKind") == "command" for child in children)
+
+
+def _has_authored_edit_value(edit_node: Dict[str, Any]) -> bool:
+    if edit_node.get("valueAuthored") is True:
+        return True
+    if "valueAuthored" in edit_node:
+        return False
+    if edit_node.get("valueDefaulted"):
+        return False
+    if edit_node.get("valueKind") in {"array", "object", "record"}:
+        return False
+    if "value" not in edit_node:
+        return False
+    value = edit_node.get("value")
+    if value in (None, "", "unset"):
         return False
     return True
 
