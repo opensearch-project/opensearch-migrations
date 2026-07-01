@@ -9,6 +9,7 @@ dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
     implementation project(":SnapshotReader")
+    implementation project(":SnapshotReaderGcs")
     implementation project(":RfsPipeline")
     implementation project(":SolrReader")
     implementation project(":transformation")

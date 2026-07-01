@@ -40,10 +40,40 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const MIN_POD_REPLICAS_DESC = "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. " +
+    "This renders a PodDisruptionBudget minAvailable value for the service. " +
+    "The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
+}
+
+function validateMinPodReplicas(
+    ctx: z.RefinementCtx,
+    data: {podReplicas?: number, minPodReplicas?: number}
+) {
+    if (data.minPodReplicas !== undefined && data.podReplicas !== undefined
+        && data.minPodReplicas > data.podReplicas) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
+            path: ["minPodReplicas"]
+        });
+    }
+}
+
+function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
+    return z.object({
+        podReplicas: z.number().int().nonnegative().default(1).optional()
+            .describe(podReplicasDescription),
+        minPodReplicas: z.number().int().nonnegative().default(0).optional()
+            .describe(MIN_POD_REPLICAS_DESC.replace("the service", `the ${serviceName} service`)),
+    });
+}
+
+function withScalableServiceValidation<T extends z.ZodObject<any>>(schema: T): T {
+    return schema.superRefine((data, ctx) => validateMinPodReplicas(ctx, data)) as T;
 }
 class SchemaValidationError extends Error {
     constructor(message: string, public path: string[]) {
@@ -133,20 +163,27 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
-export const S3_REPO_CONFIG = z.object({
-    awsRegion: z.string()
-        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
+// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
+// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+export const REPO_CONFIG = z.object({
+    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    awsRegion: z.string().default("").optional()
+        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
-        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The bucket must already exist and be accessible from the source cluster."),
+        .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
+            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "This is passed to the cluster when registering the snapshot repository. " +
+            "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
-}).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
+}).describe("Configuration for a snapshot repository used by the source cluster. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -374,13 +411,10 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                 failureThreshold: 8,
             },
             config: {
-                // RF=3 + minISR=2 on a 3-broker cluster: survives one broker
-                // down (rolling restart, single node loss) without losing
-                // writes or quorum. ISR = replicas fully caught up to the
-                // leader; acks=all blocks until every ISR member has written,
-                // and writes fail (NotEnoughReplicasException) if |ISR|<minISR.
-                // auto.create.topics.enable stays false — all migration topics
-                // are declared explicitly via KafkaTopic CRs.
+                // RF=3 + minISR=2 on a 3-broker cluster survives one broker down
+                // during a rolling restart, drain, or single-node loss without losing
+                // writes or quorum. auto.create.topics.enable stays false because
+                // migration topics are declared explicitly via KafkaTopic CRs.
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 3,
                 "transaction.state.log.replication.factor": 3,
@@ -391,28 +425,20 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
-        // 3-broker, combined (controller+broker) KRaft pool. 3 is the minimum
-        // that satisfies RF=3/minISR=2 above.
+        // 3 is the minimum broker count that satisfies RF=3/minISR=2 above.
         replicas: 3,
         roles: ["controller", "broker"],
         storage: {
             type: "persistent-claim",
-            // Smoke-test size (raised 1Gi → 2Gi with the 1→3 broker bump;
-            // internal topics are now RF=3). Real deployments should override.
+            // Smoke-test size. Real deployments should override.
             size: "2Gi",
             deleteClaim: true,
         },
         template: {
             pod: {
-                // Spread brokers one-per-node so a single node disruption
-                // (Karpenter consolidation during the RFS scale-up/down churn,
-                // a spot reclaim, a drain) can only ever take ONE broker. With
-                // RF=3/minISR=2 the cluster then survives it as a rolling event
-                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
-                // keeps this soft: on a <3-node dev cluster the brokers must
-                // still schedule (and reschedule during rotation) rather than
-                // wedge Pending. maxSkew=1 means the scheduler only doubles up
-                // on a node once every other node already has one.
+                // Spread brokers one-per-node so a single node disruption can only take
+                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
+                // schedule instead of wedging Pending.
                 topologySpreadConstraints: [
                     {
                         maxSkew: 1,
@@ -532,7 +558,11 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Explicitly disable TLS termination on the capture proxy."),
 ]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
-export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
+export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "capture proxy",
+        "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+    ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
@@ -543,15 +573,14 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     internetFacing: z.boolean().default(false).optional()
         .describe("When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
         .changeRestriction('impossible'),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Kubernetes resource limits and requests for the capture proxy container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
         .default(DEFAULT_RESOURCES.PROXY),
-}).describe("Kubernetes deployment-level options for the capture proxy.");
+}))
+    .describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
@@ -608,18 +637,21 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = z.object({
+export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}).describe("Process-level and deployment-level configuration options for the capture proxy.");
+}))
+    .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
-export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
+export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "traffic replayer",
+        "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -627,7 +659,8 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
-}).describe("Kubernetes deployment-level options for the traffic replayer.");
+}))
+    .describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
@@ -720,6 +753,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
+    validateMinPodReplicas(ctx, data);
     validatePipelineRawConfigConflict(ctx, data, "requestTransforms", [
         "transformerConfig",
         "transformerConfigEncoded",
@@ -859,10 +893,12 @@ export const USER_METADATA_OPTIONS = z.object({
     ]);
 });
 
-export const USER_RFS_WORKFLOW_OPTIONS = z.object({
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" + 
-            " throughput scales linearly up to the total number of source shards."),
+export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "RFS document backfill",
+        "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" +
+            " throughput scales linearly up to the total number of source shards."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -887,7 +923,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
-}).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+}))
+    .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
@@ -998,6 +1035,7 @@ export const USER_RFS_OPTIONS = z.object({
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .superRefine((data, ctx) => {
+        validateMinPodReplicas(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -1126,8 +1164,8 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
-    z.record(z.string(), S3_REPO_CONFIG)
-    .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
+    z.record(z.string(), REPO_CONFIG)
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1329,12 +1367,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         }
     }
 
-    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced S3 repo.
+    // (GCS repos are not affected — they authenticate via the cluster's GCS keystore / Workload Identity.)
     if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
             if ("createSnapshotConfig" in snapConfig.config) {
                 const repo = repos?.[snapConfig.repoName];
-                if (repo && !repo.s3RoleArn) {
+                if (repo && repo.repoPathUri.startsWith("s3://") && !repo.s3RoleArn) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,

@@ -64,9 +64,38 @@ export function widenComplexity<
     return v as BaseExpression<T, C>;
 }
 
+export type UnquotedWrapperMode = "raw-non-string" | "yaml-safe-json";
+type RawUnquotedValue = Exclude<NonSerializedPlainObject, string> | Serialized<Exclude<NonSerializedPlainObject, string>>;
+
+declare const __toJsonExpressionBrand: unique symbol;
+export type ToJsonExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    BaseExpression<T, C> & { readonly [__toJsonExpressionBrand]: true };
+
+function isToJsonExpression(value: BaseExpression<PlainObject, ExpressionType>): value is ToJsonExpression<any, any> {
+    return value.kind === "function" && (value as { functionName?: string }).functionName === "toJSON";
+}
+
 export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
-    constructor(public readonly value: BaseExpression<T>) {
+    constructor(value: BaseExpression<T, ExpressionType> & BaseExpression<RawUnquotedValue, ExpressionType>, mode?: "raw-non-string");
+    constructor(value: ToJsonExpression<T | Serialized<T>, ExpressionType>, mode: "yaml-safe-json");
+    constructor(
+        public readonly value: BaseExpression<PlainObject, ExpressionType>,
+        _mode: UnquotedWrapperMode = "raw-non-string"
+    ) {
         super("strip_surrounding_quotes_in_serialized_output");
+    }
+}
+
+declare const __yamlPlainSafeStringBrand: unique symbol;
+export type YamlPlainSafeString = string & { readonly [__yamlPlainSafeStringBrand]: true };
+
+/** Marks a string expression that is already safe for normal YAML scalar serialization. */
+export class YamlPlainSafeStringExpression<
+    E extends BaseExpression<string, CE>,
+    CE extends ExpressionType = ExprC<E>
+> extends BaseExpression<YamlPlainSafeString, CE> {
+    constructor(public readonly source: E) {
+        super("yaml_plain_safe_string");
     }
 }
 
@@ -448,6 +477,8 @@ type NormalizeSerializedForToBoundary<T extends PlainObject> =
                         T[K] extends PlainObject ? NormalizeSerializedForToBoundary<T[K]> : never
                     }
                     : T;
+type SerializedBoundaryResult<R extends PlainObject> =
+    Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>;
 
 type RejectWithParamHybridForSerialize<T extends PlainObject> =
     T extends ArgoWithParamHybridBrand ? never : T;
@@ -683,23 +714,27 @@ class ExprBuilder {
 
     // Regex functions
     regexMatch(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<boolean, ExpressionType, "complicatedExpression">("regexMatch", toExpression(pattern), toExpression(text));
+        return fn<boolean, ExpressionType, "complicatedExpression">("sprig.regexMatch", toExpression(pattern), toExpression(text));
     }
 
     regexFind(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexFind", toExpression(pattern), toExpression(text));
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexFind", toExpression(pattern), toExpression(text));
     }
 
     regexFindAll(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexReplaceAll", toExpression(pattern), toExpression(replacement), toExpression(text));
+        // Sprig's regexReplaceAll Go signature is (regex, src, replacement). When used in Argo expr
+        // (expr-lang), arguments are passed positionally matching the Go signature, NOT the Sprig
+        // template pipe-style convention (regex, replacement, src). The TS API here keeps the
+        // template-style argument order for ergonomics, but emits args in Go/expr order.
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexReplaceAll", toExpression(pattern), toExpression(text), toExpression(replacement));
     }
 
     regexSplit(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     fillTemplate<T extends string>(
@@ -919,8 +954,11 @@ class ExprBuilder {
     }
 
 
-    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>) {
-        return fn<Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>,CIn,"complicatedExpression">("toJSON", data);
+    serialize<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>
+    ): ToJsonExpression<SerializedBoundaryResult<R>, "complicatedExpression"> {
+        const toJson = fn<SerializedBoundaryResult<R>,CIn,"complicatedExpression">("toJSON", data);
+        return toJson as unknown as ToJsonExpression<SerializedBoundaryResult<R>, "complicatedExpression">;
     }
 
     toString<
@@ -939,7 +977,9 @@ class ExprBuilder {
 
     recordToString<T extends AggregateType, CIn extends ExpressionType>(
         data: AllowLiteralOrExpression<T, CIn>
-    ): BaseExpression<string, "complicatedExpression"> & BaseExpression<Serialized<T>, "complicatedExpression"> {
+    ): BaseExpression<string, "complicatedExpression">
+        & BaseExpression<Serialized<T>, "complicatedExpression">
+        & ToJsonExpression<Serialized<T>, "complicatedExpression"> {
         return fn<Serialized<T>,CIn,"complicatedExpression">("toJSON", toExpression(data)) as any;
     }
 
@@ -1028,6 +1068,23 @@ class ExprBuilder {
     toBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
         return fn<string,CIn>("toBase64", toExpression(data));
     }
+
+    toBase64YamlSafe<CIn extends ExpressionType>(
+        data: AllowLiteralOrExpression<string,CIn>
+    ): BaseExpression<YamlPlainSafeString, CIn> {
+        return new YamlPlainSafeStringExpression(this.toBase64(data));
+    }
+
+    /** Emits a dynamic string as JSON so Argo substitution remains valid YAML. */
+    yamlSafeString(
+        value: AllowLiteralOrExpression<string, any>
+    ): BaseExpression<string, "complicatedExpression"> {
+        const jsonEscaped = fn<string, "complicatedExpression", "complicatedExpression">(
+            "toJSON",
+            toExpression(value)
+        ) as unknown as ToJsonExpression<string, "complicatedExpression">;
+        return new UnquotedTypeWrapper<string>(jsonEscaped, "yaml-safe-json");
+    }
 }
 
 export const expr = new ExprBuilder();
@@ -1036,14 +1093,22 @@ export default expr;
 
 
 // This function and the next tie into the renderer
+function expressionValueProxy<T extends PlainObject>(value: BaseExpression<T>): T {
+    return value as never;
+}
+
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<number>>): number;
 export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>): boolean;
-export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T;
-export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject|Serialized<number>|Serialized<boolean>)>(value: BaseExpression<T>) {
-    return new UnquotedTypeWrapper(value) as any as T;
+export function makeDirectTypeProxy<T extends AggregateType>(value: BaseExpression<Serialized<T>>): T;
+export function makeDirectTypeProxy<T extends Exclude<NonSerializedPlainObject, string>>(value: BaseExpression<T>): T;
+export function makeDirectTypeProxy<T extends (Exclude<NonSerializedPlainObject, string>|Serialized<Exclude<NonSerializedPlainObject, string>>)>(value: BaseExpression<T>) {
+    if (isToJsonExpression(value)) {
+        return expressionValueProxy(new UnquotedTypeWrapper<T>(value, "yaml-safe-json"));
+    }
+    return expressionValueProxy(new UnquotedTypeWrapper<T>(value));
 }
 
 // This function and the next tie into the renderer
 export function makeStringTypeProxy<T extends string>(value: AllowLiteralOrExpression<T>): T {
-    return value as any as T;
+    return isExpression(value) ? expressionValueProxy(value) : value;
 }

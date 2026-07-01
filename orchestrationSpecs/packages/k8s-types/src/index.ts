@@ -8550,6 +8550,120 @@ export interface IoK8SApiBatchV1JobList {
   [k: string]: unknown;
 }
 
+/**
+ * PodDisruptionBudget is an object to define the max disruption that can be caused to a collection of pods
+ *
+ * This interface was referenced by `K8STypes`'s JSON-Schema
+ * via the `definition` "io.k8s.api.policy.v1.PodDisruptionBudget".
+ */
+export interface IoK8SApiPolicyV1 {
+  /**
+   * APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+   */
+  apiVersion?: string;
+  /**
+   * Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+   */
+  kind?: string;
+  /**
+   * Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+   */
+  metadata?: IoK8SApimachineryPkgApisMetaV1;
+  /**
+   * Specification of the desired behavior of the PodDisruptionBudget.
+   */
+  spec?: IoK8SApiPolicyV11;
+  /**
+   * Most recently observed status of the PodDisruptionBudget.
+   */
+  status?: IoK8SApiPolicyV12;
+  [k: string]: unknown;
+}
+/**
+ * PodDisruptionBudgetSpec is a description of a PodDisruptionBudget.
+ *
+ * This interface was referenced by `K8STypes`'s JSON-Schema
+ * via the `definition` "io.k8s.api.policy.v1.PodDisruptionBudgetSpec".
+ */
+export interface IoK8SApiPolicyV11 {
+  /**
+   * An eviction is allowed if at most "maxUnavailable" pods selected by "selector" are unavailable after the eviction, i.e. even in absence of the evicted pod. For example, one can prevent all voluntary evictions by specifying 0. This is a mutually exclusive setting with "minAvailable".
+   */
+  maxUnavailable?: IoK8SApimachineryPkgUtilIntstrIntOrString;
+  /**
+   * An eviction is allowed if at least "minAvailable" pods selected by "selector" will still be available after the eviction, i.e. even in the absence of the evicted pod.  So for example you can prevent all voluntary evictions by specifying "100%".
+   */
+  minAvailable?: IoK8SApimachineryPkgUtilIntstrIntOrString;
+  /**
+   * Label query over pods whose evictions are managed by the disruption budget. A null selector will match no pods, while an empty ({}) selector will select all pods within the namespace.
+   */
+  selector?: IoK8SApimachineryPkgApisMetaV14;
+  /**
+   * UnhealthyPodEvictionPolicy defines the criteria for when unhealthy pods should be considered for eviction. Current implementation considers healthy pods, as pods that have status.conditions item with type="Ready",status="True".
+   *
+   * Valid policies are IfHealthyBudget and AlwaysAllow. If no policy is specified, the default behavior will be used, which corresponds to the IfHealthyBudget policy.
+   *
+   * IfHealthyBudget policy means that running pods (status.phase="Running"), but not yet healthy can be evicted only if the guarded application is not disrupted (status.currentHealthy is at least equal to status.desiredHealthy). Healthy pods will be subject to the PDB for eviction.
+   *
+   * AlwaysAllow policy means that all running pods (status.phase="Running"), but not yet healthy are considered disrupted and can be evicted regardless of whether the criteria in a PDB is met. This means perspective running pods of a disrupted application might not get a chance to become healthy. Healthy pods will be subject to the PDB for eviction.
+   *
+   * Additional policies may be added in the future. Clients making eviction decisions should disallow eviction of unhealthy pods if they encounter an unrecognized policy in this field.
+   *
+   * Possible enum values:
+   *  - `"AlwaysAllow"` policy means that all running pods (status.phase="Running"), but not yet healthy are considered disrupted and can be evicted regardless of whether the criteria in a PDB is met. This means perspective running pods of a disrupted application might not get a chance to become healthy. Healthy pods will be subject to the PDB for eviction.
+   *  - `"IfHealthyBudget"` policy means that running pods (status.phase="Running"), but not yet healthy can be evicted only if the guarded application is not disrupted (status.currentHealthy is at least equal to status.desiredHealthy). Healthy pods will be subject to the PDB for eviction.
+   */
+  unhealthyPodEvictionPolicy?: "AlwaysAllow" | "IfHealthyBudget";
+  [k: string]: unknown;
+}
+/**
+ * PodDisruptionBudgetStatus represents information about the status of a PodDisruptionBudget. Status may trail the actual state of a system.
+ *
+ * This interface was referenced by `K8STypes`'s JSON-Schema
+ * via the `definition` "io.k8s.api.policy.v1.PodDisruptionBudgetStatus".
+ */
+export interface IoK8SApiPolicyV12 {
+  /**
+   * Conditions contain conditions for PDB. The disruption controller sets the DisruptionAllowed condition. The following are known values for the reason field (additional reasons could be added in the future): - SyncFailed: The controller encountered an error and wasn't able to compute
+   *               the number of allowed disruptions. Therefore no disruptions are
+   *               allowed and the status of the condition will be False.
+   * - InsufficientPods: The number of pods are either at or below the number
+   *                     required by the PodDisruptionBudget. No disruptions are
+   *                     allowed and the status of the condition will be False.
+   * - SufficientPods: There are more pods than required by the PodDisruptionBudget.
+   *                   The condition will be True, and the number of allowed
+   *                   disruptions are provided by the disruptionsAllowed property.
+   */
+  conditions?: IoK8SApimachineryPkgApisMetaV17[];
+  /**
+   * current number of healthy pods
+   */
+  currentHealthy: number;
+  /**
+   * minimum desired number of healthy pods
+   */
+  desiredHealthy: number;
+  /**
+   * DisruptedPods contains information about pods whose eviction was processed by the API server eviction subresource handler but has not yet been observed by the PodDisruptionBudget controller. A pod will be in this map from the time when the API server processed the eviction request to the time when the pod is seen by PDB controller as having been marked for deletion (or after a timeout). The key in the map is the name of the pod and the value is the time when the API server processed the eviction request. If the deletion didn't occur and a pod is still there it will be removed from the list automatically by PodDisruptionBudget controller after some time. If everything goes smooth this map should be empty for the most of the time. Large number of entries in the map may indicate problems with pod deletions.
+   */
+  disruptedPods?: {
+    [k: string]: IoK8SApimachineryPkgApisMetaV1Time;
+  };
+  /**
+   * Number of pod disruptions that are currently allowed.
+   */
+  disruptionsAllowed: number;
+  /**
+   * total number of pods counted by this disruption budget
+   */
+  expectedPods: number;
+  /**
+   * Most recent generation observed when updating this PDB status. DisruptionsAllowed and other status information is valid only if observedGeneration equals to PDB's object generation.
+   */
+  observedGeneration?: number;
+  [k: string]: unknown;
+}
+
 
 // Clean type aliases for main resources
 export type Pod = IoK8SApiCoreV1149;
@@ -8560,6 +8674,7 @@ export type ReplicaSet = IoK8SApiAppsV113;
 export type StatefulSet = IoK8SApiAppsV118;
 export type Job = IoK8SApiBatchV111;
 export type CronJob = IoK8SApiBatchV1;
+export type PodDisruptionBudget = IoK8SApiPolicyV1;
 export type JobTemplateSpec = IoK8SApiBatchV12;
 
 // Clean type aliases for commonly used types

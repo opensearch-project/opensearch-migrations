@@ -1,8 +1,7 @@
 package org.opensearch.migrations;
 
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
@@ -29,34 +28,21 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
         var clientFactory = new OpenSearchClientFactory(args.sourceArgs.toConnectionContext());
         var client = clientFactory.determineVersionAndCreate();
 
-        SnapshotCreator snapshotCreator;
-        if (args.fileSystemRepoPath != null) {
-            snapshotCreator = new FileSystemSnapshotCreator(
-                args.snapshotName,
-                args.snapshotRepoName,
-                client,
-                args.fileSystemRepoPath,
-                args.indexAllowlist,
-                context,
-                args.compressionEnabled,
-                args.includeGlobalState
-            );
-        } else {
-            snapshotCreator = new S3SnapshotCreator(
-                args.snapshotName,
-                args.snapshotRepoName,
-                client,
-                args.s3RepoUri,
-                args.s3Region,
-                args.s3Endpoint,
-                args.indexAllowlist,
-                args.maxSnapshotRateMBPerNode,
-                args.s3RoleArn,
-                context,
-                args.compressionEnabled,
-                args.includeGlobalState
-            );
-        }
+        var parsedUri = RepoUri.parse(args.repoUri);
+        var snapshotCreator = new SnapshotCreator(
+            args.snapshotName,
+            args.snapshotRepoName,
+            client,
+            parsedUri,
+            args.indexAllowlist,
+            context,
+            args.compressionEnabled,
+            args.includeGlobalState,
+            args.s3Region,
+            args.endpoint,
+            args.maxSnapshotRateMBPerNode,
+            args.s3RoleArn
+        );
 
         try {
             if (args.noWait) {

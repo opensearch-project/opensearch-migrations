@@ -217,8 +217,8 @@ sourceClusters:
       #awsRegion: string
       ##  Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint
       #endpoint: string
-      ##  s3:///BUCKETNAME/PATH
-      #s3RepoPathUri: string
+      ##  s3:///BUCKETNAME/PATH  (or gs://BUCKETNAME/PATH)
+      #repoPathUri: string
     proxy:
       #loggingConfigurationOverrideConfigMap: string
       #otelMetricsCollectorEndpoint: http://otel-collector:4317

@@ -1,4 +1,4 @@
-{{- if .Values.defaultBucketConfiguration.create }}
+{{- if and (or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "")) .Values.defaultBucketConfiguration.create }}
 apiVersion: batch/v1
 kind: Job
 metadata:
