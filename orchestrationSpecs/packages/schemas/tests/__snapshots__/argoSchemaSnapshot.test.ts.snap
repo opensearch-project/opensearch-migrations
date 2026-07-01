@@ -1491,13 +1491,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "suppressCaptureForHeaderMatch": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "default": []
-                    },
                     "suppressCaptureForMethod": {
                       "type": "string",
                       "default": ""
@@ -1509,6 +1502,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "suppressMethodAndPath": {
                       "type": "string",
                       "default": ""
+                    },
+                    "suppressCaptureForHeaderMatch": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
                     },
                     "sslTrustCertFile": {
                       "type": "string",
@@ -7079,12 +7079,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "x-change-restriction": "gated"
                   },
                   "suppressCaptureForHeaderMatch": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Java regex pattern to test against the named header's value. The proxy uses full-string matching. Matching requests are forwarded but not recorded.",
+                      "x-ui-hint": {
+                        "kind": "javaRegex",
+                        "message": "Java regex matched against the full value for the named header; header names are matched case-insensitively.",
+                        "examples": [
+                          "healthcheck",
+                          "Bearer .*",
+                          ".*OpenSearch.*"
+                        ],
+                        "testStrings": [
+                          "healthcheck",
+                          "Mozilla/5.0 healthcheck",
+                          "curl/8.6.0",
+                          "Bearer eyJhbGciOi...",
+                          "application/json"
+                        ]
+                      }
                     },
-                    "default": [],
-                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.",
+                    "default": {},
+                    "description": "Map of HTTP header names to Java regex patterns. Header names are matched case-insensitively. When a request has a matching header value, the request is forwarded but not recorded.",
                     "checksumFor": [
                       "snapshot",
                       "replayer"
@@ -7096,8 +7114,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "x-change-restriction": "gated",
                     "x-ui-hint": {
-                      "kind": "array",
-                      "addLabel": "header pattern"
+                      "kind": "record",
+                      "addLabel": "header match",
+                      "keyPattern": "^[!#$%&'*+.^_\`|~0-9A-Za-z-]+$",
+                      "message": "Use an HTTP header name, such as User-Agent, Authorization, or x-amz-security-token."
                     }
                   },
                   "suppressCaptureForMethod": {

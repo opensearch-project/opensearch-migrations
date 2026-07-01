@@ -955,11 +955,20 @@ function unsetAtPath(config: any, path: string[]): void {
     delete parent[key];
 }
 
-function defaultConfigForPath(path: string[]): Record<string, unknown> {
+function defaultConfigForPath(path: string[]): unknown {
     const key = path.join(".");
     const factory = DEFAULT_CONFIG_FACTORIES[key];
     if (factory) {
         return factory();
+    }
+    const recordSchema = resolveJsonSchemaRef(jsonSchemaForConfigPath(path)) as {additionalProperties?: unknown} | undefined;
+    const additionalSchema = resolveJsonSchemaRef(
+        typeof recordSchema?.additionalProperties === "object" && recordSchema.additionalProperties !== null
+            ? recordSchema.additionalProperties as any
+            : undefined
+    );
+    if (additionalSchema) {
+        return defaultJsonValueForSchema(additionalSchema);
     }
     throw new Error(`Add is not supported at path ${path.join(".")}`);
 }

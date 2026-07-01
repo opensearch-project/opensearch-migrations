@@ -212,8 +212,18 @@ const PROXY_RESOLVED_FIELDS = {
     ...FILE_SOURCE_RESOLVED_FIELDS,
 } as const;
 
+export const ARGO_SUPPRESS_CAPTURE_HEADER_MATCH = z.array(z.string()).default([]).optional()
+    .describe("Flattened alternating header-name and Java-regex values for suppressCaptureForHeaderMatch, passed to the proxy process.")
+    .checksumFor('snapshot', 'replayer')
+    .changeRestriction('gated');
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS
+        .omit({suppressCaptureForHeaderMatch: true})
+        .extend({
+            suppressCaptureForHeaderMatch: ARGO_SUPPRESS_CAPTURE_HEADER_MATCH,
+            ...PROXY_RESOLVED_FIELDS,
+        })
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,

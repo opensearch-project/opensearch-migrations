@@ -765,6 +765,23 @@ describe('MigrationConfigTransformer validation', () => {
         });
     });
 
+    it('should lower capture header suppression maps to proxy process argument pairs', async () => {
+        const configWithHeaderMatches = cloneBaseConfig();
+        configWithHeaderMatches.traffic.proxies.proxy1.proxyConfig.suppressCaptureForHeaderMatch = {
+            "Authorization": "Bearer .*",
+            "User-Agent": ".*healthcheck.*",
+        };
+
+        const result = await transformer.processFromObject(configWithHeaderMatches);
+
+        expect(result.proxies?.[0]?.proxyConfig.suppressCaptureForHeaderMatch).toEqual([
+            "Authorization",
+            "Bearer .*",
+            "User-Agent",
+            ".*healthcheck.*",
+        ]);
+    });
+
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,

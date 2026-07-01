@@ -244,6 +244,12 @@ const PROXY_METHOD_AND_PATH_REGEX_HINT: UiHint = {
     examples: ["GET /_cluster/health", "(GET|HEAD) /.*", "POST .*/_search"],
     testStrings: ["GET /_cluster/health", "HEAD /", "POST /my-index/_search", "GET /_cat/indices?v", "POST /_bulk"],
 };
+const PROXY_HEADER_VALUE_REGEX_HINT: UiHint = {
+    kind: 'javaRegex',
+    message: "Java regex matched against the full value for the named header; header names are matched case-insensitively.",
+    examples: ["healthcheck", "Bearer .*", ".*OpenSearch.*"],
+    testStrings: ["healthcheck", "Mozilla/5.0 healthcheck", "curl/8.6.0", "Bearer eyJhbGciOi...", "application/json"],
+};
 
 const CORE_V1_SECRET: KubernetesResourceType = {group: "", version: "v1", kind: "Secret", namespaced: true};
 const CORE_V1_CONFIG_MAP: KubernetesResourceType = {group: "", version: "v1", kind: "ConfigMap", namespaced: true};
@@ -616,6 +622,7 @@ export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONA
 export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
 
 export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
+export const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 export const DNS_LABEL_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
 export const DNS_NAME_PATTERN = `^(?:\\*\\.)?${DNS_LABEL_PATTERN}(?:\\.${DNS_LABEL_PATTERN})*$`;
@@ -1093,9 +1100,18 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('gated'),
-    suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional()
-        .uiHint({kind: 'array', addLabel: 'header pattern'})
-        .describe("List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.")
+    suppressCaptureForHeaderMatch: z.record(
+        z.string().regex(HTTP_HEADER_NAME_PATTERN),
+        z.string().min(1).uiHint(PROXY_HEADER_VALUE_REGEX_HINT)
+            .describe("Java regex pattern to test against the named header's value. The proxy uses full-string matching. Matching requests are forwarded but not recorded.")
+    ).default({}).optional()
+        .uiHint({
+            kind: 'record',
+            addLabel: 'header match',
+            keyPattern: HTTP_HEADER_NAME_PATTERN.source,
+            message: "Use an HTTP header name, such as User-Agent, Authorization, or x-amz-security-token.",
+        })
+        .describe("Map of HTTP header names to Java regex patterns. Header names are matched case-insensitively. When a request has a matching header value, the request is forwarded but not recorded.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     suppressCaptureForMethod: z.string().default("").optional()

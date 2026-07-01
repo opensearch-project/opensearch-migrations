@@ -84,7 +84,9 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
     }
 
     if (unwrapped instanceof z.ZodRecord && isSafePlainObject(jsonSchema?.additionalProperties)) {
-        injectMetaExtensions(jsonSchema.additionalProperties, (unwrapped as z.ZodRecord<any, any>).valueType);
+        const valueType = (unwrapped as z.ZodRecord<any, any>).valueType;
+        applyMetaExtensions(jsonSchema.additionalProperties, valueType);
+        injectMetaExtensions(jsonSchema.additionalProperties, valueType);
         return;
     }
 

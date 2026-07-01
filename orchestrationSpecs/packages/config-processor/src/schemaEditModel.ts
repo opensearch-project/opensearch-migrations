@@ -62,6 +62,7 @@ export interface EditNode {
     }[];
     command?: {
         requiresName?: boolean;
+        editAdded?: boolean;
     };
     children?: EditNode[];
 }
@@ -280,8 +281,16 @@ function schemaContainerKind(schema: any): "array" | "object" | undefined {
     return SCHEMA_OBJECT_TYPES.has(name) ? "object" : undefined;
 }
 
+function zodRecordValueSchema(schema: any): any | undefined {
+    const unwrapped = unwrapSchema(schema);
+    return unwrapped?.valueType ?? unwrapped?._def?.valueType;
+}
+
 export function schemaArrayElement(schema: any): any | undefined {
     const unwrapped = unwrapSchema(schema);
+    if (schemaConstructorName(unwrapped) !== "ZodArray") {
+        return undefined;
+    }
     return unwrapped?.element ?? unwrapped?._def?.element ?? unwrapped?._def?.type;
 }
 
@@ -444,6 +453,11 @@ export function defaultJsonValueForSchema(schema: JsonSchema | undefined): unkno
         return false;
     }
     return "";
+}
+
+function jsonSchemaAdditionalPropertiesSchema(schema: JsonSchema | undefined): JsonSchema | undefined {
+    const additional = resolveJsonSchemaRef(schema)?.additionalProperties;
+    return isJsonSchemaObject(additional) ? resolveJsonSchemaRef(additional) : undefined;
 }
 
 function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | undefined {
@@ -668,6 +682,42 @@ function jsonSchemaArrayChildren(
     ];
 }
 
+function recordAddLabel(inputHint: EditInputHint | undefined): string {
+    return inputHint?.kind === "record" && inputHint.addLabel
+        ? inputHint.addLabel
+        : "item";
+}
+
+function jsonSchemaRecordChildren(
+    rootPath: string[],
+    schema: JsonSchema,
+    value: unknown,
+): EditNode[] {
+    const recordValue = isPlainObject(value) ? value : {};
+    const itemSchema = jsonSchemaAdditionalPropertiesSchema(schema);
+    const recordHint = jsonSchemaUiHint(schema);
+    const addLabel = recordAddLabel(recordHint);
+    const children = Object.entries(recordValue)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([recordKey, recordItemValue]) => {
+            const node = itemSchema
+                ? jsonSchemaFieldNode(rootPath, recordKey, itemSchema, {[recordKey]: recordItemValue}, true)
+                : genericDisplayNode([...rootPath, recordKey], recordKey, recordItemValue, "required", false, "");
+            node.collapsed = false;
+            return node;
+        });
+    children.push(addRow(
+        rootPath,
+        addLabel,
+        arrayDescriptionForAdd(addLabel),
+        true,
+        recordKeyHint(recordHint),
+        false,
+        true,
+    ));
+    return children;
+}
+
 function jsonSchemaArrayItemNode(
     rootPath: string[],
     schema: JsonSchema | undefined,
@@ -716,9 +766,12 @@ function jsonSchemaFieldNode(
     }
 
     const containerKind = jsonSchemaType(resolved) === "array" ? "array" : "object";
-    const childNodes = containerKind === "object"
-        ? jsonSchemaObjectChildren(path, resolved, value)
-        : jsonSchemaArrayChildren(path, resolved, value);
+    const recordItemSchema = containerKind === "object" ? jsonSchemaAdditionalPropertiesSchema(resolved) : undefined;
+    const childNodes = recordItemSchema
+        ? jsonSchemaRecordChildren(path, resolved, value)
+        : containerKind === "object"
+            ? jsonSchemaObjectChildren(path, resolved, value)
+            : jsonSchemaArrayChildren(path, resolved, value);
     const minItems = containerKind === "array" ? jsonSchemaMinItems(resolved) : undefined;
     const missingArrayItems = userRequired && minItems !== undefined && Array.isArray(value) && value.length < minItems;
     const missing = userRequired && (value === undefined || value === null || missingArrayItems);
@@ -735,9 +788,9 @@ function jsonSchemaFieldNode(
         return markValueState(finalizeNode({
             id: `edit:${path.join(".")}`,
             path,
-            label: `${key}: ${value === undefined || value === null ? (userRequired ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (Object.keys(value).length ? "configured" : "{}") : String(value)}`,
+            label: `${key}: ${value === undefined || value === null ? (userRequired ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (recordItemSchema ? `${Object.keys(value).length} item${Object.keys(value).length === 1 ? "" : "s"}` : (Object.keys(value).length ? "configured" : "{}")) : String(value)}`,
             value,
-            valueKind: containerKind,
+            valueKind: recordItemSchema ? "record" : containerKind,
             presence,
             expert,
             description,
@@ -1479,6 +1532,17 @@ export function schemaFieldNode(
         )) {
             return jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required);
         }
+        return markValueState(zodRecordNode(
+            path,
+            key,
+            schema,
+            value,
+            userRequired,
+            inputHint,
+            description,
+            expert,
+            presence,
+        ), valueDefaulted, hasValue);
     }
     const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
     if (unionNode) {
@@ -1520,6 +1584,54 @@ export function schemaFieldNode(
         return markValueState(scalarNode(path, key, "", description, userRequired, inputHint, "string", expert, presence, externalRef), valueDefaulted, hasValue);
     }
     return markValueState(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted, hasValue);
+}
+
+function zodRecordNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    required: boolean,
+    inputHint: EditInputHint | undefined,
+    description: string,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode {
+    const recordValue = isPlainObject(value) ? value : {};
+    const valueSchema = zodRecordValueSchema(schema);
+    const addLabel = recordAddLabel(inputHint);
+    const children = [
+        ...Object.entries(recordValue)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([recordKey, recordItemValue]) => valueSchema
+                ? schemaFieldNode(path, recordKey, valueSchema, {[recordKey]: recordItemValue})
+                : genericDisplayNode([...path, recordKey], recordKey, recordItemValue, "required", false, "")),
+        addRow(
+            path,
+            addLabel,
+            arrayDescriptionForAdd(addLabel),
+            true,
+            recordKeyHint(inputHint),
+            expert,
+            true,
+        ),
+    ];
+    const missing = required && (value === undefined || value === null);
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: ${Object.keys(recordValue).length} item${Object.keys(recordValue).length === 1 ? "" : "s"}`,
+        value,
+        valueKind: "record",
+        presence,
+        expert,
+        description,
+        required,
+        inputHint,
+        status: missing ? "required" : "ok",
+        diagnostics: missing ? [{severity: "required", message: `${key} is required.`, path}] : [],
+        children,
+    });
 }
 
 function zodObjectNode(
@@ -1630,6 +1742,7 @@ export function addRow(
     requiresName = true,
     inputHint?: EditInputHint,
     expert = false,
+    editAdded = false,
 ): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
@@ -1640,7 +1753,7 @@ export function addRow(
         expert,
         inputHint,
         validation: validationFromHint(inputHint),
-        command: {requiresName},
+        command: {requiresName, editAdded},
         status: "ok",
     });
 }
@@ -1679,6 +1792,13 @@ export function childSchemaAtPath(schema: any, path: string[]): any | undefined 
     const elementSchema = unwrapped?.element ?? unwrapped?._def?.element;
     if (elementSchema && isArrayIndex(part)) {
         return childSchemaAtPath(elementSchema, rest);
+    }
+
+    if (schemaConstructorName(unwrapped) === "ZodRecord") {
+        const valueSchema = unwrapped?.valueType ?? unwrapped?._def?.valueType;
+        if (valueSchema) {
+            return childSchemaAtPath(valueSchema, rest);
+        }
     }
 
     return undefined;

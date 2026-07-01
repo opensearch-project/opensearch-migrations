@@ -174,14 +174,19 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         message = str(self.regex_help.get("message") or "Java regex used by the capture proxy.")
         help_widget.display = True
         samples_widget.display = bool(samples)
-        help_widget.update(
-            f"{escape(message)}\n"
-            f"Regex101: [link={url}]open with samples[/] ({escape(url)})"
-        )
+        help_widget.update(self._regex_help_markup(message, url))
         if samples:
             samples_widget.update("Samples:\n" + "\n".join(f"  {escape(sample)}" for sample in samples))
         else:
             samples_widget.update("")
+
+    @staticmethod
+    def _regex_help_markup(message: str, url: str) -> str:
+        quoted_url = url.replace('"', "%22")
+        return (
+            f"{escape(message)}\n"
+            f"Regex101: [link=\"{quoted_url}\"]open with samples[/] ({escape(url)})"
+        )
 
     @staticmethod
     def _regex101_url(regex: str, samples: list[str]) -> str:

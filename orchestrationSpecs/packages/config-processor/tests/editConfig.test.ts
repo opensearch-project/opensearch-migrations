@@ -716,6 +716,7 @@ describe("editConfig state", () => {
         const serviceType = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.serviceType");
         const tls = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
         const setHeader = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.setHeader");
+        const suppressHeaderMatch = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch");
         const suppressMethod = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForMethod");
         const suppressUriPath = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForUriPath");
         const suppressMethodAndPath = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressMethodAndPath");
@@ -758,6 +759,24 @@ describe("editConfig state", () => {
         ]);
         expect(tls).toMatchObject({presence: "optional", valueKind: "union", value: "unset"});
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
+        expect(suppressHeaderMatch).toMatchObject({
+            presence: "optional",
+            valueKind: "record",
+            inputHint: {
+                kind: "record",
+                addLabel: "header match",
+            },
+        });
+        expect(findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch:add")).toMatchObject({
+            label: "+ Add header match",
+            command: {
+                requiresName: true,
+                editAdded: true,
+            },
+            inputHint: {
+                kind: "text",
+            },
+        });
         expect(suppressMethod?.inputHint).toMatchObject({
             kind: "javaRegex",
             testStrings: ["GET", "HEAD", "POST", "PUT", "DELETE"],
@@ -775,6 +794,58 @@ describe("editConfig state", () => {
         expect(captureGroup?.statusCounts?.required).toBe(1);
         expect(addProxy?.status).toBe("ok");
         expect(addProxy?.label).toContain("+ Add capture proxy");
+    });
+
+    it("edits capture header suppression as a map of header names to regex values", () => {
+        const added = applyEditOperationToObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                },
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "suppressCaptureForHeaderMatch"],
+            value: {name: "User-Agent"},
+        });
+
+        const addedHeader = findNode(
+            added.editState.nodes,
+            "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch.User-Agent"
+        );
+        expect(parse(added.yaml).traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch).toEqual({
+            "User-Agent": "",
+        });
+        expect(addedHeader).toMatchObject({
+            label: "User-Agent: <required>",
+            status: "required",
+            valueKind: "scalar",
+            inputHint: {
+                kind: "javaRegex",
+                testStrings: ["healthcheck", "Mozilla/5.0 healthcheck", "curl/8.6.0", "Bearer eyJhbGciOi...", "application/json"],
+            },
+        });
+
+        const set = applyEditOperationToObject(parse(added.yaml), {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "suppressCaptureForHeaderMatch", "User-Agent"],
+            value: ".*healthcheck.*",
+        });
+
+        expect(parse(set.yaml).traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch).toEqual({
+            "User-Agent": ".*healthcheck.*",
+        });
+        expect(findNode(
+            set.editState.nodes,
+            "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForHeaderMatch.User-Agent"
+        )?.label).toBe("User-Agent: .*healthcheck.*");
     });
 
     it("does not require replay config when traffic capture is configured alone", () => {

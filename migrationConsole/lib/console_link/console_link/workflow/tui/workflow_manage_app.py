@@ -2253,11 +2253,16 @@ class WorkflowTreeApp(App):
         if not name:
             return
         self._cancel_config_edit_validation()
+        added_path = [str(part) for part in (node.get("path") or [])] + [name]
+        command = node.get("command") or {}
         self._apply_config_edit_operation({
             "op": "add",
             "path": node.get("path"),
             "value": {"name": name},
-        })
+        },
+            post_apply_edit_id=self._edit_id_for_path(added_path) if command.get("editAdded") else None,
+            discard_path_on_cancel=added_path if command.get("editAdded") else None,
+        )
 
     def _handle_scalar_config_value(
         self,

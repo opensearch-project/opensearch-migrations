@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from unittest.mock import MagicMock, patch
+from rich.markup import render
 from textual.app import App, ComposeResult
 from textual.widgets import Button, Input, Static, TextArea
 
@@ -1532,6 +1533,16 @@ def test_text_input_modal_builds_regex101_url_with_multiline_samples():
     assert parsed.netloc == "regex101.com"
     assert query["regex"] == ["GET|HEAD"]
     assert query["testString"] == ["GET\nHEAD\nPOST"]
+
+
+def test_text_input_modal_regex101_help_markup_quotes_link_url():
+    url = TextInputModal._regex101_url("", ["GET", "HEAD", "POST"])
+    markup = TextInputModal._regex_help_markup("Java regex used by the capture proxy.", url)
+
+    rendered = render(markup)
+
+    assert "open with samples" in rendered.plain
+    assert url in rendered.plain
 
 
 def resource_sections_for_manage_tests():

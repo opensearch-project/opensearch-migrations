@@ -68,6 +68,15 @@ describe("workflow schema UI hints", () => {
     it("exports Java regex hints for capture suppression patterns", () => {
         const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
 
+        expect(proxyConfig.properties.suppressCaptureForHeaderMatch["x-ui-hint"]).toMatchObject({
+            kind: "record",
+            addLabel: "header match",
+        });
+        expect(proxyConfig.properties.suppressCaptureForHeaderMatch.additionalProperties["x-ui-hint"]).toMatchObject({
+            kind: "javaRegex",
+            examples: ["healthcheck", "Bearer .*", ".*OpenSearch.*"],
+            testStrings: ["healthcheck", "Mozilla/5.0 healthcheck", "curl/8.6.0", "Bearer eyJhbGciOi...", "application/json"],
+        });
         expect(proxyConfig.properties.suppressCaptureForMethod["x-ui-hint"]).toMatchObject({
             kind: "javaRegex",
             examples: ["GET", "GET|HEAD", "POST|PUT|PATCH"],

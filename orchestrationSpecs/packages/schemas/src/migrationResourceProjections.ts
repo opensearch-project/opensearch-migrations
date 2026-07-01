@@ -11,6 +11,7 @@ import {
 } from "./userSchemas";
 import {
     ARGO_METADATA_OPTIONS,
+    ARGO_PROXY_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
 } from "./argoSchemas";
@@ -66,8 +67,9 @@ export const RESOURCE_PROJECTIONS: readonly ResourceProjection[] = [
 const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "CaptureProxy",
-        sourceSchema: "USER_PROXY_OPTIONS",
-        schema: USER_PROXY_OPTIONS,
+        sourceSchema: "ARGO_PROXY_OPTIONS",
+        schema: ARGO_PROXY_OPTIONS,
+        policySchemas: [USER_PROXY_OPTIONS],
     },
     {
         resourceKind: "TrafficReplay",

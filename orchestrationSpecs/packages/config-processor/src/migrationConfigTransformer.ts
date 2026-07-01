@@ -395,11 +395,30 @@ function prepareReplayerConfig(
     });
 }
 
+function flattenSuppressCaptureForHeaderMatch(value: unknown): string[] | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+        return [];
+    }
+    return Object.entries(value).flatMap(([headerName, pattern]) => [headerName, String(pattern)]);
+}
+
 function prepareProxyConfig(
     config: z.infer<typeof CAPTURE_CONFIG>["proxyConfig"]
 ) {
     const fileSourceRegistry = new FileSourceRegistry();
-    const tls = config.tls;
+    const {
+        suppressCaptureForHeaderMatch,
+        ...configWithoutHeaderMatch
+    } = config;
+    const loweredHeaderMatch = flattenSuppressCaptureForHeaderMatch(suppressCaptureForHeaderMatch);
+    const loweredConfig = {
+        ...configWithoutHeaderMatch,
+        ...(loweredHeaderMatch === undefined ? {} : {suppressCaptureForHeaderMatch: loweredHeaderMatch}),
+    };
+    const tls = loweredConfig.tls;
 
     if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
         const {clientAuth} = tls;
@@ -412,7 +431,7 @@ function prepareProxyConfig(
                 sslTrustCertPemEnvVar: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR
             };
         return ARGO_PROXY_OPTIONS.parse({
-            ...config,
+            ...loweredConfig,
             ...trustCertConfig,
             requireClientAuth: clientAuth.required ?? true,
             ...fileSourceRegistry.resolvedFields,
@@ -420,7 +439,7 @@ function prepareProxyConfig(
     }
 
     return ARGO_PROXY_OPTIONS.parse({
-        ...config,
+        ...loweredConfig,
         ...fileSourceRegistry.resolvedFields,
     });
 }
