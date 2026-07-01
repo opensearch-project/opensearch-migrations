@@ -12,6 +12,7 @@ from kubernetes.client.rest import ApiException
 from ..models.utils import get_current_namespace, load_k8s_config
 from .artifact_store import ArtifactStoreError, artifact_uri, list_artifacts, read_artifact_text
 from .crd_utils import CRD_GROUP, CRD_VERSION, DISPLAY_NAMES, parse_resource_path, resource_display_name
+from .hints import hint_after_show
 from .log import (
     _split_passthrough_args,
 )
@@ -650,6 +651,9 @@ def show_command(ctx, list_resources, all_resources, history, run_selector, clea
     output_task = _canonical_task_name(resource_name)
     if output_task:
         _handle_task_show(ctx, namespace, output_task, task, list_resources, history, run_selector, clean)
-        return
+    else:
+        _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
 
-    _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
+    # --clean is for script-friendly raw artifact output; never append the hint there.
+    if not list_resources and not history and not run_selector and not clean:
+        hint_after_show()

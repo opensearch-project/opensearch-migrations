@@ -25,6 +25,7 @@ import {
     configMapKey,
     defineParam,
     expr,
+    FunctionExpression,
     IMAGE_PULL_POLICY,
     InputParamDef,
     INTERNAL,
@@ -42,6 +43,7 @@ import {ResourceManagement} from "./resourceManagement";
 
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {getApprovalMap, getSourceTargetPathAndSnapshotAndMigrationIndex} from "./commonUtils/configContextPathConstructors";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
 import {S3TrafficLoader} from "./s3TrafficLoader";
@@ -449,6 +451,8 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
+        .addInputsFromRecord(
+            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
 
         .addSteps(b => b
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
@@ -460,6 +464,31 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
+            )
+            .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
+                    }),
+                // The skip flag must be a native boolean expression here: this `when` is
+                // compound, so it renders as an expr-lang ({{=...}}) condition where a
+                // stringified input parameter cannot be negated (`!"false"` throws
+                // "interface {} is string, not bool"). Inlining the sprig.dig keeps it a
+                // real bool. (The metadata gates dodge this only because their `when` is a
+                // lone `!()` that renders in Argo's legacy templating.)
+                {when: {templateExp: expr.and(
+                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                    expr.not(new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+                        ...getSourceTargetPathAndSnapshotAndMigrationIndex(
+                            b.inputs.sourceLabel,
+                            b.inputs.targetConfig,
+                            expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                            b.inputs.migrationLabel
+                        ),
+                        expr.literal("documentBackfill"),
+                        expr.literal(false),
+                        expr.deserializeRecord(b.inputs.skipApprovalMap)
+                    ]))
+                )}}
             )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
                     c.register({
@@ -787,6 +816,7 @@ export const FullMigration = WorkflowBuilder.create({
                         topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
                         checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),

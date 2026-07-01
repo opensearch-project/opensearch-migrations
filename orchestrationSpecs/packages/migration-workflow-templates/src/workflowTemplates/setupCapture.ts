@@ -598,6 +598,21 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
+            // Auto-skip the proxy-setup approval gate when skip-approvals is configured,
+            // mirroring how the metadata/backfill gates honor the approval-config map.
+            // `skipApproval` originates as a boolean in the config-processor, but it reaches
+            // this template through an Argo loop item (createProxy's c.item), which Argo
+            // stringifies — so in the serialized proxyConfig it arrives as "true"/"false".
+            // Compare as a string (via asString) rather than negating it directly: in
+            // expr-lang `!"true"` throws "interface {} is string, not bool". (Same footgun
+            // as the documentBackfill gate, which dodges it by reading real bools from the
+            // approval-config map.)
+            const skipProxyApproval = expr.equals(
+                expr.asString(expr.dig(config, ["skipApproval"], expr.literal(false))),
+                expr.literal("true"));
+            // Use dig for ALL tls field accesses so expressions are null-safe.
+            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
+            // so expr.get() on a nil tls block crashes even when the step is guarded.
             // Argo evaluates step parameters before `when` guards, so tls fields must be null-safe.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
@@ -760,6 +775,16 @@ export const SetupCapture = WorkflowBuilder.create({
                         listenPort: b.inputs.listenPort,
                         serviceType,
                     })
+                )
+                // Gate here, after the proxy is deployed and its endpoint is serving, so the
+                // operator can swing client traffic through the proxy and verify capture before
+                // approving. Only once approved do we patch the CaptureProxy to Ready below, which
+                // publishes checksumForSnapshot and releases the downstream snapshot/backfill flow.
+                .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({
+                        resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
+                    }),
+                    { when: c => ({templateExp: expr.not(skipProxyApproval)}) }
                 )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({

@@ -46,6 +46,7 @@ class StatusCommandHandler:
         self.sorter = WorkflowSorter()
         self.displayer = StatusWorkflowDisplayer()
         self.live_check_processor = LiveCheckProcessor(ConfigConverter())
+        self._last_phase: Optional[str] = None
 
     def handle_status_command(self, workflow_name: Optional[str], argo_server: str,
                               namespace: str, insecure: bool,
@@ -153,6 +154,7 @@ class StatusCommandHandler:
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
         metadata = workflow_data.get('metadata', {})
+        self._last_phase = status.get('phase', 'Unknown')
 
         self.displayer.display_workflow_status(
             metadata.get('name', 'unknown'),
@@ -566,6 +568,7 @@ def _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, in
         ctx.exit(ExitCode.FAILURE.value)
 
     try:
+        from .hints import hint_after_status
         service = WorkflowService()
         handler = StatusCommandHandler(service, token)
 
@@ -573,6 +576,7 @@ def _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, in
             handler.handle_status_command(None, argo_server, namespace, insecure, show_all, live_status)
         else:
             handler.handle_status_command(workflow_name, argo_server, namespace, insecure, show_all, live_status)
+            hint_after_status(handler._last_phase or '')
 
     except click.Abort:
         ctx.exit(ExitCode.FAILURE.value)

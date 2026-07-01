@@ -883,6 +883,24 @@
           [
             {
               "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=!(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.proxyConfig)) == 'true')}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{='captureproxysetup.'+inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "approveProxySetup"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "patchcaptureproxyready",
                 "name": "resource-management"
               },
