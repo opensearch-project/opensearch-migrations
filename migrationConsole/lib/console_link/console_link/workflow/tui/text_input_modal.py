@@ -31,6 +31,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     BINDINGS = [
         *BUTTON_ARROW_BINDINGS,
         Binding("enter", "submit_focused", "Save", show=False, priority=True),
+        Binding("t", "test_regex", "Test regex", show=False),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
 
@@ -69,6 +70,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
             yield Static("", id="regex-samples")
             with Horizontal(id="buttons"):
                 yield ModalButton("Save (<Enter>)", id="save", variant="success")
+                if self.regex_help:
+                    yield ModalButton("Test (t)", id="test")
                 if self.clear_allowed:
                     yield ModalButton(f"{self.clear_label}", id="clear")
                 yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
@@ -94,9 +97,17 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         if self.clear_allowed:
             self.dismiss(CLEAR_VALUE)
 
+    def action_test_regex(self) -> None:
+        if not self.regex_help:
+            return
+        self.app.open_url(self._current_regex101_url())
+
     def action_submit_focused(self) -> None:
         focused = self.app.focused or self.focused
         if isinstance(focused, Button):
+            if focused.id == "test":
+                self.action_test_regex()
+                return
             if focused.id == "clear":
                 self.action_clear()
                 return
@@ -129,6 +140,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
             self.action_submit()
+        elif event.button.id == "test":
+            self.action_test_regex()
         elif event.button.id == "clear":
             self.action_clear()
         else:
@@ -169,23 +182,28 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
             samples_widget.display = False
             return
 
-        samples = [str(sample) for sample in self.regex_help.get("testStrings", []) if str(sample)]
-        url = self._regex101_url(value, samples)
+        samples = self._regex_help_samples()
         message = str(self.regex_help.get("message") or "Java regex used by the capture proxy.")
         help_widget.display = True
         samples_widget.display = bool(samples)
-        help_widget.update(self._regex_help_markup(message, url))
+        help_widget.update(self._regex_help_markup(message))
         if samples:
             samples_widget.update("Samples:\n" + "\n".join(f"  {escape(sample)}" for sample in samples))
         else:
             samples_widget.update("")
 
+    def _current_regex101_url(self) -> str:
+        value = self.query_one("#value", Input).value if self.is_mounted else self.initial_value
+        return self._regex101_url(value, self._regex_help_samples())
+
+    def _regex_help_samples(self) -> list[str]:
+        return [str(sample) for sample in self.regex_help.get("testStrings", []) if str(sample)]
+
     @staticmethod
-    def _regex_help_markup(message: str, url: str) -> str:
-        quoted_url = url.replace('"', "%22")
+    def _regex_help_markup(message: str) -> str:
         return (
             f"{escape(message)}\n"
-            f"Regex101: [link=\"{quoted_url}\"]open with samples[/] ({escape(url)})"
+            "Regex101: Test (t) opens this pattern with samples."
         )
 
     @staticmethod

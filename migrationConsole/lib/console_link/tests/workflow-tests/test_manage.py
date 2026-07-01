@@ -1535,14 +1535,41 @@ def test_text_input_modal_builds_regex101_url_with_multiline_samples():
     assert query["testString"] == ["GET\nHEAD\nPOST"]
 
 
-def test_text_input_modal_regex101_help_markup_quotes_link_url():
+def test_text_input_modal_regex101_help_markup_avoids_wrapped_url():
     url = TextInputModal._regex101_url("", ["GET", "HEAD", "POST"])
-    markup = TextInputModal._regex_help_markup("Java regex used by the capture proxy.", url)
+    markup = TextInputModal._regex_help_markup("Java regex used by the capture proxy.")
 
     rendered = render(markup)
 
-    assert "open with samples" in rendered.plain
-    assert url in rendered.plain
+    assert "Test (t)" in rendered.plain
+    assert url not in rendered.plain
+
+
+@pytest.mark.asyncio
+async def test_text_input_modal_test_regex_opens_regex101_url():
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield Button("placeholder")
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        modal = TextInputModal(
+            "Edit regex",
+            initial_value="GET|HEAD",
+            regex_help={"testStrings": ["GET", "HEAD", "POST"]},
+        )
+        await app.push_screen(modal)
+        app.open_url = MagicMock()
+
+        await pilot.click("#test")
+
+        app.open_url.assert_called_once()
+        opened_url = app.open_url.call_args.args[0]
+        parsed = urlparse(opened_url)
+        query = parse_qs(parsed.query)
+        assert parsed.netloc == "regex101.com"
+        assert query["regex"] == ["GET|HEAD"]
+        assert query["testString"] == ["GET\nHEAD\nPOST"]
 
 
 def resource_sections_for_manage_tests():
