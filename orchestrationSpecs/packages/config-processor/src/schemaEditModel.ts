@@ -261,6 +261,11 @@ function schemaContainerKind(schema: any): "array" | "object" | undefined {
     return SCHEMA_OBJECT_TYPES.has(name) ? "object" : undefined;
 }
 
+export function schemaArrayElement(schema: any): any | undefined {
+    const unwrapped = unwrapSchema(schema);
+    return unwrapped?.element ?? unwrapped?._def?.element ?? unwrapped?._def?.type;
+}
+
 let cachedUnifiedSchema: JsonSchema | undefined;
 let cachedUnifiedSchemaKey: string | undefined;
 
@@ -432,6 +437,30 @@ function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | un
     } : undefined;
 }
 
+function jsonSchemaUiHint(schema: JsonSchema | undefined): EditInputHint | undefined {
+    const hint = resolveJsonSchemaRef(schema)?.["x-ui-hint"];
+    return isJsonSchemaObject(hint) && typeof hint.kind === "string"
+        ? hint as EditInputHint
+        : undefined;
+}
+
+function arrayAddLabel(inputHint: EditInputHint | undefined): string {
+    return inputHint?.kind === "array" && inputHint.addLabel
+        ? inputHint.addLabel
+        : "item";
+}
+
+function arrayDescriptionForAdd(addLabel: string): string {
+    return `Create a new ${addLabel} in pending workflow YAML.`;
+}
+
+function jsonSchemaMinItems(schema: JsonSchema | undefined): number | undefined {
+    const minItems = resolveJsonSchemaRef(schema)?.minItems;
+    return typeof minItems === "number" && Number.isFinite(minItems) && minItems > 0
+        ? minItems
+        : undefined;
+}
+
 export function jsonSchemaDiscriminator(schema: JsonSchema | undefined): string | undefined {
     const branches = jsonSchemaBranches(schema);
     if (!branches.length) {
@@ -558,9 +587,10 @@ function jsonSchemaArrayChildren(
 ): EditNode[] {
     const arrayValue = Array.isArray(value) ? value : [];
     const itemSchema = resolveJsonSchemaRef(schema.items);
+    const addLabel = arrayAddLabel(jsonSchemaUiHint(schema));
     return [
-        ...arrayValue.map((itemValue, index) => jsonSchemaArrayItemNode(rootPath, itemSchema, itemValue, index)),
-        addRow(rootPath, "item", "Create a new array item in pending workflow YAML.", false),
+        ...arrayValue.map((itemValue, index) => jsonSchemaArrayItemNode(rootPath, itemSchema, itemValue, index, addLabel)),
+        addRow(rootPath, addLabel, arrayDescriptionForAdd(addLabel), false),
     ];
 }
 
@@ -569,6 +599,7 @@ function jsonSchemaArrayItemNode(
     schema: JsonSchema | undefined,
     value: unknown,
     index: number,
+    itemLabel = "item",
 ): EditNode {
     const key = String(index);
     const node = schema
@@ -576,7 +607,7 @@ function jsonSchemaArrayItemNode(
         : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
     const label = node.label;
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
-    node.label = `item ${index + 1}${valueSuffix}`;
+    node.label = `${itemLabel} ${index + 1}${valueSuffix}`;
     node.collapsed = true;
     return node;
 }
@@ -613,6 +644,18 @@ function jsonSchemaFieldNode(
     const childNodes = containerKind === "object"
         ? jsonSchemaObjectChildren(path, resolved, value)
         : jsonSchemaArrayChildren(path, resolved, value);
+    const minItems = containerKind === "array" ? jsonSchemaMinItems(resolved) : undefined;
+    const missingArrayItems = required && minItems !== undefined && Array.isArray(value) && value.length < minItems;
+    const missing = required && (value === undefined || value === null || missingArrayItems);
+    const diagnostics: EditDiagnostic[] = missing
+        ? [{
+            severity: "required",
+            message: missingArrayItems
+                ? `${key} requires at least ${minItems} item${minItems === 1 ? "" : "s"}.`
+                : `${key} is required.`,
+            path,
+        }]
+        : [];
     if (childNodes.length || value === undefined || value === null || isPlainObject(value) || Array.isArray(value)) {
         return markValueDefaulted(finalizeNode({
             id: `edit:${path.join(".")}`,
@@ -624,7 +667,8 @@ function jsonSchemaFieldNode(
             expert,
             description,
             required,
-            status: required && (value === undefined || value === null) ? "required" : "ok",
+            status: missing ? "required" : "ok",
+            diagnostics,
             children: childNodes,
         }), valueDefaulted);
     }
@@ -1312,6 +1356,13 @@ export function schemaFieldNode(
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
 
+    if (schemaConstructorName(schema) === "ZodArray") {
+        const jsonSchema = jsonSchemaForConfigPath(path);
+        if (jsonSchema && jsonSchemaType(jsonSchema) === "array") {
+            return markValueDefaulted(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required), valueDefaulted);
+        }
+        return markValueDefaulted(zodArrayNode(path, key, schema, value, required, inputHint, description, expert, presence), valueDefaulted);
+    }
     if (schemaConstructorName(schema) === "ZodRecord") {
         const jsonSchema = jsonSchemaForConfigPath(path);
         if (jsonSchema && (
@@ -1356,6 +1407,60 @@ export function schemaFieldNode(
         return markValueDefaulted(scalarNode(path, key, "", description, required, inputHint, "string", expert, presence, externalRef), valueDefaulted);
     }
     return markValueDefaulted(genericDisplayNode(path, key, value, presence, expert, description), valueDefaulted);
+}
+
+function zodArrayNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    required: boolean,
+    inputHint: EditInputHint | undefined,
+    description: string,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode {
+    const arrayValue = Array.isArray(value) ? value : [];
+    const itemSchema = schemaArrayElement(schema);
+    const addLabel = arrayAddLabel(inputHint);
+    const children = [
+        ...arrayValue.map((itemValue, index) => zodArrayItemNode(path, itemSchema, itemValue, index, addLabel)),
+        addRow(path, addLabel, arrayDescriptionForAdd(addLabel), false),
+    ];
+    const missing = required && (value === undefined || value === null);
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : `${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`}`,
+        value,
+        valueKind: "array",
+        presence,
+        expert,
+        description,
+        required,
+        inputHint,
+        status: missing ? "required" : "ok",
+        diagnostics: missing ? [{severity: "required", message: `${key} is required.`, path}] : [],
+        children,
+    });
+}
+
+function zodArrayItemNode(
+    rootPath: string[],
+    schema: any,
+    value: unknown,
+    index: number,
+    itemLabel: string,
+): EditNode {
+    const key = String(index);
+    const node = schema
+        ? schemaFieldNode(rootPath, key, schema, {[key]: value})
+        : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
+    const label = node.label;
+    const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
+    node.label = `${itemLabel} ${index + 1}${valueSuffix}`;
+    node.collapsed = true;
+    return node;
 }
 
 export function addRow(

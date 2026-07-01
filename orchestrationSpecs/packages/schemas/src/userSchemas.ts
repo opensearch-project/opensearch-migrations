@@ -974,6 +974,7 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         commonName: z.string().optional()
             .describe("Optional common name (CN) for the TLS certificate subject."),
         dnsNames: z.array(z.string()).min(1)
+            .uiHint({kind: 'array', addLabel: 'DNS name'})
             .describe("DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."),
         duration: z.string().default("2160h").optional()
             .describe("Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
@@ -1023,6 +1024,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
+        .uiHint({kind: 'array', addLabel: 'header'})
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
@@ -1054,6 +1056,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('gated'),
     suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'header pattern'})
         .describe("List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
@@ -1111,6 +1114,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     numClientThreads: z.number().default(0).optional()
         .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
     nonRetryableDocExceptionTypes: z.array(z.string()).optional()
+        .uiHint({kind: 'array', addLabel: 'exception type'})
         .describe("List of document-level exception types that should not be retried during bulk replay. " +
             "These errors still count as failures in the output but are not retried because they are " +
             "deterministic client or mapping errors that will produce the same result on every attempt. " +
@@ -1233,6 +1237,7 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     indexAllowlist: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'index pattern'})
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
             "exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). " +
@@ -1273,15 +1278,18 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'component template'})
         .describe("List of component template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
             "An empty list includes all non-system component templates."),
     indexAllowlist: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'index pattern'})
         .describe("Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
             "Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. " +
             "An empty list includes all non-system indices."),
     indexTemplateAllowlist: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'index template'})
         .describe("List of index template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
             "An empty list includes all non-system index templates."),
@@ -1365,6 +1373,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'index pattern'})
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
             "Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. " +
@@ -1424,6 +1433,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
+        .uiHint({kind: 'array', addLabel: 'exception type'})
         .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
             "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
             "Use this for idempotent migrations where certain errors are expected and harmless. " +

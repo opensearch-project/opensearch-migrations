@@ -3664,7 +3664,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "type": "string"
                                   },
                                   "default": [],
-                                  "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                  "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                  "x-ui-hint": {
+                                    "kind": "array",
+                                    "addLabel": "index pattern"
+                                  }
                                 },
                                 "maxSnapshotRateMbPerNode": {
                                   "type": "number",
@@ -5304,7 +5308,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-ui-hint": {
+                      "kind": "array",
+                      "addLabel": "header"
+                    }
                   },
                   "destinationConnectionPoolSize": {
                     "type": "number",
@@ -5446,7 +5454,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "type": "string"
                             },
                             "minItems": 1,
-                            "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."
+                            "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local').",
+                            "x-ui-hint": {
+                              "kind": "array",
+                              "addLabel": "DNS name"
+                            }
                           },
                           "duration": {
                             "type": "string",
@@ -5962,7 +5974,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-ui-hint": {
+                      "kind": "array",
+                      "addLabel": "header pattern"
+                    }
                   },
                   "suppressCaptureForMethod": {
                     "type": "string",
@@ -6328,7 +6344,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "string"
                     },
-                    "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
+                    "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception.",
+                    "x-ui-hint": {
+                      "kind": "array",
+                      "addLabel": "exception type"
+                    }
                   },
                   "observedPacketConnectionTimeout": {
                     "type": "number",

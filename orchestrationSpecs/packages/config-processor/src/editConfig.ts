@@ -71,6 +71,7 @@ import {
     optionalSingleKeyUnionNode,
     recordKeyHint,
     resolveJsonSchemaRef,
+    schemaArrayElement,
     schemaFieldDescription,
     schemaFieldNode,
     schemaFieldNodeFor,
@@ -971,6 +972,17 @@ function addAtPath(config: any, path: string[], value: unknown): void {
         }
         const itemSchema = resolveJsonSchemaRef(arraySchema?.items);
         parent[key].push(defaultJsonValueForSchema(itemSchema));
+        return;
+    }
+
+    const zodArraySchema = schemaForConfigPath(path);
+    const itemSchema = schemaArrayElement(zodArraySchema);
+    if (itemSchema) {
+        const {parent, key} = parentAtPath(config, path);
+        if (!Array.isArray(parent[key])) {
+            parent[key] = [];
+        }
+        parent[key].push(defaultValueForSchema(itemSchema) ?? "");
         return;
     }
 

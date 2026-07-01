@@ -789,6 +789,9 @@ describe("editConfig state", () => {
         });
 
         const issuerRef = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.issuerRef");
+        const dnsNames = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames");
+        const dnsName = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames.0");
+        const addDnsName = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames:add");
 
         expect(issuerRef).toMatchObject({
             valueKind: "object",
@@ -807,6 +810,24 @@ describe("editConfig state", () => {
             },
         });
         expect(issuerRef?.label).toContain("issuerRef: migrations-ca (ClusterIssuer)");
+        expect(dnsNames).toMatchObject({
+            valueKind: "array",
+            required: true,
+            status: "ok",
+        });
+        expect(dnsNames?.label).toContain("dnsNames: 1 item");
+        expect(dnsName).toMatchObject({
+            valueKind: "scalar",
+            value: "cap.default.svc.cluster.local",
+            valueType: "string",
+            collapsed: true,
+        });
+        expect(dnsName?.label).toContain("DNS name 1: cap.default.svc.cluster.local");
+        expect(addDnsName).toMatchObject({
+            valueKind: "command",
+            label: "+ Add DNS name",
+            command: {requiresName: false},
+        });
     });
 
     it("applies proxy TLS mode changes and refreshes required children", () => {
@@ -832,6 +853,64 @@ describe("editConfig state", () => {
         expect(result.yaml).toContain("secretName: \"\"");
         expect(tls?.label).toContain("tls: < existingSecret >");
         expect(secretName?.status).toBe("required");
+    });
+
+    it("edits cert-manager DNS names as a schema-driven string list", () => {
+        const certManager = applyEditOperationToObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                },
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls"],
+            value: "certManager",
+        });
+
+        const emptyDnsNames = findNode(certManager.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames");
+        const addDnsName = findNode(certManager.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames:add");
+
+        expect(parse(certManager.yaml).traffic.proxies.cap.proxyConfig.tls.dnsNames).toEqual([]);
+        expect(emptyDnsNames).toMatchObject({
+            valueKind: "array",
+            status: "required",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({severity: "required"}),
+            ]),
+        });
+        expect(addDnsName?.label).toBe("+ Add DNS name");
+
+        const added = applyEditOperationToObject(parse(certManager.yaml), {
+            op: "add",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls", "dnsNames"],
+            value: {},
+        });
+        const addedItem = findNode(added.editState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames.0");
+
+        expect(parse(added.yaml).traffic.proxies.cap.proxyConfig.tls.dnsNames).toEqual([""]);
+        expect(addedItem).toMatchObject({
+            valueKind: "scalar",
+            status: "required",
+            value: "",
+        });
+        expect(addedItem?.label).toContain("DNS name 1: <required>");
+
+        const set = applyEditOperationToObject(parse(added.yaml), {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls", "dnsNames", "0"],
+            value: "cap.default.svc.cluster.local",
+        });
+        expect(parse(set.yaml).traffic.proxies.cap.proxyConfig.tls.dnsNames).toEqual(["cap.default.svc.cluster.local"]);
+
+        const removed = applyEditOperationToObject(parse(set.yaml), {
+            op: "removeConfig",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "tls", "dnsNames", "0"],
+        });
+        expect(parse(removed.yaml).traffic.proxies.cap.proxyConfig.tls.dnsNames).toEqual([]);
     });
 
     it("renders proxy clientAuth with console client certificate Secret reference", () => {
