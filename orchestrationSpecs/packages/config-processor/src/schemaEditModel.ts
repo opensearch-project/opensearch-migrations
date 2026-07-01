@@ -122,7 +122,6 @@ const SCHEMA_SCALAR_TYPES: Record<string, EditNode["valueType"]> = {
     ZodNumber: "number",
     ZodBoolean: "boolean",
     ZodString: "string",
-    ZodEnum: "string",
     ZodLiteral: "string",
 };
 const SCHEMA_OBJECT_TYPES = new Set(["ZodObject", "ZodRecord", "ZodUnion", "ZodDiscriminatedUnion"]);
@@ -187,6 +186,25 @@ export function literalValues(schema: any): Set<unknown> {
         return new Set([literal.value]);
     }
     return new Set();
+}
+
+export function zodEnumValues(schema: any): unknown[] {
+    const unwrapped = unwrapSchema(schema);
+    if (String(unwrapped?.constructor?.name ?? "") !== "ZodEnum") {
+        return [];
+    }
+    if (Array.isArray(unwrapped.options)) {
+        return unwrapped.options;
+    }
+    const values = unwrapped._def?.values ?? unwrapped.def?.values;
+    if (Array.isArray(values)) {
+        return values;
+    }
+    const entries = unwrapped._def?.entries ?? unwrapped.def?.entries;
+    if (isPlainObject(entries)) {
+        return Object.values(entries);
+    }
+    return [];
 }
 
 export function validationFromHint(inputHint?: EditInputHint): EditNode["validation"] | undefined {
@@ -564,6 +582,51 @@ function jsonEnumNode(
         status: required && unset ? "required" : "ok",
         variants: [
             ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional value."}] : []),
+            ...values.map(option => ({label: String(option), value: option})),
+        ],
+    });
+}
+
+function zodEnumNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+    defaultValue: unknown,
+): EditNode {
+    const values = zodEnumValues(schema);
+    const unset = value === undefined || value === null || value === "";
+    const defaultLabel = defaultValue === undefined ? undefined : String(defaultValue);
+    const unsetLabel = defaultLabel ? `default (${defaultLabel})` : "unset";
+    const displayValue = unset
+        ? (required ? "required" : defaultLabel ? `default: ${defaultLabel}` : "unset")
+        : String(value);
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${displayValue} >`,
+        value: unset && !required ? "unset" : value,
+        valueKind: "union",
+        presence,
+        expert,
+        description: schemaDescription(schema),
+        status: required && unset ? "required" : "ok",
+        diagnostics: required && unset ? [{
+            severity: "required",
+            message: `${key} is required.`,
+            path,
+        }] : [],
+        variants: [
+            ...(!required ? [{
+                label: unsetLabel,
+                value: "unset",
+                description: defaultLabel
+                    ? "Remove this value and use the schema default."
+                    : "Remove this optional value.",
+            }] : []),
             ...values.map(option => ({label: String(option), value: option})),
         ],
     });
@@ -1417,6 +1480,9 @@ export function schemaFieldNode(
     const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
     if (unionNode) {
         return markValueState(unionNode, valueDefaulted, hasValue);
+    }
+    if (zodEnumValues(schema).length > 0) {
+        return markValueState(zodEnumNode(path, key, schema, value, userRequired, expert, presence, defaultValue), valueDefaulted, hasValue);
     }
     if (scalarType === "boolean") {
         return markValueState(booleanNode(path, key, value === true, description, expert, presence), valueDefaulted, hasValue);

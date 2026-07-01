@@ -318,6 +318,33 @@ describe("editConfig state", () => {
         expect(toggleResult.yaml).toContain("allowInsecure: true");
     });
 
+    it("applies and clears enum choices", () => {
+        const config = {
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                },
+            },
+            snapshotMigrationConfigs: [],
+        };
+
+        const clusterIp = applyEditOperationToObject(config, {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "serviceType"],
+            value: "ClusterIP",
+        });
+        const reset = applyEditOperationToObject(parse(clusterIp.yaml), {
+            op: "set",
+            path: ["traffic", "proxies", "cap", "proxyConfig", "serviceType"],
+            value: "unset",
+        });
+
+        expect(parse(clusterIp.yaml).traffic.proxies.cap.proxyConfig.serviceType).toBe("ClusterIP");
+        expect(parse(reset.yaml).traffic.proxies.cap.proxyConfig.serviceType).toBeUndefined();
+    });
+
     it("unsets scalar values without creating missing parent objects", () => {
         const config = {
             sourceClusters: {
@@ -700,7 +727,19 @@ describe("editConfig state", () => {
         expect(listenPort?.valueType).toBe("number");
         expect(listenPort?.label).toContain("listenPort: <required>");
         expect(podReplicas).toMatchObject({status: "ok", presence: "optional", expert: false, valueType: "number"});
-        expect(serviceType).toMatchObject({status: "ok", presence: "optional", expert: true});
+        expect(serviceType).toMatchObject({
+            status: "ok",
+            presence: "optional",
+            expert: true,
+            valueKind: "union",
+            value: "LoadBalancer",
+            valueDefaulted: true,
+        });
+        expect(serviceType?.variants?.map(variant => variant.value)).toEqual([
+            "unset",
+            "LoadBalancer",
+            "ClusterIP",
+        ]);
         expect(tls).toMatchObject({presence: "optional", valueKind: "union", value: "unset"});
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(kafkaTopic?.status).toBe("ok");

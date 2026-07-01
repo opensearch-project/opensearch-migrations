@@ -83,6 +83,7 @@ import {
     uiHintAt,
     uiHintOf,
     unwrapSchema,
+    zodEnumValues,
 } from "./schemaEditModel";
 
 type EditOption = NonNullable<EditInputHint["options"]>[number];
@@ -912,6 +913,10 @@ function setAtPath(config: any, path: string[], value: unknown): void {
         return;
     }
     if (jsonSchema && jsonSchemaEnumValues(jsonSchema).length > 0 && value === "unset") {
+        delete parent[key];
+        return;
+    }
+    if (schema && zodEnumValues(schema).length > 0 && value === "unset") {
         delete parent[key];
         return;
     }
