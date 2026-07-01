@@ -118,7 +118,7 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
     try:
         wf = get_workflow(namespace, workflow_name)
-        phase = (wf or {}).get('status', {}).get('phase', '') if wf else ''
+        phase = (wf or {}).get('status', {}).get('phase', '')
     except Exception:
         phase = ''
     hint_after_manage(phase)

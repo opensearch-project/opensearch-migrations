@@ -753,9 +753,10 @@ class TestShowHints:
         )
 
     def test_resource_show_displays_hint(self):
+        # Handler reports output was displayed (returns True) → hint fires.
         with (
             patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
-            patch("console_link.workflow.commands.show._handle_resource_show"),
+            patch("console_link.workflow.commands.show._handle_resource_show", return_value=True),
         ):
             result = CliRunner().invoke(
                 workflow_cli, ["show", "snapshotmigration.migration-0"]
@@ -766,9 +767,10 @@ class TestShowHints:
         assert NO_FURTHER_ACTION_HINT in result.output
 
     def test_task_show_displays_hint(self):
+        # Handler reports output was displayed (returns True) → hint fires.
         with (
             patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
-            patch("console_link.workflow.commands.show._handle_task_show"),
+            patch("console_link.workflow.commands.show._handle_task_show", return_value=True),
         ):
             result = CliRunner().invoke(
                 workflow_cli, ["show", "evaluatemetadata", "snapshotmigration.migration-0"]
@@ -777,6 +779,60 @@ class TestShowHints:
         assert result.exit_code == 0
         assert HINT_PREFIX in result.output
         assert NO_FURTHER_ACTION_HINT in result.output
+
+    # ── no-output paths ─────────────────────────────────────────────────────────
+    # These drive the *real* handler logic (only the K8s/artifact seam is mocked) so
+    # they exercise the code that decides no output was displayed — not just
+    # show_command honoring a mocked return value. In each case the command should
+    # print its own "No ... output found" message (self-documenting) and NOT append
+    # the "migration complete" hint, which would contradict it.
+
+    def test_resource_show_no_output_does_not_show_hint(self):
+        # Resource exists but its status carries no output refs yet (task still running).
+        resource = {"metadata": {"name": "migration-0", "uid": "u1"}, "status": {"outputs": {}}}
+        with (
+            patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
+            patch("console_link.workflow.commands.show._fetch_resource", return_value=resource),
+        ):
+            result = CliRunner().invoke(
+                workflow_cli, ["show", "snapshotmigration.migration-0"]
+            )
+
+        assert result.exit_code == 0
+        assert "No managed stdout output found" in result.output  # self-documents
+        assert HINT_PREFIX not in result.output
+
+    def test_task_show_no_matching_resources_does_not_show_hint(self):
+        # No resources of the task's kind exist at all.
+        with (
+            patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
+            patch("console_link.workflow.commands.show._list_resources_for_task", return_value=[]),
+        ):
+            result = CliRunner().invoke(
+                workflow_cli, ["show", "evaluatemetadata"]
+            )
+
+        assert result.exit_code == 0
+        assert "No evaluatemetadata output found" in result.output  # self-documents
+        assert HINT_PREFIX not in result.output
+
+    def test_task_show_resources_without_output_does_not_show_hint(self):
+        # Previously-silent path: resources of the task's kind exist, but none carry the
+        # task's output ref, so `targets` is empty. Before the fix this printed nothing
+        # AND still emitted the completion hint.
+        resource = {"metadata": {"name": "migration-0", "uid": "u1"}, "status": {"outputs": {}}}
+        with (
+            patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
+            patch("console_link.workflow.commands.show._task_resources",
+                  return_value=[("snapshotmigration.migration-0", resource)]),
+        ):
+            result = CliRunner().invoke(
+                workflow_cli, ["show", "evaluatemetadata"]
+            )
+
+        assert result.exit_code == 0
+        assert "No evaluatemetadata output found" in result.output  # no longer silent
+        assert HINT_PREFIX not in result.output
 
     @patch("console_link.workflow.commands.show.load_k8s_config")
     @patch("console_link.workflow.commands.show._list_show_targets")

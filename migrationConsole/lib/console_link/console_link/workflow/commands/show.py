@@ -390,21 +390,26 @@ def _task_resources(namespace: str, task: str,
 
 
 def _show_task_outputs(ctx, namespace: str, task: str, resource_filter: Optional[str],
-                       clean: bool = False) -> None:
+                       clean: bool = False) -> bool:
+    """Display a task's outputs across current resources. Returns True if output was shown."""
     task_info = OUTPUT_TASKS[task]
     output_name = task_info["output"]
     resources = _task_resources(namespace, task, resource_filter)
+    subject = f" matching '{resource_filter}'" if resource_filter else ""
     if not resources:
-        subject = f" matching '{resource_filter}'" if resource_filter else ""
         click.echo(f"No {task_info['display']} output found for current resources{subject}.")
-        return
+        return False
 
     targets = []
     for resource_name, resource in resources:
         ref = _output_refs(resource).get(output_name)
         if ref:
             targets.append((resource_name, output_name, ref))
+    if not targets:
+        click.echo(f"No {task_info['display']} output found for current resources{subject}.")
+        return False
     _print_latest_outputs(ctx, targets, always_header=True, clean=clean)
+    return True
 
 
 def _task_history_entries(namespace: str, task: str,
@@ -495,14 +500,15 @@ def _show_task_history(ctx, namespace: str, task: str,
 
 def _handle_task_show(ctx, namespace: str, task: str, resource_filter: Optional[str],
                       list_resources: bool, history: bool,
-                      run_selector: Optional[str], clean: bool) -> None:
+                      run_selector: Optional[str], clean: bool) -> bool:
+    """Show a task's artifacts. Returns True if current output was displayed."""
     if list_resources:
         _list_show_targets(namespace, task)
-        return
+        return False
     if history or run_selector:
         _show_task_history(ctx, namespace, task, resource_filter, run_selector)
-        return
-    _show_task_outputs(ctx, namespace, task, resource_filter, clean=clean)
+        return False
+    return _show_task_outputs(ctx, namespace, task, resource_filter, clean=clean)
 
 
 def _fetch_resource_and_refs(
@@ -533,29 +539,32 @@ def _show_resource_history(ctx, resource_name: str, resource: Dict[str, Any],
 
 
 def _show_current_resource_outputs(ctx, resource_name: str, output_name: Optional[str],
-                                   refs: Dict[str, Dict[str, str]], clean: bool) -> None:
+                                   refs: Dict[str, Dict[str, str]], clean: bool) -> bool:
+    """Display current outputs for a resource. Returns True if output was shown."""
     if output_name:
         if output_name not in refs:
             available = ", ".join(sorted(refs)) or "none"
             click.echo(f"No managed output named '{output_name}' found for '{resource_name}'.")
             click.echo(f"Available outputs: {available}")
-            return
+            return False
         refs = {output_name: refs[output_name]}
 
     if not refs:
         expected = ", ".join(_managed_output_names_for_resource(resource_name))
         suffix = f" Expected outputs: {expected}." if expected else ""
         click.echo(f"No managed stdout output found for migration resource '{resource_name}'.{suffix}")
-        return
+        return False
 
     _print_output_refs(ctx, dict(sorted(refs.items())), clean=clean)
+    return True
 
 
 def _handle_resource_show(ctx, namespace: str, resource_name_arg: str, task: Optional[str],
                           list_resources: bool, history: bool,
-                          run_selector: Optional[str], clean: bool) -> None:
+                          run_selector: Optional[str], clean: bool) -> bool:
+    """Show artifacts for a resource. Returns True if current output was displayed."""
     if list_resources and not _show_resource_list_error(ctx):
-        return
+        return False
 
     resource_name, output_name = _resolve_show_target(
         resource_name_arg,
@@ -563,13 +572,13 @@ def _handle_resource_show(ctx, namespace: str, resource_name_arg: str, task: Opt
     )
     resource_and_refs = _fetch_resource_and_refs(ctx, namespace, resource_name)
     if not resource_and_refs:
-        return
+        return False
     resource, refs = resource_and_refs
 
     if history or run_selector:
         _show_resource_history(ctx, resource_name, resource, output_name, run_selector)
-        return
-    _show_current_resource_outputs(ctx, resource_name, output_name, refs, clean)
+        return False
+    return _show_current_resource_outputs(ctx, resource_name, output_name, refs, clean)
 
 
 def _list_all_show_targets_or_exit(ctx, namespace: str) -> None:
@@ -650,10 +659,13 @@ def show_command(ctx, list_resources, all_resources, history, run_selector, clea
 
     output_task = _canonical_task_name(resource_name)
     if output_task:
-        _handle_task_show(ctx, namespace, output_task, task, list_resources, history, run_selector, clean)
+        output_shown = _handle_task_show(ctx, namespace, output_task, task, list_resources, history, run_selector, clean)
     else:
-        _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
+        output_shown = _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
 
-    # --clean is for script-friendly raw artifact output; never append the hint there.
-    if not list_resources and not history and not run_selector and not clean:
+    # Only nudge toward the next step when output was actually displayed. Error paths
+    # exit, and no-output paths print their own explanatory message and return False, so a
+    # "migration complete" hint would contradict them. --clean is script-friendly raw
+    # output and must never carry the hint.
+    if output_shown and not list_resources and not history and not run_selector and not clean:
         hint_after_show()
