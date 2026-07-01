@@ -55,7 +55,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           ]
                         }
                       ],
-                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+                      "x-effective-default": {
+                        "label": "scram-sha-512",
+                        "value": {
+                          "type": "scram-sha-512"
+                        },
+                        "source": "workflow policy",
+                        "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
+                      }
                     },
                     "clusterSpecOverrides": {
                       "type": "object",
@@ -156,7 +164,98 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "secretName": {
                                   "type": "string",
                                   "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "http-basic-auth",
+                                    "displayName": "HTTP Basic Auth Secret",
+                                    "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                    "matchProfiles": [
+                                      "http-basic-auth-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/basic-auth",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "username",
+                                          "password"
+                                        ],
+                                        "contentValidationIds": [
+                                          "non-empty-keys"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "HTTP Basic Auth Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "username",
+                                          "label": "Username",
+                                          "input": "text",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ]
+                                        },
+                                        {
+                                          "name": "password",
+                                          "label": "Password",
+                                          "input": "password",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/basic-auth",
+                                        "stringData": {
+                                          "username": {
+                                            "fromField": "username"
+                                          },
+                                          "password": {
+                                            "fromField": "password"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 }
                               },
                               "required": [
@@ -207,7 +306,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "clientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  }
                                 }
                               },
                               "required": [
@@ -227,7 +332,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version": {
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.",
+                      "x-ui-hint": {
+                        "kind": "text",
+                        "format": "cluster-version",
+                        "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+                        "message": "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
+                        "examples": [
+                          "ES 7.10.2",
+                          "OS 2.11.0",
+                          "SOLR 9.7.0"
+                        ]
+                      }
                     },
                     "snapshotInfo": {
                       "type": "object",
@@ -306,7 +422,79 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                           "loggingConfigurationOverrideConfigMap": {
                                             "type": "string",
                                             "default": "",
-                                            "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                            "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                                            "x-ui-hint": {
+                                              "kind": "text",
+                                              "format": "k8s-name",
+                                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                            },
+                                            "x-external-ref": {
+                                              "kind": "kubernetesResource",
+                                              "purpose": "log4j-config",
+                                              "displayName": "Log4j2 ConfigMap",
+                                              "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                                              "matchProfiles": [
+                                                "log4j-configmap"
+                                              ],
+                                              "selection": {
+                                                "target": "scalarName"
+                                              },
+                                              "k8s": {
+                                                "resourceTypes": [
+                                                  {
+                                                    "group": "",
+                                                    "version": "v1",
+                                                    "kind": "ConfigMap",
+                                                    "namespaced": true
+                                                  }
+                                                ],
+                                                "match": {
+                                                  "requiredKeys": [
+                                                    "log4j2.properties"
+                                                  ],
+                                                  "contentValidationIds": [
+                                                    "log4j-properties"
+                                                  ]
+                                                }
+                                              },
+                                              "create": {
+                                                "label": "Log4j2 ConfigMap",
+                                                "fields": [
+                                                  {
+                                                    "name": "configMapName",
+                                                    "label": "ConfigMap name",
+                                                    "input": "name",
+                                                    "required": true,
+                                                    "validationIds": [
+                                                      "k8s-name"
+                                                    ]
+                                                  },
+                                                  {
+                                                    "name": "properties",
+                                                    "label": "log4j2.properties",
+                                                    "input": "multilineText",
+                                                    "required": true,
+                                                    "validationIds": [
+                                                      "non-empty",
+                                                      "log4j-properties"
+                                                    ]
+                                                  }
+                                                ],
+                                                "output": {
+                                                  "kind": "ConfigMap",
+                                                  "data": {
+                                                    "log4j2.properties": {
+                                                      "fromField": "properties"
+                                                    }
+                                                  }
+                                                },
+                                                "apply": {
+                                                  "target": "scalarName",
+                                                  "nameField": "configMapName"
+                                                }
+                                              }
+                                            }
                                           },
                                           "otelTraceCollectorEndpoint": {
                                             "anyOf": [
@@ -343,7 +531,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                               "type": "string"
                                             },
                                             "default": [],
-                                            "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                            "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                            "x-ui-hint": {
+                                              "kind": "array",
+                                              "addLabel": "index pattern"
+                                            }
                                           },
                                           "maxSnapshotRateMbPerNode": {
                                             "type": "number",
@@ -353,12 +545,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                           "compressionEnabled": {
                                             "type": "boolean",
                                             "default": false,
-                                            "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
+                                            "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                            "x-expert": true
                                           },
                                           "includeGlobalState": {
                                             "type": "boolean",
                                             "default": true,
-                                            "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                            "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                            "x-expert": true
                                           }
                                         },
                                         "description": "Configuration for creating a new snapshot of the source cluster."
@@ -654,7 +848,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "snapshot",
                         "replayer"
                       ],
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-checksum-for": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "x-change-restriction": "gated",
+                      "x-ui-hint": {
+                        "kind": "array",
+                        "addLabel": "header"
+                      }
                     },
                     "destinationConnectionPoolSize": {
                       "type": "number",
@@ -676,7 +879,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "snapshot",
                         "replayer"
                       ],
-                      "changeRestriction": "impossible"
+                      "changeRestriction": "impossible",
+                      "x-checksum-for": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "x-change-restriction": "impossible"
                     },
                     "maxTrafficBufferSize": {
                       "type": "number",
@@ -730,7 +938,38 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "required": [
                                 "name"
                               ],
-                              "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."
+                              "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy.",
+                              "x-external-ref": {
+                                "kind": "kubernetesResource",
+                                "purpose": "cert-manager-issuer",
+                                "displayName": "cert-manager Issuer",
+                                "description": "cert-manager Issuer, ClusterIssuer, or AWS PCA ClusterIssuer that signs proxy TLS certificates.",
+                                "selection": {
+                                  "target": "objectRef"
+                                },
+                                "k8s": {
+                                  "resourceTypes": [
+                                    {
+                                      "group": "cert-manager.io",
+                                      "version": "v1",
+                                      "kind": "Issuer",
+                                      "namespaced": true
+                                    },
+                                    {
+                                      "group": "cert-manager.io",
+                                      "version": "v1",
+                                      "kind": "ClusterIssuer",
+                                      "namespaced": false
+                                    },
+                                    {
+                                      "group": "awspca.cert-manager.io",
+                                      "version": "v1beta1",
+                                      "kind": "AWSPCAClusterIssuer",
+                                      "namespaced": false
+                                    }
+                                  ]
+                                }
+                              }
                             },
                             "commonName": {
                               "type": "string",
@@ -739,10 +978,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "dnsNames": {
                               "type": "array",
                               "items": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 253,
+                                "pattern": "^(?:\\\\*\\\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+                                "description": "DNS name to include as a Subject Alternative Name on the proxy TLS certificate. Use a bare DNS name, not a URL.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "pattern": "^(?:\\\\*\\\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+                                  "message": "Use a DNS name without a scheme, port, path, or spaces. Wildcards are allowed only as the leftmost label, like *.example.com."
+                                }
                               },
                               "minItems": 1,
-                              "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."
+                              "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local').",
+                              "x-ui-hint": {
+                                "kind": "array",
+                                "addLabel": "DNS name"
+                              }
                             },
                             "duration": {
                               "type": "string",
@@ -819,7 +1071,100 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "consoleClientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "proxy-console-client-tls",
+                                    "displayName": "Proxy Client Certificate Secret",
+                                    "description": "Kubernetes TLS Secret containing the client certificate and private key used by console commands when connecting to the proxy.",
+                                    "matchProfiles": [
+                                      "tls-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/tls",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "tls.crt",
+                                          "tls.key"
+                                        ],
+                                        "contentValidationIds": [
+                                          "tls-certificate-key-pair"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "Proxy Client Certificate Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "certificate",
+                                          "label": "Certificate PEM",
+                                          "input": "multilineText",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty",
+                                            "pem-certificate-chain"
+                                          ]
+                                        },
+                                        {
+                                          "name": "privateKey",
+                                          "label": "Private key PEM",
+                                          "input": "secretMultilineText",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty",
+                                            "pem-private-key"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/tls",
+                                        "stringData": {
+                                          "tls.crt": {
+                                            "fromField": "certificate"
+                                          },
+                                          "tls.key": {
+                                            "fromField": "privateKey"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 },
                                 "required": {
                                   "type": "boolean",
@@ -850,7 +1195,100 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             },
                             "secretName": {
                               "type": "string",
-                              "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
+                              "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/.",
+                              "x-ui-hint": {
+                                "kind": "text",
+                                "format": "k8s-name",
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                              },
+                              "x-external-ref": {
+                                "kind": "kubernetesResource",
+                                "purpose": "proxy-server-tls",
+                                "displayName": "TLS Certificate Secret",
+                                "description": "Kubernetes TLS Secret containing 'tls.crt' and 'tls.key' entries.",
+                                "matchProfiles": [
+                                  "tls-secret"
+                                ],
+                                "selection": {
+                                  "target": "scalarName"
+                                },
+                                "k8s": {
+                                  "resourceTypes": [
+                                    {
+                                      "group": "",
+                                      "version": "v1",
+                                      "kind": "Secret",
+                                      "namespaced": true
+                                    }
+                                  ],
+                                  "match": {
+                                    "acceptedSecretTypes": [
+                                      "kubernetes.io/tls",
+                                      "Opaque"
+                                    ],
+                                    "requiredKeys": [
+                                      "tls.crt",
+                                      "tls.key"
+                                    ],
+                                    "contentValidationIds": [
+                                      "tls-certificate-key-pair"
+                                    ]
+                                  }
+                                },
+                                "create": {
+                                  "label": "TLS Certificate Secret",
+                                  "fields": [
+                                    {
+                                      "name": "secretName",
+                                      "label": "Secret name",
+                                      "input": "name",
+                                      "required": true,
+                                      "validationIds": [
+                                        "k8s-name"
+                                      ]
+                                    },
+                                    {
+                                      "name": "certificate",
+                                      "label": "Certificate PEM",
+                                      "input": "multilineText",
+                                      "required": true,
+                                      "validationIds": [
+                                        "non-empty",
+                                        "pem-certificate-chain"
+                                      ]
+                                    },
+                                    {
+                                      "name": "privateKey",
+                                      "label": "Private key PEM",
+                                      "input": "secretMultilineText",
+                                      "required": true,
+                                      "sensitive": true,
+                                      "validationIds": [
+                                        "non-empty",
+                                        "pem-private-key"
+                                      ],
+                                      "confirm": true
+                                    }
+                                  ],
+                                  "output": {
+                                    "kind": "Secret",
+                                    "type": "kubernetes.io/tls",
+                                    "stringData": {
+                                      "tls.crt": {
+                                        "fromField": "certificate"
+                                      },
+                                      "tls.key": {
+                                        "fromField": "privateKey"
+                                      }
+                                    }
+                                  },
+                                  "apply": {
+                                    "target": "scalarName",
+                                    "nameField": "secretName"
+                                  }
+                                }
+                              }
                             },
                             "clientAuth": {
                               "type": "object",
@@ -917,7 +1355,100 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "consoleClientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "proxy-console-client-tls",
+                                    "displayName": "Proxy Client Certificate Secret",
+                                    "description": "Kubernetes TLS Secret containing the client certificate and private key used by console commands when connecting to the proxy.",
+                                    "matchProfiles": [
+                                      "tls-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/tls",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "tls.crt",
+                                          "tls.key"
+                                        ],
+                                        "contentValidationIds": [
+                                          "tls-certificate-key-pair"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "Proxy Client Certificate Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "certificate",
+                                          "label": "Certificate PEM",
+                                          "input": "multilineText",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty",
+                                            "pem-certificate-chain"
+                                          ]
+                                        },
+                                        {
+                                          "name": "privateKey",
+                                          "label": "Private key PEM",
+                                          "input": "secretMultilineText",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty",
+                                            "pem-private-key"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/tls",
+                                        "stringData": {
+                                          "tls.crt": {
+                                            "fromField": "certificate"
+                                          },
+                                          "tls.key": {
+                                            "fromField": "privateKey"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 },
                                 "required": {
                                   "type": "boolean",
@@ -953,7 +1484,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       ],
                       "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "enableMSKAuth": {
                       "type": "boolean",
@@ -1462,7 +1994,98 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "secretName": {
                                   "type": "string",
                                   "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "http-basic-auth",
+                                    "displayName": "HTTP Basic Auth Secret",
+                                    "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                    "matchProfiles": [
+                                      "http-basic-auth-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/basic-auth",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "username",
+                                          "password"
+                                        ],
+                                        "contentValidationIds": [
+                                          "non-empty-keys"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "HTTP Basic Auth Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "username",
+                                          "label": "Username",
+                                          "input": "text",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ]
+                                        },
+                                        {
+                                          "name": "password",
+                                          "label": "Password",
+                                          "input": "password",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/basic-auth",
+                                        "stringData": {
+                                          "username": {
+                                            "fromField": "username"
+                                          },
+                                          "password": {
+                                            "fromField": "password"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 }
                               },
                               "required": [
@@ -1513,7 +2136,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "clientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  }
                                 }
                               },
                               "required": [
@@ -1533,7 +2162,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version": {
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.",
+                      "x-ui-hint": {
+                        "kind": "text",
+                        "format": "cluster-version",
+                        "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+                        "message": "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
+                        "examples": [
+                          "ES 7.10.2",
+                          "OS 2.11.0",
+                          "SOLR 9.7.0"
+                        ]
+                      }
                     },
                     "label": {
                       "type": "string"
@@ -1829,7 +2469,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useTargetClusterForWorkCoordination": {
                       "type": "boolean",
                       "default": false,
-                      "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
+                      "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster.",
+                      "x-expert": true
                     },
                     "resources": {
                       "type": "object",
@@ -1913,7 +2554,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "checksumFor": [
                         "replayer"
                       ],
-                      "changeRestriction": "impossible"
+                      "changeRestriction": "impossible",
+                      "x-checksum-for": [
+                        "replayer"
+                      ],
+                      "x-change-restriction": "impossible"
                     },
                     "docTransformerConfigFile": {
                       "type": "string",
@@ -1921,7 +2566,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "checksumFor": [
                         "replayer"
                       ],
-                      "changeRestriction": "impossible"
+                      "changeRestriction": "impossible",
+                      "x-checksum-for": [
+                        "replayer"
+                      ],
+                      "x-change-restriction": "impossible"
                     },
                     "documentsPerBulkRequest": {
                       "type": "number",
@@ -2136,7 +2785,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "endpoint": {
                       "type": "string",
                       "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
-                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
+                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters.",
+                      "x-ui-hint": {
+                        "kind": "text",
+                        "format": "http-endpoint",
+                        "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+                        "message": "Use an http:// or https:// endpoint with an optional port and trailing slash."
+                      }
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -2153,7 +2808,98 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "secretName": {
                                   "type": "string",
                                   "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "http-basic-auth",
+                                    "displayName": "HTTP Basic Auth Secret",
+                                    "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                    "matchProfiles": [
+                                      "http-basic-auth-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/basic-auth",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "username",
+                                          "password"
+                                        ],
+                                        "contentValidationIds": [
+                                          "non-empty-keys"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "HTTP Basic Auth Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "username",
+                                          "label": "Username",
+                                          "input": "text",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ]
+                                        },
+                                        {
+                                          "name": "password",
+                                          "label": "Password",
+                                          "input": "password",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/basic-auth",
+                                        "stringData": {
+                                          "username": {
+                                            "fromField": "username"
+                                          },
+                                          "password": {
+                                            "fromField": "password"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 }
                               },
                               "required": [
@@ -2204,7 +2950,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "clientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  }
                                 }
                               },
                               "required": [
@@ -2349,7 +3101,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "properties": {
                       "source": {
                         "type": "string",
-                        "description": "Name of the source cluster. Must match a key in sourceClusters."
+                        "description": "Name of the source cluster. Must match a key in sourceClusters.",
+                        "x-ui-hint": {
+                          "kind": "reference",
+                          "sourcePath": [
+                            "sourceClusters"
+                          ],
+                          "message": "Choose one source cluster from sourceClusters."
+                        }
                       },
                       "snapshot": {
                         "type": "string",
@@ -2563,7 +3322,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
                       "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                      "changeRestriction": "impossible"
+                      "changeRestriction": "impossible",
+                      "x-change-restriction": "impossible",
+                      "x-expert": true
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -2582,7 +3343,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "items": {
                         "type": "string"
                       },
-                      "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
+                      "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception.",
+                      "x-ui-hint": {
+                        "kind": "array",
+                        "addLabel": "exception type"
+                      }
                     },
                     "observedPacketConnectionTimeout": {
                       "type": "number",
@@ -2636,42 +3401,50 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "transformerConfig": {
                       "type": "string",
                       "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
                       "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "transformerConfigFile": {
                       "type": "string",
                       "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
                       "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
                       "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
                       "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleS3Bucket": {
                       "type": "string",
                       "description": "S3 bucket for tuple output. When set, tuples are written directly to S3.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleS3Region": {
                       "type": "string",
                       "description": "AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.",
-                      "changeRestriction": "gated"
+                      "changeRestriction": "gated",
+                      "x-change-restriction": "gated"
                     },
                     "tupleS3Prefix": {
                       "type": "string",
@@ -2806,7 +3579,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "endpoint": {
                       "type": "string",
                       "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
-                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
+                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters.",
+                      "x-ui-hint": {
+                        "kind": "text",
+                        "format": "http-endpoint",
+                        "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+                        "message": "Use an http:// or https:// endpoint with an optional port and trailing slash."
+                      }
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -2823,7 +3602,98 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "secretName": {
                                   "type": "string",
                                   "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  },
+                                  "x-external-ref": {
+                                    "kind": "kubernetesResource",
+                                    "purpose": "http-basic-auth",
+                                    "displayName": "HTTP Basic Auth Secret",
+                                    "description": "Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                                    "matchProfiles": [
+                                      "http-basic-auth-secret"
+                                    ],
+                                    "selection": {
+                                      "target": "scalarName"
+                                    },
+                                    "k8s": {
+                                      "resourceTypes": [
+                                        {
+                                          "group": "",
+                                          "version": "v1",
+                                          "kind": "Secret",
+                                          "namespaced": true
+                                        }
+                                      ],
+                                      "match": {
+                                        "acceptedSecretTypes": [
+                                          "kubernetes.io/basic-auth",
+                                          "Opaque"
+                                        ],
+                                        "requiredKeys": [
+                                          "username",
+                                          "password"
+                                        ],
+                                        "contentValidationIds": [
+                                          "non-empty-keys"
+                                        ]
+                                      }
+                                    },
+                                    "create": {
+                                      "label": "HTTP Basic Auth Secret",
+                                      "fields": [
+                                        {
+                                          "name": "secretName",
+                                          "label": "Secret name",
+                                          "input": "name",
+                                          "required": true,
+                                          "validationIds": [
+                                            "k8s-name"
+                                          ]
+                                        },
+                                        {
+                                          "name": "username",
+                                          "label": "Username",
+                                          "input": "text",
+                                          "required": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ]
+                                        },
+                                        {
+                                          "name": "password",
+                                          "label": "Password",
+                                          "input": "password",
+                                          "required": true,
+                                          "sensitive": true,
+                                          "validationIds": [
+                                            "non-empty"
+                                          ],
+                                          "confirm": true
+                                        }
+                                      ],
+                                      "output": {
+                                        "kind": "Secret",
+                                        "type": "kubernetes.io/basic-auth",
+                                        "stringData": {
+                                          "username": {
+                                            "fromField": "username"
+                                          },
+                                          "password": {
+                                            "fromField": "password"
+                                          }
+                                        }
+                                      },
+                                      "apply": {
+                                        "target": "scalarName",
+                                        "nameField": "secretName"
+                                      }
+                                    }
+                                  }
                                 }
                               },
                               "required": [
@@ -2874,7 +3744,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 },
                                 "clientSecretName": {
                                   "type": "string",
-                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication.",
+                                  "x-ui-hint": {
+                                    "kind": "text",
+                                    "format": "k8s-name",
+                                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                    "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                  }
                                 }
                               },
                               "required": [
@@ -3954,11 +4830,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           },
           "fromSource": {
             "type": "string",
-            "description": "Label of the source cluster to migrate from. Must match a key in sourceClusters."
+            "description": "Label of the source cluster to migrate from. Must match a key in sourceClusters.",
+            "x-ui-hint": {
+              "kind": "reference",
+              "sourcePath": [
+                "sourceClusters"
+              ],
+              "message": "Choose one source cluster from sourceClusters."
+            }
           },
           "toTarget": {
             "type": "string",
-            "description": "Label of the target cluster to migrate to. Must match a key in targetClusters."
+            "description": "Label of the target cluster to migrate to. Must match a key in targetClusters.",
+            "x-ui-hint": {
+              "kind": "reference",
+              "sourcePath": [
+                "targetClusters"
+              ],
+              "message": "Choose one target cluster from targetClusters."
+            }
           },
           "perSnapshotConfig": {
             "type": "object",
@@ -3984,7 +4874,79 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": "",
-                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        },
+                        "x-external-ref": {
+                          "kind": "kubernetesResource",
+                          "purpose": "log4j-config",
+                          "displayName": "Log4j2 ConfigMap",
+                          "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                          "matchProfiles": [
+                            "log4j-configmap"
+                          ],
+                          "selection": {
+                            "target": "scalarName"
+                          },
+                          "k8s": {
+                            "resourceTypes": [
+                              {
+                                "group": "",
+                                "version": "v1",
+                                "kind": "ConfigMap",
+                                "namespaced": true
+                              }
+                            ],
+                            "match": {
+                              "requiredKeys": [
+                                "log4j2.properties"
+                              ],
+                              "contentValidationIds": [
+                                "log4j-properties"
+                              ]
+                            }
+                          },
+                          "create": {
+                            "label": "Log4j2 ConfigMap",
+                            "fields": [
+                              {
+                                "name": "configMapName",
+                                "label": "ConfigMap name",
+                                "input": "name",
+                                "required": true,
+                                "validationIds": [
+                                  "k8s-name"
+                                ]
+                              },
+                              {
+                                "name": "properties",
+                                "label": "log4j2.properties",
+                                "input": "multilineText",
+                                "required": true,
+                                "validationIds": [
+                                  "non-empty",
+                                  "log4j-properties"
+                                ]
+                              }
+                            ],
+                            "output": {
+                              "kind": "ConfigMap",
+                              "data": {
+                                "log4j2.properties": {
+                                  "fromField": "properties"
+                                }
+                              }
+                            },
+                            "apply": {
+                              "target": "scalarName",
+                              "nameField": "configMapName"
+                            }
+                          }
+                        }
                       },
                       "skipEvaluateApproval": {
                         "type": "boolean",
@@ -4002,7 +4964,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates."
+                        "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates.",
+                        "x-ui-hint": {
+                          "kind": "array",
+                          "addLabel": "component template"
+                        }
                       },
                       "indexAllowlist": {
                         "type": "array",
@@ -4010,7 +4976,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices."
+                        "description": "Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices.",
+                        "x-ui-hint": {
+                          "kind": "array",
+                          "addLabel": "index pattern"
+                        }
                       },
                       "indexTemplateAllowlist": {
                         "type": "array",
@@ -4018,12 +4988,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates."
+                        "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates.",
+                        "x-ui-hint": {
+                          "kind": "array",
+                          "addLabel": "index template"
+                        }
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": "[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). Only disable if metadata has parsing issues on snapshots that require strict version matching."
+                        "description": "[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). Only disable if metadata has parsing issues on snapshots that require strict version matching.",
+                        "x-expert": true
                       },
                       "clusterAwarenessAttributes": {
                         "type": "number",
@@ -4409,19 +5384,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "snapshot",
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "enableSourcelessMigrations": {
                         "type": "boolean",
                         "default": false,
                         "description": "Enable migration of indices that have _source disabled or partially filtered (includes/excludes). When enabled, document backfill will reconstruct documents from stored fields and doc_values. Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.",
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-change-restriction": "impossible"
                       },
                       "useRecoverySource": {
                         "type": "boolean",
                         "default": false,
                         "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.",
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-change-restriction": "impossible"
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -4442,7 +5424,79 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": "",
-                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        },
+                        "x-external-ref": {
+                          "kind": "kubernetesResource",
+                          "purpose": "log4j-config",
+                          "displayName": "Log4j2 ConfigMap",
+                          "description": "Kubernetes ConfigMap containing a Log4j2 properties file.",
+                          "matchProfiles": [
+                            "log4j-configmap"
+                          ],
+                          "selection": {
+                            "target": "scalarName"
+                          },
+                          "k8s": {
+                            "resourceTypes": [
+                              {
+                                "group": "",
+                                "version": "v1",
+                                "kind": "ConfigMap",
+                                "namespaced": true
+                              }
+                            ],
+                            "match": {
+                              "requiredKeys": [
+                                "log4j2.properties"
+                              ],
+                              "contentValidationIds": [
+                                "log4j-properties"
+                              ]
+                            }
+                          },
+                          "create": {
+                            "label": "Log4j2 ConfigMap",
+                            "fields": [
+                              {
+                                "name": "configMapName",
+                                "label": "ConfigMap name",
+                                "input": "name",
+                                "required": true,
+                                "validationIds": [
+                                  "k8s-name"
+                                ]
+                              },
+                              {
+                                "name": "properties",
+                                "label": "log4j2.properties",
+                                "input": "multilineText",
+                                "required": true,
+                                "validationIds": [
+                                  "non-empty",
+                                  "log4j-properties"
+                                ]
+                              }
+                            ],
+                            "output": {
+                              "kind": "ConfigMap",
+                              "data": {
+                                "log4j2.properties": {
+                                  "fromField": "properties"
+                                }
+                              }
+                            },
+                            "apply": {
+                              "target": "scalarName",
+                              "nameField": "configMapName"
+                            }
+                          }
+                        }
                       },
                       "skipApproval": {
                         "type": "boolean",
@@ -4452,7 +5506,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "useTargetClusterForWorkCoordination": {
                         "type": "boolean",
                         "default": false,
-                        "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
+                        "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster.",
+                        "x-expert": true
                       },
                       "resources": {
                         "type": "object",
@@ -4525,7 +5580,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible",
+                        "x-ui-hint": {
+                          "kind": "array",
+                          "addLabel": "index pattern"
+                        }
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
@@ -4534,7 +5597,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible",
+                        "x-expert": true
                       },
                       "docTransformerConfigBase64": {
                         "type": "string",
@@ -4543,7 +5611,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "docTransformerConfig": {
                         "type": "string",
@@ -4551,7 +5623,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "docTransformerConfigFile": {
                         "type": "string",
@@ -4559,7 +5635,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "documentTransforms": {
                         "type": "array",
@@ -4888,7 +5968,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -4905,19 +5989,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
                         "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
-                        "changeRestriction": "gated"
+                        "changeRestriction": "gated",
+                        "x-change-restriction": "gated",
+                        "x-expert": true
                       },
                       "maxConnections": {
                         "type": "number",
                         "default": 10,
                         "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
-                        "changeRestriction": "gated"
+                        "changeRestriction": "gated",
+                        "x-change-restriction": "gated"
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
                         "default": 85899345920,
                         "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
-                        "changeRestriction": "gated"
+                        "changeRestriction": "gated",
+                        "x-change-restriction": "gated"
                       },
                       "otelTraceCollectorEndpoint": {
                         "anyOf": [
@@ -4970,7 +6058,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "allowedDocExceptionTypes": {
                         "type": "array",
@@ -4978,22 +6070,29 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of document-level exception types to treat as successful operations during bulk migration. Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. Use this for idempotent migrations where certain errors are expected and harmless. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream where backing index writes may conflict with existing documents. Defaults to empty (all errors are treated as failures). See BulkDocErrorTypes for common OpenSearch exception type strings."
+                        "description": "List of document-level exception types to treat as successful operations during bulk migration. Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. Use this for idempotent migrations where certain errors are expected and harmless. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream where backing index writes may conflict with existing documents. Defaults to empty (all errors are treated as failures). See BulkDocErrorTypes for common OpenSearch exception type strings.",
+                        "x-ui-hint": {
+                          "kind": "array",
+                          "addLabel": "exception type"
+                        }
                       },
                       "coordinatorRetryMaxRetries": {
                         "type": "number",
                         "default": 7,
-                        "description": "[Expert] Maximum number of retries when marking work items as completed on the coordinator."
+                        "description": "[Expert] Maximum number of retries when marking work items as completed on the coordinator.",
+                        "x-expert": true
                       },
                       "coordinatorRetryInitialDelayMs": {
                         "type": "number",
                         "default": 1000,
-                        "description": "[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
+                        "description": "[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs.",
+                        "x-expert": true
                       },
                       "coordinatorRetryMaxDelayMs": {
                         "type": "number",
                         "default": 64000,
-                        "description": "[Expert] Maximum delay in milliseconds for any single coordinator completion retry."
+                        "description": "[Expert] Maximum delay in milliseconds for any single coordinator completion retry.",
+                        "x-expert": true
                       },
                       "enableSourcelessMigrations": {
                         "type": "boolean",
@@ -5002,7 +6101,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "useRecoverySource": {
                         "type": "boolean",
@@ -5011,7 +6114,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       },
                       "positionGapStopword": {
                         "type": "string",
@@ -5020,7 +6127,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "checksumFor": [
                           "replayer"
                         ],
-                        "changeRestriction": "impossible"
+                        "changeRestriction": "impossible",
+                        "x-checksum-for": [
+                          "replayer"
+                        ],
+                        "x-change-restriction": "impossible"
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
@@ -5451,7 +6562,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "dnsNames": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 253,
+                              "pattern": "^(?:\\\\*\\\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+                              "description": "DNS name to include as a Subject Alternative Name on the proxy TLS certificate. Use a bare DNS name, not a URL.",
+                              "x-ui-hint": {
+                                "kind": "text",
+                                "pattern": "^(?:\\\\*\\\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+                                "message": "Use a DNS name without a scheme, port, path, or spaces. Wildcards are allowed only as the leftmost label, like *.example.com."
+                              }
                             },
                             "minItems": 1,
                             "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local').",
@@ -6138,7 +7258,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "properties": {
                     "source": {
                       "type": "string",
-                      "description": "Name of the source cluster. Must match a key in sourceClusters."
+                      "description": "Name of the source cluster. Must match a key in sourceClusters.",
+                      "x-ui-hint": {
+                        "kind": "reference",
+                        "sourcePath": [
+                          "sourceClusters"
+                        ],
+                        "message": "Choose one source cluster from sourceClusters."
+                      }
                     },
                     "snapshot": {
                       "type": "string",

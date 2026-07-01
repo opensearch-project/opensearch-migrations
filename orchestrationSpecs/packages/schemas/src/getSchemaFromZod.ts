@@ -32,6 +32,7 @@ function safeObjectValues(obj: Record<string, unknown>) {
 
 /** Unwrap Zod wrappers (optional, default, etc.) to reach the type that holds .meta(). */
 function unwrapZod(schema: z.ZodType): z.ZodType {
+    if (schema instanceof z.ZodArray) return schema;
     if ('unwrap' in schema && typeof (schema as any).unwrap === 'function') return unwrapZod((schema as any).unwrap());
     if ('removeDefault' in schema && typeof (schema as any).removeDefault === 'function') return unwrapZod((schema as any).removeDefault());
     if (schema instanceof z.ZodPipe) {
@@ -55,6 +56,18 @@ function isExpertDescription(description: string | undefined): boolean {
     return Boolean(description) && (/^\s*\[Expert\]/i.test(description ?? "") || /^\s*Expert\b/i.test(description ?? ""));
 }
 
+function applyMetaExtensions(jsonSchema: Record<string, unknown>, zodSchema: z.ZodType): void {
+    const meta = fieldMeta(zodSchema);
+    if (meta?.checksumFor?.length) jsonSchema['x-checksum-for'] = meta.checksumFor;
+    if (meta?.changeRestriction) jsonSchema['x-change-restriction'] = meta.changeRestriction;
+    if (meta?.uiHint) jsonSchema['x-ui-hint'] = meta.uiHint;
+    if (meta?.externalRef) jsonSchema['x-external-ref'] = meta.externalRef;
+    if (meta?.effectiveDefault) jsonSchema['x-effective-default'] = meta.effectiveDefault;
+    if (meta?.expert || isExpertDescription(getDescription(zodSchema as z.ZodTypeAny) ?? String(jsonSchema.description ?? ""))) {
+        jsonSchema['x-expert'] = true;
+    }
+}
+
 /** Walk a generated JSON Schema and inject x- extensions from Zod .meta(). */
 function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
     const unwrapped = unwrapZod(zodSchema);
@@ -64,15 +77,7 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
             if (!Object.hasOwn((unwrapped as z.ZodObject<any>).shape, key)) continue;
             if (!isSafePlainObject(propSchema)) continue;
             const fieldZod = (unwrapped as z.ZodObject<any>).shape[key];
-            const meta = fieldMeta(fieldZod);
-            if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
-            if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
-            if (meta?.uiHint) propSchema['x-ui-hint'] = meta.uiHint;
-            if (meta?.externalRef) propSchema['x-external-ref'] = meta.externalRef;
-            if (meta?.effectiveDefault) propSchema['x-effective-default'] = meta.effectiveDefault;
-            if (meta?.expert || isExpertDescription(getDescription(fieldZod as z.ZodTypeAny) ?? String(propSchema.description ?? ""))) {
-                propSchema['x-expert'] = true;
-            }
+            applyMetaExtensions(propSchema, fieldZod);
             injectMetaExtensions(propSchema, fieldZod);
         }
         return;
@@ -84,7 +89,9 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
     }
 
     if (unwrapped instanceof z.ZodArray && isSafePlainObject(jsonSchema?.items)) {
-        injectMetaExtensions(jsonSchema.items, (unwrapped as z.ZodArray<any>).element);
+        const itemZod = (unwrapped as z.ZodArray<any>).element;
+        applyMetaExtensions(jsonSchema.items, itemZod);
+        injectMetaExtensions(jsonSchema.items, itemZod);
         return;
     }
 

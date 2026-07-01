@@ -593,6 +593,8 @@ export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTE
 
 export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const DNS_LABEL_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+export const DNS_NAME_PATTERN = `^(?:\\*\\.)?${DNS_LABEL_PATTERN}(?:\\.${DNS_LABEL_PATTERN})*$`;
 export const K8S_IMAGE_PULL_POLICY = z.enum(["Always", "Never", "IfNotPresent"]);
 
 const K8S_NAME_UI_HINT: UiHint = {
@@ -613,6 +615,11 @@ const OPTIONAL_HTTP_ENDPOINT_UI_HINT: UiHint = {
     pattern: OPTIONAL_HTTP_ENDPOINT_PATTERN,
     message: "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash.",
 };
+const DNS_NAME_UI_HINT: UiHint = {
+    kind: 'text',
+    pattern: DNS_NAME_PATTERN,
+    message: "Use a DNS name without a scheme, port, path, or spaces. Wildcards are allowed only as the leftmost label, like *.example.com.",
+};
 
 export const FILE_RELATIVE_PATH = z.string()
     .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/)
@@ -621,6 +628,13 @@ export const FILE_RELATIVE_PATH = z.string()
 export const CONFIGMAP_FILE_KEY = z.string()
     .regex(/^(?!\.{1,2}$)(?!\.\.)[A-Za-z0-9._-]+$/)
     .describe("ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs.");
+
+export const CERTIFICATE_DNS_NAME = z.string()
+    .min(1)
+    .max(253)
+    .regex(new RegExp(DNS_NAME_PATTERN))
+    .uiHint(DNS_NAME_UI_HINT)
+    .describe("DNS name to include as a Subject Alternative Name on the proxy TLS certificate. Use a bare DNS name, not a URL.");
 
 export const FILE_REF_FROM_IMAGE = z.object({
     image: z.string().min(1)
@@ -973,7 +987,7 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         issuerRef: CERT_MANAGER_ISSUER_REF,
         commonName: z.string().optional()
             .describe("Optional common name (CN) for the TLS certificate subject."),
-        dnsNames: z.array(z.string()).min(1)
+        dnsNames: z.array(CERTIFICATE_DNS_NAME).min(1)
             .uiHint({kind: 'array', addLabel: 'DNS name'})
             .describe("DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."),
         duration: z.string().default("2160h").optional()

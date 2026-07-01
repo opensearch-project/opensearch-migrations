@@ -429,7 +429,14 @@ export function defaultJsonValueForSchema(schema: JsonSchema | undefined): unkno
 
 function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | undefined {
     const resolved = resolveJsonSchemaRef(schema);
+    const schemaHint = jsonSchemaUiHint(resolved);
     const pattern = typeof resolved?.pattern === "string" ? resolved.pattern : undefined;
+    if (schemaHint?.kind === "text") {
+        return {
+            ...schemaHint,
+            pattern: schemaHint.pattern ?? pattern,
+        };
+    }
     return pattern ? {
         kind: "text",
         pattern,

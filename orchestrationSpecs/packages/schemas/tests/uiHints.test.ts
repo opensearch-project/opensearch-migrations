@@ -1,4 +1,4 @@
-import {OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "../src";
+import {DNS_NAME_PATTERN, OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "../src";
 
 function findExternalRefSchema(root: any, purpose: string): any | undefined {
     const stack = [root];
@@ -104,6 +104,28 @@ describe("workflow schema UI hints", () => {
                     {group: "cert-manager.io", version: "v1", kind: "ClusterIssuer", namespaced: false},
                     {group: "awspca.cert-manager.io", version: "v1beta1", kind: "AWSPCAClusterIssuer", namespaced: false},
                 ],
+            },
+        });
+    });
+
+    it("exports scalar item hints for DNS name arrays", () => {
+        const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
+        const certManagerTls = proxyConfig.properties.tls.oneOf
+            .find((branch: any) => branch.properties?.mode?.enum?.includes("certManager"));
+        const dnsNameItem = certManagerTls.properties.dnsNames.items;
+
+        expect(certManagerTls.properties.dnsNames["x-ui-hint"]).toMatchObject({
+            kind: "array",
+            addLabel: "DNS name",
+        });
+        expect(dnsNameItem).toMatchObject({
+            type: "string",
+            pattern: DNS_NAME_PATTERN,
+            maxLength: 253,
+            "x-ui-hint": {
+                kind: "text",
+                pattern: DNS_NAME_PATTERN,
+                message: expect.stringContaining("Use a DNS name"),
             },
         });
     });

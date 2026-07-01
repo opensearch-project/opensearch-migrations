@@ -1,6 +1,6 @@
 import {applyEditOperationToObject, buildEditStateFromObject} from "../src/editConfig";
 import type {EditNode} from "../src/schemaEditModel";
-import {buildUnifiedSchema, USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
+import {buildUnifiedSchema, DNS_NAME_PATTERN, USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
 import {parse} from "yaml";
 import {spawnSync} from "child_process";
 import path from "path";
@@ -821,12 +821,49 @@ describe("editConfig state", () => {
             value: "cap.default.svc.cluster.local",
             valueType: "string",
             collapsed: true,
+            validation: {
+                pattern: DNS_NAME_PATTERN,
+                message: expect.stringContaining("Use a DNS name"),
+            },
         });
         expect(dnsName?.label).toContain("DNS name 1: cap.default.svc.cluster.local");
         expect(addDnsName).toMatchObject({
             valueKind: "command",
             label: "+ Add DNS name",
             command: {requiresName: false},
+        });
+
+        const invalidState = buildEditStateFromObject({
+            sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            tls: {
+                                mode: "certManager",
+                                issuerRef: {name: "migrations-ca", kind: "ClusterIssuer"},
+                                dnsNames: ["https://cap.default.svc.cluster.local:9201"],
+                            },
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+        const invalidDnsName = findNode(invalidState.nodes, "edit:traffic.proxies.cap.proxyConfig.tls.dnsNames.0");
+        expect(invalidDnsName).toMatchObject({
+            valueKind: "scalar",
+            status: "error",
+            validation: {pattern: DNS_NAME_PATTERN},
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    severity: "error",
+                    message: expect.stringContaining("Use a DNS name"),
+                }),
+            ]),
         });
     });
 
