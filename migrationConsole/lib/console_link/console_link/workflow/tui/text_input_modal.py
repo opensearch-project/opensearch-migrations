@@ -1,5 +1,6 @@
 import re
 from typing import Any, Callable, Optional
+from urllib.parse import urlencode
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,6 +22,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     #value { margin-bottom: 0; }
     #validation { color: $error; margin-bottom: 0; min-height: 1; }
     #remote-validation { margin-bottom: 1; min-height: 1; }
+    #regex-help { color: gray; margin-bottom: 0; }
+    #regex-samples { color: gray; margin-bottom: 1; }
     #buttons { align: center middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
     """
@@ -41,6 +44,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         clear_allowed: bool = False,
         clear_label: str = "Clear",
         on_change: Optional[Callable[[str, bool], None]] = None,
+        regex_help: Optional[dict] = None,
     ):
         super().__init__()
         self.prompt = prompt
@@ -51,6 +55,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         self.clear_allowed = clear_allowed
         self.clear_label = clear_label
         self.on_change = on_change
+        self.regex_help = regex_help or {}
         self._compiled_pattern = self._compile_pattern(self.validation.get("pattern"))
 
     def compose(self) -> ComposeResult:
@@ -60,6 +65,8 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
             yield Input(value=self.initial_value, id="value", select_on_focus=False)
             yield Static("", id="validation")
             yield Static("", id="remote-validation")
+            yield Static("", id="regex-help")
+            yield Static("", id="regex-samples")
             with Horizontal(id="buttons"):
                 yield ModalButton("Save (<Enter>)", id="save", variant="success")
                 if self.clear_allowed:
@@ -72,6 +79,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         input_widget.focus()
         input_widget.cursor_position = len(input_widget.value)
         self._update_validation(input_widget.value)
+        self._update_regex_help(input_widget.value)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -109,6 +117,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         message = self._update_validation(event.value)
+        self._update_regex_help(event.value)
         if message:
             self.set_remote_validation("")
             if self.on_change:
@@ -151,6 +160,36 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         if self._compiled_pattern is not None and value != "" and not self._compiled_pattern.search(value):
             return self.validation.get("message") or "Value does not match the expected format."
         return None
+
+    def _update_regex_help(self, value: str) -> None:
+        help_widget = self.query_one("#regex-help", Static)
+        samples_widget = self.query_one("#regex-samples", Static)
+        if not self.regex_help:
+            help_widget.display = False
+            samples_widget.display = False
+            return
+
+        samples = [str(sample) for sample in self.regex_help.get("testStrings", []) if str(sample)]
+        url = self._regex101_url(value, samples)
+        message = str(self.regex_help.get("message") or "Java regex used by the capture proxy.")
+        help_widget.display = True
+        samples_widget.display = bool(samples)
+        help_widget.update(
+            f"{escape(message)}\n"
+            f"Regex101: [link={url}]open with samples[/] ({escape(url)})"
+        )
+        if samples:
+            samples_widget.update("Samples:\n" + "\n".join(f"  {escape(sample)}" for sample in samples))
+        else:
+            samples_widget.update("")
+
+    @staticmethod
+    def _regex101_url(regex: str, samples: list[str]) -> str:
+        params = {
+            "regex": regex,
+            "testString": "\n".join(samples),
+        }
+        return "https://regex101.com/?" + urlencode(params)
 
     @staticmethod
     def _compile_pattern(pattern: Optional[str]):

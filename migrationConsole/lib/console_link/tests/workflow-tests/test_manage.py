@@ -2,6 +2,7 @@ import base64
 import copy
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -1517,6 +1518,20 @@ def test_structured_value_modal_parses_yaml_objects_and_arrays():
 
     with pytest.raises(ValueError, match="YAML object"):
         object_modal._parse_value("- not\n- an\n- object\n")
+
+    with pytest.raises(ValueError, match="YAML array"):
+        array_modal._parse_value("key: value\n")
+
+
+def test_text_input_modal_builds_regex101_url_with_multiline_samples():
+    url = TextInputModal._regex101_url("GET|HEAD", ["GET", "HEAD", "POST"])
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "regex101.com"
+    assert query["regex"] == ["GET|HEAD"]
+    assert query["testString"] == ["GET\nHEAD\nPOST"]
 
 
 def resource_sections_for_manage_tests():

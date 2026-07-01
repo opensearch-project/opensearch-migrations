@@ -65,6 +65,26 @@ describe("workflow schema UI hints", () => {
         });
     });
 
+    it("exports Java regex hints for capture suppression patterns", () => {
+        const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
+
+        expect(proxyConfig.properties.suppressCaptureForMethod["x-ui-hint"]).toMatchObject({
+            kind: "javaRegex",
+            examples: ["GET", "GET|HEAD", "POST|PUT|PATCH"],
+            testStrings: ["GET", "HEAD", "POST", "PUT", "DELETE"],
+        });
+        expect(proxyConfig.properties.suppressCaptureForUriPath["x-ui-hint"]).toMatchObject({
+            kind: "javaRegex",
+            examples: ["/_cluster/health", "/_cat/.*", ".*/_search"],
+            testStrings: ["/_cluster/health", "/_cat/indices?v", "/my-index/_search", "/_bulk", "/favicon.ico"],
+        });
+        expect(proxyConfig.properties.suppressMethodAndPath["x-ui-hint"]).toMatchObject({
+            kind: "javaRegex",
+            examples: ["GET /_cluster/health", "(GET|HEAD) /.*", "POST .*/_search"],
+            testStrings: ["GET /_cluster/health", "HEAD /", "POST /my-index/_search", "GET /_cat/indices?v", "POST /_bulk"],
+        });
+    });
+
     it("exports external reference hints for HTTP basic auth secrets", () => {
         const authConfig = schema.properties.sourceClusters.additionalProperties.properties.authConfig;
         const basicSecret = authConfig.anyOf

@@ -7103,7 +7103,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "suppressCaptureForMethod": {
                     "type": "string",
                     "default": "",
-                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded.",
+                    "description": "Java regex pattern to test against the HTTP method of the incoming request (for example, 'HEAD' or 'GET|HEAD'). The proxy uses full-string matching. Matching requests are forwarded but not recorded.",
                     "checksumFor": [
                       "snapshot",
                       "replayer"
@@ -7113,12 +7113,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-ui-hint": {
+                      "kind": "javaRegex",
+                      "message": "Java regex matched against the full HTTP method string; use alternatives like GET|HEAD for multiple methods.",
+                      "examples": [
+                        "GET",
+                        "GET|HEAD",
+                        "POST|PUT|PATCH"
+                      ],
+                      "testStrings": [
+                        "GET",
+                        "HEAD",
+                        "POST",
+                        "PUT",
+                        "DELETE"
+                      ]
+                    }
                   },
                   "suppressCaptureForUriPath": {
                     "type": "string",
                     "default": "",
-                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded.",
+                    "description": "Java regex pattern to test against the URI path of the incoming request. The proxy uses full-string matching. Matching requests are forwarded but not recorded.",
                     "checksumFor": [
                       "snapshot",
                       "replayer"
@@ -7128,12 +7144,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-ui-hint": {
+                      "kind": "javaRegex",
+                      "message": "Java regex matched against the full request URI path; include .* when you want a contains-style match.",
+                      "examples": [
+                        "/_cluster/health",
+                        "/_cat/.*",
+                        ".*/_search"
+                      ],
+                      "testStrings": [
+                        "/_cluster/health",
+                        "/_cat/indices?v",
+                        "/my-index/_search",
+                        "/_bulk",
+                        "/favicon.ico"
+                      ]
+                    }
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
                     "default": "",
-                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format.",
+                    "description": "Java regex pattern to test against the combined 'METHOD /path' value of the incoming request. The proxy uses full-string matching. Matching requests are forwarded but not recorded.",
                     "checksumFor": [
                       "snapshot",
                       "replayer"
@@ -7143,7 +7175,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-ui-hint": {
+                      "kind": "javaRegex",
+                      "message": "Java regex matched against '<METHOD> <URI path>'; include both method and path in the pattern.",
+                      "examples": [
+                        "GET /_cluster/health",
+                        "(GET|HEAD) /.*",
+                        "POST .*/_search"
+                      ],
+                      "testStrings": [
+                        "GET /_cluster/health",
+                        "HEAD /",
+                        "POST /my-index/_search",
+                        "GET /_cat/indices?v",
+                        "POST /_bulk"
+                      ]
+                    }
                   }
                 },
                 "required": [

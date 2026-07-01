@@ -450,6 +450,9 @@ function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | un
     const resolved = resolveJsonSchemaRef(schema);
     const schemaHint = jsonSchemaUiHint(resolved);
     const pattern = typeof resolved?.pattern === "string" ? resolved.pattern : undefined;
+    if (schemaHint?.kind === "javaRegex") {
+        return schemaHint;
+    }
     if (schemaHint?.kind === "text") {
         return {
             ...schemaHint,

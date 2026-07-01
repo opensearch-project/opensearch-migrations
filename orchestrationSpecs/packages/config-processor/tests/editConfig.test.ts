@@ -716,6 +716,9 @@ describe("editConfig state", () => {
         const serviceType = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.serviceType");
         const tls = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.tls");
         const setHeader = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.setHeader");
+        const suppressMethod = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForMethod");
+        const suppressUriPath = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressCaptureForUriPath");
+        const suppressMethodAndPath = findNode(state.nodes, "edit:traffic.proxies.cap.proxyConfig.suppressMethodAndPath");
         const addProxy = findNode(state.nodes, "edit:traffic.proxies:add");
 
         const expectedOptionKeys = [
@@ -755,6 +758,18 @@ describe("editConfig state", () => {
         ]);
         expect(tls).toMatchObject({presence: "optional", valueKind: "union", value: "unset"});
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
+        expect(suppressMethod?.inputHint).toMatchObject({
+            kind: "javaRegex",
+            testStrings: ["GET", "HEAD", "POST", "PUT", "DELETE"],
+        });
+        expect(suppressUriPath?.inputHint).toMatchObject({
+            kind: "javaRegex",
+            testStrings: ["/_cluster/health", "/_cat/indices?v", "/my-index/_search", "/_bulk", "/favicon.ico"],
+        });
+        expect(suppressMethodAndPath?.inputHint).toMatchObject({
+            kind: "javaRegex",
+            testStrings: ["GET /_cluster/health", "HEAD /", "POST /my-index/_search", "GET /_cat/indices?v", "POST /_bulk"],
+        });
         expect(kafkaTopic?.status).toBe("ok");
         expect(kafkaTopic?.label).toContain("kafkaTopic: <unset>");
         expect(captureGroup?.statusCounts?.required).toBe(1);

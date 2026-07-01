@@ -1866,6 +1866,7 @@ class WorkflowTreeApp(App):
                 modal,
                 locally_valid,
             ),
+            regex_help=self._edit_node_regex_help(node),
         )
         self.push_screen(
             modal,
@@ -2477,6 +2478,11 @@ class WorkflowTreeApp(App):
                 "message": input_hint.get("message"),
             }
         return validation
+
+    @staticmethod
+    def _edit_node_regex_help(node: Dict) -> Optional[Dict]:
+        input_hint = node.get("inputHint") or {}
+        return dict(input_hint) if input_hint.get("kind") == "javaRegex" else None
 
     @classmethod
     def _config_edit_enter_description(cls, node: Optional[Dict]) -> str:

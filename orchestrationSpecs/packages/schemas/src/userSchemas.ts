@@ -14,6 +14,12 @@ export type UiHint =
         examples?: string[];
     }
     | {
+        kind: 'javaRegex';
+        message?: string;
+        examples?: string[];
+        testStrings?: string[];
+    }
+    | {
         kind: 'reference';
         sourcePath: string[];
         allowCustom?: boolean;
@@ -220,6 +226,24 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const PROXY_METHOD_REGEX_HINT: UiHint = {
+    kind: 'javaRegex',
+    message: "Java regex matched against the full HTTP method string; use alternatives like GET|HEAD for multiple methods.",
+    examples: ["GET", "GET|HEAD", "POST|PUT|PATCH"],
+    testStrings: ["GET", "HEAD", "POST", "PUT", "DELETE"],
+};
+const PROXY_URI_PATH_REGEX_HINT: UiHint = {
+    kind: 'javaRegex',
+    message: "Java regex matched against the full request URI path; include .* when you want a contains-style match.",
+    examples: ["/_cluster/health", "/_cat/.*", ".*/_search"],
+    testStrings: ["/_cluster/health", "/_cat/indices?v", "/my-index/_search", "/_bulk", "/favicon.ico"],
+};
+const PROXY_METHOD_AND_PATH_REGEX_HINT: UiHint = {
+    kind: 'javaRegex',
+    message: "Java regex matched against '<METHOD> <URI path>'; include both method and path in the pattern.",
+    examples: ["GET /_cluster/health", "(GET|HEAD) /.*", "POST .*/_search"],
+    testStrings: ["GET /_cluster/health", "HEAD /", "POST /my-index/_search", "GET /_cat/indices?v", "POST /_bulk"],
+};
 
 const CORE_V1_SECRET: KubernetesResourceType = {group: "", version: "v1", kind: "Secret", namespaced: true};
 const CORE_V1_CONFIG_MAP: KubernetesResourceType = {group: "", version: "v1", kind: "ConfigMap", namespaced: true};
@@ -1075,15 +1099,18 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     suppressCaptureForMethod: z.string().default("").optional()
-        .describe("HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded.")
+        .uiHint(PROXY_METHOD_REGEX_HINT)
+        .describe("Java regex pattern to test against the HTTP method of the incoming request (for example, 'HEAD' or 'GET|HEAD'). The proxy uses full-string matching. Matching requests are forwarded but not recorded.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     suppressCaptureForUriPath: z.string().default("").optional()
-        .describe("URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded.")
+        .uiHint(PROXY_URI_PATH_REGEX_HINT)
+        .describe("Java regex pattern to test against the URI path of the incoming request. The proxy uses full-string matching. Matching requests are forwarded but not recorded.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     suppressMethodAndPath: z.string().default("").optional()
-        .describe("Combined method and path pattern for capture suppression in 'METHOD /path' format.")
+        .uiHint(PROXY_METHOD_AND_PATH_REGEX_HINT)
+        .describe("Java regex pattern to test against the combined 'METHOD /path' value of the incoming request. The proxy uses full-string matching. Matching requests are forwarded but not recorded.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
 }).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
