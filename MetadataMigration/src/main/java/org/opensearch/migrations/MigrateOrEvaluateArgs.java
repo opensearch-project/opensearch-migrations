@@ -25,6 +25,12 @@ public class MigrateOrEvaluateArgs {
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;
 
+    @Parameter(names = { "--solr-collection-name", "--solrCollectionName" },
+        description = "Target index name for a bare Solr backup. Optional for SolrCloud (the collection "
+            + "name is read from backup.properties); recommended for standalone backups, whose core name is "
+            + "not recorded in the backup. Ignored for wrapped multi-collection layouts.")
+    public String solrCollectionName = null;
+
     @Parameter(names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
         description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
     public String repoUri;

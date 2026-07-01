@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
@@ -93,23 +94,37 @@ public class ClusterReaderExtractor {
     private ClusterReader getSolrSnapshotReader(RepoUri parsedUri) {
         Path backupDir;
         List<String> collectionNames;
+        var dataDirByCollection = new LinkedHashMap<String, String>();
         switch (parsedUri) {
             case RepoUri.FileRepoUri f -> {
                 backupDir = Path.of(f.path());
-                collectionNames = discoverFileSystemCollections(backupDir);
+                var bare = SolrBackupLayout.classifyBareBackup(backupDir, arguments.solrCollectionName);
+                if (bare != null && bare.collectionName() != null) {
+                    collectionNames = List.of(bare.collectionName());
+                    dataDirByCollection.put(bare.collectionName(), bare.dataPath());
+                } else {
+                    collectionNames = discoverFileSystemCollections(backupDir);
+                }
             }
             case RepoUri.S3RepoUri s -> {
                 var s3Repo = createSolrS3Repo(s);
                 backupDir = s3Repo.getRepoRootDir();
-                collectionNames = s3Repo.listTopLevelDirectories();
-                for (var collection : collectionNames) {
-                    downloadZkBackupForCollection(s3Repo, collection);
+                var bare = detectBareSolrLayoutInS3(s3Repo, arguments.solrCollectionName);
+                if (bare != null && bare.collectionName() != null) {
+                    collectionNames = List.of(bare.collectionName());
+                    dataDirByCollection.put(bare.collectionName(), bare.dataPath());
+                    downloadZkBackupForDataDir(s3Repo, bare.dataPath());
+                } else {
+                    collectionNames = s3Repo.listTopLevelDirectories();
+                    for (var collection : collectionNames) {
+                        downloadZkBackupForCollection(s3Repo, collection);
+                    }
                 }
             }
             default -> throw new ParameterException("Solr snapshot requires --repo-uri with file:// or s3:// scheme");
         }
 
-        return buildSolrSnapshotReader(backupDir, collectionNames);
+        return buildSolrSnapshotReader(backupDir, collectionNames, dataDirByCollection);
     }
 
     private List<String> discoverFileSystemCollections(Path backupDir) {
@@ -142,7 +157,7 @@ public class ClusterReaderExtractor {
      *
      * Delegates layout resolution to {@link SolrBackupLayout#resolveCollectionDataPrefix}.
      */
-    private void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
+    void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
         var resolved = SolrBackupLayout.resolveCollectionDataPrefix(collection, s3Repo::listSubDirectories);
         if (resolved == null) {
             log.warn("No zk_backup directories found for collection '{}' in S3", collection);
@@ -151,10 +166,44 @@ public class ClusterReaderExtractor {
         s3Repo.downloadPrefix(resolved.joinWith(collection) + "/" + resolved.latestZkBackupName());
     }
 
-    private ClusterReader buildSolrSnapshotReader(Path backupDir, List<String> collectionNames) {
+    void downloadZkBackupForDataDir(S3Repo s3Repo, String dataDir) {
+        var zkName = SolrBackupLayout.findLatestZkBackupName(s3Repo.listSubDirectories(dataDir));
+        if (zkName == null) {
+            log.warn("No zk_backup found at bare Solr backup root '{}'", dataDir);
+            return;
+        }
+        s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkName));
+    }
+
+    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
+        var bare = SolrBackupLayout.detectBareLayoutFromListing(s3Repo.listTopLevelDirectories());
+        if (bare == null) {
+            return null;
+        }
+        if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
+            var name = nameOverride;
+            if (name == null) {
+                try {
+                    s3Repo.downloadFile("backup.properties");
+                    name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
+                } catch (RuntimeException e) {
+                    log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
+                }
+            }
+            return new SolrBackupLayout.BareBackupLayout(SolrBackupLayout.SolrBackupMode.CLOUD, name, bare.dataPath());
+        }
+        return nameOverride != null
+            ? new SolrBackupLayout.BareBackupLayout(bare.mode(), nameOverride, bare.dataPath())
+            : bare;
+    }
+
+    private ClusterReader buildSolrSnapshotReader(
+        Path backupDir, List<String> collectionNames, Map<String, String> dataDirByCollection
+    ) {
         var schemas = new LinkedHashMap<String, JsonNode>();
         for (var name : collectionNames) {
-            schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));
+            var dataDir = dataDirByCollection.getOrDefault(name, name);
+            schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(dataDir)));
         }
 
         if (!arguments.dataFilterArgs.indexAllowlist.isEmpty()) {
@@ -162,7 +211,7 @@ public class ClusterReaderExtractor {
         }
 
         log.atInfo().setMessage("Solr snapshot reader: found {} collection(s) in {}").addArgument(schemas.size()).addArgument(backupDir).log();
-        return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas);
+        return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas, dataDirByCollection);
     }
 
     ClusterReader getRemoteReader(ConnectionContext connection) {

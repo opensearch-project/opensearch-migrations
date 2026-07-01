@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Properties;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -295,6 +296,199 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /** Which Solr deployment produced a backup, inferred from its on-disk markers. */
+    public enum SolrBackupMode {
+        /** SolrCloud Collections-API {@code BACKUP}: zk_backup/, backup.properties, snapshot.shardN/. */
+        CLOUD,
+        /** Standalone replication-handler {@code command=backup}: a flat {@code snapshot.<name>/} Lucene index. */
+        STANDALONE
+    }
+
+    /**
+     * Describes a backup root that holds a single collection/core's data <em>directly</em>, with no
+     * per-collection wrapper directory. This is what real Solr 6/7 backups produce, and what the
+     * manual "reshape" step used to paper over:
+     *
+     * <ul>
+     *   <li><b>SolrCloud</b> ({@link SolrBackupMode#CLOUD}): {@code <root>/{backup.properties, snapshot.shardN/, zk_backup/}}
+     *       — the collection name is recovered from {@code backup.properties}; {@code dataPath} is {@code ""}
+     *       (the data lives at the root).</li>
+     *   <li><b>Standalone</b> ({@link SolrBackupMode#STANDALONE}): {@code <root>/snapshot.<name>/<flat Lucene index>}
+     *       — nothing in the backup records the core name, so it is derived from the {@code snapshot.<name>}
+     *       directory (prefix stripped) unless an override is supplied; {@code dataPath} is {@code "snapshot.<name>"}.
+     *       When the root <em>is</em> the flat index (segments at the top level), {@code dataPath} is {@code ""}.</li>
+     * </ul>
+     *
+     * @param mode           which deployment produced the backup
+     * @param collectionName the recovered/derived collection (CLOUD) or core (STANDALONE) name; may be
+     *                       {@code null} for CLOUD when no name could be read and no override was given
+     * @param dataPath       location of the actual backup data relative to the backup root
+     *                       ({@code ""} == the root itself)
+     */
+    public record BareBackupLayout(SolrBackupMode mode, String collectionName, String dataPath) {
+        /** Resolves the directory that actually contains the backup data, given the backup root. */
+        public Path resolveFrom(Path backupRoot) {
+            return dataPath.isEmpty() ? backupRoot : backupRoot.resolve(dataPath);
+        }
+    }
+
+    /**
+     * Classifies a backup root that contains a single collection/core directly (the "bare" layout
+     * produced by SolrCloud 6/7 and standalone Solr), so the Migration Assistant can read it without
+     * the manual reshape step. Returns {@code null} when {@code backupRoot} is not a bare
+     * single-collection backup (e.g. a wrapped multi-collection layout, where each child directory is
+     * a collection).
+     *
+     * <p>The discriminator is the presence of SolrCloud-only markers ({@code zk_backup}/{@code zk_backup_N},
+     * {@code backup.properties}/{@code backup_N.properties}, or {@code shard_backup_metadata}). When present
+     * the root is read as a SolrCloud collection — its {@code snapshot.shardN/} directories are shards of one
+     * collection, never separate collections. When absent, a {@code snapshot.<name>/} index (or flat segments at
+     * the root) is read as a standalone core. This is what keeps the two {@code snapshot.*} naming conventions
+     * from being confused.
+     *
+     * @param backupRoot   the directory the backup was written to / uploaded from
+     * @param nameOverride explicit collection/core name; when non-null it wins over any recovered/derived name
+     * @return the bare layout descriptor, or {@code null} if the root is not a bare single-collection backup
+     */
+    public static BareBackupLayout classifyBareBackup(Path backupRoot, String nameOverride) {
+        if (backupRoot == null || !Files.isDirectory(backupRoot)) {
+            return null;
+        }
+        if (hasCloudMarkersAtRoot(backupRoot)) {
+            var name = nameOverride != null ? nameOverride : readCollectionNameFromBackupProperties(backupRoot);
+            log.info("Classified bare SolrCloud backup at {} (collection={})", backupRoot, name);
+            return new BareBackupLayout(SolrBackupMode.CLOUD, name, "");
+        }
+        // Standalone replication backup: a flat Lucene index, either directly at the root...
+        if (containsSegmentsFile(backupRoot)) {
+            var name = nameOverride != null ? nameOverride
+                : stripSnapshotPrefix(backupRoot.getFileName().toString());
+            log.info("Classified bare standalone backup (flat root) at {} (core={})", backupRoot, name);
+            return new BareBackupLayout(SolrBackupMode.STANDALONE, name, "");
+        }
+        // ...or inside a single snapshot.<name>/ directory.
+        var snapshotDir = findStandaloneSnapshotDir(backupRoot);
+        if (snapshotDir != null) {
+            var dirName = snapshotDir.getFileName().toString();
+            var name = nameOverride != null ? nameOverride : stripSnapshotPrefix(dirName);
+            log.info("Classified bare standalone backup at {}/{} (core={})", backupRoot, dirName, name);
+            return new BareBackupLayout(SolrBackupMode.STANDALONE, name, dirName);
+        }
+        return null;
+    }
+
+    private static boolean hasCloudMarkersAtRoot(Path root) {
+        try (var entries = Files.list(root)) {
+            return entries.anyMatch(p -> {
+                var name = p.getFileName().toString();
+                return name.equals("zk_backup")
+                    || ZK_BACKUP_PATTERN.matcher(name).matches()
+                    || name.equals("shard_backup_metadata")
+                    || name.equals("backup.properties")
+                    || (name.startsWith("backup_") && name.endsWith(".properties"));
+            });
+        } catch (IOException e) {
+            log.warn("Failed to inspect backup root for SolrCloud markers {}: {}", root, e.getMessage());
+            return false;
+        }
+    }
+
+    /** Finds a {@code snapshot.<name>/} child directory that holds a flat Lucene index, or null. */
+    private static Path findStandaloneSnapshotDir(Path root) {
+        try (var entries = Files.list(root)) {
+            return entries.filter(Files::isDirectory)
+                .filter(p -> p.getFileName().toString().startsWith("snapshot."))
+                .filter(SolrBackupLayout::containsSegmentsFile)
+                .findFirst()
+                .orElse(null);
+        } catch (IOException e) {
+            log.warn("Failed to scan for standalone snapshot dir under {}: {}", root, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String stripSnapshotPrefix(String name) {
+        return name.startsWith("snapshot.") ? name.substring("snapshot.".length()) : name;
+    }
+
+    /**
+     * Reads the collection name from a SolrCloud {@code backup.properties} (or the latest
+     * {@code backup_N.properties}) under the given directory. Returns {@code null} if no properties
+     * file is present or it carries no recognised collection-name key.
+     *
+     * <p>NOTE: the exact key Solr writes should be confirmed against a real Solr 7 backup; both
+     * {@code collection} and {@code collectionName} are accepted here.
+     */
+    public static String readCollectionNameFromBackupProperties(Path dir) {
+        var propsFile = findBackupPropertiesFile(dir);
+        if (propsFile == null) {
+            return null;
+        }
+        var props = new Properties();
+        try (var in = Files.newInputStream(propsFile)) {
+            props.load(in);
+        } catch (IOException e) {
+            log.warn("Failed to read {}: {}", propsFile, e.getMessage());
+            return null;
+        }
+        for (var key : List.of("collection", "collectionName")) {
+            var value = props.getProperty(key);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        log.warn("No collection-name property found in {}", propsFile);
+        return null;
+    }
+
+    private static Path findBackupPropertiesFile(Path dir) {
+        var bare = dir.resolve("backup.properties");
+        if (Files.isRegularFile(bare)) {
+            return bare;
+        }
+        try (var entries = Files.list(dir)) {
+            return entries.filter(Files::isRegularFile)
+                .filter(p -> {
+                    var name = p.getFileName().toString();
+                    return name.startsWith("backup_") && name.endsWith(".properties");
+                })
+                .max(Comparator.comparing(p -> p.getFileName().toString()))
+                .orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Listing-based counterpart to {@link #classifyBareBackup} for S3, where backup data is not yet
+     * downloaded and only directory (common-prefix) names are available. Returns a layout whose
+     * {@code collectionName} is filled for STANDALONE (from the {@code snapshot.<name>} directory) but
+     * left {@code null} for CLOUD — the caller must recover the CLOUD name from {@code backup.properties}
+     * or an override. Returns {@code null} for a wrapped (multi-collection) layout.
+     */
+    public static BareBackupLayout detectBareLayoutFromListing(List<String> rootSubDirs) {
+        var hasCloudMarkers = rootSubDirs.stream().anyMatch(n ->
+            n.equals("zk_backup")
+                || ZK_BACKUP_PATTERN.matcher(n).matches()
+                || n.equals("shard_backup_metadata"));
+        if (hasCloudMarkers) {
+            return new BareBackupLayout(SolrBackupMode.CLOUD, null, "");
+        }
+        var snapshotDir = rootSubDirs.stream()
+            .filter(n -> n.startsWith("snapshot."))
+            .findFirst()
+            .orElse(null);
+        if (snapshotDir != null) {
+            return new BareBackupLayout(SolrBackupMode.STANDALONE, stripSnapshotPrefix(snapshotDir), snapshotDir);
+        }
+        return null;
+    }
+
+    /** Joins an S3/relative prefix to a suffix, avoiding a leading {@code /} when the base is empty. */
+    public static String joinPrefix(String base, String suffix) {
+        return base.isEmpty() ? suffix : base + "/" + suffix;
     }
 
     /**
