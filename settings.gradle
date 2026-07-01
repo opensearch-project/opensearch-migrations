@@ -51,6 +51,7 @@ include 'RfsCommon'
 include 'RfsHttp'
 include 'SearchSnapshotExtractor'
 include 'SnapshotReader'
+include 'SnapshotReaderGcs'
 include 'RfsPipeline'
 include 'SolrReader'
 include 'CreateSnapshot'
@@ -71,9 +72,11 @@ include 'TrafficCapture:transformationShim'
 include 'TrafficCapture:SolrTransformations'
 include 'buildImages'
 include 'custom-es-images'
-include 'agent-skills'
+include 'deployment:k8s'
 include 'deployment:k8s:aws'
+include 'deployment:k8s:migrationCompanion'
 project(':deployment:k8s:aws').projectDir = file('deployment/k8s/aws')
+project(':deployment:k8s:migrationCompanion').projectDir = file('deployment/k8s/migrationCompanion')
 
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())

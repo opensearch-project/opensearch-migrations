@@ -62,7 +62,7 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
 
     def post_migration_actions(self):
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=self.argo_service.namespace)
+        wait_for_replayer_consuming(namespace=self.argo_service.namespace, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
         proxy = make_proxy_cluster(self.source_cluster)
         ops = self.source_operations

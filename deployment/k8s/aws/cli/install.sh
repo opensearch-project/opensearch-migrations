@@ -28,6 +28,7 @@
 #   MIGRATE_REPO        owner/repo override (defaults below)
 #   MIGRATE_VERSION     pin to a specific release tag (default: latest)
 #   MIGRATE_PREFIX      install root (default: per-mode, see above)
+#   MIGRATE_PLATFORM    installer classifier override (default: detected)
 #   BIN_DIR             symlink dir (path mode default: ~/.local/bin)
 #   MIGRATE_WORKSPACE   workspace root (workspace mode; default ./migration-assistant-workspace)
 #   INSTALL_FROM_LOCAL  local path to install from (developer/test)
@@ -65,6 +66,24 @@ c_bold()   { printf '\033[1m%s\033[0m' "$1"; }
 die() { printf '%s %s\n' "$(c_red error:)" "$*" >&2; exit 1; }
 
 require() { command -v "$1" >/dev/null 2>&1 || die "required command not on PATH: $1"; }
+
+detect_platform_classifier() {
+  local os arch
+  case "$(uname -s)" in
+    Linux*) os="linux" ;;
+    Darwin*) os="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT) os="windows" ;;
+    *) die "unsupported operating system: $(uname -s)" ;;
+  esac
+
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "unsupported CPU architecture: $(uname -m)" ;;
+  esac
+
+  printf '%s-%s\n' "$os" "$arch"
+}
 
 # Pretty-print paths relative to PWD when under it, else ~ form, else raw.
 # shellcheck disable=SC2088  # the literal '~/' is for display, not shell expansion
@@ -113,7 +132,11 @@ fetch_into() {
     [[ -f "$INSTALL_FROM_LOCAL/manifest.json" ]] \
       && cp "$INSTALL_FROM_LOCAL/manifest.json" "$install_dir/"
   else
-    local tarball="migration-assistant-cli-${version}.tar.gz"
+    local platform="${MIGRATE_PLATFORM:-}"
+    if [[ -z "$platform" ]]; then
+      platform="$(detect_platform_classifier)"
+    fi
+    local tarball="migration-assistant-cli-${version}-${platform}.tar.gz"
     local url="https://github.com/${REPO}/releases/download/${version}/${tarball}"
     local tmp; tmp=$(mktemp -d)
     # Retry, don't die on the first blip: GitHub's release CDN often returns a
@@ -124,7 +147,7 @@ fetch_into() {
     curl -fL --connect-timeout 30 --max-time 300 \
          --retry 5 --retry-delay 3 --retry-all-errors \
          -o "$tmp/$tarball" "$url" \
-      || { rm -rf "$tmp"; die "could not download $url (network/CDN unreachable after retries — verify with: curl -fL -o /dev/null $url)"; }
+      || { rm -rf "$tmp"; die "could not download $url (verify with: curl -fL -o /dev/null $url)"; }
     tar -xzf "$tmp/$tarball" -C "$install_dir" --strip-components=1
     rm -rf "$tmp"
   fi

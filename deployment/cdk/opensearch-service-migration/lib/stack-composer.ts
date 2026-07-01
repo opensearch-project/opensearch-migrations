@@ -95,6 +95,11 @@ export class StackComposer {
         return version
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private hasContextValue(contextJSON: Record<string, any>, optionName: string): boolean {
+        return contextJSON[optionName] !== undefined && contextJSON[optionName] !== "";
+    }
+
     private addDependentStacks(primaryStack: Stack, dependantStacks: (Stack|undefined)[]) {
         for (const stack of dependantStacks) {
             if (stack) {
@@ -204,7 +209,15 @@ export class StackComposer {
         const captureProxyJvmArgs = this.getContextForType('captureProxyJvmArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
+        const legacyOtelCollectorEnabled = this.hasContextValue(contextJSON, 'otelCollectorEnabled')
+            ? this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
+            : undefined
+        const otelMetricsCollectorEnabled = this.hasContextValue(contextJSON, 'otelMetricsCollectorEnabled')
+            ? this.getContextForType('otelMetricsCollectorEnabled', 'boolean', defaultValues, contextJSON)
+            : legacyOtelCollectorEnabled ?? defaultValues.otelMetricsCollectorEnabled ?? true
+        const otelTraceCollectorEnabled = this.hasContextValue(contextJSON, 'otelTraceCollectorEnabled')
+            ? this.getContextForType('otelTraceCollectorEnabled', 'boolean', defaultValues, contextJSON)
+            : legacyOtelCollectorEnabled ?? defaultValues.otelTraceCollectorEnabled ?? false
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const reindexFromSnapshotJvmArgs = this.getContextForType('reindexFromSnapshotJvmArgs', 'string', defaultValues, contextJSON)
@@ -344,6 +357,7 @@ export class StackComposer {
                 sourceClusterDefinition,
                 targetClusterDefinition,
                 managedServiceSourceSnapshotEnabled,
+                otelTraceCollectorEnabled,
                 env: props.env,
             })
             this.stacks.push(networkStack)
@@ -479,7 +493,8 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
-                otelCollectorEnabled: otelCollectorEnabled,
+                otelMetricsCollectorEnabled,
+                otelTraceCollectorEnabled,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env,
@@ -504,7 +519,8 @@ export class StackComposer {
                 userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
                 jvmArgs: trafficReplayerJvmArgs,
-                otelCollectorEnabled: otelCollectorEnabled,
+                otelMetricsCollectorEnabled,
+                otelTraceCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
@@ -543,7 +559,8 @@ export class StackComposer {
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
-                otelCollectorEnabled: otelCollectorEnabled,
+                otelMetricsCollectorEnabled,
+                otelTraceCollectorEnabled,
                 skipClusterCertCheck: servicesYaml.source_cluster?.allowInsecure,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
@@ -571,7 +588,8 @@ export class StackComposer {
                     endpointMigrationSSMParameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
                 },
-                otelCollectorEnabled: false,
+                otelMetricsCollectorEnabled: false,
+                otelTraceCollectorEnabled: false,
                 skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",
@@ -601,7 +619,8 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                otelCollectorEnabled,
+                otelMetricsCollectorEnabled,
+                otelTraceCollectorEnabled,
                 managedServiceSourceSnapshotEnabled,
                 env: props.env
             })

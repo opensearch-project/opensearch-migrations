@@ -12,10 +12,12 @@ metadata:
     "helm.sh/hook": pre-install,pre-upgrade,pre-delete
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation
+    {{- if and (eq .Values.cloudProvider "gcp") .Values.gcp.serviceAccountEmail }}
+    iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccountEmail | quote }}
+    {{- end }}
 {{- end }}
-
----
 {{- if .Values.installer.rbac.create }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -34,9 +36,8 @@ rules:
     resources: ["*"]
     verbs: ["*"]
 {{- end }}
-
----
 {{- if .Values.installer.rbac.create }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

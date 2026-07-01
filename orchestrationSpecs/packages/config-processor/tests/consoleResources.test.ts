@@ -38,7 +38,7 @@ function multiResourceConfig() {
                     repos: {
                         repoA: {
                             awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket-a",
+                            repoPathUri: "s3://bucket-a",
                         },
                     },
                     snapshots: {
@@ -108,11 +108,11 @@ function multiResourceConfig() {
             },
             replayers: {
                 replayA: {
-                    fromProxy: "proxy-a",
+                    fromCapturedTraffic: "proxy-a",
                     toTarget: "targetX",
                 },
                 replayB: {
-                    fromProxy: "proxy-b",
+                    fromCapturedTraffic: "proxy-b",
                     toTarget: "targetY",
                 },
             },
@@ -277,7 +277,7 @@ describe("console resources", () => {
         };
         config.traffic.replayers = {
             replayA: {
-                fromProxy: "proxy-a",
+                fromCapturedTraffic: "proxy-a",
                 toTarget: "targetX",
             },
         };

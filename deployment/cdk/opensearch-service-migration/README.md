@@ -64,6 +64,8 @@ This project uses CDK context parameters to configure deployments. These context
 
 The full list of available configuration options for this project are listed [here](./options.md). Each option can be provided as an empty string `""` or simply not included, and in each of these 'empty' cases the option will use the project default value (if it exists) or CloudFormation's default value.
 
+OpenTelemetry is split by signal. `otelMetricsCollectorEnabled` defaults to `true` and starts the ECS sidecar with a metrics-only AWS collector configuration that exports to CloudWatch. `otelTraceCollectorEnabled` defaults to `false`; set it to `true` to pass trace endpoints to the migration services, create the X-Ray VPC endpoint for new VPCs, and use the sidecar configuration that exports traces to AWS X-Ray. The legacy `otelCollectorEnabled` context key is still accepted as an explicit compatibility override for both signals.
+
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values, e.g. --c stage=dev2 (highest precedence)
 2. Created `cdk.context.json` in the same directory as this README

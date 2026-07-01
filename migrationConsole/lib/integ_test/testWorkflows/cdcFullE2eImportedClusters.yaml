@@ -16,7 +16,7 @@ spec:
 
   arguments:
     parameters:
-      - name: s3-snapshot-configmap
+      - name: snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
@@ -32,6 +32,10 @@ spec:
         value: "false"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: otel-trace-collector-endpoint
+        value: ""
+      - name: client-auth-pem-base64
+        value: ""
 
   templates:
     - name: main
@@ -44,26 +48,26 @@ spec:
           - name: tupleS3Region
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: AWS_REGION
           - name: useLocalStack
             default: "false"
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: USE_LOCAL_STACK
                 optional: true
           - name: tupleS3Endpoint
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: ENDPOINT_HTTP
                 optional: true
           - name: tupleS3BucketName
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: BUCKET_NAME
           - name: imageMigrationConsoleLocation
             valueFrom:
@@ -106,6 +110,10 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
 
         - - name: run-proxy-only-migration-with-workflow-cli
             templateRef:
@@ -157,6 +165,10 @@ spec:
                   value: "{{inputs.parameters.tupleS3BucketName}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: clientAuthPemBase64
+                  value: "{{workflow.parameters.client-auth-pem-base64}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:

@@ -32,7 +32,8 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
     readonly jvmArgs?: string,
-    readonly otelCollectorEnabled: boolean,
+    readonly otelMetricsCollectorEnabled: boolean,
+    readonly otelTraceCollectorEnabled: boolean,
     readonly clusterAuthDetails: ClusterAuth,
     readonly skipClusterCertCheck?: boolean,
     readonly sourceClusterVersion?: string,
@@ -97,8 +98,11 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
         }
-        if (props.otelCollectorEnabled) {
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otel-collector-endpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        if (props.otelTraceCollectorEnabled) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otel-trace-collector-endpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        if (props.otelMetricsCollectorEnabled) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otel-metrics-collector-endpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
         if (props.sourceClusterVersion) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--source-version", `"${props.sourceClusterVersion}"`)

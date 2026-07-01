@@ -75,9 +75,9 @@ spec:
       {{- end }}
       {{- end }}
 
-      {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
+      {{- if (and $.Values.metrics.enabled
                   (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
-              echo "'otel-collector-daemonset' and 'opentelemetry-operator' are mutually exclusive. " \
+              echo "'metrics.enabled' and 'opentelemetry-operator' are mutually exclusive. " \
                    "At least one must be false."
               exit 1
       {{- end }}
@@ -269,12 +269,24 @@ spec:
                     --timeout {{ default "300" $chart.timeout }}s \
                     --set global.managedBy="{{ $.Release.Name }}" \
           {{- if eq $name "argo-workflows" }}
-                    --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
-                    --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
-            {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
-                    --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
-            {{- else }}
-                    --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+            {{- if or (eq $.Values.cloudProvider "aws") (eq $.Values.cloudProvider "") }}
+                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+                  --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
+              {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
+                  --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
+              {{- else }}
+                  --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+              {{- end }}
+            {{- else if eq $.Values.cloudProvider "gcp" }}
+              {{- $gcpProject := required "Missing required value: .Values.gcp.project" $.Values.gcp.project }}
+              {{- $gcsBucketName := $.Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" $gcpProject) }}
+                   --set artifactRepository.gcs.bucket="{{ $gcsBucketName }}" \
+              {{- if $.Values.gcsBucketConfiguration.useLocalGcs }}
+                   --set artifactRepository.gcs.endpoint="http://{{ $.Values.gcsBucketConfiguration.localGcsEndpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4443" \
+              {{- end }}
+              {{- if $.Values.gcp.serviceAccountEmail }}
+                   --set-string "controller.serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account={{ $.Values.gcp.serviceAccountEmail }}" \
+               {{- end }}
             {{- end }}
           {{- end }}
           {{- if eq $name "ack-cloudwatch-controller" }}

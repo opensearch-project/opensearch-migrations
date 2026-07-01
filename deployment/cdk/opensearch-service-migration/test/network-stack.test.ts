@@ -8,7 +8,7 @@ import { GatewayVpcEndpointAwsService, InterfaceVpcEndpointAwsService } from "aw
 import { Stack } from "aws-cdk-lib";
 
 
-function getExpectedEndpoints(networkStack: NetworkStack): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
+function getExpectedEndpoints(networkStack: NetworkStack, includeXray = false): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
     return [
         InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
         InterfaceVpcEndpointAwsService.CLOUDWATCH_MONITORING,
@@ -21,7 +21,7 @@ function getExpectedEndpoints(networkStack: NetworkStack): (InterfaceVpcEndpoint
         InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
         InterfaceVpcEndpointAwsService.SSM,
         InterfaceVpcEndpointAwsService.SSM_MESSAGES,
-        InterfaceVpcEndpointAwsService.XRAY,
+        ...(includeXray ? [InterfaceVpcEndpointAwsService.XRAY] : []),
         GatewayVpcEndpointAwsService.S3,
         Stack.of(networkStack).region.startsWith('us-gov-')
             ? InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS
@@ -146,5 +146,28 @@ describe('NetworkStack Tests', () => {
         expect(uniqueServiceNames.size).toBe(expectedEndpoints.length);
         // Verify the total number of VPC Endpoints
         networkTemplate.resourceCountIs('AWS::EC2::VPCEndpoint', expectedEndpoints.length);
+    });
+
+    test('Test X-Ray VPC endpoint is created when trace collection is enabled', () => {
+        const contextOptions = {
+            vpcEnabled: true,
+            vpcAZCount: 2,
+            otelTraceCollectorEnabled: true,
+            sourceCluster: {
+                "endpoint": "https://test-cluster",
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
+            }
+        }
+
+        const openSearchStacks = createStackComposer(contextOptions)
+        const networkStack: NetworkStack = (openSearchStacks.stacks.filter((s) => s instanceof NetworkStack)[0]) as NetworkStack
+        const networkTemplate = Template.fromStack(networkStack)
+        const expectedEndpoints = getExpectedEndpoints(networkStack, true);
+
+        networkTemplate.resourceCountIs('AWS::EC2::VPCEndpoint', expectedEndpoints.length);
+        networkTemplate.hasResourceProperties('AWS::EC2::VPCEndpoint', {
+            ServiceName: "com.amazonaws.us-east-1.xray"
+        });
     });
 });

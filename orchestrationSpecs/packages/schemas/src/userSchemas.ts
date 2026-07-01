@@ -40,10 +40,40 @@ const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing 
     "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
     "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
     "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
+const MIN_POD_REPLICAS_DESC = "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. " +
+    "This renders a PodDisruptionBudget minAvailable value for the service. " +
+    "The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
+}
+
+function validateMinPodReplicas(
+    ctx: z.RefinementCtx,
+    data: {podReplicas?: number, minPodReplicas?: number}
+) {
+    if (data.minPodReplicas !== undefined && data.podReplicas !== undefined
+        && data.minPodReplicas > data.podReplicas) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
+            path: ["minPodReplicas"]
+        });
+    }
+}
+
+function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
+    return z.object({
+        podReplicas: z.number().int().nonnegative().default(1).optional()
+            .describe(podReplicasDescription),
+        minPodReplicas: z.number().int().nonnegative().default(0).optional()
+            .describe(MIN_POD_REPLICAS_DESC.replace("the service", `the ${serviceName} service`)),
+    });
+}
+
+function withScalableServiceValidation<T extends z.ZodObject<any>>(schema: T): T {
+    return schema.superRefine((data, ctx) => validateMinPodReplicas(ctx, data)) as T;
 }
 class SchemaValidationError extends Error {
     constructor(message: string, public path: string[]) {
@@ -133,20 +163,27 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
-export const S3_REPO_CONFIG = z.object({
-    awsRegion: z.string()
-        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
+// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
+// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+export const REPO_CONFIG = z.object({
+    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    awsRegion: z.string().default("").optional()
+        .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
-        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The bucket must already exist and be accessible from the source cluster."),
+        .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
+            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "This is passed to the cluster when registering the snapshot repository. " +
+            "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
-}).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
+}).describe("Configuration for a snapshot repository used by the source cluster. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -273,8 +310,30 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
+const blankStringAsDisabled = (value: unknown) =>
+    typeof value === "string" && value.trim().length === 0 ? "" : value;
+
+const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+
+const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+
+// Default is applied in the preprocess step rather than via .default().optional():
+// under zod >=4.4 that ordering no longer applies the default for an absent key,
+// and .optional().default() makes the input type required. Empty/blank strings
+// stay explicit disables, while omitted values default to the collector. The
+// metadata default keeps generated JSON/OpenAPI schemas useful for schema-driven
+// clients such as interactive config viewers.
+const optionalEndpointWithDefault = (defaultValue: string) =>
+    z.preprocess(
+        (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
+        OPTIONAL_ENDPOINT.optional()
+    ).meta({default: defaultValue});
+
+const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
+    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");
+
+const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
+    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.");
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -352,13 +411,10 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                 failureThreshold: 8,
             },
             config: {
-                // RF=3 + minISR=2 on a 3-broker cluster: survives one broker
-                // down (rolling restart, single node loss) without losing
-                // writes or quorum. ISR = replicas fully caught up to the
-                // leader; acks=all blocks until every ISR member has written,
-                // and writes fail (NotEnoughReplicasException) if |ISR|<minISR.
-                // auto.create.topics.enable stays false — all migration topics
-                // are declared explicitly via KafkaTopic CRs.
+                // RF=3 + minISR=2 on a 3-broker cluster survives one broker down
+                // during a rolling restart, drain, or single-node loss without losing
+                // writes or quorum. auto.create.topics.enable stays false because
+                // migration topics are declared explicitly via KafkaTopic CRs.
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 3,
                 "transaction.state.log.replication.factor": 3,
@@ -369,28 +425,20 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
-        // 3-broker, combined (controller+broker) KRaft pool. 3 is the minimum
-        // that satisfies RF=3/minISR=2 above.
+        // 3 is the minimum broker count that satisfies RF=3/minISR=2 above.
         replicas: 3,
         roles: ["controller", "broker"],
         storage: {
             type: "persistent-claim",
-            // Smoke-test size (raised 1Gi → 2Gi with the 1→3 broker bump;
-            // internal topics are now RF=3). Real deployments should override.
+            // Smoke-test size. Real deployments should override.
             size: "2Gi",
             deleteClaim: true,
         },
         template: {
             pod: {
-                // Spread brokers one-per-node so a single node disruption
-                // (Karpenter consolidation during the RFS scale-up/down churn,
-                // a spot reclaim, a drain) can only ever take ONE broker. With
-                // RF=3/minISR=2 the cluster then survives it as a rolling event
-                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
-                // keeps this soft: on a <3-node dev cluster the brokers must
-                // still schedule (and reschedule during rotation) rather than
-                // wedge Pending. maxSkew=1 means the scheduler only doubles up
-                // on a node once every other node already has one.
+                // Spread brokers one-per-node so a single node disruption can only take
+                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
+                // schedule instead of wedging Pending.
                 topologySpreadConstraints: [
                     {
                         maxSkew: 1,
@@ -510,7 +558,11 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Explicitly disable TLS termination on the capture proxy."),
 ]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
-export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
+export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "capture proxy",
+        "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+    ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
@@ -521,18 +573,18 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     internetFacing: z.boolean().default(false).optional()
         .describe("When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
         .changeRestriction('impossible'),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Kubernetes resource limits and requests for the capture proxy container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
         .default(DEFAULT_RESOURCES.PROXY),
-}).describe("Kubernetes deployment-level options for the capture proxy.");
+}))
+    .describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
@@ -585,18 +637,21 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = z.object({
+export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}).describe("Process-level and deployment-level configuration options for the capture proxy.");
+}))
+    .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
-export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
+export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "traffic replayer",
+        "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -604,7 +659,8 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
-}).describe("Kubernetes deployment-level options for the traffic replayer.");
+}))
+    .describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
@@ -630,7 +686,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -696,6 +753,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
+    validateMinPodReplicas(ctx, data);
     validatePipelineRawConfigConflict(ctx, data, "requestTransforms", [
         "transformerConfig",
         "transformerConfigEncoded",
@@ -736,6 +794,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -793,7 +853,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -832,10 +893,12 @@ export const USER_METADATA_OPTIONS = z.object({
     ]);
 });
 
-export const USER_RFS_WORKFLOW_OPTIONS = z.object({
-    podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" + 
-            " throughput scales linearly up to the total number of source shards."),
+export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
+    ...scalableServiceWorkflowOptions(
+        "RFS document backfill",
+        "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" +
+            " throughput scales linearly up to the total number of source shards."
+    ).shape,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -860,7 +923,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
-}).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+}))
+    .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
@@ -908,7 +972,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
@@ -970,6 +1035,7 @@ export const USER_RFS_OPTIONS = z.object({
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .superRefine((data, ctx) => {
+        validateMinPodReplicas(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -1098,8 +1164,8 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
-    z.record(z.string(), S3_REPO_CONFIG)
-    .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
+    z.record(z.string(), REPO_CONFIG)
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1112,6 +1178,28 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
 
+export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
+    s3Uri: z.string()
+        .regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/.+\.proto\.gz$/)
+        .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
+    awsRegion: z.string()
+        .describe("AWS region of the S3 bucket holding the export."),
+    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
+        .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
+    sourceLabel: z.string()
+        .describe("Label of the source cluster this dump was originally captured from. " +
+            "Used for resource labeling. Does NOT need to match a sourceClusters key " +
+            "(the original source may be long gone by the time the dump is replayed)."),
+}).describe("Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. " +
+    "When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. " +
+    "The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, " +
+    "and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow.");
+
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
         .describe("Name of the source cluster. Must match a key in sourceClusters."),
@@ -1120,28 +1208,79 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
-    fromProxy: z.string()
-        .describe("Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."),
+    fromCapturedTraffic: z.string()
+        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."),
     toTarget: z.string()
         .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters."),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
         .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
-}).describe("Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster.");
+}).describe("Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster.");
 
 export const TRAFFIC_CONFIG = z.object({
-    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG)
-        .describe("Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
+        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
+        .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
+            "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
+            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
-        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster.")
+        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
 }).superRefine((data, ctx) => {
-    for (const [name, rc] of Object.entries(data.replayers)) {
-        if (!(rc.fromProxy in data.proxies)) {
+    const proxies = data.proxies ?? {};
+    const s3Sources = data.s3Sources ?? {};
+    for (const name of Object.keys(s3Sources)) {
+        if (name in proxies) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
-                path: ['replayers', name, 'fromProxy']
+                message: `Name '${name}' is used in both traffic.proxies and traffic.s3Sources. Each captured-traffic source must have a unique name.`,
+                path: ['s3Sources', name]
+            });
+        }
+    }
+    // Two captured-traffic sources cannot land in the same Kafka topic on the
+    // same Kafka cluster. The effective topic is `kafkaTopic ?? sourceName`,
+    // so name collisions across sources, explicit-topic collisions, and any
+    // mix that maps to the same (cluster, topic) tuple all need to be caught.
+    // Without this, two producers would share one topic — any replayer reading
+    // that topic would interleave records from both, with no way to tell them
+    // apart, and `kafkaImport.sh`-style reloads would write into a topic the
+    // proxy is also feeding.
+    type Origin = { kind: 'proxy' | 's3Source'; name: string };
+    const claims = new Map<string, Origin>();
+    const recordClaim = (cluster: string, topic: string, origin: Origin, path: (string | number)[]) => {
+        const key = `${cluster}\0${topic}`;
+        const existing = claims.get(key);
+        if (existing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `traffic.${origin.kind}s['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${existing.kind}s['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
+                path
+            });
+        } else {
+            claims.set(key, origin);
+        }
+    };
+    for (const [name, p] of Object.entries(proxies)) {
+        const cluster = p.kafka ?? "default";
+        const topic = (p.kafkaTopic && p.kafkaTopic !== "") ? p.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
+    }
+    for (const [name, s3] of Object.entries(s3Sources)) {
+        const cluster = s3.kafka ?? "default";
+        const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
+    }
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        const inProxies = rc.fromCapturedTraffic in proxies;
+        const inS3 = rc.fromCapturedTraffic in s3Sources;
+        if (!inProxies && !inS3) {
+            const available = [...Object.keys(proxies), ...Object.keys(s3Sources)];
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown captured-traffic source '${rc.fromCapturedTraffic}'. Available (proxies + s3Sources): ${available.join(', ')}`,
+                path: ['replayers', name, 'fromCapturedTraffic']
             });
         }
     }
@@ -1228,12 +1367,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         }
     }
 
-    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced S3 repo.
+    // (GCS repos are not affected — they authenticate via the cluster's GCS keystore / Workload Identity.)
     if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
             if ("createSnapshotConfig" in snapConfig.config) {
                 const repo = repos?.[snapConfig.repoName];
-                if (repo && !repo.s3RoleArn) {
+                if (repo && repo.repoPathUri.startsWith("s3://") && !repo.s3RoleArn) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,
@@ -1367,7 +1507,10 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         }
 
         if (data.traffic) {
-            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+            const proxies = data.traffic.proxies ?? {};
+            const s3Sources = data.traffic.s3Sources ?? {};
+            const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
@@ -1376,12 +1519,21 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
                 const kafkaRef = proxyConfig.kafka;
-                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
                 if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
+                    });
+                }
+            }
+            for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
+                const kafkaRef = s3Config.kafka;
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
             }

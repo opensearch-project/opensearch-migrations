@@ -260,6 +260,15 @@ export class EKSInfra extends Construct {
                 ],
                 resources: ['*'],
             }),
+            // Allow Console/tests to verify emitted CloudWatch application metrics
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "cloudwatch:ListMetrics",
+                    "cloudwatch:GetMetricData"
+                ],
+                resources: ['*'],
+            }),
             // Sending traces to xray
             new PolicyStatement({
                 effect: Effect.ALLOW,

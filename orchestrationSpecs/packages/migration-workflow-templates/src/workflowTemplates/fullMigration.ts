@@ -9,6 +9,7 @@ import {
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
+    DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
     getZodKeys,
     NAMED_KAFKA_CLIENT_CONFIG,
@@ -43,8 +44,10 @@ import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVa
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
+import {S3TrafficLoader} from "./s3TrafficLoader";
 import {Replayer} from "./replayer";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {SCALABLE_WORKLOAD_INPUTS, scalingFromOptions} from "./commonUtils/scalableWorkload";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -191,7 +194,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -217,10 +220,54 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
                     topicReplicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
                     sourceK8sLabel: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["sourceConfig", "label"], ""),
+                })
+            )
+        )
+    )
+
+
+    // ── Section 2b: S3 traffic sources ───────────────────────────────────
+    //
+    // Parallel to setupSingleProxy, but for one-time S3 → Kafka loads.
+    // Creates the same kind of CapturedTraffic CR (so the replayer wait is
+    // uniform) but does NOT stand up a CaptureProxy. The loader patches the
+    // CR to phase=Ready with loadCompleted=true on success.
+
+    .addTemplate("setupSingleS3Source", t => t
+        .addRequiredInput("loaderConfig", typeToken<z.infer<typeof DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG>>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
+        .addRequiredInput("topicPartitions", typeToken<number>())
+        .addRequiredInput("topicReplicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        .addOptionalInput("groupName_view", c => "S3 Source")
+        .addOptionalInput("sortOrder_view", c => 999)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addSteps(b => b
+            .addStep("setupS3Source", S3TrafficLoader, "reconcileCapturedTrafficAndLoad", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    loaderConfig: b.inputs.loaderConfig,
+                    kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaTopicName: b.inputs.kafkaTopicName,
+                    topicCrName: b.inputs.topicCrName,
+                    kafkaClusterOwnerUid: b.inputs.kafkaClusterOwnerUid,
+                    configChecksum: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["configChecksum"], ""),
+                    topicConfigChecksum: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["topicConfigChecksum"], ""),
+                    checksumForSnapshot: expr.literal(""),
+                    checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["checksumForReplayer"], ""),
+                    topicPartitions: b.inputs.topicPartitions,
+                    topicReplicas: b.inputs.topicReplicas,
+                    topicConfig: b.inputs.topicConfig,
+                    sourceK8sLabel: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["sourceLabel"], ""),
                 })
             )
         )
@@ -376,7 +423,6 @@ export const FullMigration = WorkflowBuilder.create({
             )
         )
     )
-
 
     // ── Section 4: Snapshot Migrations ───────────────────────────────────
 
@@ -539,21 +585,22 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.makeDict({}) as any
                         )),
                         crdName: b.inputs.resourceName,
-                        resourceUid: b.inputs.resourceUid,
+                        // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
+                        // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
+                        // for BYOS/imported-cluster flows). This is required so ownerReferences on
+                        // RFS coordinator Secret/Service/StatefulSet point at the real owner UID;
+                        // otherwise Kubernetes GC deletes those resources within ~1s.
+                        resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
                 }
             )
-            // Metadata-only path: workflow patches SM.status itself. On the
-            // RFS-enabled path, the RFS-completion CronJob is the sole writer
-            // of SM.status (INV-1), so this step is suppressed when a
-            // documentBackfillConfig is present.
             .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
                 c => c.register({
                     resourceName: b.inputs.resourceName,
@@ -564,25 +611,18 @@ export const FullMigration = WorkflowBuilder.create({
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
-                    expr.not(expr.hasKey(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        "documentBackfillConfig"))
-                )})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
         })
     )
-
-
-    // ── Section 5: Traffic Replays ───────────────────────────────────────
 
     .addTemplate("runSingleReplay", t => t
         .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("fromProxy", typeToken<string>())
-        .addRequiredInput("fromProxyConfigChecksum", typeToken<string>())
+        .addRequiredInput("fromCapturedTraffic", typeToken<string>())
+        .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
+        .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("useLocalStack", typeToken<boolean>())
@@ -614,19 +654,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: expr.concat(
-                            expr.asString(expr.get(c.item, "source")),
-                            expr.literal("-"),
-                            expr.dig(
-                                expr.deserializeRecord(b.inputs.targetConfig),
-                                ["label"],
-                                ""
-                            ),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "snapshot")),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "migrationLabel"))
-                        ),
+                        resourceName: expr.asString(expr.get(c.item, "resourceName")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
                         checksumField: expr.literal("checksumForReplayer"),
                     });
@@ -638,12 +666,12 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitIndefinitelyForProxy", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForTrafficSource", ResourceManagement, "waitIndefinitelyForTrafficSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.fromProxy,
-                    configChecksum: b.inputs.fromProxyConfigChecksum,
-                    checksumField: expr.literal("checksumForReplayer"),
+                    sourceName: b.inputs.fromCapturedTraffic,
+                    sourceKind: b.inputs.fromCapturedTrafficSourceKind,
+                    configChecksum: b.inputs.fromCapturedTrafficConfigChecksum,
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
@@ -746,8 +774,9 @@ export const FullMigration = WorkflowBuilder.create({
                     when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters")}
                 }
             )
-            .addStep("createProxy", INTERNAL, "setupSingleProxy", c =>
-                c.register({
+            .addStep("createProxy", INTERNAL, "setupSingleProxy", c => {
+                const proxyScaling = scalingFromOptions(expr.get(c.item, "proxyConfig"));
+                return c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
@@ -784,11 +813,8 @@ export const FullMigration = WorkflowBuilder.create({
                         ["listenPort"],
                         9200
                     ),
-                    podReplicas: expr.dig(
-                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
-                        ["podReplicas"],
-                        1
-                    ),
+                    podReplicas: proxyScaling.podReplicas,
+                    minPodReplicas: proxyScaling.minPodReplicas,
                     topicPartitions: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         ["topicSpecOverrides", "partitions"],
@@ -807,9 +833,65 @@ export const FullMigration = WorkflowBuilder.create({
                     groupName_view: expr.get(c.item, "name"),
                     resourceName: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
-                }), {
+                });
+            }, {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
+                }
+            )
+            .addStep("createS3Source", INTERNAL, "setupSingleS3Source", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    loaderConfig: expr.serialize(expr.makeDict({
+                        name: expr.get(c.item, "name"),
+                        sourceLabel: expr.get(c.item, "sourceLabel"),
+                        s3Uri: expr.get(c.item, "s3Uri"),
+                        awsRegion: expr.get(c.item, "awsRegion"),
+                        endpoint: expr.dig(c.item, ["endpoint"], ""),
+                        kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                        topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
+                        checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        kafkaClusterName: expr.dig(
+                            expr.deserializeRecord(expr.get(c.item, "kafkaConfig")), ["label"], ""),
+                        resourceUid: expr.dig(c.item, ["resourceUid"], ""),
+                    })),
+                    kafkaClusterName: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["label"],
+                        ""
+                    ),
+                    kafkaTopicName: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["kafkaTopic"],
+                        ""
+                    ),
+                    topicCrName: expr.concat(expr.get(c.item, "name"), expr.literal("-topic")),
+                    kafkaClusterOwnerUid: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["clusterResourceUid"],
+                        ""
+                    ),
+                    topicPartitions: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "partitions"],
+                        1
+                    ),
+                    topicReplicas: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "replicas"],
+                        1
+                    ),
+                    topicConfig: expr.serialize(expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "config"],
+                        expr.makeDict({})
+                    )),
+                    groupName_view: expr.get(c.item, "name"),
+                    sortOrder_view: expr.literal(2),
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.dig(expr.deserializeRecord(b.inputs.config), ["s3TrafficLoaders"], expr.literal([])))
                 }
             )
             .addStep("createSnapshot", INTERNAL, "createSnapshotsForSource", c =>
@@ -830,19 +912,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
-                        expr.get(c.item, "sourceLabel"),
-                        expr.literal("-"),
-                        expr.dig(
-                            expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                            ["label"],
-                            ""
-                        ),
-                        expr.literal("-"),
-                        expr.get(c.item, "label"),
-                        expr.literal("-"),
-                        expr.get(c.item, "migrationLabel")
-                    ),
+                    resourceName: expr.get(c.item, "resourceName"),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal(" → "),
@@ -874,7 +944,7 @@ export const FullMigration = WorkflowBuilder.create({
                             false
                         ),
                         groupName_view: expr.concat(
-                            expr.get(c.item, "fromProxy"),
+                            expr.get(c.item, "fromCapturedTraffic"),
                             expr.literal(" → "),
                             expr.dig(
                                 expr.deserializeRecord(expr.get(c.item, "toTarget")),

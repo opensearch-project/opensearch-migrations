@@ -35,6 +35,19 @@ describe("generated migration resources", () => {
         expect(crds).toContain("metadataMigrationEnableSourcelessMigrations:");
     });
 
+    test("generates collector endpoint CRD fields as strings", () => {
+        for (const fieldName of [
+            "otelTraceCollectorEndpoint",
+            "otelMetricsCollectorEndpoint",
+            "metadataMigrationOtelTraceCollectorEndpoint",
+            "metadataMigrationOtelMetricsCollectorEndpoint",
+            "documentBackfillOtelTraceCollectorEndpoint",
+            "documentBackfillOtelMetricsCollectorEndpoint",
+        ]) {
+            expect(crds).toContain(`${fieldName}:\n                  type: string`);
+        }
+    });
+
     test("does not add dependency fields to approval gates", () => {
         const approvalGateCrd = crds.split("---")
             .find(document => document.includes("name: approvalgates.migrations.opensearch.org"));

@@ -1,5 +1,7 @@
 conditionalPackageInstalls:
   localstack: false
+  # EKS keeps the Prometheus stack but excludes optional tracing/UI add-ons by default.
+  grafana: false
   jaeger: false
   aws-privateca-issuer: true     # pre-install on EKS; lightweight, idle without a PCA ARN
   ack-acmpca-controller: false   # opt-in only — creates real AWS PCA with cost implications
@@ -20,6 +22,15 @@ cluster:
 # Enable multi-arch for EKS
 workloadsNodePool:
   architectures: ["amd64", "arm64"]
+
+tracing:
+  backend: xray
+  env:
+    - name: AWS_REGION
+      valueFrom:
+        configMapKeyRef:
+          name: aws-metadata
+          key: AWS_REGION
 
 
 defaultBucketConfiguration:
@@ -43,8 +54,7 @@ defaultBucketConfiguration:
 #  installer:
 #    pullPolicy: Always
 
-# For OTEL Daemonset
-otelConfiguration:
+metrics:
   env:
     - name: AWS_REGION
       valueFrom:
@@ -140,6 +150,11 @@ otelConfiguration:
           exporters: [awsemf/cadvisor, prometheus]
 
 charts:
+  kube-prometheus-stack:
+    values:
+      grafana:
+        enabled: false
+
   argo-workflows:
     values:
       artifactRepository:

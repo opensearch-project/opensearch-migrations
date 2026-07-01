@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {z} from "zod";
+import {unwrapSchema} from "./schemaUtilities";
 import {
     collectProjectedFields,
     collectRestrictedProjectedFields,
@@ -73,38 +74,30 @@ function toYaml(value: YamlValue, indent = 0): string {
     }).join("\n");
 }
 
-function unwrapSchema(schema: z.ZodTypeAny | undefined): z.ZodTypeAny | undefined {
-    let current = schema;
-    while (current) {
-        if (current instanceof z.ZodOptional) {
-            current = current.unwrap() as z.ZodTypeAny;
-            continue;
-        }
-        if (current instanceof z.ZodDefault) {
-            current = current.removeDefault() as z.ZodTypeAny;
-            continue;
-        }
-        const def = (current as any)._def;
-        if (def?.out) {
-            current = def.out as z.ZodTypeAny;
-            continue;
-        }
-        if (def?.innerType) {
-            current = def.innerType as z.ZodTypeAny;
-            continue;
-        }
-        return current;
-    }
-    return undefined;
-}
-
 function schemaToOpenApi(schema: z.ZodTypeAny | undefined): Record<string, YamlValue> {
-    const unwrapped = unwrapSchema(schema);
+    const unwrapped = schema ? unwrapSchema(schema) : undefined;
     if (!unwrapped) return {type: "object", "x-kubernetes-preserve-unknown-fields": true};
     if (unwrapped instanceof z.ZodString) return {type: "string"};
+    if (unwrapped instanceof z.ZodLiteral) {
+        const literalValue = unwrapped.value;
+        if (typeof literalValue === "string") return {type: "string", enum: [literalValue]};
+        if (typeof literalValue === "number") return {type: "number", enum: [literalValue]};
+        if (typeof literalValue === "boolean") return {type: "boolean", enum: [literalValue]};
+    }
     if (unwrapped instanceof z.ZodBoolean) return {type: "boolean"};
     if (unwrapped instanceof z.ZodNumber) return {type: "number"};
     if (unwrapped instanceof z.ZodEnum) return {type: "string", enum: [...unwrapped.options]};
+    if (unwrapped instanceof z.ZodUnion) {
+        const optionSchemas = unwrapped.options.map(option => schemaToOpenApi(option as z.ZodTypeAny));
+        const optionTypes = [...new Set(optionSchemas.map(option => option.type))];
+        if (optionTypes.length === 1 && optionTypes[0] !== "object") {
+            const enumValues = optionSchemas.flatMap(option => Array.isArray(option.enum) ? option.enum : []);
+            return {
+                type: optionTypes[0],
+                ...(enumValues.length === optionSchemas.length ? {enum: enumValues} : {}),
+            };
+        }
+    }
     if (unwrapped instanceof z.ZodArray) {
         return {
             type: "array",

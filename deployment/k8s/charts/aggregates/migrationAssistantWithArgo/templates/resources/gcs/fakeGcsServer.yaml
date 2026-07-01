@@ -1,0 +1,70 @@
+{{- if index .Values.conditionalPackageInstalls "fake-gcs-server" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gcsBucketConfiguration.localGcsEndpoint }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: fake-gcs-server
+  ports:
+    - name: http
+      port: 4443
+      targetPort: 4443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-gcs-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-gcs-server
+  template:
+    metadata:
+      labels:
+        app: fake-gcs-server
+    spec:
+      {{- $bucket := .Values.gcsBucketConfiguration.bucketName | default "migration-test-bucket" }}
+      initContainers:
+        # fake-gcs-server with an in-memory backend starts with no buckets, but
+        # repository-gcs expects the snapshot bucket to already exist (it writes a
+        # verification blob on registration). Seed it by creating a directory named
+        # after the bucket under the -data root; fake-gcs auto-creates a bucket for
+        # each such directory at startup.
+        - name: seed-bucket
+          image: mirror.gcr.io/library/busybox:1.36
+          command: ["sh", "-c", "mkdir -p /data/{{ $bucket }}"]
+          volumeMounts:
+            - name: gcs-data
+              mountPath: /data
+      containers:
+        - name: fake-gcs-server
+          image: fsouza/fake-gcs-server:latest
+          args:
+            - "-scheme"
+            - "http"
+            - "-port"
+            - "4443"
+            - "-backend"
+            - "memory"
+            - "-data"
+            - "/data"
+          ports:
+            - containerPort: 4443
+          volumeMounts:
+            - name: gcs-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /storage/v1/b
+              port: 4443
+            initialDelaySeconds: 2
+            periodSeconds: 5
+      volumes:
+        - name: gcs-data
+          emptyDir: {}
+{{- end }}

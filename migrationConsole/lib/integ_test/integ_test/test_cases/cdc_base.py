@@ -5,7 +5,7 @@ Test IDs 0031-0039 are reserved for CDC variants.
 import logging
 import subprocess
 import time
-from typing import Optional
+from typing import Optional, Sequence
 
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
@@ -29,6 +29,8 @@ CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 PROXY_READY_TIMEOUT_SECONDS = 3600
 REPLAYER_POD_READY_BUFFER_SECONDS = 20 * 60
 DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS = PROXY_READY_TIMEOUT_SECONDS + REPLAYER_POD_READY_BUFFER_SECONDS
+FAILED_DEPENDENCY_PHASES = {"Error", "Failed"}
+MIGRATION_WORKFLOW_PREFIX = "migration-workflow"
 
 
 # --- Shared helpers ---
@@ -155,12 +157,14 @@ def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, 
     )
 
 
-def _raise_if_cdc_dependency_error(namespace: str) -> None:
+def _raise_if_cdc_dependency_error(namespace: str, workflow_names: Optional[Sequence[str]] = None) -> None:
     phase, message, _, _ = _get_capture_proxy_readiness_status(namespace)
     if phase == "Error":
         _dump_proxy_readiness_diagnostics(namespace)
         raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
     _raise_if_kafka_cluster_error(namespace)
+    _raise_if_migration_resource_error(namespace)
+    _raise_if_argo_workflow_error(namespace, workflow_names)
 
 
 def _raise_if_kafka_cluster_error(namespace: str) -> None:
@@ -190,6 +194,105 @@ def _get_kafka_cluster_errors(namespace: str) -> list[tuple[str, str]]:
         if status.get("phase") == "Error":
             errors.append((item.get("metadata", {}).get("name", "<unknown>"), status.get("message", "")))
     return errors
+
+
+def _raise_if_migration_resource_error(namespace: str) -> None:
+    errors = _get_migration_resource_errors(namespace)
+    if not errors:
+        return
+    formatted = ", ".join(
+        f"{plural}/{name}: phase={phase}, message={message or '<none>'}"
+        for plural, name, phase, message in errors
+    )
+    raise RuntimeError(f"CDC dependency resource failed before replayer became ready: {formatted}")
+
+
+def _get_migration_resource_errors(namespace: str) -> list[tuple[str, str, str, str]]:
+    custom = client.CustomObjectsApi()
+    errors = []
+    for plural in ("datasnapshots", "snapshotmigrations", "trafficreplays"):
+        try:
+            response = custom.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+            )
+        except ApiException:
+            continue
+
+        for item in response.get("items", []):
+            status = item.get("status", {})
+            phase = status.get("phase")
+            if phase in FAILED_DEPENDENCY_PHASES:
+                errors.append((
+                    plural,
+                    item.get("metadata", {}).get("name", "<unknown>"),
+                    phase,
+                    status.get("message", ""),
+                ))
+    return errors
+
+
+def _raise_if_argo_workflow_error(namespace: str, workflow_names: Optional[Sequence[str]] = None) -> None:
+    errors = _get_argo_workflow_errors(namespace, workflow_names)
+    if not errors:
+        return
+    _dump_argo_workflow_diagnostics(namespace)
+    formatted = ", ".join(
+        f"workflow/{name}: phase={phase}, message={message or '<none>'}"
+        for name, phase, message in errors
+    )
+    raise RuntimeError(f"CDC dependency workflow failed before replayer became ready: {formatted}")
+
+
+def _get_argo_workflow_errors(namespace: str, workflow_names: Optional[Sequence[str]]) -> list[tuple[str, str, str]]:
+    custom = client.CustomObjectsApi()
+    expected_workflows = {name for name in (workflow_names or []) if name}
+    try:
+        response = custom.list_namespaced_custom_object(
+            group="argoproj.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="workflows",
+        )
+    except ApiException:
+        return []
+
+    errors = []
+    for item in response.get("items", []):
+        metadata = item.get("metadata", {})
+        name = metadata.get("name", "")
+        if not _is_relevant_cdc_workflow(name, expected_workflows):
+            continue
+        status = item.get("status", {})
+        phase = status.get("phase")
+        if phase in FAILED_DEPENDENCY_PHASES:
+            errors.append((name, phase, _workflow_failure_message(status)))
+    return errors
+
+
+def _is_relevant_cdc_workflow(name: str, expected_workflows: set[str]) -> bool:
+    if name in expected_workflows:
+        return True
+    return name == MIGRATION_WORKFLOW_PREFIX or name.startswith(f"{MIGRATION_WORKFLOW_PREFIX}-")
+
+
+def _workflow_failure_message(status: dict) -> str:
+    message = status.get("message") or ""
+    node_messages = []
+    for node in (status.get("nodes", {}) or {}).values():
+        if node.get("phase") not in FAILED_DEPENDENCY_PHASES:
+            continue
+        display_name = node.get("displayName") or node.get("name") or node.get("id") or "<unknown>"
+        node_message = node.get("message") or ""
+        node_messages.append(f"{display_name}: {node_message or '<none>'}")
+        if len(node_messages) >= 3:
+            break
+    if node_messages:
+        return f"{message}; failed nodes: {', '.join(node_messages)}" if message else \
+            f"failed nodes: {', '.join(node_messages)}"
+    return message
 
 
 def _dump_proxy_readiness_diagnostics(namespace: str) -> None:
@@ -297,11 +400,28 @@ def _dump_kafka_disruption_diagnostics(namespace: str = "ma") -> None:
             logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
+def _dump_argo_workflow_diagnostics(namespace: str) -> None:
+    cmds = (
+        ["kubectl", "get", "workflows.argoproj.io", "-n", namespace, "-o", "wide"],
+        ["kubectl", "get", "workflows.argoproj.io", "-n", namespace, "-o", "yaml"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 - diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
+
+
 def wait_for_replayer_consuming(
     namespace: str,
     timeout_seconds: int = 120,
     interval: int = 5,
     pod_ready_timeout_seconds: int = DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS,
+    workflow_name: Optional[str] = None,
 ):
     """Wait until the replayer has joined the Kafka consumer group."""
     logger.info("Waiting for replayer pod readiness before checking Kafka consumer group...")
@@ -310,7 +430,10 @@ def wait_for_replayer_consuming(
             namespace,
             REPLAYER_LABEL_SELECTOR,
             timeout_seconds=pod_ready_timeout_seconds,
-            dependency_error_check=lambda: _raise_if_cdc_dependency_error(namespace),
+            dependency_error_check=lambda: _raise_if_cdc_dependency_error(
+                namespace,
+                [workflow_name] if workflow_name else None,
+            ),
         )
     except TimeoutError:
         _dump_capture_proxy_diagnostics(namespace, PROXY_RESOURCE_NAME)
@@ -319,6 +442,7 @@ def wait_for_replayer_consuming(
 
     start = time.time()
     while time.time() - start < timeout_seconds:
+        _raise_if_cdc_dependency_error(namespace, [workflow_name] if workflow_name else None)
         try:
             result = subprocess.run(
                 ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=100"],

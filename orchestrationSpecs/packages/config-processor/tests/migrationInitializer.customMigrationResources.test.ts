@@ -18,10 +18,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -66,7 +64,7 @@ describe('migration initializer CRD resource generation', () => {
                 },
                 replayers: {
                     "target-replay": {
-                        fromProxy: "source-proxy",
+                        fromCapturedTraffic: "source-proxy",
                         toTarget: "target",
                         dependsOnSnapshotMigrations: [
                             {source: "source", snapshot: "snap1"}
@@ -150,7 +148,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('dataSnapshots: {');
         expect(enrichScript).toContain('"source-snap1": $data_snapshot_source_snap1');
         expect(enrichScript).toContain(
-            '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + "-" + .label)]}))))'
+            '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[crdname($snapshot.sourceConfig.label + "-" + .label)]}))))'
         );
         expect(enrichScript).toContain(
             "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
@@ -158,7 +156,92 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+        );
+    });
+
+    it('generates S3 captured traffic resources without creating a capture proxy', async () => {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    version: "ES 7.10.2"
+                }
+            },
+            targetClusters: {
+                target: {
+                    endpoint: "https://target.example.com",
+                    allowInsecure: true
+                }
+            },
+            traffic: {
+                s3Sources: {
+                    "loaded-dump": {
+                        s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                        awsRegion: "us-east-1",
+                        sourceLabel: "archived-source"
+                    }
+                },
+                replayers: {
+                    replay: {
+                        fromCapturedTraffic: "loaded-dump",
+                        toTarget: "target"
+                    }
+                }
+            },
+            snapshotMigrationConfigs: []
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config, "byoc-workflow", {runNumber: 1700000000000});
+        const resources = bundle.customMigrationResources.items;
+        const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
+
+        const byKind = (kind: string) =>
+            resources.filter((item: any) => item.kind === kind).map((item: any) => item.metadata.name);
+        const getResource = (kind: string, name: string) =>
+            resources.find((item: any) => item.kind === kind && item.metadata.name === name);
+
+        expect(byKind("KafkaCluster")).toContain("default");
+        expect(byKind("CapturedTraffic")).toContain("loaded-dump-topic");
+        expect(byKind("CaptureProxy")).toEqual([]);
+        expect(byKind("TrafficReplay")).toContain("loaded-dump-target-replay");
+        expect(byKind("ApprovalGate")).toEqual(expect.arrayContaining([
+            "capturedtraffic.loaded-dump-topic.vapretry",
+            "trafficreplay.loaded-dump-target-replay.vapretry"
+        ]));
+
+        const capturedTraffic = getResource("CapturedTraffic", "loaded-dump-topic");
+        expect(capturedTraffic.metadata.labels).toEqual(expect.objectContaining({
+            [MigrationInitializer.GATE_LABEL_SOURCE]: "archived-source",
+            [MigrationInitializer.OUTPUT_LABEL_KAFKA_CLUSTER]: "default",
+            [MigrationInitializer.WORKFLOW_LABEL]: "byoc-workflow"
+        }));
+        expect(capturedTraffic.spec).toEqual(expect.objectContaining({
+            dependsOn: ["default"],
+            kafkaClusterName: "default",
+            topicName: "loaded-dump",
+            sourceKind: "s3",
+            s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz",
+            loadStarted: true
+        }));
+        expect(getResource("TrafficReplay", "loaded-dump-target-replay").spec.dependsOn).toEqual(["loaded-dump"]);
+        expect(bundle.resolvedMigrationResources.resources).toContainEqual(expect.objectContaining({
+            kind: "CapturedTraffic",
+            name: "loaded-dump-topic",
+            parameters: expect.objectContaining({
+                sourceKind: "s3",
+                s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz"
+            })
+        }));
+
+        expect(enrichScript).toContain(
+            "s3loader_loaded_dump=\"$(kubectl get capturedtraffics.migrations.opensearch.org/loaded-dump-topic -o jsonpath='{.metadata.uid}')\""
+        );
+        expect(enrichScript).toContain("s3TrafficLoaders: {");
+        expect(enrichScript).toContain('"loaded-dump": $s3loader_loaded_dump');
+        expect(enrichScript).toContain(
+            '.s3TrafficLoaders |= ((. // []) | map(. + {resourceUid: $uids.s3TrafficLoaders[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))'
         );
     });
 
@@ -169,7 +252,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -268,7 +351,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -323,10 +406,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -380,7 +461,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 });

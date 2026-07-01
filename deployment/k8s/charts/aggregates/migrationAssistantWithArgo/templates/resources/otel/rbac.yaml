@@ -1,3 +1,4 @@
+{{- if or .Values.metrics.enabled .Values.tracing.enabled (get .Values.conditionalPackageInstalls "opentelemetry-operator") }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -52,3 +53,4 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: otel-collector
+{{- end }}

@@ -83,7 +83,9 @@ services:
       - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --transformTarget
       - opensearch
-      - --otelCollectorEndpoint
+      - --otelTraceCollectorEndpoint
+      - http://otel-lgtm:4317
+      - --otelMetricsCollectorEndpoint
       - http://otel-lgtm:4317
 
   # Dual-target shim (Solr primary): sends to both Solr and OpenSearch,
@@ -128,7 +130,9 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --otelCollectorEndpoint
+      - --otelTraceCollectorEndpoint
+      - http://otel-lgtm:4317
+      - --otelMetricsCollectorEndpoint
       - http://otel-lgtm:4317
       - --reportingConfig
       - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'
@@ -175,7 +179,9 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --otelCollectorEndpoint
+      - --otelTraceCollectorEndpoint
+      - http://otel-lgtm:4317
+      - --otelMetricsCollectorEndpoint
       - http://otel-lgtm:4317
       - --reportingConfig
       - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'

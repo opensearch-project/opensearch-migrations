@@ -3,6 +3,9 @@ def call(Map config = [:]) {
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def testIds = config.testIds ?: ""
+    def traceTestIds = config.traceTestIds ?: ""
+    def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceJaeger.yaml"
+    def traceBackend = config.traceBackend ?: "jaeger"
 
     def versions = migrationVersions()
     def allSourceVersions = versions.sourceVersions
@@ -120,10 +123,14 @@ def call(Map config = [:]) {
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
+                                def traceArgs = ""
+                                if (traceTestIds != "") {
+                                    traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
+                                }
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }

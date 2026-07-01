@@ -24,7 +24,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                     repos: {
                         default: {
                             awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path",
+                            repoPathUri: "s3://bucket/path",
                         },
                     },
                     snapshots: {
@@ -58,7 +58,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
             replayers: {
                 replay: {
-                    fromProxy: "source-proxy",
+                    fromCapturedTraffic: "source-proxy",
                     toTarget: "target",
                     replayerConfig: {
                         speedupFactor: 5,

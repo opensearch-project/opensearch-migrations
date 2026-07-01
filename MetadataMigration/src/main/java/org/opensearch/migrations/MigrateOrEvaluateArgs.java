@@ -25,27 +25,22 @@ public class MigrateOrEvaluateArgs {
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;
 
-    @Parameter(names = {
-        "--file-system-repo-path" }, description = "The full path to the snapshot repo on the file system.")
-    public String fileSystemRepoPath;
+    @Parameter(names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
+        description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
+    public String repoUri;
 
-    @Parameter(names = {
-        "--s3-local-dir" }, description = "The absolute path to the directory on local disk to download S3 files to")
-    public String s3LocalDirPath;
-
-    @Parameter(names = {
-        "--s3-repo-uri" }, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
-    public String s3RepoUri;
+    @Parameter(names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir"},
+        description = "The absolute path to the directory on local disk to download remote repo files to")
+    public String localDir;
 
     @Parameter(names = {
         "--s3-region" }, description = "The AWS Region the S3 bucket is in, like: us-east-2")
     public String s3Region;
 
     @Parameter(required = false,
-            names = { "--s3-endpoint", "--s3Endpoint" },
-            description = ("The endpoint URL to use for S3 calls.  " +
-                    "For use when the default AWS ones won't work for a particular context."))
-    public String s3Endpoint = null;
+            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+    public String endpoint = null;
 
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
@@ -64,10 +59,21 @@ public class MigrateOrEvaluateArgs {
         + " Default: 1 (which does not apply any transformation)")
     public int clusterAwarenessAttributes = 1;
 
-    @Parameter(required = false, names = {
-        "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-            + "forwarded. If no value is provided, metrics will not be forwarded.")
-    String otelCollectorEndpoint;
+    @Parameter(
+        required = false,
+        names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+            "Omit this option to disable trace export.")
+    String otelTraceCollectorEndpoint;
+
+    @Parameter(
+        required = false,
+        names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+            "Omit this option to disable metric export.")
+    String otelMetricsCollectorEndpoint;
 
     @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.", converter = VersionConverter.class)
     public Version sourceVersion = null;

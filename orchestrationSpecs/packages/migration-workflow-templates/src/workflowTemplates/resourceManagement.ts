@@ -3,6 +3,7 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
+    ExpressionType,
     FunctionExpression,
     INTERNAL,
     InputParamDef,
@@ -10,11 +11,12 @@ import {
     makeDirectTypeProxy,
     makeStringTypeProxy,
     NonSerializedPlainObject,
-    PlainObject,
     selectInputsForRegister,
     Serialized,
     TemplateBuilder,
+    ToJsonExpression,
     typeToken,
+    UnquotedTypeWrapper,
     WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -40,6 +42,7 @@ import {
     K8S_SECRET_READY_RETRY_STRATEGY,
     K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
+import {prefixedScalableWorkloadFields, scalingFromRecord} from "./commonUtils/scalableWorkload";
 
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
@@ -84,14 +87,20 @@ function placeholderStatusFields<T extends StringStatusFields>(fields: T): Recor
     return proxied;
 }
 
-function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, any>): T {
+function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, ExpressionType>): T {
     // Resource templates substitute Argo expressions before kubectl parses the YAML.
     // toJSON keeps quote-heavy strings, arrays, and objects valid as YAML literals.
-    const jsonExpression = new FunctionExpression<Serialized<T>, NonSerializedPlainObject, any>(
+    const jsonExpression = new FunctionExpression<
+        Serialized<T>,
+        T,
+        ExpressionType,
+        "complicatedExpression",
+        readonly [BaseExpression<T, ExpressionType>]
+    >(
         "toJSON",
-        [value] as unknown as BaseExpression<NonSerializedPlainObject, any>[]
-    );
-    return makeDirectTypeProxy(jsonExpression as unknown as BaseExpression<Record<string, PlainObject>>) as unknown as T;
+        [value] as const
+    ) as unknown as ToJsonExpression<Serialized<T>, "complicatedExpression">;
+    return new UnquotedTypeWrapper<T>(jsonExpression, "yaml-safe-json") as never;
 }
 
 function buildPatchStatusTemplate<
@@ -220,6 +229,8 @@ function makeCapturedTrafficManifest(
     partitions: BaseExpression<Serialized<number>>,
     replicas: BaseExpression<Serialized<number>>,
     topicConfig: BaseExpression<Serialized<Record<string, any>>>,
+    sourceKind: BaseExpression<string>,
+    s3SourceUri: BaseExpression<string>,
 ) {
     return {
         apiVersion: CRD_API_VERSION,
@@ -233,6 +244,12 @@ function makeCapturedTrafficManifest(
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(kafkaClusterName),
             }
         },
+        // s3SourceUri + sourceKind + loadStarted are routed through `apply` so
+        // that any change between submit attempts (e.g., user edits the URI in
+        // their config and resubmits) is caught by the CapturedTraffic VAP
+        // before any loader runs. The VAP rejects mutating s3SourceUri /
+        // sourceKind, so a resubmit pointed at a different file fails fast at
+        // admission, not after the loader pod has started writing partial data.
         spec: {
             dependsOn: [makeStringTypeProxy(kafkaClusterName)],
             kafkaClusterName: makeStringTypeProxy(kafkaClusterName),
@@ -240,6 +257,9 @@ function makeCapturedTrafficManifest(
             partitions: makeDirectTypeProxy(partitions),
             replicas: makeDirectTypeProxy(replicas),
             topicConfig: makeDirectTypeProxy(expr.deserializeRecord(topicConfig)),
+            sourceKind: makeStringTypeProxy(sourceKind),
+            s3SourceUri: makeStringTypeProxy(s3SourceUri),
+            loadStarted: true,
         }
     };
 }
@@ -251,6 +271,7 @@ function makeCaptureProxyManifest(
 ) {
     const config = expr.deserializeRecord(proxyConfig);
     const proxyOpts = expr.get(config, "proxyConfig");
+    const proxyScaling = scalingFromRecord(proxyOpts);
     const workflowSpecFields = expr.makeDict({
         dependsOn: expr.toArray(topicCrName),
         loggingConfigurationOverrideConfigMap: expr.dig(
@@ -259,7 +280,8 @@ function makeCaptureProxyManifest(
             expr.literal("")
         ),
         internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
-        podReplicas: expr.dig(proxyOpts, ["podReplicas"], 1),
+        podReplicas: proxyScaling.podReplicas,
+        minPodReplicas: proxyScaling.minPodReplicas,
         resources: expr.get(proxyOpts, "resources"),
         tls: expr.dig(proxyOpts, ["tls"], expr.makeDict({})),
     });
@@ -287,6 +309,10 @@ function makeSnapshotMigrationManifest(
     snapshotMigrationConfig: BaseExpression<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>,
 ) {
     const config = expr.deserializeRecord(snapshotMigrationConfig);
+    const documentBackfillScaling = prefixedScalableWorkloadFields(
+        "documentBackfill",
+        expr.dig(config, ["documentBackfillConfig"], expr.makeDict({}))
+    );
     return {
         apiVersion: CRD_API_VERSION,
         kind: "SnapshotMigration",
@@ -316,14 +342,16 @@ function makeSnapshotMigrationManifest(
             metadataMigrationClusterAwarenessAttributes: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "clusterAwarenessAttributes"], 1)),
             metadataMigrationEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "enableSourcelessMigrations"], false)),
             metadataMigrationUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "useRecoverySource"], false)),
-            metadataMigrationOtelCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelCollectorEndpoint"], expr.literal(""))),
+            metadataMigrationOtelTraceCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelTraceCollectorEndpoint"], expr.literal(""))),
+            metadataMigrationOtelMetricsCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelMetricsCollectorEndpoint"], expr.literal(""))),
             metadataMigrationOutput: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE"))),
             metadataMigrationTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigBase64"], expr.literal(""))),
             metadataMigrationTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfig"], expr.literal(""))),
             metadataMigrationTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigFile"], expr.literal(""))),
             metadataMigrationFileSourceVolumes: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumes"], expr.literal([]))),
             metadataMigrationFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumeMounts"], expr.literal([]))),
-            documentBackfillPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "podReplicas"], 1)),
+            documentBackfillPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillPodReplicas),
+            documentBackfillMinPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillMinPodReplicas),
             documentBackfillJvmArgs: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal(""))),
             documentBackfillLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
             documentBackfillUseTargetClusterForWorkCoordination: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useTargetClusterForWorkCoordination"], false)),
@@ -343,7 +371,8 @@ function makeSnapshotMigrationManifest(
             documentBackfillInitialLeaseDuration: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "initialLeaseDuration"], expr.literal("PT1H"))),
             documentBackfillMaxConnections: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxConnections"], 10)),
             documentBackfillMaxShardSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxShardSizeBytes"], 80 * 1024 * 1024 * 1024)),
-            documentBackfillOtelCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "otelCollectorEndpoint"], expr.literal(""))),
+            documentBackfillOtelTraceCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "otelTraceCollectorEndpoint"], expr.literal(""))),
+            documentBackfillOtelMetricsCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "otelMetricsCollectorEndpoint"], expr.literal(""))),
             documentBackfillServerGeneratedIds: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "serverGeneratedIds"], expr.literal("AUTO"))),
             documentBackfillEmitDocType: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "emitDocType"], expr.literal("AUTO"))),
             documentBackfillAllowedDocExceptionTypes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "allowedDocExceptionTypes"], expr.literal([]))),
@@ -362,6 +391,7 @@ function makeTrafficReplayManifest(
     targetLabel: BaseExpression<string>,
 ) {
     const opts = expr.deserializeRecord(replayerOptions);
+    const replayerScaling = scalingFromRecord(opts);
     const workflowSpecFields = expr.makeDict({
         dependsOn: expr.deserializeRecord(dependsOn),
         jvmArgs: expr.dig(opts, ["jvmArgs"], expr.literal("")),
@@ -370,7 +400,8 @@ function makeTrafficReplayManifest(
             ["loggingConfigurationOverrideConfigMap"],
             expr.literal("")
         ),
-        podReplicas: expr.dig(opts, ["podReplicas"], 1),
+        podReplicas: replayerScaling.podReplicas,
+        minPodReplicas: replayerScaling.minPodReplicas,
         resources: expr.get(opts, "resources"),
         fileSourceVolumes: expr.dig(opts, ["fileSourceVolumes"], expr.literal([])),
         fileSourceVolumeMounts: expr.dig(opts, ["fileSourceVolumeMounts"], expr.literal([])),
@@ -401,9 +432,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
-
-    // ── Root resource mutations ──────────────────────────────────────────
-
     .addTemplate("upsertKafkaClusterResource", t => t
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
         .addResourceTask(b => b
@@ -424,6 +452,10 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("partitions", typeToken<number>())
         .addRequiredInput("replicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        // sourceKind = "proxy" or "s3" — VAP-locked once the CR exists.
+        // s3SourceUri is empty for the proxy path, set for s3.
+        .addOptionalInput("sourceKind", c => "proxy")
+        .addOptionalInput("s3SourceUri", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -435,7 +467,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                     b.inputs.sourceLabel,
                     b.inputs.partitions,
                     b.inputs.replicas,
-                    b.inputs.topicConfig
+                    b.inputs.topicConfig,
+                    b.inputs.sourceKind,
+                    b.inputs.s3SourceUri,
                 )
             }))
         .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
@@ -465,8 +499,8 @@ export const ResourceManagement = WorkflowBuilder.create({
             const snapshotOptions = expr.get(snapshotItemConfig, "config");
 
             return b.setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
+                action: "apply",
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
@@ -482,7 +516,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     spec: {
                         snapshotPrefix: makeStringTypeProxy(expr.get(snapshotItemConfig, "snapshotPrefix")),
                         indexAllowlist: makeDirectTypeProxy(
-                            expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([])) as any
+                            expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([]))
                         ),
                         maxSnapshotRateMbPerNode: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["maxSnapshotRateMbPerNode"], 0)
@@ -513,6 +547,11 @@ export const ResourceManagement = WorkflowBuilder.create({
             }))
         .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
         .addJsonPathOutput("resourceCreationTimestamp", "{.metadata.creationTimestamp}", typeToken<string>())
+        // Emit the real apiserver-assigned UID so downstream owned resources (RFS coordinator
+        // Secret/Service/StatefulSet) can set valid ownerReferences. Without this, callers
+        // would propagate a placeholder UID (e.g. "imported" for BYOS/imported-cluster paths)
+        // and Kubernetes GC would delete the owned resources within ~1s as orphaned children.
+        .addJsonPathOutput("resourceUid", "{.metadata.uid}", typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -676,6 +715,8 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
+        .addOptionalInput("sourceKind", c => "proxy")
+        .addOptionalInput("s3SourceUri", c => "")
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "upsertCapturedTrafficResource", c =>
@@ -687,6 +728,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     partitions: b.inputs.partitions,
                     replicas: b.inputs.replicas,
                     topicConfig: b.inputs.topicConfig,
+                    sourceKind: b.inputs.sourceKind,
+                    s3SourceUri: b.inputs.s3SourceUri,
                 }),
                 {continueOn: {failed: true}}
             )
@@ -730,6 +773,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     partitions: b.inputs.partitions,
                     replicas: b.inputs.replicas,
                     topicConfig: b.inputs.topicConfig,
+                    sourceKind: b.inputs.sourceKind,
+                    s3SourceUri: b.inputs.s3SourceUri,
                     configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
@@ -917,6 +962,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                 c.steps.tryApply.outputs.resourceCreationTimestamp,
                 expr.literal("")
             ))
+        .addExpressionOutput("resourceUid", c =>
+            expr.ternary(
+                expr.equals(c.steps.tryApply.status, "Succeeded"),
+                c.steps.tryApply.outputs.resourceUid,
+                expr.literal("")
+            ))
     )
 
     .addTemplate("reconcileTrafficReplayResource", t => t
@@ -1000,8 +1051,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     }))
     .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
         configChecksum: "",
-        checksumForSnapshot: "",
-        checksumForReplayer: ""
+        checksumForSnapshot: ""
     }))
     .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
@@ -1029,8 +1079,6 @@ export const ResourceManagement = WorkflowBuilder.create({
         configChecksum: ""
     }))
 
-
-    // ── Wait templates (resource get with retry) ─────────────────────────
     // Leaf Kubernetes/Strimzi/cert-manager waits use bounded infra retries.
     // Waits on our own migration status resources can run much longer in a
     // single attempt because another workflow branch is responsible for moving
@@ -1186,6 +1234,35 @@ export const ResourceManagement = WorkflowBuilder.create({
             })
             .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
+    )
+
+    .addTemplate("waitIndefinitelyForTrafficSource", t => t
+        .addRequiredInput("sourceName", typeToken<string>())
+        .addRequiredInput("sourceKind", typeToken<"proxy" | "s3">())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => {
+            const isS3Source = expr.templateValue(expr.equals(b.inputs.sourceKind, expr.literal("s3")));
+            return b
+                .addStep("waitForCaptureProxy", INTERNAL, "waitIndefinitelyForCaptureProxy", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.sourceName,
+                        configChecksum: b.inputs.configChecksum,
+                        checksumField: expr.literal("checksumForReplayer"),
+                    }),
+                    {when: {templateExp: expr.not(isS3Source)}}
+                )
+                .addStep("waitForS3CapturedTraffic", INTERNAL, "waitIndefinitelyForCapturedTraffic", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: expr.concat(b.inputs.sourceName, expr.literal("-topic")),
+                        configChecksum: b.inputs.configChecksum,
+                        checksumField: expr.literal("checksumForReplayer"),
+                    }),
+                    {when: {templateExp: isS3Source}}
+                );
+        })
     )
 
 

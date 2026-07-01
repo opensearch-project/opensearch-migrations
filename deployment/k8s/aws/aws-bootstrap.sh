@@ -63,6 +63,7 @@ skip_cfn_deploy=false
 tls_mode="none"
 pca_arn=""
 version=""
+ma_chart_dir=""
 create_vpc_endpoints=""
 ignore_checks=false
 push_images_to_ecr=true
@@ -133,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (required with --deploy-import-vpc-cfn)."
       echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
       echo "                                            Only valid with --deploy-import-vpc-cfn."
-      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
+      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
@@ -425,7 +426,7 @@ fi
 
 # --- expand --create-vpc-endpoints value ---
 if [[ "$create_vpc_endpoints" == "all" ]]; then
-  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth"
+  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth"
 fi
 
 # --- resolve version once ---
@@ -458,7 +459,41 @@ esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 HELM_VERSION="3.14.0"
 
-ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
+default_ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
+
+resolve_chart_source() {
+  if [[ "$build" == "true" ]]; then
+    if [[ -z "$ma_chart_dir" ]]; then
+      ma_chart_dir="$default_ma_chart_dir"
+    fi
+    return
+  fi
+
+  if [[ -n "$ma_chart_dir" && ( -f "$ma_chart_dir" || -d "$ma_chart_dir" ) ]]; then
+    return
+  fi
+
+  local release_base_url
+  release_base_url="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
+  echo "Downloading release Helm chart (${RELEASE_VERSION}) from GitHub..." >&2
+  curl -fLO "${release_base_url}/migration-assistant-${RELEASE_VERSION}.tgz" \
+    || { echo "Failed to download Helm chart for version ${RELEASE_VERSION}"; exit 1; }
+  ma_chart_dir="./migration-assistant-${RELEASE_VERSION}.tgz"
+}
+
+resolve_mirror_manifest_file() {
+  resolve_chart_source
+
+  if [[ -d "$ma_chart_dir" ]]; then
+    echo "${ma_chart_dir}/infra/mirror/private-ecr-manifest.yaml"
+    return
+  fi
+
+  local manifest_tmp_dir
+  manifest_tmp_dir=$(mktemp -d)
+  tar xzf "$ma_chart_dir" -C "$manifest_tmp_dir" migration-assistant/infra/mirror/private-ecr-manifest.yaml
+  echo "${manifest_tmp_dir}/migration-assistant/infra/mirror/private-ecr-manifest.yaml"
+}
 
 install_helm() {
   echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
@@ -606,10 +641,11 @@ if [[ "$deploy_cfn" == "true" ]]; then
           ecr)             cfn_params+=("CreateECREndpoint=true") ;;
           ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
           cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          monitoring)      cfn_params+=("CreateCloudWatchMonitoringEndpoint=true") ;;
           efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
           sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
           eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
-          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
+          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth)" >&2 ;;
         esac
       done
     fi
@@ -895,13 +931,10 @@ fi
 
 
 # --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
-# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
 # @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
 # @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
 _bootstrap_source_helpers() {
   local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
-  . "$scripts_dir/privateEcrManifest.sh"
   # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
   . "$scripts_dir/mirrorToEcr.sh"
   # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
@@ -917,6 +950,9 @@ fi
 if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+  mirror_manifest_file=$(resolve_mirror_manifest_file)
+  echo "Using ECR mirror manifest: ${mirror_manifest_file}"
+  load_private_ecr_manifest "$mirror_manifest_file"
   mirror_images_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$IMAGES"
   mirror_charts_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$CHARTS"
 
@@ -1024,7 +1060,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
     # from Docker Hub. mirror_images_to_ecr already copied this image above.
     ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/moby/buildkit:buildx-stable-1"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
     setup_build_backend
   fi
 
@@ -1085,19 +1121,13 @@ fi
 # By default, the Helm chart is downloaded from the GitHub release matching
 # $RELEASE_VERSION. With --build, it comes from the local repo checkout instead.
 # Dashboard JSONs are bundled inside the chart.
-if [[ "$build" != "true" ]]; then
-  RELEASE_BASE_URL="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
-  echo "Downloading release artifacts (${RELEASE_VERSION}) from GitHub..."
-  curl -fLO "${RELEASE_BASE_URL}/migration-assistant-${RELEASE_VERSION}.tgz" \
-    || { echo "Failed to download Helm chart for version ${RELEASE_VERSION}"; exit 1; }
-  ma_chart_dir="./migration-assistant-${RELEASE_VERSION}.tgz"
-fi
+resolve_chart_source
 
 # --- helm install ---
 # When using packaged chart, valuesEks.yaml is extracted from the tgz since
 # helm can't reference files inside an archive. When using the local chart,
 # values files are referenced directly. To add new values files, update both paths.
-if [[ "$build" != "true" ]]; then
+if [[ -f "$ma_chart_dir" ]]; then
   tar xzf "${ma_chart_dir}" migration-assistant/valuesEks.yaml migration-assistant/values.yaml
   HELM_VALUES_FLAGS="-f migration-assistant/values.yaml -f migration-assistant/valuesEks.yaml"
 else

@@ -29,7 +29,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
     TUPLE_HEADER_1 = "x-mountable-tuple-transform-1"
     TUPLE_HEADER_2 = "x-mountable-tuple-transform-2"
     TUPLE_STRING_CONTEXT_HEADER = "x-mountable-string-context-transform"
-    TUPLE_GLOB = "/s3/artifacts/tuples/**/tuples-*.log.gz"
+    TUPLE_GLOB = "/artifacts/tuples/**/tuples-*.log.gz"
 
     def __init__(self, user_args: MATestUserArguments):
         if user_args.target_type == "AOSS":
@@ -317,7 +317,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
         wait_for_proxy_ready(ns, timeout_seconds)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=ns, timeout_seconds=300)
+        wait_for_replayer_consuming(namespace=ns, timeout_seconds=300, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
 
         proxy_cluster = make_proxy_cluster(self.source_cluster)
