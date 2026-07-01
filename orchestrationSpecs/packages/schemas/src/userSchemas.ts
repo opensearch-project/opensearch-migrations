@@ -1167,6 +1167,8 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."),
     source: z.string()
         .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."),
+    skipApproval: z.boolean().default(false).optional()
+        .describe("When true, skips the manual approval gate after this proxy is configured and ready."),
     proxyConfig: USER_PROXY_OPTIONS
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");

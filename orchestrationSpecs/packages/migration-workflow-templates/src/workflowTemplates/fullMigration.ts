@@ -8,6 +8,7 @@ import {
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
     DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
@@ -188,7 +189,7 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
     .addTemplate("setupSingleProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -196,6 +197,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -221,6 +223,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
@@ -833,9 +836,9 @@ export const FullMigration = WorkflowBuilder.create({
                         topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
                         checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
-                        skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
+                    skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),

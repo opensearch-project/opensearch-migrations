@@ -340,6 +340,10 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     resourceUid: z.string(),
 });
 
+export const DENORMALIZED_PROXY_SETUP_CONFIG = DENORMALIZED_PROXY_CONFIG.omit({
+    skipApproval: true,
+});
+
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),

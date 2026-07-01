@@ -121,6 +121,16 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.authConfig\.basic: rogueInUnion/);
     });
 
+    it('should honor per-proxy skipApproval without global skipApprovals', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = false;
+        config.traffic.proxies.proxy1.skipApproval = true;
+
+        const result = await transformer.transform(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(true);
+    });
+
     it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,

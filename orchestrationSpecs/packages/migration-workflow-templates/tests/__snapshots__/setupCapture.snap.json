@@ -496,6 +496,10 @@
               "name": "listenPort"
             },
             {
+              "name": "skipApproval",
+              "value": "false"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -882,7 +886,7 @@
                 "template": "waitforuserapproval",
                 "name": "resource-management"
               },
-              "when": "{{=!(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.proxyConfig)) == 'true')}}",
+              "when": "{{=!(inputs.parameters.skipApproval)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -989,6 +993,10 @@
             },
             {
               "name": "listenPort"
+            },
+            {
+              "name": "skipApproval",
+              "value": "false"
             },
             {
               "name": "podReplicas"
@@ -1303,6 +1311,10 @@
                     "value": "{{inputs.parameters.listenPort}}"
                   },
                   {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
+                  },
+                  {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
@@ -1387,6 +1399,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
                   },
                   {
                     "name": "podReplicas",

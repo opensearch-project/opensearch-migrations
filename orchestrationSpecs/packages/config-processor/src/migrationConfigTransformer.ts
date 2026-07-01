@@ -649,9 +649,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
         const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
 
-        // Operational flag (not part of any checksum): when skip-approvals is set the
-        // proxy-setup approval gate is auto-skipped, the same way scrapeApprovals skips
-        // the metadata/backfill gates.
+        // Operational flag (not part of any checksum): when skip-approvals is set
+        // globally or for a proxy, the proxy-setup approval gate is auto-skipped.
         const globalSkipApprovals = userConfig.skipApprovals ?? false;
         const proxiesWithChecksums = proxies.map(p => ({
             ...p,
@@ -660,7 +659,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
-            skipApproval: globalSkipApprovals,
+            skipApproval: globalSkipApprovals || (p.skipApproval ?? false),
         }));
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
@@ -861,7 +860,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
-                proxyConfig: prepareProxyConfig(proxy.proxyConfig)
+                proxyConfig: prepareProxyConfig(proxy.proxyConfig),
+                skipApproval: proxy.skipApproval ?? false,
             };
         });
     }

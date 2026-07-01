@@ -515,6 +515,10 @@
               "name": "listenPort"
             },
             {
+              "name": "skipApproval",
+              "value": "false"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -587,6 +591,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
                   },
                   {
                     "name": "podReplicas",
@@ -2268,7 +2276,11 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"skipApproval\", sprig.dig('skipApproval', false, item), \"resourceUid\", item['resourceUid']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{=sprig.dig('skipApproval', false, item)}}"
                   },
                   {
                     "name": "kafkaClusterName",

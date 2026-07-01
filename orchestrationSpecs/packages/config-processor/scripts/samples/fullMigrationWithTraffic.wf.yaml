@@ -52,6 +52,7 @@ traffic:
   proxies:
     capture-proxy:
       source: "source"
+      skipApproval: true
       proxyConfig:
         listenPort: 9201
   replayers:
