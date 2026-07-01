@@ -997,6 +997,43 @@ describe("editConfig state", () => {
         expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.secretName")).toMatchObject({
             status: "required",
             required: true,
+            externalRef: {
+                kind: "kubernetesResource",
+                purpose: "kafka-scram-password",
+                matchProfiles: ["kafka-scram-password-secret"],
+                selection: {target: "scalarName"},
+                k8s: {
+                    resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                    match: {
+                        requiredKeys: ["password"],
+                    },
+                },
+                create: {
+                    label: "Kafka SCRAM Password Secret",
+                    apply: {target: "scalarName", nameField: "secretName"},
+                },
+            },
+        });
+        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.caSecretName")).toMatchObject({
+            status: "required",
+            required: true,
+            externalRef: {
+                kind: "kubernetesResource",
+                purpose: "kafka-ca",
+                matchProfiles: ["kafka-ca-secret"],
+                selection: {target: "scalarName"},
+                k8s: {
+                    resourceTypes: [{group: "", version: "v1", kind: "Secret", namespaced: true}],
+                    match: {
+                        requiredKeys: ["ca.crt"],
+                        contentValidationIds: ["pem-certificate-chain"],
+                    },
+                },
+                create: {
+                    label: "Kafka CA Secret",
+                    apply: {target: "scalarName", nameField: "secretName"},
+                },
+            },
         });
         expect(defaultAuthKafka.yaml).toContain("auth:");
         expect(defaultAuthKafka.yaml).toContain("type: scram-sha-512");

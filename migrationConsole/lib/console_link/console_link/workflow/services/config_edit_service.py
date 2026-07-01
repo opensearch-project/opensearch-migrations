@@ -687,6 +687,16 @@ def _external_content_validation_messages(k8s_hint: Dict[str, Any], values: Dict
             messages.append("tls.crt is not a PEM certificate")
         if private_key and not looks_like_pem_private_key(private_key):
             messages.append("tls.key is not a PEM private key")
+    if "pem-certificate-chain" in validation_ids:
+        for key in required_keys or sorted(values.keys()):
+            certificate = values.get(key)
+            if certificate and not looks_like_pem_certificate_chain(certificate):
+                messages.append(f"{key} is not a PEM certificate")
+    if "pem-private-key" in validation_ids:
+        for key in required_keys or sorted(values.keys()):
+            private_key = values.get(key)
+            if private_key and not looks_like_pem_private_key(private_key):
+                messages.append(f"{key} is not a PEM private key")
     if "log4j-properties" in validation_ids:
         properties = values.get("log4j2.properties")
         if properties is not None and not looks_like_log4j_properties(properties):

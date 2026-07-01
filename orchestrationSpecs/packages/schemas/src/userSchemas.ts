@@ -55,6 +55,8 @@ export type ExternalRefPurpose =
 export type KubernetesExternalRefMatchProfile =
     | 'http-basic-auth-secret'
     | 'tls-secret'
+    | 'kafka-scram-password-secret'
+    | 'kafka-ca-secret'
     | 'log4j-configmap';
 export interface KubernetesResourceType {
     group: string;
@@ -238,6 +240,14 @@ const KUBERNETES_EXTERNAL_REF_MATCH_PROFILES: Record<KubernetesExternalRefMatchP
         requiredKeys: ['tls.crt', 'tls.key'],
         contentValidationIds: ['tls-certificate-key-pair'],
     },
+    'kafka-scram-password-secret': {
+        requiredKeys: ['password'],
+        contentValidationIds: ['non-empty-keys'],
+    },
+    'kafka-ca-secret': {
+        requiredKeys: ['ca.crt'],
+        contentValidationIds: ['pem-certificate-chain'],
+    },
     'log4j-configmap': {
         requiredKeys: ['log4j2.properties'],
         contentValidationIds: ['log4j-properties'],
@@ -385,6 +395,86 @@ const PROXY_CONSOLE_CLIENT_TLS_EXTERNAL_REF: ExternalRefHint = {
     create: {
         ...TLS_SECRET_EXTERNAL_REF.create!,
         label: 'Proxy Client Certificate Secret',
+    },
+};
+const KAFKA_SCRAM_PASSWORD_EXTERNAL_REF: ExternalRefHint = {
+    ...kubernetesResourceRef({
+        purpose: 'kafka-scram-password',
+        displayName: 'Kafka SCRAM Password Secret',
+        description: "Kubernetes Secret containing the SCRAM password for an existing Kafka user. The workflow reads the 'password' key.",
+        resourceTypes: [CORE_V1_SECRET],
+        matchProfiles: ['kafka-scram-password-secret'],
+    }),
+    create: {
+        label: 'Kafka SCRAM Password Secret',
+        fields: [
+            {
+                name: 'secretName',
+                label: 'Secret name',
+                input: 'name',
+                required: true,
+                validationIds: ['k8s-name'],
+            },
+            {
+                name: 'password',
+                label: 'Password',
+                input: 'password',
+                required: true,
+                sensitive: true,
+                validationIds: ['non-empty'],
+                confirm: true,
+            },
+        ],
+        output: {
+            kind: 'Secret',
+            type: 'Opaque',
+            stringData: {
+                password: {fromField: 'password'},
+            },
+        },
+        apply: {
+            target: 'scalarName',
+            nameField: 'secretName',
+        },
+    },
+};
+const KAFKA_CA_EXTERNAL_REF: ExternalRefHint = {
+    ...kubernetesResourceRef({
+        purpose: 'kafka-ca',
+        displayName: 'Kafka CA Secret',
+        description: "Kubernetes Secret containing the Kafka cluster CA certificate. The workflow mounts the 'ca.crt' key.",
+        resourceTypes: [CORE_V1_SECRET],
+        matchProfiles: ['kafka-ca-secret'],
+    }),
+    create: {
+        label: 'Kafka CA Secret',
+        fields: [
+            {
+                name: 'secretName',
+                label: 'Secret name',
+                input: 'name',
+                required: true,
+                validationIds: ['k8s-name'],
+            },
+            {
+                name: 'certificate',
+                label: 'CA certificate PEM',
+                input: 'multilineText',
+                required: true,
+                validationIds: ['non-empty', 'pem-certificate-chain'],
+            },
+        ],
+        output: {
+            kind: 'Secret',
+            type: 'Opaque',
+            stringData: {
+                'ca.crt': {fromField: 'certificate'},
+            },
+        },
+        apply: {
+            target: 'scalarName',
+            nameField: 'secretName',
+        },
     },
 };
 import deepmerge from "deepmerge";
@@ -683,13 +773,22 @@ export const KAFKA_CLIENT_CONFIG = z.object({
 
 export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [
     z.object({
-        type: z.literal("none"),
+        type: z.literal("none")
+            .describe("Do not use Kafka client authentication."),
     }),
     z.object({
-        type: z.literal("scram-sha-512"),
-        secretName: z.string().regex(K8S_NAMING_PATTERN),
-        caSecretName: z.string().regex(K8S_NAMING_PATTERN),
-        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN).optional(),
+        type: z.literal("scram-sha-512")
+            .describe("Use SASL/SCRAM-SHA-512 authentication for the existing Kafka cluster."),
+        secretName: z.string().regex(K8S_NAMING_PATTERN)
+            .describe("Name of a Kubernetes Secret containing the Kafka SCRAM password in the 'password' key.")
+            .uiHint(K8S_NAME_UI_HINT)
+            .externalRef(KAFKA_SCRAM_PASSWORD_EXTERNAL_REF),
+        caSecretName: z.string().regex(K8S_NAMING_PATTERN)
+            .describe("Name of a Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key.")
+            .uiHint(K8S_NAME_UI_HINT)
+            .externalRef(KAFKA_CA_EXTERNAL_REF),
+        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN).optional()
+            .describe("Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret."),
     }),
 ]);
 

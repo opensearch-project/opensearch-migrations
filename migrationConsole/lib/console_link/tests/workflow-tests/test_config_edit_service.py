@@ -113,6 +113,41 @@ def test_list_external_resources_uses_tls_content_validation_hints():
     assert "tls.key is not a PEM private key" in by_name["bad-tls"]["message"]
 
 
+def test_list_external_resources_uses_standalone_pem_certificate_chain_validation():
+    service = ConfigEditService(namespace="test", store=FakeStore())
+    core = MagicMock()
+    core.list_namespaced_secret.return_value = SimpleNamespace(items=[
+        fake_k8s_item(
+            "valid-ca",
+            type="Opaque",
+            data={"ca.crt": encoded("-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n")},
+        ),
+        fake_k8s_item(
+            "bad-ca",
+            type="Opaque",
+            data={"ca.crt": encoded("not a cert")},
+        ),
+    ])
+    external_ref = {
+        "kind": "kubernetesResource",
+        "k8s": {
+            "resourceTypes": [{"group": "", "version": "v1", "kind": "Secret", "namespaced": True}],
+            "match": {
+                "requiredKeys": ["ca.crt"],
+                "contentValidationIds": ["pem-certificate-chain"],
+            },
+        },
+    }
+
+    with patch.object(service, "_core_v1", return_value=core):
+        rows = service.list_external_resources(external_ref)
+
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["valid-ca"]["status"] == "matching"
+    assert by_name["bad-ca"]["status"] == "warn"
+    assert "ca.crt is not a PEM certificate" in by_name["bad-ca"]["message"]
+
+
 def test_list_external_resources_uses_config_map_content_validation_hints():
     service = ConfigEditService(namespace="test", store=FakeStore())
     core = MagicMock()
