@@ -2241,7 +2241,7 @@ spec:
                   serviceAccountName: migration-console-access-role
                   containers:
                     - name: solr
-                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:6.6.0
+                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:7.7.3
                       imagePullPolicy: Always
                       securityContext:
                         runAsUser: 0
