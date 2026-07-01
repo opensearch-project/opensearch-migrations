@@ -628,20 +628,32 @@ export class MigrationInitializer {
         // DataSnapshot resources from snapshots
         for (const snapshot of (workflows.snapshots ?? []) as SnapshotConfig[]) {
             for (const item of snapshot.createSnapshotConfig as SnapshotItemConfig[]) {
+                const snapshotResourceName = this.makeCrdName(snapshot.sourceConfig.label, item.label);
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'DataSnapshot',
                     metadata: {
-                        name: this.makeCrdName(snapshot.sourceConfig.label, item.label),
+                        name: snapshotResourceName,
                         labels: {
                             ...baseResourceLabels,
                             [MigrationInitializer.GATE_LABEL_SOURCE]: snapshot.sourceConfig.label,
                             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
                         }
                     },
-                    spec: specFor('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
+                    spec: specFor('DataSnapshot', snapshotResourceName),
                     status: { phase: 'Created', configChecksum: '' }
                 });
+
+                // Approval gate: wait for user to confirm traffic routing before snapshot
+                if ((item as any).dependsOnProxySetups?.length > 0) {
+                    items.push(this.makeApprovalGateResource(
+                        ['confirmtrafficrouting', snapshotResourceName],
+                        gateLabels({
+                            [MigrationInitializer.GATE_LABEL_SOURCE]: snapshot.sourceConfig.label,
+                            [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
+                        })
+                    ));
+                }
             }
         }
 
