@@ -3076,7 +3076,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "caSecretName": {
                             "type": "string",
                             "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                            "description": "Name of a Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key.",
+                            "description": "Optional Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key. Omit to use the client runtime's default trust store.",
                             "x-ui-hint": {
                               "kind": "text",
                               "format": "k8s-name",
@@ -3154,13 +3154,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "kafkaUserName": {
                             "type": "string",
                             "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                            "description": "Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret."
+                            "description": "Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret.",
+                            "x-ui-hint": {
+                              "kind": "text",
+                              "format": "k8s-name",
+                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                            }
                           }
                         },
                         "required": [
                           "type",
                           "secretName",
-                          "caSecretName"
+                          "kafkaUserName"
                         ]
                       }
                     ],

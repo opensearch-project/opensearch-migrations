@@ -1015,8 +1015,9 @@ describe("editConfig state", () => {
             },
         });
         expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.caSecretName")).toMatchObject({
-            status: "required",
-            required: true,
+            status: "ok",
+            required: false,
+            presence: "optional",
             externalRef: {
                 kind: "kubernetesResource",
                 purpose: "kafka-ca",
@@ -1033,6 +1034,14 @@ describe("editConfig state", () => {
                     label: "Kafka CA Secret",
                     apply: {target: "scalarName", nameField: "secretName"},
                 },
+            },
+        });
+        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.kafkaUserName")).toMatchObject({
+            status: "required",
+            required: true,
+            inputHint: {
+                kind: "text",
+                format: "k8s-name",
             },
         });
         expect(defaultAuthKafka.yaml).toContain("auth:");

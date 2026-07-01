@@ -783,11 +783,12 @@ export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [
             .describe("Name of a Kubernetes Secret containing the Kafka SCRAM password in the 'password' key.")
             .uiHint(K8S_NAME_UI_HINT)
             .externalRef(KAFKA_SCRAM_PASSWORD_EXTERNAL_REF),
-        caSecretName: z.string().regex(K8S_NAMING_PATTERN)
-            .describe("Name of a Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key.")
+        caSecretName: z.string().regex(K8S_NAMING_PATTERN).optional()
+            .describe("Optional Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key. Omit to use the client runtime's default trust store.")
             .uiHint(K8S_NAME_UI_HINT)
             .externalRef(KAFKA_CA_EXTERNAL_REF),
-        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN).optional()
+        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN)
+            .uiHint(K8S_NAME_UI_HINT)
             .describe("Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret."),
     }),
 ]);
