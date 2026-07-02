@@ -845,16 +845,6 @@ def edit_state_with_proxy_console_client_secret(secret_name=""):
                 "status": "ok",
                 "statusCounts": {},
             },
-            {
-                "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.required",
-                "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "required"],
-                "label": "[OK] required: true",
-                "value": True,
-                "valueKind": "boolean",
-                "description": "When true, clients must present a certificate signed by the configured trusted client CA.",
-                "status": "ok",
-                "statusCounts": {},
-            },
         ],
     })
     return state

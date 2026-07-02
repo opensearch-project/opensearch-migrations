@@ -208,7 +208,7 @@ const PROXY_RESOLVED_FIELDS = {
     sslTrustCertPemEnvVar: z.string().min(1).optional()
         .describe("Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."),
     requireClientAuth: z.boolean().optional()
-        .describe("Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."),
+        .describe("Resolved proxy-process flag derived from tls.clientAuth presence. Stripped from the CaptureProxy CR."),
     ...FILE_SOURCE_RESOLVED_FIELDS,
 } as const;
 

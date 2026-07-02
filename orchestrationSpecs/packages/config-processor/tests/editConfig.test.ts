@@ -1208,7 +1208,7 @@ describe("editConfig state", () => {
 
         expect(result.yaml).toContain("mode: existingSecret");
         expect(result.yaml).toContain("clientAuth:");
-        expect(result.yaml).toContain("required: true");
+        expect(result.yaml).not.toContain("required:");
         expect(tls?.label).toContain("tls: < existingSecret >");
         expect(clientAuth).toMatchObject({valueKind: "union", value: "enabled"});
     });

@@ -1164,11 +1164,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                       }
                                     }
                                   }
-                                },
-                                "required": {
-                                  "type": "boolean",
-                                  "default": true,
-                                  "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
                                 }
                               },
                               "additionalProperties": false,
@@ -1448,11 +1443,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                       }
                                     }
                                   }
-                                },
-                                "required": {
-                                  "type": "boolean",
-                                  "default": true,
-                                  "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
                                 }
                               },
                               "additionalProperties": false,
@@ -1530,7 +1520,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "requireClientAuth": {
                       "type": "boolean",
-                      "description": "Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."
+                      "description": "Resolved proxy-process flag derived from tls.clientAuth presence. Stripped from the CaptureProxy CR."
                     },
                     "fileSourceVolumes": {
                       "type": "array",
@@ -6751,11 +6741,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     }
                                   }
                                 }
-                              },
-                              "required": {
-                                "type": "boolean",
-                                "default": true,
-                                "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
                               }
                             },
                             "additionalProperties": false,
@@ -7035,11 +7020,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     }
                                   }
                                 }
-                              },
-                              "required": {
-                                "type": "boolean",
-                                "default": true,
-                                "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
                               }
                             },
                             "additionalProperties": false,

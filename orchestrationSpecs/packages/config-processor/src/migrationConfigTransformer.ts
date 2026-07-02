@@ -433,7 +433,7 @@ function prepareProxyConfig(
         return ARGO_PROXY_OPTIONS.parse({
             ...loweredConfig,
             ...trustCertConfig,
-            requireClientAuth: clientAuth.required ?? true,
+            requireClientAuth: true,
             ...fileSourceRegistry.resolvedFields,
         });
     }

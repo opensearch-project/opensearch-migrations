@@ -632,7 +632,6 @@ describe('MigrationConfigTransformer validation', () => {
             mode: "existingSecret",
             secretName: "proxy-tls",
             clientAuth: {
-                required: true,
                 trustedClientCaFile: {
                     configMap: "trusted-client-roots",
                     path: "ca.crt"
@@ -662,7 +661,6 @@ describe('MigrationConfigTransformer validation', () => {
             secretName: "proxy-tls",
             clientAuth: {
                 trustedClientCaPem: pem,
-                required: false
             }
         };
 
@@ -674,13 +672,12 @@ describe('MigrationConfigTransformer validation', () => {
             secretName: "proxy-tls",
             clientAuth: {
                 trustedClientCaPem: pem,
-                required: false
             }
         });
         expect(proxyConfig.sslTrustCertPem).toBe(pem);
         expect(proxyConfig.sslTrustCertPemEnvVar).toBe("CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
         expect(proxyConfig.sslTrustCertFile).toBeUndefined();
-        expect(proxyConfig.requireClientAuth).toBe(false);
+        expect(proxyConfig.requireClientAuth).toBe(true);
         expect(proxyConfig.fileSourceVolumes).toEqual([]);
         expect(proxyConfig.fileSourceVolumeMounts).toEqual([]);
     });

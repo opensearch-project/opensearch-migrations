@@ -141,7 +141,6 @@ describe("resolved migration resources", () => {
                 mode: "existingSecret",
                 secretName: "proxy-tls",
                 clientAuth: {
-                    required: true,
                     trustedClientCaFile: {
                         configMap: "trusted-client-roots",
                         path: "ca.crt",

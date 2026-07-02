@@ -994,8 +994,6 @@ export const PROXY_TLS_CLIENT_AUTH_CONFIG = z.object({
         .describe("Name of a Kubernetes TLS Secret containing the client certificate and private key that migration-console commands use when connecting to this mTLS-enabled proxy.")
         .uiHint(K8S_NAME_UI_HINT)
         .externalRef(PROXY_CONSOLE_CLIENT_TLS_EXTERNAL_REF),
-    required: z.boolean().default(true).optional()
-        .describe("When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.")
 }).strict().superRefine((value, ctx) => {
     const trustSourceCount = [
         value.trustedClientCaFile !== undefined,

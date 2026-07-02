@@ -843,7 +843,7 @@ function proxyClientAuthForVariant(existing: any, variant: unknown): unknown {
         return undefined;
     }
     if (variant === "enabled") {
-        return isPlainObject(existing) ? existing : {required: true};
+        return isPlainObject(existing) ? existing : {};
     }
     throw new Error(`Unknown proxy clientAuth mode: ${String(variant)}`);
 }
