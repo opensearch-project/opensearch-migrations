@@ -175,7 +175,12 @@ describe("workflow schema UI hints", () => {
         expect(autoCreate.properties.auth["x-effective-default"]).toMatchObject({
             label: "scram-sha-512",
             value: {type: "scram-sha-512"},
-            source: "workflow policy",
+        });
+
+        const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
+        expect(proxyConfig.properties.tls["x-effective-default"]).toMatchObject({
+            label: "cert-manager self-signed",
+            description: expect.stringContaining("preconfigured self-signed issuer"),
         });
     });
 });

@@ -42,7 +42,6 @@ export interface EffectiveDefaultHint {
     label: string;
     value?: unknown;
     description?: string;
-    source?: string;
 }
 
 export type ExternalRefKind = 'kubernetesResource' | 'image' | 'secret' | 'configMap' | 'certManagerIssuer';
@@ -1096,6 +1095,10 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
+        .effectiveDefault({
+            label: "cert-manager self-signed",
+            description: "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names.",
+        })
         .changeRestriction('gated'),
     enableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
@@ -1596,7 +1599,6 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
             .effectiveDefault({
                 label: "scram-sha-512",
                 value: {type: "scram-sha-512"},
-                source: "workflow policy",
                 description: "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication.",
             }),
         // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and

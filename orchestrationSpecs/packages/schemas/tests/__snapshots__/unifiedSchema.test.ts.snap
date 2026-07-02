@@ -41,7 +41,6 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
         "value": {
           "type": "scram-sha-512"
         },
-        "source": "workflow policy",
         "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
       }
     },

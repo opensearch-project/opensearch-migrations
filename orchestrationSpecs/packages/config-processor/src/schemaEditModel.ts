@@ -1144,7 +1144,7 @@ export function discriminatedUnionBranches(schema: any, discriminator: string): 
         .filter(Boolean) as DiscriminatedUnionBranch[];
 }
 
-function discriminatedUnionNode(
+export function discriminatedUnionNode(
     path: string[],
     key: string,
     schema: any,

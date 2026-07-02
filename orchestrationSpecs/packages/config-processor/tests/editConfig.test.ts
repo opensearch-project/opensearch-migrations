@@ -525,7 +525,6 @@ describe("editConfig state", () => {
             status: "ok",
             effectiveDefault: {
                 label: "scram-sha-512",
-                source: "workflow policy",
             },
         });
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.map(variant => variant.value)).toEqual([
@@ -757,7 +756,21 @@ describe("editConfig state", () => {
             "LoadBalancer",
             "ClusterIP",
         ]);
-        expect(tls).toMatchObject({presence: "optional", valueKind: "union", value: "unset"});
+        expect(tls).toMatchObject({
+            presence: "optional",
+            valueKind: "union",
+            value: "unset",
+            effectiveDefault: {
+                label: "cert-manager self-signed",
+                description: expect.stringContaining("preconfigured self-signed issuer"),
+            },
+        });
+        expect(tls?.label).toContain("tls: < default: cert-manager self-signed >");
+        expect(tls?.variants?.[0]).toMatchObject({
+            label: "default (cert-manager self-signed)",
+            value: "unset",
+            description: expect.stringContaining("preconfigured self-signed issuer"),
+        });
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(suppressHeaderMatch).toMatchObject({
             presence: "optional",

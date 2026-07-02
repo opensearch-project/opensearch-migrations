@@ -61,7 +61,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "value": {
                           "type": "scram-sha-512"
                         },
-                        "source": "workflow policy",
                         "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
                       }
                     },
@@ -1485,7 +1484,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-effective-default": {
+                        "label": "cert-manager self-signed",
+                        "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names."
+                      }
                     },
                     "enableMSKAuth": {
                       "type": "boolean",
@@ -4105,7 +4108,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "value": {
                         "type": "scram-sha-512"
                       },
-                      "source": "workflow policy",
                       "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
                     }
                   },
@@ -7069,7 +7071,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-effective-default": {
+                      "label": "cert-manager self-signed",
+                      "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names."
+                    }
                   },
                   "enableMSKAuth": {
                     "type": "boolean",
