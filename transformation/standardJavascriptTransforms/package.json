@@ -25,10 +25,10 @@
     "serve": "http-server ./build/browser-test -o"
   },
   "devDependencies": {
-    "jest": "^29.5.0",
+    "jest": "^30.4.2",
     "eslint": "^8.38.0",
     "http-server": "^14.1.1",
-    "jest-junit": "^16.0.0"
+    "jest-junit": "^17.0.0"
   },
   "overrides": {
     "uuid": "11.1.1",

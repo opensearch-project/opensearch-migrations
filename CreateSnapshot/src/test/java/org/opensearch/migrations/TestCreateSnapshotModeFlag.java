@@ -181,9 +181,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "create";
         args.solrCollections = List.of("dummy");
         args.noWait = false;
@@ -239,9 +239,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";  // IMPORT mode
         args.solrCollections = List.of("importcoll");
         args.noWait = false;
@@ -292,9 +292,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
         args.solrCollections = List.of(collection);
         args.noWait = false;
@@ -328,9 +328,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
         args.solrCollections = List.of("nobkpcoll");
         args.noWait = false;
@@ -380,7 +380,7 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = "standalone_unified_test";
         args.snapshotRepoName = "test";
-        args.fileSystemRepoPath = "/var/solr/data";
+        args.repoUri = "/var/solr/data";
         args.mode = "create";
         args.noWait = false;
 
@@ -412,7 +412,7 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = "standalone_import_test";
         args.snapshotRepoName = "test";
-        args.fileSystemRepoPath = tempRepo.toString();
+        args.repoUri = tempRepo.toString();
         args.mode = "import";
         args.noWait = false;
 
@@ -459,7 +459,7 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = "branch_create_test";
         args.snapshotRepoName = "test";
-        args.fileSystemRepoPath = "/var/solr/data";
+        args.repoUri = "/var/solr/data";
         args.mode = "create";
         args.noWait = false;
 
@@ -487,9 +487,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = "branch_import_test";
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/branch-import";
+        args.repoUri = "s3://" + BUCKET_NAME + "/branch-import";
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
         args.solrCollections = List.of("branchcoll");
         args.noWait = false;
@@ -536,9 +536,9 @@ public class TestCreateSnapshotModeFlag {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "test";
-        args.s3RepoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
-        args.s3Endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
         // Specify collections explicitly so we skip live-cluster discovery and reach the
         // schema-fetch-and-upload step (which is what must fail fatally when the source is gone).

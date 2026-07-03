@@ -16,6 +16,10 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -518,6 +522,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "minPodReplicas"
+            },
+            {
               "name": "topicPartitions"
             },
             {
@@ -588,6 +595,10 @@
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{inputs.parameters.minPodReplicas}}"
                   },
                   {
                     "name": "topicPartitions",
@@ -1573,7 +1584,7 @@
                 "parameters": [
                   {
                     "name": "resourceUid",
-                    "value": "{{inputs.parameters.resourceUid}}"
+                    "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceUid}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1668,16 +1679,16 @@
                     "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceCreationTimestamp}}"
                   },
                   {
-                    "name": "workloadIdentityChecksum",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
+                    "name": "sourceEndpoint",
+                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   },
                   {
                     "name": "checksumForReplayer",
                     "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   },
                   {
-                    "name": "sourceEndpoint",
-                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                    "name": "workloadIdentityChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
                   }
                 ]
               },
@@ -1690,7 +1701,7 @@
                 "template": "patchsnapshotmigrationcompleted",
                 "name": "resource-management"
               },
-              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && !('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig))}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1734,6 +1745,9 @@
             },
             {
               "name": "fromCapturedTraffic"
+            },
+            {
+              "name": "fromCapturedTrafficSourceKind"
             },
             {
               "name": "fromCapturedTrafficConfigChecksum"
@@ -1846,7 +1860,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
+                    "value": "{{=item['resourceName']}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1872,16 +1886,12 @@
           [
             {
               "templateRef": {
-                "template": "waitindefinitelyforcapturedtraffic",
+                "template": "waitindefinitelyfortrafficsource",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromCapturedTraffic+'-topic'}}"
-                  },
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.fromCapturedTrafficConfigChecksum}}"
@@ -1895,12 +1905,16 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "checksumField",
-                    "value": "checksumForReplayer"
+                    "name": "sourceName",
+                    "value": "{{inputs.parameters.fromCapturedTraffic}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.fromCapturedTrafficSourceKind}}"
                   }
                 ]
               },
-              "name": "waitIndefinitelyForCapturedTraffic"
+              "name": "waitIndefinitelyForTrafficSource"
             }
           ],
           [
@@ -2264,6 +2278,10 @@
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
                   },
                   {
+                    "name": "minPodReplicas",
+                    "value": "{{=sprig.dig('minPodReplicas', 0, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
                     "name": "topicPartitions",
                     "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
                   },
@@ -2464,7 +2482,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']}}"
+                    "value": "{{=item['resourceName']}}"
                   },
                   {
                     "name": "groupName_view",
@@ -2530,6 +2548,10 @@
                   {
                     "name": "fromCapturedTraffic",
                     "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficSourceKind')}}"
                   },
                   {
                     "name": "fromCapturedTrafficConfigChecksum",

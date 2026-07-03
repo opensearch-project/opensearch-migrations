@@ -36,8 +36,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "KafkaCluster",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: true,
         blockOwnerDeletion: true,
     }];
@@ -125,7 +125,10 @@ function makeDeployKafkaNodePool(args: {
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
             }
         },
-        spec: makeDirectTypeProxy(expr.deserializeRecord(args.nodePoolSpec))
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            expr.deserializeRecord(args.nodePoolSpec),
+            expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
+        ))
     };
 }
 

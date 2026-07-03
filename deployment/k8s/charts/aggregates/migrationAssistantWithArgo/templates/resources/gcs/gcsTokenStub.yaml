@@ -1,0 +1,85 @@
+{{- if index .Values.conditionalPackageInstalls "fake-gcs-server" }}
+{{- /*
+  OAuth token stub for local GCS testing.
+
+  Elasticsearch's repository-gcs plugin always performs an OAuth2 token
+  exchange (it has no anonymous mode), POSTing to the token_uri from the
+  service-account credentials file. fake-gcs-server serves the storage API
+  but NOT a token endpoint, so without this stub repository-gcs falls back
+  to the real https://storage.googleapis.com and fails with 401.
+
+  This stub answers any token request with a static bearer token. fake-gcs
+  does not validate the token, so its value is irrelevant — only that the
+  exchange succeeds. Deployed only when fake-gcs-server is enabled.
+*/}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gcs-token-stub
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: gcs-token-stub
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcs-token-stub
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gcs-token-stub
+  template:
+    metadata:
+      labels:
+        app: gcs-token-stub
+    spec:
+      containers:
+        - name: gcs-token-stub
+          image: mirror.gcr.io/library/python:3-alpine
+          command:
+            - python
+            - -c
+            - |
+              from http.server import BaseHTTPRequestHandler, HTTPServer
+              import json
+
+              class Handler(BaseHTTPRequestHandler):
+                  def _respond(self):
+                      body = json.dumps({
+                          "access_token": "fake-token",
+                          "expires_in": 3600,
+                          "token_type": "Bearer",
+                      }).encode()
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+                  def do_POST(self):
+                      self._respond()
+
+                  def do_GET(self):
+                      self._respond()
+
+                  def log_message(self, *args):
+                      pass
+
+              HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+{{- end }}

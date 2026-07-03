@@ -112,7 +112,7 @@ public class TestCreateSnapshotSolr {
             args.sourceArgs.insecure = true;
             args.sourceType = "solr";
             args.snapshotName = "test_standalone_backup";
-            args.fileSystemRepoPath = solrDataDir(major);
+            args.repoUri = solrDataDir(major);
             args.noWait = false;
 
             var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
@@ -166,7 +166,7 @@ public class TestCreateSnapshotSolr {
             args.sourceArgs.insecure = true;
             args.sourceType = "solr";
             args.snapshotName = "test_cloud_backup";
-            args.fileSystemRepoPath = backupRoot;
+            args.repoUri = backupRoot;
             args.noWait = false;
 
             // With the per-snapshot location layout (<base>/<snapshotName>), Solr validates that the
@@ -180,7 +180,7 @@ public class TestCreateSnapshotSolr {
             var result = solr.execInContainer("ls", backupRoot + "/test_cloud_backup");
             log.atInfo().setMessage("[Solr {}] Cloud backup directory contents: {}")
                 .addArgument(solrVersion).addArgument(result.getStdout()).log();
-            // New layout: <fileSystemRepoPath>/<snapshotName>/<collection>/... — verify collection
+            // New layout: <repoUri>/<snapshotName>/<collection>/... — verify collection
             // subdir was created by Solr (not just the empty per-snapshot dir we pre-created).
             Assertions.assertTrue(result.getStdout().contains("cloudcoll"),
                 "Backup directory " + backupRoot + "/test_cloud_backup should contain the "

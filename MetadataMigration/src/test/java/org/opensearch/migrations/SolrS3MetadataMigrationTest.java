@@ -181,9 +181,9 @@ class SolrS3MetadataMigrationTest {
             createArgs.sourceType = "solr";
             createArgs.snapshotName = snapshotName;
             createArgs.snapshotRepoName = "s3";
-            createArgs.s3RepoUri = s3RepoUri;
+            createArgs.repoUri = s3RepoUri;
             createArgs.s3Region = REGION;
-            createArgs.s3Endpoint = localStackEndpoint();
+            createArgs.endpoint = localStackEndpoint();
             createArgs.solrCollections = List.of(COLLECTION);
             createArgs.noWait = false;
 
@@ -198,10 +198,10 @@ class SolrS3MetadataMigrationTest {
             var metaArgs = new MigrateOrEvaluateArgs();
             metaArgs.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
             metaArgs.snapshotName = snapshotName;
-            metaArgs.s3RepoUri = s3RepoUri;
+            metaArgs.repoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
-            metaArgs.s3Endpoint = localStackEndpoint();
-            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.endpoint = localStackEndpoint();
+            metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
@@ -266,9 +266,9 @@ class SolrS3MetadataMigrationTest {
             createArgs.sourceType = "solr";
             createArgs.snapshotName = snapshotName;
             createArgs.snapshotRepoName = "s3";
-            createArgs.s3RepoUri = s3RepoUri;
+            createArgs.repoUri = s3RepoUri;
             createArgs.s3Region = REGION;
-            createArgs.s3Endpoint = localStackEndpoint();
+            createArgs.endpoint = localStackEndpoint();
             createArgs.solrCollections = List.of(COLLECTION);
             createArgs.noWait = false;
             new CreateSnapshot(createArgs, snapshotContext.createSnapshotCreateContext()).run();
@@ -307,10 +307,10 @@ class SolrS3MetadataMigrationTest {
             var metaArgs = new MigrateOrEvaluateArgs();
             metaArgs.sourceVersion = Version.fromString("SOLR " + version.tag());
             metaArgs.snapshotName = snapshotName;
-            metaArgs.s3RepoUri = s3RepoUri;
+            metaArgs.repoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
-            metaArgs.s3Endpoint = localStackEndpoint();
-            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.endpoint = localStackEndpoint();
+            metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
@@ -413,10 +413,10 @@ class SolrS3MetadataMigrationTest {
             var metaArgs = new MigrateOrEvaluateArgs();
             metaArgs.sourceVersion = Version.fromString("SOLR " + version.tag());
             metaArgs.snapshotName = snapshotName;
-            metaArgs.s3RepoUri = s3RepoUri;
+            metaArgs.repoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
-            metaArgs.s3Endpoint = localStackEndpoint();
-            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.endpoint = localStackEndpoint();
+            metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
@@ -454,9 +454,9 @@ class SolrS3MetadataMigrationTest {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "s3";
-        args.s3RepoUri = s3RepoUri;
+        args.repoUri = s3RepoUri;
         args.s3Region = REGION;
-        args.s3Endpoint = localStackEndpoint();
+        args.endpoint = localStackEndpoint();
         args.solrCollections = List.of(COLLECTION);
         args.noWait = false;
         return args;

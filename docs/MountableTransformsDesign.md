@@ -455,7 +455,7 @@ sourceClusters:
     endpoint: "https://source:9200"
     snapshotInfo:
       repos:
-        main-repo: { s3RepoPathUri: "s3://bucket/path", awsRegion: "us-east-1" }
+        main-repo: { repoPathUri: "s3://bucket/path", awsRegion: "us-east-1" }
       snapshots:
         main-snapshot: { repoName: main-repo, config: { createSnapshotConfig: {} } }
 

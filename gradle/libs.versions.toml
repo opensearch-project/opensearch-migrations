@@ -1,13 +1,14 @@
 [versions]
-aws-crt = "0.47.0"
+aws-crt = "0.47.1"
 aws-msk-iam-auth = "2.3.7"
-aws-sdk = "2.46.11"
+aws-sdk = "2.46.15"
 bouncycastle = "1.84"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
 dockerapi = "3.7.1"
 errorprone = "2.42.0"
+gcp-storage = "2.49.0"
 errorprone-slf4j = "0.1.29"
 graalvm = "25.0.3"
 groovy = "3.0.25"
@@ -75,6 +76,8 @@ errorprone-slf4j = { module = "jp.skypencil.errorprone.slf4j:errorprone-slf4j", 
 groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
 
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
+
+gcp-storage = { module = "com.google.cloud:google-cloud-storage", version.ref = "gcp-storage" }
 
 hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 

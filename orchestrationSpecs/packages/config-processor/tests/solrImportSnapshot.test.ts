@@ -37,7 +37,7 @@ function solrImportConfig(opts: {
                     repos: {
                         default: {
                             awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/solr-path",
+                            repoPathUri: "s3://bucket/solr-path",
                         },
                     },
                     snapshots: {

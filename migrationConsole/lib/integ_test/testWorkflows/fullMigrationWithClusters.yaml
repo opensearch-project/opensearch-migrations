@@ -41,7 +41,7 @@ spec:
       - name: image-registry-prefix
         value: ""
       # Any references to workflow.parameters must come from top level workflow
-      - name: s3-snapshot-configmap
+      - name: snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
@@ -255,29 +255,31 @@ spec:
             default: "true"
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
-          - name: s3Region
+          - name: bucketUri
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: AWS_REGION
-          - name: s3Endpoint
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: BUCKET_URI
+          - name: bucketEndpoint
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: ENDPOINT
                 optional: true
-          - name: s3BucketName
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: BUCKET_NAME
           - name: snapshotRoleArn
             default: ""
             valueFrom:
               configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                name: "{{workflow.parameters.snapshot-configmap}}"
                 key: SNAPSHOT_ROLE_ARN
+                optional: true
+          - name: awsRegion
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: AWS_REGION
                 optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
@@ -291,32 +293,29 @@ spec:
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
             SKIP_APPROVALS='{{inputs.parameters.skip-approvals}}'
-            S3_REGION='{{inputs.parameters.s3Region}}'
-            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
-            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            BUCKET_URI='{{inputs.parameters.bucketUri}}'
+            BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
-            
+            AWS_REGION='{{inputs.parameters.awsRegion}}'
+
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
               .[0].snapshotConfig.snapshotNameConfig // {"createSnapshotConfig": {}}
             ')
-            
-            # Build snapshot repo config
+
+            # Build snapshot repo config from the full URI (s3://... or gs://...)
             SNAPSHOT_REPO=$(jq -n \
-              --arg region "$S3_REGION" \
-              --arg endpoint "$S3_ENDPOINT" \
-              --arg bucket "$S3_BUCKET" \
+              --arg uri "$BUCKET_URI" \
+              --arg endpoint "$BUCKET_ENDPOINT" \
               --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+              --arg region "$AWS_REGION" \
               '{
-                "awsRegion": $region,
-                "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-              }')
-            
-            # Add s3RoleArn only if provided
-            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-              SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
-            fi
+                "repoPathUri": ($uri + "/" + $suffix)
+              }
+              + (if $endpoint != "" then {"endpoint": $endpoint} else {} end)
+              + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)
+              + (if $region != "" then {"awsRegion": $region} else {} end)')
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" --argjson snapshotNameConfig "$SNAPSHOT_NAME_CONFIG" '
               # Add snapshotInfo with repo and snapshot definition

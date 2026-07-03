@@ -78,7 +78,7 @@ class RfsMigrateDocumentsTest {
     void classifySnapshotReadFailure_wrappedFailureReturnsDedicatedExitCode() {
         var args = new RfsMigrateDocuments.Args();
         args.snapshotName = "snap1";
-        args.s3RepoUri = "s3://bucket/repo";
+        args.repoUri = "s3://bucket/repo";
         // A wrapped snapshot read failure must be located and classified with the dedicated exit code.
         var wrapped = new RuntimeException("reading snapshot failed",
             new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata: index-0"));
@@ -91,10 +91,10 @@ class RfsMigrateDocumentsTest {
 
     @Test
     void classifySnapshotReadFailure_localDirRepoIsClassified() {
-        // The repo path comes from snapshotLocalDir when set (the non-S3 branch of the ternary).
+        // The repo path comes from a file-scheme repoUri (the non-S3 branch of the ternary).
         var args = new RfsMigrateDocuments.Args();
         args.snapshotName = "snap2";
-        args.snapshotLocalDir = "/snapshots/repo";
+        args.repoUri = "/snapshots/repo";
         var failure = new SnapshotRepo.CannotParseRepoFile("bad index-0");
 
         var exitCode = RfsMigrateDocuments.classifySnapshotReadFailure(failure, args);

@@ -711,6 +711,11 @@ class IntegrationTestArgoService:
             "kind": "Workflow",
             "metadata": metadata,
             "spec": {
+                "podMetadata": {
+                    "annotations": {
+                        "karpenter.sh/do-not-disrupt": "true"
+                    }
+                },
                 "workflowTemplateRef": {
                     "name": workflow_template_name
                 },
