@@ -803,7 +803,7 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     mode: z.enum(["create", "import"]).default("create").optional()
-        .describe("Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."),
+        .describe("Snapshot mode used by the workflow-generated CreateSnapshot step. User configs should leave this as 'create' (default). For Solr externally-managed snapshots, use externallyManagedSnapshotName with importConfig; the workflow will inject 'import' internally."),
     solrCollections: SOLR_COLLECTIONS_OPTION,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
@@ -1304,10 +1304,12 @@ export const USER_SOLR_IMPORT_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
 }).describe("Options for the Solr import-prepare step that runs CreateSnapshot with '--mode import' " +
-    "against an externally-managed Solr snapshot. The step retrieves each collection/core's schema " +
-    "(managed-schema.xml) from the live Solr source and uploads it into the snapshot repository's " +
-    "zk_backup_0/configs/ layout so the downstream metadata migration can derive OpenSearch mappings. " +
-    "It performs no backup. Requires the live Solr source to be reachable.");
+    "against an externally-managed Solr snapshot. It performs no backup. For standalone Solr, the step " +
+    "retrieves each core's schema (managed-schema.xml) from the live source and writes the synthetic " +
+    "<snapshot>/<core>/zk_backup_0/configs/<core>/managed-schema.xml layout that downstream metadata " +
+    "migration needs for mapping generation. For SolrCloud, the step does not write a synthetic schema; " +
+    "SolrCloud backups are expected to include their ZooKeeper configs in the real backup layout, and a " +
+    "shallow synthetic schema would shadow that layout. Requires the live Solr source to be reachable.");
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
     externallyManagedSnapshotName: z.string()
@@ -1418,6 +1420,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     // at config-validation time rather than silently doing nothing at runtime.
     const isSolrSource = typeof data.version === "string" && data.version.startsWith("SOLR ");
     for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+        if ("createSnapshotConfig" in snapConfig.config && snapConfig.config.createSnapshotConfig.mode === "import") {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Snapshot '${snapName}' sets createSnapshotConfig.mode='import'. Use externallyManagedSnapshotName with importConfig for Solr externally-managed snapshots; createSnapshotConfig is only for snapshots this workflow creates.`,
+                path: ['snapshotInfo', 'snapshots', snapName, 'config', 'createSnapshotConfig', 'mode']
+            });
+        }
         if ("importConfig" in snapConfig.config && snapConfig.config.importConfig !== undefined && !isSolrSource) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,

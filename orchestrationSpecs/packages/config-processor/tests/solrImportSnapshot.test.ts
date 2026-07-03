@@ -144,4 +144,35 @@ describe("Solr externally-managed snapshot import path", () => {
         expect(String((threw as InputValidationError).message ?? threw))
             .toMatch(/importConfig/);
     });
+
+    it("rejects user-authored createSnapshotConfig mode=import", async () => {
+        const config = solrImportConfig({withImportConfig: false}) as {
+            sourceClusters: {
+                solrSource: {
+                    snapshotInfo: {
+                        snapshots: {
+                            solrSnap: {
+                                config: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        config.sourceClusters.solrSource.snapshotInfo.snapshots.solrSnap.config = {
+            createSnapshotConfig: {
+                mode: "import",
+            },
+        };
+
+        let threw: unknown;
+        try {
+            await new MigrationConfigTransformer().processFromObject(config);
+        } catch (e) {
+            threw = e;
+        }
+        expect(threw).toBeInstanceOf(InputValidationError);
+        expect(String((threw as InputValidationError).message ?? threw))
+            .toMatch(/externallyManagedSnapshotName.*importConfig/);
+    });
 });

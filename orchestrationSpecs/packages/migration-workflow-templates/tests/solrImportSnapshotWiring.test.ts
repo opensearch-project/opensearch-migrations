@@ -8,21 +8,23 @@ import {CreateOrGetSnapshot} from "../src/workflowTemplates/createOrGetSnapshot"
  * full-template snapshots) so a regression in the import branch fails loudly and legibly.
  */
 describe("Solr import snapshot workflow wiring", () => {
-    it("snapshotWorkflow gates the import branch (runImport + direct CR completion) on sourceType", () => {
+    it("snapshotWorkflow gates the import branch (runImport + direct CR completion) on mode", () => {
         const rendered = JSON.stringify(renderWorkflowTemplate(CreateSnapshot));
 
-        // runCreateSnapshot emits --mode/--source-type via the inline-JSON params; the import branch
-        // only adds a sourceType key when sourceType is non-empty.
+        // runCreateSnapshot emits --mode/--source-type via the inline-JSON params; sourceType is
+        // forwarded to Java, but workflow branching is controlled by createSnapshotConfig.mode.
         expect(rendered).toContain("sourceType");
-        // The import-only steps exist and are gated on a non-empty sourceType.
+        expect(rendered).toContain("createSnapshotConfig");
+        expect(rendered).toContain("sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'");
+        // The import-only steps exist and are gated on mode=import.
         expect(rendered).toContain("runImport");
         expect(rendered).toContain("markSnapshotImported");
         // The import path marks the CR done directly (no monitor cronjob) via patchDataSnapshotCompleted
         // (template names render lowercased in the Argo YAML).
         expect(rendered).toContain("patchdatasnapshotcompleted");
-        // Import steps fire when sourceType is non-empty; create-path steps when it is empty.
-        expect(rendered).toContain("!(0 == len(inputs.parameters.sourceType))");
-        expect(rendered).toContain("0 == len(inputs.parameters.sourceType)");
+        // Import steps fire when mode=import; create-path steps when mode is anything else/default.
+        expect(rendered).toContain("{{=sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'}}");
+        expect(rendered).toContain("{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}");
         // The create-path completion-wait still exists.
         expect(rendered).toContain("waitindefinitelyfordatasnapshot");
     });

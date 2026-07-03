@@ -187,8 +187,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
     // snapshot-monitor cronjob patch the DataSnapshot CR Completed) and the Solr IMPORT path
     // (no backup: CreateSnapshot --mode import uploads the source schema into the externally-managed
     // snapshot's repo, then we patch the CR Completed directly). The two paths are mutually exclusive
-    // and selected by `sourceType`: empty → create (engine auto-detected by the Java side); non-empty
-    // (e.g. "solr") → import. A single template keeps one snapshot semaphore (the synchronization
+    // and selected by createSnapshotConfig.mode: "create" (default) runs the backup path, "import"
+    // runs the import-prepare path. A single template keeps one snapshot semaphore (the synchronization
     // validator requires each configMapKeyRef to be unique across the workflow).
     .addTemplate("snapshotWorkflow", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
@@ -199,14 +199,15 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("dataSnapshotName", typeToken<string>())
         .addRequiredInput("dataSnapshotUid", typeToken<string>())
-        // Non-empty selects the Solr import path (value is the CreateSnapshot --source-type). Empty
-        // (default) runs the normal backup-producing create path with live engine auto-detection.
+        // Explicit CreateSnapshot --source-type. This is forwarded to Java when set, but workflow
+        // branching is controlled by createSnapshotConfig.mode.
         .addOptionalInput("sourceType", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => {
-            const isImport = expr.not(expr.isEmpty(b.inputs.sourceType));
-            const notImport = expr.isEmpty(b.inputs.sourceType);
+            const snapshotMode = expr.dig(expr.deserializeRecord(b.inputs.createSnapshotConfig), ["mode"], "create");
+            const isImport = expr.equals(snapshotMode, expr.literal("import"));
+            const notImport = expr.not(isImport);
             return b
             // ── CREATE path ──────────────────────────────────────────────────
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>

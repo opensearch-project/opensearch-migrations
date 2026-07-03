@@ -351,7 +351,7 @@
           [
             {
               "template": "runcreatesnapshot",
-              "when": "{{=0 == len(inputs.parameters.sourceType)}}",
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -415,7 +415,7 @@
           [
             {
               "template": "applysnapshotdonecronjob",
-              "when": "{{=0 == len(inputs.parameters.sourceType)}}",
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -462,7 +462,7 @@
           [
             {
               "template": "runcreatesnapshot",
-              "when": "{{=!(0 == len(inputs.parameters.sourceType))}}",
+              "when": "{{=sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -512,7 +512,7 @@
                 "template": "patchdatasnapshotcompleted",
                 "name": "resource-management"
               },
-              "when": "{{=!(0 == len(inputs.parameters.sourceType))}}",
+              "when": "{{=sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -546,7 +546,7 @@
                 "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
-              "when": "{{=0 == len(inputs.parameters.sourceType)}}",
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {

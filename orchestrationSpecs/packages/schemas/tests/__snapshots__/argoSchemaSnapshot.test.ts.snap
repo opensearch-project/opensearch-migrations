@@ -397,7 +397,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                               "import"
                                             ],
                                             "default": "create",
-                                            "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
+                                            "description": "Snapshot mode used by the workflow-generated CreateSnapshot step. User configs should leave this as 'create' (default). For Solr externally-managed snapshots, use externallyManagedSnapshotName with importConfig; the workflow will inject 'import' internally."
                                           },
                                           "solrCollections": {
                                             "type": "array",
@@ -3492,7 +3492,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "import"
                                   ],
                                   "default": "create",
-                                  "description": "Snapshot mode: 'create' (default) performs standard snapshot creation; 'import' (Solr only) performs no backup and instead uploads the source schema from the live Solr cluster into an externally-managed snapshot. 'import' requires the live source to be reachable and fails if the schema cannot be obtained."
+                                  "description": "Snapshot mode used by the workflow-generated CreateSnapshot step. User configs should leave this as 'create' (default). For Solr externally-managed snapshots, use externallyManagedSnapshotName with importConfig; the workflow will inject 'import' internally."
                                 },
                                 "solrCollections": {
                                   "type": "array",

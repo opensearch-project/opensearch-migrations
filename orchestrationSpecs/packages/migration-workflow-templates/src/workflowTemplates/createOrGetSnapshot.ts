@@ -69,19 +69,18 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         // matches the snapshot already present in the repo. Empty for the normal create path.
         .addOptionalInput("importExternalSnapshotName", c => "")
         // CreateSnapshot --source-type forwarded to snapshotWorkflow. Set to "solr" on the import
-        // path (selects the import branch in snapshotWorkflow); empty on the create path (the Java
-        // side auto-detects the engine). Derived from importExternalSnapshotName at the call site.
+        // path so Java does not rely on live engine detection; empty on the create path so Java
+        // auto-detects the engine. Branching in snapshotWorkflow is controlled by mode.
         .addOptionalInput("sourceType", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => {
             // The Solr import-prepare path and the normal create path share one snapshotWorkflow
-            // call. isImport selects between them: when set, we pass sourceType:"solr" (which makes
-            // snapshotWorkflow run CreateSnapshot --mode import + patch the CR directly, no backup)
-            // and use the external snapshot name verbatim; otherwise sourceType is empty (create
-            // path, engine auto-detected) and the generated, lowercased name is used. The step is
-            // still gated on autoCreate-or-import so a plain externally-managed snapshot (which never
-            // reaches this template) stays a no-op.
+            // call. isImport selects the external snapshot name and sourceType:"solr" for the
+            // import-prepare path. snapshotWorkflow then branches on createSnapshotConfig.mode, which
+            // configProcessor sets to "import" for Solr importConfig snapshots. The step is still
+            // gated on autoCreate-or-import so a plain externally-managed snapshot (which never reaches
+            // this template) stays a no-op.
             const isImport = expr.not(expr.isEmpty(b.inputs.importExternalSnapshotName));
             // Compute autoCreate as a real boolean from the config input (same check getSnapshotName
             // makes), NOT from getSnapshotName's string output parameter. The when-condition ORs it
