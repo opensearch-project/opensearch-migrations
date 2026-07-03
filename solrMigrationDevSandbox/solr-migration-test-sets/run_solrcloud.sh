@@ -206,9 +206,27 @@ run_orbit() {
 # by default and writes <location>/<name>/ in the MA-expected layout.
 backup_collection() {
     local name="$1"
+    local snap_name="solrcloud_backup_$$"
+
     # Hard-commit first: BACKUP only captures committed segments, and solr-orbit's
     # load may leave docs uncommitted (otherwise the backup is empty).
-    curl -fsS "${SOLR_URL}/solr/nyc_taxis/update?commit=true" >/dev/null
+    # openSearcher=true ensures the searcher is reopened on this commit so its
+    # getIndexCommit() refers to a commit whose files are on disk.
+    curl -fsS "${SOLR_URL}/solr/nyc_taxis/update?commit=true&openSearcher=true" >/dev/null
+
+    # Pin the current commit via CREATESNAPSHOT. The root cause of the
+    # NoSuchFileException on Solr 6 is that autoCommit fires every 15s with
+    # openSearcher=false: it writes segments_N+1 and Lucene's
+    # KeepOnlyLastCommitDeletionPolicy deletes segments_N, but the searcher's NRT
+    # reader still reports segments_N via getIndexCommit(). CREATESNAPSHOT calls
+    # IndexDeletionPolicyWrapper.snapshot() on each shard leader, which pins the
+    # commit so the deletion policy cannot remove its files even if new auto-commits
+    # arrive before BACKUP finishes. Passing commitName to BACKUP tells BackupCoreOp
+    # to use the pinned commit directly rather than the (potentially stale) NRT reader.
+    log "Creating snapshot ${snap_name} to pin commit before backup"
+    curl -fsS "${SOLR_URL}/solr/admin/collections?action=CREATESNAPSHOT&collection=nyc_taxis&commitName=${snap_name}&wt=json" >/dev/null \
+        || warn "CREATESNAPSHOT failed; backup may hit NoSuchFileException on Solr 6"
+
     # Start fresh: Solr 6/7 refuse to back up into an existing directory (HTTP 400),
     # and Solr 8/9 would otherwise pile up extra incremental revisions. Delete from
     # *inside* the container so Solr's view of the bind mount is immediately consistent
@@ -216,8 +234,12 @@ backup_collection() {
     docker exec solr-node1 rm -rf "/backups/solrcloud/${name}" 2>/dev/null || true
     log "Backing up collection -> ${BACKUP_BASE}/${name}"
     local resp
-    resp="$(curl -fsS "${SOLR_URL}/solr/admin/collections?action=BACKUP&name=${name}&collection=nyc_taxis&location=/backups/solrcloud&wt=json")" \
+    resp="$(curl -fsS "${SOLR_URL}/solr/admin/collections?action=BACKUP&name=${name}&collection=nyc_taxis&location=/backups/solrcloud&commitName=${snap_name}&wt=json")" \
         || die "BACKUP request failed for ${name}"
+
+    # Release the snapshot so the pinned commit can be cleaned up by the deletion policy
+    curl -fsS "${SOLR_URL}/solr/admin/collections?action=DELETESNAPSHOT&collection=nyc_taxis&commitName=${snap_name}&wt=json" >/dev/null 2>&1 || true
+
     if echo "$resp" | grep -qiE '"(exception|error)"'; then
         warn "BACKUP for ${name} reported an error: ${resp}"
     fi
@@ -260,19 +282,6 @@ reshape_solrcloud_collection() {
 run_version() {
     local version="$1"
     log "######## Solr ${version} ########"
-
-    # Solr 6.6.x SolrCloud non-incremental BACKUP writes a header-valid segments_N
-    # that enumerates zero segments, even with CREATESNAPSHOT + commitName. The
-    # per-segment data files (_0.fdt etc.) are copied but unreachable from the
-    # SegmentInfos, so RFS sees maxDoc=0 and silently migrates 0 docs. This is a
-    # Solr 6.x defect, not a workflow issue — incremental BACKUP (rewritten in
-    # 8.x) doesn't have it. Use the standalone v6 backup instead (see
-    # run_standalone.sh / backups/standalone/snapshot.nyc_taxis_6/).
-    if [[ "$version" == "6" ]]; then
-        warn "Solr 6 SolrCloud BACKUP produces a broken segments_N (numSegments=0)."
-        warn "Skipping v6 SolrCloud; use the standalone v6 backup for that test set."
-        return 0
-    fi
 
     compose_up "$version"
     create_collection "$version"
