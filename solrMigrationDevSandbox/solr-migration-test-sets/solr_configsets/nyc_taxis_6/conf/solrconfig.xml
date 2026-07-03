@@ -48,8 +48,8 @@
   </query>
   <requestDispatcher>
     <requestParsers enableRemoteStreaming="true"
-                    multipartUploadLimitInKB="-1"
-                    formdataUploadLimitInKB="-1"
+                    multipartUploadLimitInKB="2048000"
+                    formdataUploadLimitInKB="2048000"
                     addHttpRequestToContext="false"/>
     <httpCaching never304="true" />
   </requestDispatcher>
