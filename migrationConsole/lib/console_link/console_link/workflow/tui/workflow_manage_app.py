@@ -815,6 +815,9 @@ class WorkflowTreeApp(App):
             if self._is_removable_edit_node(node):
                 self.bind("delete", "remove_config_node", description="Remove")
                 self.bind("backspace", "remove_config_node", show=False)
+            elif self._config_node_can_unset(node or {}):
+                self.bind("delete", "clear_config_node", description="Clear")
+                self.bind("backspace", "clear_config_node", description="Clear", show=False)
             self.refresh_bindings()
             return
 
@@ -856,6 +859,7 @@ class WorkflowTreeApp(App):
                 (node or {}).get("valueKind"),
                 bool((node or {}).get("command")),
                 self._is_removable_edit_node(node),
+                self._config_node_can_unset(node or {}),
             )
 
         node = node or {}
@@ -2225,7 +2229,7 @@ class WorkflowTreeApp(App):
         return (
             node.get("presence") == "optional"
             and not node.get("required")
-            and node.get("valueKind") in {"scalar", "boolean", "object", "array"}
+            and node.get("valueKind") in {"scalar", "boolean", "object", "array", "union"}
         )
 
     def _handle_config_variant_choice(
@@ -2442,6 +2446,12 @@ class WorkflowTreeApp(App):
             ConfirmModal(f"Remove config entry '{'.'.join(path)}' from pending YAML?"),
             lambda confirmed: self._remove_config_node(path) if confirmed else None,
         )
+
+    def action_clear_config_node(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or not self._config_node_can_unset(node):
+            return
+        self._unset_config_node(node)
 
     @staticmethod
     def _is_removable_config_path(path: list[str]) -> bool:
