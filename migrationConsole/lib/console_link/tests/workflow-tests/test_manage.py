@@ -31,6 +31,11 @@ from console_link.workflow.tui.workflow_manage_app import (
     reset_terminal_mouse_reporting,
 )
 from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
+from console_link.workflow.tui.config_edit_tree import (
+    EDIT_MODE_ALL,
+    FIELD_VISIBILITY_ESSENTIAL,
+    edit_state_resource_sections,
+)
 from console_link.workflow.tui.config_edit_exit_modal import ConfigEditExitModal
 from console_link.workflow.tui.confirm_modal import ConfirmModal
 from console_link.workflow.tui.container_select_modal import ContainerSelectModal
@@ -492,6 +497,40 @@ async def test_choice_select_modal_renders_mouse_ok_enter_affordance():
 
 
 @pytest.mark.asyncio
+async def test_choice_select_modal_initializes_current_choice_description():
+    modal = ChoiceSelectModal(
+        "Select clientAuth",
+        [
+            {
+                "label": "disabled",
+                "value": "disabled",
+                "description": "Do not require client certificates.",
+            },
+            {
+                "label": "enabled",
+                "value": "enabled",
+                "description": "Require client certificates signed by the trusted client CA.",
+            },
+        ],
+        current_value="enabled",
+    )
+
+    class ChoiceHarness(App):
+        def compose(self) -> ComposeResult:
+            yield Static("")
+
+        async def on_mount(self) -> None:
+            self.push_screen(modal)
+
+    app = ChoiceHarness()
+    async with app.run_test() as pilot:
+        assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+        assert "enabled (current)" == app.screen.query_one("#choice-1", Button).label.plain
+        choice_doc = app.screen.query_one("#choice-doc", Static)
+        assert "Require client certificates" in str(choice_doc.content)
+
+
+@pytest.mark.asyncio
 async def test_container_select_modal_renders_mouse_ok_enter_affordance():
     modal = ContainerSelectModal(["main", "sidecar"], "pod-a")
     result = {}
@@ -842,6 +881,62 @@ def edit_state_with_proxy_console_client_secret(secret_name=""):
                     "proxy-console-client-tls",
                     "Proxy Client Certificate Secret"
                 ),
+                "status": "ok",
+                "statusCounts": {},
+            },
+        ],
+    })
+    return state
+
+
+def edit_state_with_missing_proxy_client_auth_trust_source():
+    state = edit_state_with_proxy_tls_secret("proxy-tls")
+    tls_node = state["nodes"][0]["children"][0]["children"][0]["children"][0]["children"][0]
+    tls_node["children"].append({
+        "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth",
+        "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth"],
+        "label": "[REQ 1] clientAuth: < enabled >",
+        "value": "enabled",
+        "valueKind": "union",
+        "description": "Optional mutual TLS client-authentication configuration for the capture proxy listener.",
+        "presence": "optional",
+        "status": "required",
+        "statusCounts": {"required": 1},
+        "variants": [
+            {
+                "label": "disabled",
+                "value": "disabled",
+                "description": "Do not require client certificates when console commands connect to the proxy.",
+            },
+            {
+                "label": "enabled",
+                "value": "enabled",
+                "description": "Require client certificates signed by the configured trusted client CA.",
+            },
+        ],
+        "children": [
+            {
+                "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem",
+                "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaPem"],
+                "label": "[OK] trustedClientCaPem: <unset>",
+                "value": "",
+                "valueKind": "scalar",
+                "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy.",
+                "presence": "optional",
+                "status": "ok",
+                "statusCounts": {},
+            },
+            {
+                "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.consoleClientSecretName",
+                "path": [
+                    "traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "consoleClientSecretName"
+                ],
+                "label": "[OK] consoleClientSecretName: <unset>",
+                "value": "",
+                "valueKind": "scalar",
+                "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key "
+                "that migration-console commands use when connecting to this mTLS-enabled proxy.",
+                "presence": "optional",
                 "status": "ok",
                 "statusCounts": {},
             },
@@ -2515,6 +2610,42 @@ async def test_resource_view_edit_mode_variant_opens_single_required_child_picke
             }
             assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
             assert get_clean_text_label(tree.cursor_node) == "secretName: <required> [REQ 1]"
+
+
+def test_required_parent_group_reveals_repair_children_in_essential_mode():
+    """Group-level required refinements should not hide their optional repair fields."""
+    sections = edit_state_resource_sections(
+        edit_state_with_missing_proxy_client_auth_trust_source(),
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+    all_nodes = []
+    stack = [resource for section in sections for group in section.groups for resource in group.resources]
+    while stack:
+        node = stack.pop()
+        all_nodes.append(node)
+        stack.extend(node.children)
+
+    client_auth = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth"
+    )
+    assert [
+        child.tree_id for child in client_auth.children
+    ] == [
+        "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem",
+        "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.consoleClientSecretName",
+    ]
+
+
+def test_required_parent_group_auto_targets_first_editable_descendant():
+    edit_state = edit_state_with_missing_proxy_client_auth_trust_source()
+
+    assert WorkflowTreeApp._first_required_edit_target_id(
+        edit_state,
+        "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth",
+    ) == "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem"
 
 
 @pytest.mark.asyncio

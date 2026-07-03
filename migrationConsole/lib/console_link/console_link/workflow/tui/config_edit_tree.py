@@ -272,6 +272,8 @@ def _edit_node_to_resource_node(
         child for child in edit_node.get("children") or []
         if _should_render_edit_node(child, status_mode, field_visibility)
     ]
+    if not visible_children:
+        visible_children = _required_parent_repair_children(edit_node, status_mode, field_visibility)
     should_expand = _edit_node_should_expand(
         edit_node,
         status_mode,
@@ -304,6 +306,23 @@ def _edit_node_to_resource_node(
         tree_change_summary=_edit_change_summary(edit_node, status_mode),
         tree_sort_index=sort_index,
     )
+
+
+def _required_parent_repair_children(
+    edit_node: Dict[str, Any],
+    status_mode: str,
+    field_visibility: str,
+) -> list[Dict[str, Any]]:
+    """Show editable alternatives when a group-level validation has no child target."""
+    if field_visibility != FIELD_VISIBILITY_ESSENTIAL:
+        return []
+    status, counts = _effective_status(edit_node, status_mode)
+    if status != "required" and not counts.get("required"):
+        return []
+    return [
+        child for child in edit_node.get("children") or []
+        if child.get("valueKind") != "command" and not child.get("expert")
+    ]
 
 
 def _edit_node_should_expand(

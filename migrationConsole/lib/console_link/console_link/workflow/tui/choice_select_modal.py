@@ -72,7 +72,7 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
         )
         if self.choices:
             self.query_one(f"#choice-{choice_index}", Button).focus()
-            self._update_choice_doc()
+            self._update_choice_doc(choice_index)
 
     def action_focus_previous(self) -> None:
         self.focus_previous()
@@ -116,10 +116,11 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
         index = int(str(button.id).removeprefix("choice-"))
         self.dismiss(self.choices[index].get("value"))
 
-    def _update_choice_doc(self) -> None:
-        focused = self.app.focused or self.focused
+    def _update_choice_doc(self, index: int | None = None) -> None:
+        focused = self.focused or self.app.focused
         description = ""
-        if isinstance(focused, Button) and focused.id and focused.id.startswith("choice-"):
+        if index is None and isinstance(focused, Button) and focused.id and focused.id.startswith("choice-"):
             index = int(str(focused.id).removeprefix("choice-"))
+        if index is not None and 0 <= index < len(self.choices):
             description = str(self.choices[index].get("description") or "")
         self.query_one("#choice-doc", Static).update(escape(description))
