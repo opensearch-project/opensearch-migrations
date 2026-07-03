@@ -1258,7 +1258,18 @@ describe("editConfig state", () => {
         expect(findNode(
             configMapRef.editState.nodes,
             "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaFile.configMap"
-        )).toMatchObject({valueKind: "scalar", required: true});
+        )).toMatchObject({
+            valueKind: "scalar",
+            required: true,
+            externalRef: {
+                kind: "kubernetesResource",
+                purpose: "file-ref-config-map",
+                selection: {target: "scalarName"},
+                k8s: {
+                    resourceTypes: [{group: "", version: "v1", kind: "ConfigMap", namespaced: true}],
+                },
+            },
+        });
         expect(findNode(
             configMapRef.editState.nodes,
             "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaFile.path"

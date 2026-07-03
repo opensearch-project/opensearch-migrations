@@ -1046,7 +1046,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -1325,7 +1344,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -5109,7 +5147,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                              "x-external-ref": {
+                                                "kind": "kubernetesResource",
+                                                "purpose": "file-ref-config-map",
+                                                "displayName": "ConfigMap",
+                                                "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                "selection": {
+                                                  "target": "scalarName"
+                                                },
+                                                "k8s": {
+                                                  "resourceTypes": [
+                                                    {
+                                                      "group": "",
+                                                      "version": "v1",
+                                                      "kind": "ConfigMap",
+                                                      "namespaced": true
+                                                    }
+                                                  ]
+                                                }
+                                              }
                                             },
                                             "path": {
                                               "type": "string",
@@ -5186,7 +5243,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                              "x-external-ref": {
+                                                "kind": "kubernetesResource",
+                                                "purpose": "file-ref-config-map",
+                                                "displayName": "ConfigMap",
+                                                "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                "selection": {
+                                                  "target": "scalarName"
+                                                },
+                                                "k8s": {
+                                                  "resourceTypes": [
+                                                    {
+                                                      "group": "",
+                                                      "version": "v1",
+                                                      "kind": "ConfigMap",
+                                                      "namespaced": true
+                                                    }
+                                                  ]
+                                                }
+                                              }
                                             },
                                             "path": {
                                               "type": "string",
@@ -5335,7 +5411,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                        "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                                        "x-external-ref": {
+                                                          "kind": "kubernetesResource",
+                                                          "purpose": "file-ref-config-map",
+                                                          "displayName": "ConfigMap",
+                                                          "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                          "selection": {
+                                                            "target": "scalarName"
+                                                          },
+                                                          "k8s": {
+                                                            "resourceTypes": [
+                                                              {
+                                                                "group": "",
+                                                                "version": "v1",
+                                                                "kind": "ConfigMap",
+                                                                "namespaced": true
+                                                              }
+                                                            ]
+                                                          }
+                                                        }
                                                       },
                                                       "path": {
                                                         "type": "string",
@@ -5694,7 +5789,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                              "x-external-ref": {
+                                                "kind": "kubernetesResource",
+                                                "purpose": "file-ref-config-map",
+                                                "displayName": "ConfigMap",
+                                                "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                "selection": {
+                                                  "target": "scalarName"
+                                                },
+                                                "k8s": {
+                                                  "resourceTypes": [
+                                                    {
+                                                      "group": "",
+                                                      "version": "v1",
+                                                      "kind": "ConfigMap",
+                                                      "namespaced": true
+                                                    }
+                                                  ]
+                                                }
+                                              }
                                             },
                                             "path": {
                                               "type": "string",
@@ -5771,7 +5885,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                              "x-external-ref": {
+                                                "kind": "kubernetesResource",
+                                                "purpose": "file-ref-config-map",
+                                                "displayName": "ConfigMap",
+                                                "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                "selection": {
+                                                  "target": "scalarName"
+                                                },
+                                                "k8s": {
+                                                  "resourceTypes": [
+                                                    {
+                                                      "group": "",
+                                                      "version": "v1",
+                                                      "kind": "ConfigMap",
+                                                      "namespaced": true
+                                                    }
+                                                  ]
+                                                }
+                                              }
                                             },
                                             "path": {
                                               "type": "string",
@@ -5920,7 +6053,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                        "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                                        "x-external-ref": {
+                                                          "kind": "kubernetesResource",
+                                                          "purpose": "file-ref-config-map",
+                                                          "displayName": "ConfigMap",
+                                                          "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                          "selection": {
+                                                            "target": "scalarName"
+                                                          },
+                                                          "k8s": {
+                                                            "resourceTypes": [
+                                                              {
+                                                                "group": "",
+                                                                "version": "v1",
+                                                                "kind": "ConfigMap",
+                                                                "namespaced": true
+                                                              }
+                                                            ]
+                                                          }
+                                                        }
                                                       },
                                                       "path": {
                                                         "type": "string",
@@ -6623,7 +6775,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "configMap": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                        "x-external-ref": {
+                                          "kind": "kubernetesResource",
+                                          "purpose": "file-ref-config-map",
+                                          "displayName": "ConfigMap",
+                                          "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                          "selection": {
+                                            "target": "scalarName"
+                                          },
+                                          "k8s": {
+                                            "resourceTypes": [
+                                              {
+                                                "group": "",
+                                                "version": "v1",
+                                                "kind": "ConfigMap",
+                                                "namespaced": true
+                                              }
+                                            ]
+                                          }
+                                        }
                                       },
                                       "path": {
                                         "type": "string",
@@ -6902,7 +7073,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "configMap": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                        "x-external-ref": {
+                                          "kind": "kubernetesResource",
+                                          "purpose": "file-ref-config-map",
+                                          "displayName": "ConfigMap",
+                                          "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                          "selection": {
+                                            "target": "scalarName"
+                                          },
+                                          "k8s": {
+                                            "resourceTypes": [
+                                              {
+                                                "group": "",
+                                                "version": "v1",
+                                                "kind": "ConfigMap",
+                                                "namespaced": true
+                                              }
+                                            ]
+                                          }
+                                        }
                                       },
                                       "path": {
                                         "type": "string",
@@ -7667,7 +7857,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -7744,7 +7953,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -7893,7 +8121,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "configMap": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   },
                                                   "path": {
                                                     "type": "string",
@@ -8012,7 +8259,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -8089,7 +8355,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "configMap": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                          "x-external-ref": {
+                                            "kind": "kubernetesResource",
+                                            "purpose": "file-ref-config-map",
+                                            "displayName": "ConfigMap",
+                                            "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                            "selection": {
+                                              "target": "scalarName"
+                                            },
+                                            "k8s": {
+                                              "resourceTypes": [
+                                                {
+                                                  "group": "",
+                                                  "version": "v1",
+                                                  "kind": "ConfigMap",
+                                                  "namespaced": true
+                                                }
+                                              ]
+                                            }
+                                          }
                                         },
                                         "path": {
                                           "type": "string",
@@ -8238,7 +8523,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "configMap": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   },
                                                   "path": {
                                                     "type": "string",

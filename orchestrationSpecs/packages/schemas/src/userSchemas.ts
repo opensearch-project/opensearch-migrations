@@ -50,6 +50,7 @@ export type ExternalRefPurpose =
     | 'proxy-server-tls'
     | 'proxy-console-client-tls'
     | 'proxy-client-ca'
+    | 'file-ref-config-map'
     | 'kafka-scram-password'
     | 'kafka-ca'
     | 'log4j-config'
@@ -360,6 +361,14 @@ const LOGGING_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = {
         },
     },
 };
+
+const FILE_REF_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = kubernetesResourceRef({
+    purpose: 'file-ref-config-map',
+    displayName: 'ConfigMap',
+    description: 'Kubernetes ConfigMap containing the referenced file key.',
+    resourceTypes: [CORE_V1_CONFIG_MAP],
+});
+
 const TLS_SECRET_EXTERNAL_REF: ExternalRefHint = {
     ...kubernetesResourceRef({
         purpose: 'proxy-server-tls',
@@ -676,6 +685,7 @@ export const FILE_REF_FROM_IMAGE = z.object({
 
 export const FILE_REF_FROM_CONFIGMAP = z.object({
     configMap: z.string().min(1)
+        .externalRef(FILE_REF_CONFIG_MAP_EXTERNAL_REF)
         .describe("Name of a pre-existing Kubernetes ConfigMap."),
     path: CONFIGMAP_FILE_KEY
 }).strict();
