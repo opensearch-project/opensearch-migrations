@@ -2698,7 +2698,8 @@ class WorkflowTreeApp(App):
         if len(candidates) == 1:
             return candidates[0]
         if not candidates and cls._is_required_edit_target(parent):
-            return cls._first_editable_descendant_id(parent.get("children") or [])
+            descendants = cls._editable_descendant_ids(parent.get("children") or [])
+            return descendants[0] if len(descendants) == 1 else None
         return None
 
     @classmethod
@@ -2733,14 +2734,13 @@ class WorkflowTreeApp(App):
         return None
 
     @classmethod
-    def _first_editable_descendant_id(cls, nodes) -> Optional[str]:
+    def _editable_descendant_ids(cls, nodes) -> list[str]:
+        descendants = []
         for node in nodes or []:
             if cls._opens_config_edit_dialog(node) and node.get("id"):
-                return node.get("id")
-            child_target = cls._first_editable_descendant_id(node.get("children") or [])
-            if child_target:
-                return child_target
-        return None
+                descendants.append(node.get("id"))
+            descendants.extend(cls._editable_descendant_ids(node.get("children") or []))
+        return descendants
 
     def _array_add_auto_edit_target(self, node: Dict) -> tuple[Optional[str], Optional[list[str]]]:
         path = [str(part) for part in (node.get("path") or [])]

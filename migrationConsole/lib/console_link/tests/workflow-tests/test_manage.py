@@ -2639,13 +2639,13 @@ def test_required_parent_group_reveals_repair_children_in_essential_mode():
     ]
 
 
-def test_required_parent_group_auto_targets_first_editable_descendant():
+def test_required_parent_group_does_not_auto_target_ambiguous_repair_choices():
     edit_state = edit_state_with_missing_proxy_client_auth_trust_source()
 
     assert WorkflowTreeApp._first_required_edit_target_id(
         edit_state,
         "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth",
-    ) == "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem"
+    ) is None
 
 
 @pytest.mark.asyncio
