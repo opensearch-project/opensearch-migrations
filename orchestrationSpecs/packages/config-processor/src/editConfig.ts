@@ -67,6 +67,8 @@ import {
     jsonSchemaType,
     jsonDiscriminatedUnionValueForVariant,
     objectChildrenFromValue,
+    objectUnionBranches,
+    objectUnionValueForVariant,
     optionalObjectToggleNode,
     optionalSingleKeyUnionNode,
     recordKeyHint,
@@ -894,6 +896,17 @@ function setAtPath(config: any, path: string[], value: unknown): void {
             parent[key] = next;
         }
         return;
+    }
+    if (schema && objectUnionBranches(schema).length) {
+        const next = objectUnionValueForVariant(schema, parent[key], value);
+        if (next !== undefined || value === "unset") {
+            if (next === undefined) {
+                delete parent[key];
+            } else {
+                parent[key] = next;
+            }
+            return;
+        }
     }
     const jsonSchema = jsonSchemaForConfigPath(path);
     if (jsonSchema && jsonSchemaDiscriminator(jsonSchema)) {

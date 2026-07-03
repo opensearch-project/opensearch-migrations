@@ -110,6 +110,12 @@ export interface DiscriminatedUnionBranch {
     description?: string;
 }
 
+export interface ObjectUnionBranch {
+    value: string;
+    optionSchema: any;
+    description?: string;
+}
+
 const STATUS_PRIORITY: EditNodeStatus[] = ["blocked", "error", "required", "gated", "warning", "changed", "ok"];
 const STATUS_COUNT_KEYS: Partial<Record<EditNodeStatus, keyof StatusCounts>> = {
     required: "required",
@@ -898,6 +904,44 @@ export function singleKeyUnionBranchFor(schema: any, value: string): SingleKeyUn
     return singleKeyUnionBranches(schema).find(branch => branch.value === value);
 }
 
+export function objectUnionBranches(schema: any): ObjectUnionBranch[] {
+    const options = schemaOptions(schema);
+    if (!options.length) {
+        return [];
+    }
+    const optionShapes = options.map(optionSchema => schemaShape(optionSchema));
+    if (!optionShapes.every(Boolean)) {
+        return [];
+    }
+    const requiredKeysByBranch = optionShapes.map(shape =>
+        Object.entries(shape ?? {})
+            .filter(([, fieldSchema]) => isRequiredSchema(fieldSchema))
+            .map(([key]) => key)
+    );
+    const sharedRequiredKeys = requiredKeysByBranch.reduce<Set<string>>((shared, keys, index) => {
+        const keySet = new Set(keys);
+        if (index === 0) {
+            return keySet;
+        }
+        return new Set([...shared].filter(key => keySet.has(key)));
+    }, new Set());
+    const branches = options.map((optionSchema, index) => {
+        const selectorKeys = requiredKeysByBranch[index].filter(key => !sharedRequiredKeys.has(key));
+        if (selectorKeys.length !== 1) {
+            return undefined;
+        }
+        return {
+            value: selectorKeys[0],
+            optionSchema,
+            description: schemaDescription(optionSchema),
+        };
+    });
+    const values = branches.map(branch => branch?.value);
+    return branches.every(Boolean) && new Set(values).size === values.length
+        ? branches as ObjectUnionBranch[]
+        : [];
+}
+
 function selectedSingleKeyUnionBranch(
     branches: SingleKeyUnionBranch[],
     value: unknown,
@@ -1215,6 +1259,65 @@ export function discriminatedUnionNode(
         variants,
         children: selected
             ? schemaObjectChildren(path, selected.optionSchema, value, new Set([discriminator]))
+            : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
+export function objectUnionNode(
+    path: string[],
+    key: string,
+    schema: any,
+    value: unknown,
+    hasValue: boolean,
+    description: string,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode | undefined {
+    const branches = objectUnionBranches(schema);
+    if (!branches.length) {
+        return undefined;
+    }
+
+    const selected = isPlainObject(value)
+        ? branches.find(branch => Object.hasOwn(value, branch.value))
+        : undefined;
+    const unset = !required && !hasValue && value === undefined;
+    const hasObjectValue = value !== undefined && value !== null;
+    const missing = required && !selected;
+    const unknown = hasObjectValue && !selected;
+    const diagnostics: EditDiagnostic[] = [];
+    if (missing) {
+        diagnostics.push({severity: "required", message: `${key} is required.`, path});
+    } else if (unknown) {
+        diagnostics.push({
+            severity: "error",
+            message: `Unknown ${key} variant. Expected ${branches.map(branch => branch.value).join(" or ")}.`,
+            path,
+        });
+    }
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${unset ? "unset" : selected?.value ?? (required ? "required" : "unknown")} >`,
+        value: unset ? "unset" : selected?.value,
+        valueKind: "union",
+        presence,
+        expert,
+        description,
+        status: missing ? "required" : unknown ? "error" : "ok",
+        diagnostics,
+        variants: [
+            ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
+            ...branches.map(branch => ({
+                label: branch.value,
+                value: branch.value,
+                description: branch.description,
+            })),
+        ],
+        children: selected
+            ? schemaObjectChildren(path, selected.optionSchema, value)
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -1548,6 +1651,10 @@ export function schemaFieldNode(
     if (unionNode) {
         return markValueState(unionNode, valueDefaulted, hasValue);
     }
+    const objectVariantNode = objectUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
+    if (objectVariantNode) {
+        return markValueState(objectVariantNode, valueDefaulted, hasValue);
+    }
     if (zodEnumValues(schema).length > 0) {
         return markValueState(zodEnumNode(path, key, schema, value, userRequired, expert, presence, defaultValue), valueDefaulted, hasValue);
     }
@@ -1779,6 +1886,12 @@ export function childSchemaAtPath(schema: any, path: string[]): any | undefined 
         return childSchemaAtPath(keyedBranch.fieldSchema, rest);
     }
 
+    const objectBranch = objectUnionBranches(schema).find(branch => Boolean(schemaShape(branch.optionSchema)?.[part]));
+    if (objectBranch) {
+        const branchShape = schemaShape(objectBranch.optionSchema);
+        return childSchemaAtPath(branchShape?.[part], rest);
+    }
+
     const discriminator = discriminatorForSchema(schema);
     if (discriminator) {
         const branch = schemaOptions(schema).find(optionSchema => Boolean(schemaShape(optionSchema)?.[part]));
@@ -1812,6 +1925,48 @@ export function singleKeyUnionValueForVariant(schema: any, existing: any, varian
     return {
         [branch.value]: isPlainObject(existing?.[branch.value]) ? existing[branch.value] : {},
     };
+}
+
+export function objectUnionValueForVariant(schema: any, existing: any, variant: unknown): unknown {
+    if (isUnsetVariant(variant)) {
+        return undefined;
+    }
+    const branch = objectUnionBranches(schema).find(item => item.value === variant);
+    if (!branch) {
+        throw new Error(`Unknown variant: ${String(variant)}`);
+    }
+    const shape = schemaShape(branch.optionSchema) ?? {};
+    const next: Record<string, unknown> = {};
+    for (const [key, fieldSchema] of Object.entries(shape)) {
+        if (isPlainObject(existing) && Object.hasOwn(existing, key)) {
+            next[key] = existing[key];
+            continue;
+        }
+        const defaultValue = defaultValueForSchema(fieldSchema);
+        if (defaultValue !== undefined) {
+            next[key] = defaultValue;
+        } else if (isRequiredSchema(fieldSchema)) {
+            next[key] = emptyRequiredValueForSchema(fieldSchema);
+        }
+    }
+    return next;
+}
+
+function emptyRequiredValueForSchema(schema: any): unknown {
+    const scalarType = schemaScalarType(schema);
+    if (scalarType === "number") {
+        return 0;
+    }
+    if (scalarType === "boolean") {
+        return false;
+    }
+    if (schemaConstructorName(schema) === "ZodArray") {
+        return [];
+    }
+    if (schemaShape(schema) || schemaConstructorName(schema) === "ZodRecord") {
+        return {};
+    }
+    return "";
 }
 
 function isUnsetVariant(variant: unknown): boolean {
