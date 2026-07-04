@@ -460,13 +460,13 @@ def _has_authored_edit_value(edit_node: Dict[str, Any]) -> bool:
         return False
     if edit_node.get("valueDefaulted"):
         return False
-    if edit_node.get("valueKind") in {"array", "object", "record"}:
-        return False
     if "value" not in edit_node:
         return False
     value = edit_node.get("value")
     if value in (None, "", "unset"):
         return False
+    if edit_node.get("valueKind") in {"array", "object", "record"}:
+        return bool(value)
     return True
 
 

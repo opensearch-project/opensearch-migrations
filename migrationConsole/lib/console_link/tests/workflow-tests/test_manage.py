@@ -3792,6 +3792,146 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
             assert not find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
 
 
+def test_resource_view_edit_mode_keeps_authored_object_config_visible():
+    """Essential edit mode keeps non-empty authored object values visible."""
+    edit_state = {
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:traffic.proxies",
+                        "path": ["traffic", "proxies"],
+                        "label": "Capture",
+                        "valueKind": "record",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:traffic.proxies.cap",
+                                "path": ["traffic", "proxies", "cap"],
+                                "label": "cap",
+                                "valueKind": "object",
+                                "status": "ok",
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.proxies.cap.source",
+                                        "path": ["traffic", "proxies", "cap", "source"],
+                                        "label": "source: source",
+                                        "value": "source",
+                                        "valueKind": "scalar",
+                                        "status": "ok",
+                                    },
+                                    {
+                                        "id": "edit:traffic.proxies.cap.proxyConfig",
+                                        "path": ["traffic", "proxies", "cap", "proxyConfig"],
+                                        "label": "proxyConfig: configured",
+                                        "value": {"tls": {"mode": "existingSecret"}},
+                                        "valueKind": "object",
+                                        "status": "ok",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+    sections = edit_state_resource_sections(
+        edit_state,
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+
+    cap = sections[0].groups[0].resources[0]
+    assert [child.tree_id for child in cap.children] == [
+        "edit:traffic.proxies.cap.source",
+        "edit:traffic.proxies.cap.proxyConfig",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_maps_edit_expansion_back_to_status():
+    """Expanding a mapped resource in edit mode keeps it expanded when returning to status."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "traffic:\n  proxies:\n    cap: {}\n",
+                "edit_state": edit_state_with_changed_capture_and_snapshot_migration(),
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="captureproxies",
+                    display_name="Capture",
+                    resources=[
+                        ResourceNode(
+                            name="cap",
+                            plural="captureproxies",
+                            phase="Pending Config",
+                            depends_on=[],
+                            spec={"listenPort": 9201},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:cap") is not None)
+
+            find_tree_node_by_id(tree.root, "resource:cap").collapse()
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            cap_edit = find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap")
+            assert cap_edit is not None
+            assert not cap_edit.is_expanded
+
+            cap_edit.expand()
+            await pilot.press("escape")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    get_clean_text_label(tree.root) == "Migration Status"
+                    and find_tree_node_by_id(tree.root, "resource:cap") is not None
+                    and find_tree_node_by_id(tree.root, "resource:cap").is_expanded
+                ),
+            )
+
+
 def test_workflow_config_value_state_uses_schema_default_only_when_parent_exists():
     node = {
         "path": ["traffic", "proxies", "cap", "kafka"],

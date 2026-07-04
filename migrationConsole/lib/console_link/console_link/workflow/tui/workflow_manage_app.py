@@ -319,15 +319,11 @@ class WorkflowTreeApp(App):
         else:
             self._tree_state.update(sections, workflow_data)
         self.tree_root_widget.focus()
-        changed_expansion_ids: set[str] = set()
         if self._expand_changed_resources_on_next_render:
             self._expand_changed_resources_on_next_render = False
-            changed_expansion_ids = self._changed_resource_expansion_ids(sections)
             self._expand_changed_resource_nodes(sections)
         if self._restore_resource_collapsed_ids_on_next_render is not None:
-            self._restore_collapsed_tree_ids(
-                self._restore_resource_collapsed_ids_on_next_render - changed_expansion_ids
-            )
+            self._restore_collapsed_tree_ids(self._restore_resource_collapsed_ids_on_next_render)
             self._restore_resource_collapsed_ids_on_next_render = None
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
@@ -1534,6 +1530,7 @@ class WorkflowTreeApp(App):
 
     def _discard_config_edit(self) -> None:
         """Discard the current edit session and restore the live resource tree."""
+        collapsed_ids_after_edit = self._resource_collapsed_ids_after_edit()
         self._edit_mode = False
         self._edit_loading = False
         self._edit_state = None
@@ -1545,7 +1542,7 @@ class WorkflowTreeApp(App):
         self._after_config_edit_save = None
         self._cancel_config_edit_validation()
         self._set_resource_value_mode(EDIT_MODE_ALL)
-        self._restore_resource_collapsed_ids_on_next_render = self._resource_collapsed_ids_before_edit
+        self._restore_resource_collapsed_ids_on_next_render = collapsed_ids_after_edit
         self._resource_collapsed_ids_before_edit = None
         self.query_one("#edit-help", Static).display = False
         self.action_manual_refresh()
@@ -1595,6 +1592,37 @@ class WorkflowTreeApp(App):
             for edit_id in edit_ids_by_resource_name.get(name, []):
                 mapped.setdefault(edit_id, expanded)
         return mapped
+
+    def _resource_collapsed_ids_after_edit(self) -> set[str]:
+        """Map edit-tree expansion back onto resource-tree ids for returning to status."""
+        collapsed = set(self._resource_collapsed_ids_before_edit or set())
+        current = self._tree_expansion_state()
+        if not any(node_id.startswith("edit:") for node_id in current):
+            return collapsed
+
+        for edit_id, expanded in current.items():
+            for resource_id in self._resource_tree_ids_for_edit_id(edit_id):
+                if expanded:
+                    collapsed.discard(resource_id)
+                else:
+                    collapsed.add(resource_id)
+        return collapsed
+
+    def _resource_tree_ids_for_edit_id(self, edit_id: str) -> set[str]:
+        ids = {
+            source_id
+            for source_id, target_id in EDIT_ID_BY_TREE_ID.items()
+            if target_id == edit_id
+        }
+        node = self._find_edit_node_by_id((self._edit_state or {}).get("nodes") or [], edit_id)
+        if node:
+            path = tuple(str(part) for part in (node.get("path") or []))
+            if self._is_edit_resource_path(path):
+                ids.update(
+                    f"{RESOURCE_ID_PREFIX}{name}"
+                    for name in self._edit_resource_names(node, path)
+                )
+        return ids
 
     @staticmethod
     def _edit_ids_by_resource_name(edit_state: Dict[str, Any]) -> Dict[str, list[str]]:
