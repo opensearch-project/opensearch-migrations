@@ -1173,7 +1173,8 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
         .describe("Kubernetes resource limits and requests for the replayer container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
-            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
+        .default(DEFAULT_RESOURCES.REPLAYER),
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({

@@ -603,6 +603,17 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.removeAuthHeader")).toMatchObject({
             valueKind: "boolean",
         });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.resources")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+            status: "ok",
+            valueDefaulted: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.resources.limits.cpu")).toMatchObject({
+            valueKind: "scalar",
+            status: "ok",
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.resources.limits.cpu")?.required).not.toBe(true);
     });
 
     it("renders generic object override fields from the unified JSON schema", () => withUnifiedSchemaFixture(() => {

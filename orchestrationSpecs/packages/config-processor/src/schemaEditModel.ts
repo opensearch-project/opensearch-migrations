@@ -586,7 +586,7 @@ function jsonSchemaUnionNode(
         }] : [],
         variants,
         children: selectedBranch
-            ? jsonSchemaObjectChildren(path, selectedBranch, value, new Set([discriminator]))
+            ? jsonSchemaObjectChildren(path, selectedBranch, value, value, new Set([discriminator]))
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -668,10 +668,12 @@ function jsonSchemaObjectChildren(
     rootPath: string[],
     schema: JsonSchema,
     value: unknown,
+    authoredValue: unknown,
     excludedKeys: Set<string> = new Set(),
 ): EditNode[] {
     const requiredKeys = jsonSchemaRequired(schema);
     const objectValue = isPlainObject(value) ? value : {};
+    const authoredObject = isPlainObject(authoredValue) ? authoredValue : {};
     return Object.entries(jsonSchemaProperties(schema))
         .filter(([key]) => !excludedKeys.has(key))
         .map(([key, childSchema]) => jsonSchemaFieldNode(
@@ -680,6 +682,7 @@ function jsonSchemaObjectChildren(
             childSchema,
             objectValue,
             requiredKeys.has(key),
+            authoredObject,
         ));
 }
 
@@ -757,12 +760,13 @@ function jsonSchemaFieldNode(
     schema: JsonSchema,
     config: Record<string, unknown>,
     required = false,
+    authoredConfig: Record<string, unknown> = config,
 ): EditNode {
     const resolved = resolveJsonSchemaRef(schema) ?? schema;
     const path = [...rootPath, key];
-    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, resolved.default);
+    const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, resolved.default, authoredConfig);
     const description = jsonSchemaDescription(resolved);
-    const userRequired = jsonSchemaRequiredForUser(resolved, required, resolved.default);
+    const userRequired = jsonSchemaRequiredForUser(resolved, required, resolved.default) && !valueDefaulted;
     const presence: EditNode["presence"] = userRequired ? "required" : "optional";
     const expert = resolved["x-expert"] === true || isExpertDescription(description);
     const essential = jsonSchemaEssential(resolved);
@@ -787,7 +791,7 @@ function jsonSchemaFieldNode(
     const childNodes = recordItemSchema
         ? jsonSchemaRecordChildren(path, resolved, value)
         : containerKind === "object"
-            ? jsonSchemaObjectChildren(path, resolved, value)
+            ? jsonSchemaObjectChildren(path, resolved, value, authoredConfig[key])
             : jsonSchemaArrayChildren(path, resolved, value);
     const minItems = containerKind === "array" ? jsonSchemaMinItems(resolved) : undefined;
     const missingArrayItems = userRequired && minItems !== undefined && Array.isArray(value) && value.length < minItems;

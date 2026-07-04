@@ -3340,6 +3340,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                         }
                       },
+                      "default": {
+                        "limits": {
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
+                        },
+                        "requests": {
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
+                        }
+                      },
                       "required": [
                         "limits",
                         "requests"
@@ -7675,6 +7685,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "memory"
                         ],
                         "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                      }
+                    },
+                    "default": {
+                      "limits": {
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
+                      },
+                      "requests": {
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       }
                     },
                     "required": [
