@@ -537,6 +537,8 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
         children: schemaFieldNodes(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, value, [
             {key: "fromSource", referenceOptions: ctx.sourceOptions},
             {key: "toTarget", referenceOptions: ctx.targetOptions},
+            "perSnapshotConfig",
+            "skipApprovals",
         ]),
     });
 }

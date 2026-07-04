@@ -2042,13 +2042,21 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 
 export const SNAPSHOT_MIGRATION_CONFIG_ARRAY =
     z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)
+    .min(1)
+    .uiHint({kind: 'array', addLabel: 'migration pass'})
     .describe("List of migrations to execute for a single snapshot. " +
         " Each migration must configure metadata migration, document backfill, or both." +
         " These migrations will execute concurrently as dependent snapshots finish.");
 
 export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
     z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/),
-        SNAPSHOT_MIGRATION_CONFIG_ARRAY.min(1))
+        SNAPSHOT_MIGRATION_CONFIG_ARRAY)
+    .uiHint({
+        kind: 'record',
+        addLabel: 'snapshot name',
+        keyPattern: '^[a-zA-Z][a-zA-Z0-9]*',
+        message: "Use a snapshot name defined under the selected source cluster's snapshotInfo.snapshots.",
+    })
     .describe("Map of snapshot names to their migration configurations. Keys must match snapshot names defined in the source cluster's snapshotInfo.snapshots.");
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({

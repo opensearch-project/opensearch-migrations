@@ -6292,9 +6292,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   }
                 }
               },
-              "minItems": 1
+              "minItems": 1,
+              "description": "List of migrations to execute for a single snapshot.  Each migration must configure metadata migration, document backfill, or both. These migrations will execute concurrently as dependent snapshots finish.",
+              "x-ui-hint": {
+                "kind": "array",
+                "addLabel": "migration pass"
+              }
             },
-            "description": "Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."
+            "description": "Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill).",
+            "x-ui-hint": {
+              "kind": "record",
+              "addLabel": "snapshot name",
+              "keyPattern": "^[a-zA-Z][a-zA-Z0-9]*",
+              "message": "Use a snapshot name defined under the selected source cluster's snapshotInfo.snapshots."
+            }
           }
         },
         "required": [
