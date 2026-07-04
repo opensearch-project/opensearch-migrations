@@ -33,6 +33,7 @@ from console_link.workflow.tui.workflow_manage_app import (
 from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
 from console_link.workflow.tui.config_edit_tree import (
     EDIT_MODE_ALL,
+    FIELD_VISIBILITY_ALL,
     FIELD_VISIBILITY_ESSENTIAL,
     edit_state_resource_sections,
 )
@@ -3957,6 +3958,35 @@ def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
         node.tree_id == "edit:traffic.replayers.replay.dependsOnSnapshotMigrations"
         for node in all_nodes
     )
+
+
+def test_resource_view_edit_mode_marks_expert_fields_when_visible():
+    """Expert edit fields should be visually distinguishable once All fields are shown."""
+    sections = edit_state_resource_sections(
+        edit_state_with_field_visibility(),
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ALL,
+    )
+
+    all_nodes = []
+    stack = [resource for section in sections for group in section.groups for resource in group.resources]
+    while stack:
+        node = stack.pop()
+        all_nodes.append(node)
+        stack.extend(node.children)
+
+    service_type = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:sourceClusters.legacy.serviceType"
+    )
+    allow_insecure = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:sourceClusters.legacy.allowInsecure"
+    )
+
+    assert service_type.tree_label.plain == "serviceType: LoadBalancer [expert]"
+    assert allow_insecure.tree_label.plain == "allowInsecure: false"
 
 
 @pytest.mark.asyncio

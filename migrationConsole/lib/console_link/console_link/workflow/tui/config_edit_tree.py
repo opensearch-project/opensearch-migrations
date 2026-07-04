@@ -54,6 +54,8 @@ FIELD_VISIBILITY_LABELS = {
     FIELD_VISIBILITY_STANDARD: "Standard",
     FIELD_VISIBILITY_ALL: "All",
 }
+EXPERT_LABEL = "[expert]"
+EXPERT_LABEL_STYLE = "dim cyan"
 _STATE_LABELS = {
     EDIT_MODE_DEPLOYED: "deployed",
     EDIT_MODE_CURRENT_WORKFLOW: "workflow",
@@ -487,8 +489,14 @@ def _node_label(edit_node: Dict[str, Any], value_mode: str, status_mode: str) ->
     status, counts = _effective_status(edit_node, status_mode)
     body = _label_body(edit_node, value_mode)
     badge = format_status_badge(status, counts)
-    label = f"{body} {badge}" if badge else body
-    return Text(label, style=STATUS_STYLE.get(status, ""))
+    status_style = STATUS_STYLE.get(status, "")
+    label = Text(body, style=status_style)
+    if edit_node.get("expert"):
+        label.append(" ", style=status_style)
+        label.append(EXPERT_LABEL, style=status_style or EXPERT_LABEL_STYLE)
+    if badge:
+        label.append(f" {badge}", style=status_style)
+    return label
 
 
 def _label_body(edit_node: Dict[str, Any], value_mode: str) -> str:
