@@ -560,9 +560,11 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
             field["name"]: self._field_value(self._field_input_ids[field["name"]])
             for field in self.fields
         }
-        message = self._validation_message(values)
+        validation = self._validation_error(values)
+        message = validation[0] if validation else None
         self.query_one("#validation", Static).update(escape(message or ""))
         if message:
+            self._focus_field_id(validation[1])
             return
         self.dismiss(values)
 
@@ -572,25 +574,34 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         else:
             self.dismiss(None)
 
-    def _validation_message(self, values: Dict[str, str]) -> Optional[str]:
+    def _validation_error(self, values: Dict[str, str]) -> Optional[tuple[str, Optional[str]]]:
         for field in self.fields:
             name = field["name"]
             value = values.get(name, "")
+            field_id = self._field_input_ids.get(name)
             if self.mode == "update" and _field_is_sensitive(field) and value == "":
                 output_key = _output_key_for_field(self.external_ref, name)
                 if output_key in self.existing_keys:
                     continue
             if field.get("required") and not value.strip():
-                return f"{field.get('label') or name} is required."
+                return f"{field.get('label') or name} is required.", field_id
             validation_message = _field_validation_message(field, value)
             if validation_message:
-                return validation_message
+                return validation_message, field_id
             confirm_id = self._confirm_input_ids.get(name)
             if confirm_id:
                 confirm_value = self._field_value(confirm_id)
                 if value != confirm_value:
-                    return f"{field.get('label') or name} and confirmation do not match."
+                    return f"{field.get('label') or name} and confirmation do not match.", confirm_id
         return None
+
+    def _focus_field_id(self, field_id: Optional[str]) -> None:
+        if not field_id:
+            return
+        widget = self.query_one(f"#{field_id}")
+        widget.focus()
+        if isinstance(widget, Input):
+            widget.cursor_position = len(widget.value)
 
     def _input_widget_for_field(self, field: Dict[str, Any], field_id: str, confirm: bool = False) -> Widget:
         placeholder = self._placeholder_for_field(field)

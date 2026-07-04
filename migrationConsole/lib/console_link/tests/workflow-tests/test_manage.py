@@ -3152,9 +3152,14 @@ async def test_resource_view_edit_mode_external_config_map_picker_creates_and_ap
             assert isinstance(app.screen.query_one("#field-1"), TextArea)
 
             app.screen.query_one("#field-0", Input).value = "new-log4j"
+            await pilot.press("enter")
+            assert "log4j2.properties is required" in str(app.screen.query_one("#validation").content)
+            assert app.screen.focused is app.screen.query_one("#field-1", TextArea)
+
             app.screen.query_one("#field-1", TextArea).load_text("not a properties file")
             app.screen.action_submit()
             assert "Log4j2 property assignment" in str(app.screen.query_one("#validation").content)
+            assert app.screen.focused is app.screen.query_one("#field-1", TextArea)
 
             app.screen.query_one("#field-1", TextArea).load_text("status = warn\nrootLogger.level = info\n")
             app.screen.action_submit()
