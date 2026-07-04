@@ -587,6 +587,14 @@ describe("editConfig state", () => {
             sourcePath: ["targetClusters"],
             options: [{label: "prod", value: "prod"}],
         });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.dependsOnSnapshotMigrations")).toMatchObject({
+            valueKind: "array",
+            presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
     });
 
     it("renders generic object override fields from the unified JSON schema", () => withUnifiedSchemaFixture(() => {

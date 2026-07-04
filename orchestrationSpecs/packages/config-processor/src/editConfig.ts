@@ -458,6 +458,8 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
         children: schemaFieldNodes(REPLAYER_CONFIG, rootPath, value, [
             {key: "fromCapturedTraffic", referenceOptions: ctx.capturedTrafficOptions},
             {key: "toTarget", referenceOptions: ctx.targetOptions},
+            "dependsOnSnapshotMigrations",
+            "replayerConfig",
         ]),
     });
 }
