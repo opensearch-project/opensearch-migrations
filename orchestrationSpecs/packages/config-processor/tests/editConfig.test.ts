@@ -661,6 +661,7 @@ describe("editConfig state", () => {
             valueKind: "object",
             presence: "required",
         });
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0")?.label).toContain("metadata + documents");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig")).toMatchObject({
             valueKind: "object",
             presence: "optional",
@@ -703,6 +704,48 @@ describe("editConfig state", () => {
         expect(findNode(addedMigrationPass.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0")).toMatchObject({
             valueKind: "object",
             presence: "required",
+            status: "required",
+            label: "migration pass 1: choose metadata and/or document backfill",
+        });
+        expect(findNode(addedMigrationPass.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.metadataMigrationConfig:add")).toMatchObject({
+            valueKind: "command",
+            label: "+ Add metadata migration",
+            command: {
+                requiresName: false,
+                autoEditAdded: false,
+            },
+        });
+        expect(findNode(addedMigrationPass.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.documentBackfillConfig:add")).toMatchObject({
+            valueKind: "command",
+            label: "+ Add document backfill",
+            command: {
+                requiresName: false,
+                autoEditAdded: false,
+            },
+        });
+
+        const addedMetadataMigration = applyEditOperationToObject(addedMigrationPassConfig, {
+            op: "add",
+            path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig", "all", "0", "metadataMigrationConfig"],
+            value: {},
+        });
+        const addedMetadataMigrationConfig = parse(addedMetadataMigration.yaml);
+
+        expect(addedMetadataMigrationConfig.snapshotMigrationConfigs[0].perSnapshotConfig.all).toEqual([
+            {metadataMigrationConfig: {}},
+        ]);
+        expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0")).toMatchObject({
+            valueKind: "object",
+            status: "ok",
+            label: "migration pass 1: metadata",
+        });
+        expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.metadataMigrationConfig")).toMatchObject({
+            valueKind: "object",
+            presence: "optional",
+        });
+        expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.documentBackfillConfig:add")).toMatchObject({
+            valueKind: "command",
+            label: "+ Add document backfill",
         });
     });
 

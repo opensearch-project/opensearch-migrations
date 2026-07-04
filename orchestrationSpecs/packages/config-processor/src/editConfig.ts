@@ -29,6 +29,7 @@ import {
     TARGET_CLUSTER_CONFIG,
     TARGET_CLUSTERS_MAP,
     TRAFFIC_CONFIG,
+    USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     USER_PROXY_OPTIONS,
     USER_PROXY_PROCESS_OPTION_KEYS,
     USER_PROXY_WORKFLOW_OPTION_KEYS,
@@ -116,6 +117,7 @@ const TARGET_RECORD_HINT = uiHintOf(TARGET_CLUSTERS_MAP);
 const TRAFFIC_PROXIES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["proxies"]);
 const TRAFFIC_S3_SOURCES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["s3Sources"]);
 const TRAFFIC_REPLAYERS_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["replayers"]);
+const SNAPSHOT_PER_CONFIG_HINT = uiHintAt(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, ["perSnapshotConfig"]);
 const SNAPSHOT_MIGRATION_ARRAY_HINT = uiHintAt(OVERALL_MIGRATION_CONFIG, ["snapshotMigrationConfigs"]) ?? {
     kind: "array" as const,
     addLabel: "snapshot migration",
@@ -527,6 +529,12 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
     const rootPath = ["snapshotMigrationConfigs", String(index)];
     const fromSource = value?.fromSource ?? "";
     const toTarget = value?.toTarget ?? "";
+    const children = schemaFieldNodes(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, value, [
+        {key: "fromSource", referenceOptions: ctx.sourceOptions},
+        {key: "toTarget", referenceOptions: ctx.targetOptions},
+    ]);
+    children.push(snapshotPerConfigNode([...rootPath, "perSnapshotConfig"], value?.perSnapshotConfig));
+    children.push(schemaFieldNodeFor(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, "skipApprovals", value));
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
@@ -534,13 +542,124 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
         valueKind: "object",
         description: SNAPSHOT_MIGRATION_DESCRIPTION,
         status: "ok",
-        children: schemaFieldNodes(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, value, [
-            {key: "fromSource", referenceOptions: ctx.sourceOptions},
-            {key: "toTarget", referenceOptions: ctx.targetOptions},
-            "perSnapshotConfig",
-            "skipApprovals",
-        ]),
+        children,
     });
+}
+
+function snapshotPerConfigNode(path: string[], value: unknown): EditNode {
+    const recordValue = isPlainObject(value) ? value : {};
+    const children = Object.entries(recordValue)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([snapshotName, migrations]) => snapshotMigrationPassArrayNode([...path, snapshotName], snapshotName, migrations));
+    children.push(addRow(
+        path,
+        "snapshot name",
+        "Create a new snapshot name in pending workflow YAML.",
+        true,
+        recordKeyHint(SNAPSHOT_PER_CONFIG_HINT),
+        false,
+        true,
+    ));
+    const missing = value === undefined || value === null;
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `perSnapshotConfig: ${missing ? "<required>" : `${Object.keys(recordValue).length} item${Object.keys(recordValue).length === 1 ? "" : "s"}`}`,
+        value,
+        valueKind: "record",
+        presence: "required",
+        description: schemaFieldDescription(
+            NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
+            "perSnapshotConfig",
+            "Per-snapshot migration configurations.",
+        ),
+        required: true,
+        inputHint: SNAPSHOT_PER_CONFIG_HINT,
+        status: missing ? "required" : "ok",
+        diagnostics: missing ? [{severity: "required", message: "perSnapshotConfig is required.", path}] : [],
+        children,
+    });
+}
+
+function snapshotMigrationPassArrayNode(path: string[], snapshotName: string, value: unknown): EditNode {
+    const arrayValue = Array.isArray(value) ? value : [];
+    const children = [
+        ...arrayValue.map((itemValue, index) => snapshotMigrationPassNode([...path, String(index)], index, itemValue)),
+        addRow(
+            path,
+            "migration pass",
+            "Add a migration pass for this snapshot. Each pass can migrate metadata, backfill documents, or both.",
+            false,
+            undefined,
+            false,
+            false,
+            false,
+        ),
+    ];
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${snapshotName}: ${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`,
+        value,
+        valueKind: "array",
+        presence: "required",
+        description: "Migration passes to run for this snapshot.",
+        required: true,
+        status: "ok",
+        children,
+    });
+}
+
+function snapshotMigrationPassNode(path: string[], index: number, value: unknown): EditNode {
+    const config = isPlainObject(value) ? value : {};
+    const hasMetadata = Object.hasOwn(config, "metadataMigrationConfig");
+    const hasBackfill = Object.hasOwn(config, "documentBackfillConfig");
+    const children = [
+        schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "label", config),
+        hasMetadata
+            ? schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "metadataMigrationConfig", config)
+            : addSnapshotMigrationPassBranch(path, "metadataMigrationConfig", "metadata migration"),
+        hasBackfill
+            ? schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "documentBackfillConfig", config)
+            : addSnapshotMigrationPassBranch(path, "documentBackfillConfig", "document backfill"),
+    ];
+    const missingMigrationType = !hasMetadata && !hasBackfill;
+    const migrationTypes = [
+        hasMetadata ? "metadata" : undefined,
+        hasBackfill ? "documents" : undefined,
+    ].filter(Boolean).join(" + ");
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `migration pass ${index + 1}: ${migrationTypes || "choose metadata and/or document backfill"}`,
+        value,
+        valueKind: "object",
+        presence: "required",
+        description: schemaDescription(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
+        required: true,
+        status: missingMigrationType ? "required" : "ok",
+        diagnostics: missingMigrationType
+            ? [{
+                severity: "required",
+                message: "Add metadata migration, document backfill, or both.",
+                path,
+            }]
+            : [],
+        children,
+    });
+}
+
+function addSnapshotMigrationPassBranch(path: string[], key: "metadataMigrationConfig" | "documentBackfillConfig", label: string): EditNode {
+    return addRow(
+        [...path, key],
+        label,
+        schemaFieldDescription(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, key, `Add ${label} configuration.`),
+        false,
+        undefined,
+        false,
+        false,
+        false,
+    );
 }
 
 function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext): EditNode {
@@ -1039,6 +1158,15 @@ function addAtPath(config: any, path: string[], value: unknown): void {
         ? String((value as { name: unknown }).name).trim()
         : "";
     if (!name) {
+        const schema = schemaForConfigPath(path);
+        if (schema) {
+            const {parent, key} = parentAtPath(config, path);
+            if (key in parent) {
+                throw new Error(`Config entry already exists at ${path.join(".")}`);
+            }
+            parent[key] = defaultConfigValueForSchema(schema);
+            return;
+        }
         throw new Error("Add operation requires a non-empty name");
     }
     const {parent, key} = parentAtPath(config, [...path, name]);

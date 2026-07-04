@@ -1842,7 +1842,10 @@ class WorkflowTreeApp(App):
         if kind == "command" and node.get("id", "").endswith(":add"):
             command = node.get("command") or {}
             if command.get("requiresName") is False:
-                added_id, added_path = self._array_add_auto_edit_target(node)
+                if command.get("autoEditAdded", True):
+                    added_id, added_path = self._array_add_auto_edit_target(node)
+                else:
+                    added_id, added_path = None, None
                 self._apply_config_edit_operation({
                     "op": "add",
                     "path": node.get("path"),

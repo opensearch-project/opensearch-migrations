@@ -64,6 +64,7 @@ export interface EditNode {
     command?: {
         requiresName?: boolean;
         editAdded?: boolean;
+        autoEditAdded?: boolean;
     };
     children?: EditNode[];
 }
@@ -1881,6 +1882,7 @@ export function addRow(
     inputHint?: EditInputHint,
     expert = false,
     editAdded = false,
+    autoEditAdded = true,
 ): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
@@ -1891,7 +1893,7 @@ export function addRow(
         expert,
         inputHint,
         validation: validationFromHint(inputHint),
-        command: {requiresName, editAdded},
+        command: {requiresName, editAdded, autoEditAdded},
         status: "ok",
     });
 }
