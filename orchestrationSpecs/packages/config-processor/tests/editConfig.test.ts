@@ -590,10 +590,18 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.dependsOnSnapshotMigrations")).toMatchObject({
             valueKind: "array",
             presence: "optional",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig")).toMatchObject({
             valueKind: "object",
             presence: "optional",
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.speedupFactor")).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.removeAuthHeader")).toMatchObject({
+            valueKind: "boolean",
         });
     });
 

@@ -170,6 +170,8 @@ export interface FieldMeta {
     checksumFor?: ChecksumDependency[];
     /** Change restriction category for VAP generation. Omit for 'safe'. */
     changeRestriction?: 'impossible' | 'gated';
+    /** Optional field that should still appear in the first-pass guided editor. */
+    essential?: boolean;
     /** UI editing hint exported into JSON schema and edit-state DTOs. */
     uiHint?: UiHint;
     /** External resource reference hint exported into JSON schema and edit-state DTOs. */
@@ -184,6 +186,7 @@ declare module "zod" {
     interface ZodType {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
+        essential(): this;
         uiHint(hint: UiHint): this;
         externalRef(hint: ExternalRefHint): this;
         effectiveDefault(hint: EffectiveDefaultHint): this;
@@ -198,6 +201,11 @@ z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
 z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, changeRestriction: restriction });
+};
+
+z.ZodType.prototype.essential = function() {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, essential: true });
 };
 
 z.ZodType.prototype.uiHint = function(hint: UiHint) {
@@ -1821,7 +1829,8 @@ export const REPLAYER_CONFIG = z.object({
             message: "Choose one target cluster from targetClusters.",
         }),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
-        .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
+        .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data.")
+        .essential(),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
         .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
 }).describe("Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster.");

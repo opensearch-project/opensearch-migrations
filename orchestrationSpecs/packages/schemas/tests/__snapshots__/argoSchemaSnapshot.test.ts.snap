@@ -7524,7 +7524,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
                 },
                 "default": [],
-                "description": "List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."
+                "description": "List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data.",
+                "x-essential": true
               },
               "replayerConfig": {
                 "type": "object",

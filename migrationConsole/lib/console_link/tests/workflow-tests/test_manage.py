@@ -3882,6 +3882,83 @@ def test_resource_view_edit_mode_keeps_authored_object_config_visible():
     ]
 
 
+def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
+    """Essential edit mode shows schema-marked optional fields without making them required."""
+    edit_state = {
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:traffic.replayers",
+                        "path": ["traffic", "replayers"],
+                        "label": "Replay",
+                        "valueKind": "record",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:traffic.replayers.replay",
+                                "path": ["traffic", "replayers", "replay"],
+                                "label": "replay",
+                                "valueKind": "object",
+                                "status": "ok",
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.replayers.replay.fromCapturedTraffic",
+                                        "path": ["traffic", "replayers", "replay", "fromCapturedTraffic"],
+                                        "label": "fromCapturedTraffic: cap",
+                                        "value": "cap",
+                                        "valueKind": "scalar",
+                                        "status": "ok",
+                                    },
+                                    {
+                                        "id": "edit:traffic.replayers.replay.dependsOnSnapshotMigrations",
+                                        "path": [
+                                            "traffic",
+                                            "replayers",
+                                            "replay",
+                                            "dependsOnSnapshotMigrations",
+                                        ],
+                                        "label": "dependsOnSnapshotMigrations: <unset>",
+                                        "valueKind": "array",
+                                        "presence": "optional",
+                                        "essential": True,
+                                        "status": "ok",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+    sections = edit_state_resource_sections(
+        edit_state,
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+
+    all_nodes = []
+    stack = [resource for section in sections for group in section.groups for resource in group.resources]
+    while stack:
+        node = stack.pop()
+        all_nodes.append(node)
+        stack.extend(node.children)
+
+    assert any(
+        node.tree_id == "edit:traffic.replayers.replay.dependsOnSnapshotMigrations"
+        for node in all_nodes
+    )
+
+
 @pytest.mark.asyncio
 async def test_resource_view_edit_mode_maps_edit_expansion_back_to_status():
     """Expanding a mapped resource in edit mode keeps it expanded when returning to status."""

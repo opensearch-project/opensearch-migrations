@@ -60,6 +60,7 @@ function applyMetaExtensions(jsonSchema: Record<string, unknown>, zodSchema: z.Z
     const meta = fieldMeta(zodSchema);
     if (meta?.checksumFor?.length) jsonSchema['x-checksum-for'] = meta.checksumFor;
     if (meta?.changeRestriction) jsonSchema['x-change-restriction'] = meta.changeRestriction;
+    if (meta?.essential) jsonSchema['x-essential'] = true;
     if (meta?.uiHint) jsonSchema['x-ui-hint'] = meta.uiHint;
     if (meta?.externalRef) jsonSchema['x-external-ref'] = meta.externalRef;
     if (meta?.effectiveDefault) jsonSchema['x-effective-default'] = meta.effectiveDefault;
@@ -145,6 +146,7 @@ function removeRawUiHintMetadata(jsonSchema: any): void {
     delete jsonSchema.uiHint;
     delete jsonSchema.externalRef;
     delete jsonSchema.effectiveDefault;
+    delete jsonSchema.essential;
     safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 

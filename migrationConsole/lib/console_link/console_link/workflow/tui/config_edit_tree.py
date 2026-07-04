@@ -448,6 +448,8 @@ def _should_render_edit_node(
         return True
     if _has_authored_edit_value(edit_node):
         return True
+    if edit_node.get("essential"):
+        return True
     is_expert = bool(edit_node.get("expert"))
     if field_visibility == FIELD_VISIBILITY_ESSENTIAL:
         return False

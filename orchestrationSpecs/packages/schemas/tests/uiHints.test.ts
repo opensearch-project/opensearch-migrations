@@ -183,4 +183,11 @@ describe("workflow schema UI hints", () => {
             description: expect.stringContaining("preconfigured self-signed issuer"),
         });
     });
+
+    it("exports essential optional field hints", () => {
+        const dependsOnSnapshotMigrations = schema.properties.traffic.properties.replayers.additionalProperties
+            .properties.dependsOnSnapshotMigrations;
+
+        expect(dependsOnSnapshotMigrations["x-essential"]).toBe(true);
+    });
 });
