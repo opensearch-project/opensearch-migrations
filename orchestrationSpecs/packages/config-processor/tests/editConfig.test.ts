@@ -671,6 +671,41 @@ describe("editConfig state", () => {
         });
     });
 
+    it("adds snapshot migration snapshot names without replacing the migration list", () => {
+        const addedSnapshotName = applyEditOperationToObject({
+            sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},
+            targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
+            kafkaClusterConfiguration: {},
+            snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
+            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+        }, {
+            op: "add",
+            path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig"],
+            value: {name: "all"},
+        });
+        const addedSnapshotConfig = parse(addedSnapshotName.yaml);
+
+        expect(Array.isArray(addedSnapshotConfig.snapshotMigrationConfigs)).toBe(true);
+        expect(addedSnapshotConfig.snapshotMigrationConfigs[0].perSnapshotConfig).toEqual({all: []});
+        expect(findNode(addedSnapshotName.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all")).toMatchObject({
+            valueKind: "array",
+            presence: "required",
+        });
+
+        const addedMigrationPass = applyEditOperationToObject(addedSnapshotConfig, {
+            op: "add",
+            path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig", "all"],
+            value: {},
+        });
+        const addedMigrationPassConfig = parse(addedMigrationPass.yaml);
+
+        expect(addedMigrationPassConfig.snapshotMigrationConfigs[0].perSnapshotConfig.all).toEqual([{}]);
+        expect(findNode(addedMigrationPass.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0")).toMatchObject({
+            valueKind: "object",
+            presence: "required",
+        });
+    });
+
     it("renders generic object override fields from the unified JSON schema", () => withUnifiedSchemaFixture(() => {
         const state = buildEditStateFromObject({
             sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},

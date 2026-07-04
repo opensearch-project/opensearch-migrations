@@ -545,7 +545,7 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
 
 function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext): EditNode {
     const path = ["snapshotMigrationConfigs"];
-    const children = (configs ?? []).map((value, index) => snapshotMigrationNode(index, value, ctx));
+    const children = (Array.isArray(configs) ? configs : []).map((value, index) => snapshotMigrationNode(index, value, ctx));
     children.push(addRow(path, "snapshot migration", "Create a snapshot migration configuration in pending workflow YAML.", false));
     return finalizeNode({
         id: `edit:${path.join(".")}`,
@@ -967,6 +967,10 @@ function defaultConfigForPath(path: string[]): unknown {
     if (factory) {
         return factory();
     }
+    const recordValueSchema = zodRecordValueSchema(schemaForConfigPath(path));
+    if (recordValueSchema) {
+        return defaultConfigValueForSchema(recordValueSchema);
+    }
     const recordSchema = resolveJsonSchemaRef(jsonSchemaForConfigPath(path)) as {additionalProperties?: unknown} | undefined;
     const additionalSchema = resolveJsonSchemaRef(
         typeof recordSchema?.additionalProperties === "object" && recordSchema.additionalProperties !== null
@@ -977,6 +981,27 @@ function defaultConfigForPath(path: string[]): unknown {
         return defaultJsonValueForSchema(additionalSchema);
     }
     throw new Error(`Add is not supported at path ${path.join(".")}`);
+}
+
+function zodRecordValueSchema(schema: any): any | undefined {
+    const unwrapped = unwrapSchema(schema);
+    return String(unwrapped?.constructor?.name ?? "") === "ZodRecord"
+        ? unwrapped?.valueType ?? unwrapped?._def?.valueType
+        : undefined;
+}
+
+function defaultConfigValueForSchema(schema: any): unknown {
+    const defaultValue = defaultValueForSchema(schema);
+    if (defaultValue !== undefined) {
+        return defaultValue;
+    }
+    if (schemaArrayElement(schema)) {
+        return [];
+    }
+    if (schemaShape(schema) || zodRecordValueSchema(schema)) {
+        return {};
+    }
+    return "";
 }
 
 function addAtPath(config: any, path: string[], value: unknown): void {
@@ -1006,7 +1031,7 @@ function addAtPath(config: any, path: string[], value: unknown): void {
         if (!Array.isArray(parent[key])) {
             parent[key] = [];
         }
-        parent[key].push(defaultValueForSchema(itemSchema) ?? "");
+        parent[key].push(defaultConfigValueForSchema(itemSchema));
         return;
     }
 
@@ -1016,14 +1041,11 @@ function addAtPath(config: any, path: string[], value: unknown): void {
     if (!name) {
         throw new Error("Add operation requires a non-empty name");
     }
-    let parent = config;
-    for (const part of path) {
-        parent = ensureContainer(parent, part);
-    }
-    if (name in parent) {
+    const {parent, key} = parentAtPath(config, [...path, name]);
+    if (key in parent) {
         throw new Error(`Config entry already exists at ${[...path, name].join(".")}`);
     }
-    parent[name] = defaultConfigForPath(path);
+    parent[key] = defaultConfigForPath(path);
 }
 
 export function applyEditOperation(config: any, operation: EditOperation): any {
