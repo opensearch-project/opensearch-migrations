@@ -544,13 +544,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
 
     def on_mount(self) -> None:
         self.query_one("#documentation", Static).display = bool(self.documentation)
-        first_id = next(iter(self._field_input_ids.values()), None)
-        if first_id:
-            first = self.query_one(f"#{first_id}")
-            if getattr(first, "disabled", False):
-                self.focus_next()
-            else:
-                first.focus()
+        self._focus_first_editable_field()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -599,6 +593,19 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         if not field_id:
             return
         widget = self.query_one(f"#{field_id}")
+        self._focus_field_widget(widget)
+
+    def _focus_first_editable_field(self) -> bool:
+        for field_id in self._field_input_ids.values():
+            widget = self.query_one(f"#{field_id}")
+            if getattr(widget, "disabled", False):
+                continue
+            self._focus_field_widget(widget)
+            return True
+        return False
+
+    @staticmethod
+    def _focus_field_widget(widget: Widget) -> None:
         widget.focus()
         if isinstance(widget, Input):
             widget.cursor_position = len(widget.value)

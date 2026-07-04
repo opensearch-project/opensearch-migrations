@@ -3043,8 +3043,10 @@ async def test_resource_view_edit_mode_external_secret_update_hides_password(moc
             assert app.screen.query_one("#field-2").value == ""
             assert "super-secret" not in str(app.screen.query_one("#field-2").value)
             assert isinstance(app.screen.focused, Input)
+            assert app.screen.focused.id == "field-1"
             await pilot.press("right")
             assert isinstance(app.screen.focused, Input)
+            assert app.screen.focused.id == "field-1"
             app.screen.query_one("#save").focus()
             await pilot.press("right")
             assert app.screen.focused.id == "cancel"
