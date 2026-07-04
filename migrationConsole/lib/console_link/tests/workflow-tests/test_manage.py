@@ -1457,6 +1457,23 @@ def edit_state_with_changed_capture_and_snapshot_migration():
                                         "valueKind": "object",
                                         "status": "changed",
                                         "statusCounts": {"changed": 1},
+                                        "children": [
+                                            {
+                                                "id": "edit:traffic.proxies.cap.proxyConfig.listenPort",
+                                                "path": [
+                                                    "traffic",
+                                                    "proxies",
+                                                    "cap",
+                                                    "proxyConfig",
+                                                    "listenPort",
+                                                ],
+                                                "label": "listenPort: 9201",
+                                                "value": 9201,
+                                                "valueKind": "scalar",
+                                                "status": "changed",
+                                                "statusCounts": {"changed": 1},
+                                            },
+                                        ],
                                     },
                                 ],
                             },
@@ -2466,6 +2483,7 @@ async def test_resource_view_edit_mode_preserves_expanded_resource_nodes():
 
             assert find_tree_node_by_id(tree.root, "edit:snapshotMigrationConfigs.source-target").is_expanded
             assert find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap.proxyConfig").is_expanded
 
 
 @pytest.mark.asyncio

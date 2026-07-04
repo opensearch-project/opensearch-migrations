@@ -367,9 +367,12 @@ def _should_expand_edit_node(
     status, counts = _effective_status(edit_node, status_mode)
     if _has_attention_status(status, counts):
         return True
-    if _has_only_changed_status(status, counts):
-        return False
     if _is_optional_unset_block(edit_node, visible_children):
+        return False
+    if _has_only_changed_status(status, counts) and not _changed_container_should_expand(
+        edit_node,
+        visible_children,
+    ):
         return False
     return True
 
@@ -406,6 +409,14 @@ def _is_optional_unset_block(edit_node: Dict[str, Any], visible_children: list[D
     if "<unset>" in label:
         return True
     return value_present and value in (None, "", "unset")
+
+
+def _changed_container_should_expand(edit_node: Dict[str, Any], visible_children: list[Dict[str, Any]]) -> bool:
+    if len(edit_node.get("path") or []) < 3:
+        return False
+    if edit_node.get("valueKind") not in {"array", "object", "record", "union"}:
+        return False
+    return any(child.get("valueKind") != "command" for child in visible_children)
 
 
 def _should_render_edit_node(
