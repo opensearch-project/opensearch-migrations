@@ -1171,13 +1171,22 @@ class WorkflowTreeApp(App):
         own_changed = 0
         if self._edit_node_supports_value_states(node):
             states = copy.deepcopy(node.get("states") or {})
-            deployed = self._config_edit_value_state(deployed_config, deployed_console, node)
-            current = self._config_edit_value_state(current_config, current_console, node)
-            pending = self._config_edit_value_state(
-                pending_config,
-                pending_console,
+            deployed = self._with_schema_default_hint(
+                self._config_edit_value_state(deployed_config, deployed_console, node),
                 node,
-                prefer_console=False,
+            )
+            current = self._with_schema_default_hint(
+                self._config_edit_value_state(current_config, current_console, node),
+                node,
+            )
+            pending = self._with_schema_default_hint(
+                self._config_edit_value_state(
+                    pending_config,
+                    pending_console,
+                    node,
+                    prefer_console=False,
+                ),
+                node,
             )
 
             submitted_changed = self._edit_state_changed(deployed, current)
@@ -1216,6 +1225,14 @@ class WorkflowTreeApp(App):
                 return workflow_state
             return console_state
         return workflow_state
+
+    @staticmethod
+    def _with_schema_default_hint(state: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
+        if state.get("present") is not False:
+            return state
+        if not node.get("valueDefaulted") or "value" not in node:
+            return state
+        return {**state, "defaultValue": node.get("value")}
 
     @classmethod
     def _console_config_value_state(

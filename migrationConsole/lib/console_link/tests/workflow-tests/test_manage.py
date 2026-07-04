@@ -4144,7 +4144,10 @@ async def test_resource_view_edit_mode_renders_defaulted_capture_kafka_value(moc
             await pilot.press("f")
             kafka = find_tree_node_by_id(tree.root, "edit:traffic.proxies.cap.kafka")
             assert kafka is not None
-            assert get_clean_text_label(kafka) == "kafka: deployed/workflow=<absent> | pending=default"
+            assert (
+                get_clean_text_label(kafka) ==
+                "kafka: deployed/workflow=<absent> (default: default) | pending=default"
+            )
 
 
 @pytest.mark.asyncio

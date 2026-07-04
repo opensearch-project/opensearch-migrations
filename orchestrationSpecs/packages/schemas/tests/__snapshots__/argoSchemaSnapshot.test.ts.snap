@@ -7746,7 +7746,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "observedPacketConnectionTimeout": {
                     "type": "number",
                     "default": 360,
-                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
+                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds.",
+                    "x-essential": true
                   },
                   "otelTraceCollectorEndpoint": {
                     "anyOf": [
@@ -7792,12 +7793,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "speedupFactor": {
                     "type": "number",
                     "default": 1.1,
-                    "description": "Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."
+                    "description": "Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed.",
+                    "x-essential": true
                   },
                   "targetServerResponseTimeoutSeconds": {
                     "type": "number",
                     "default": 150,
-                    "description": "Maximum seconds to wait for a response from the target cluster before timing out a replayed request."
+                    "description": "Maximum seconds to wait for a response from the target cluster before timing out a replayed request.",
+                    "x-essential": true
                   },
                   "transformerConfig": {
                     "type": "string",

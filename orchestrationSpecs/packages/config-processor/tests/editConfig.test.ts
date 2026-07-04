@@ -599,6 +599,17 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.speedupFactor")).toMatchObject({
             valueKind: "scalar",
             valueType: "number",
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.observedPacketConnectionTimeout")).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.targetServerResponseTimeoutSeconds")).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.removeAuthHeader")).toMatchObject({
             valueKind: "boolean",

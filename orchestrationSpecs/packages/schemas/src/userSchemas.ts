@@ -1201,7 +1201,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
+        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds.")
+        .essential(),
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
@@ -1210,9 +1211,11 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
     speedupFactor: z.number().default(1.1).optional()
-        .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
+        .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed.")
+        .essential(),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
-        .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
+        .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request.")
+        .essential(),
     transformerConfig: z.string().optional()
         .describe("Inline request transformer configuration as a JSON string." + REQUEST_TRANSFORMER_SUFFIX)
         .changeRestriction('gated'),

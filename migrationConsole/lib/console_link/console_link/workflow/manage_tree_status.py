@@ -118,6 +118,12 @@ def format_state_value(
     none_value: str = "null",
 ) -> Optional[str]:
     if state.get("present") is False:
+        if "defaultValue" in state:
+            default_value = _format_default_value(
+                state.get("defaultValue"),
+                none_value=none_value,
+            )
+            return f"{absent_value} (default: {default_value})"
         return absent_value
     if "value" not in state:
         return missing_value
@@ -142,6 +148,12 @@ def format_tree_value(value: Any, *, none_value: str = "null") -> str:
     if value is None:
         return none_value
     return str(value)
+
+
+def _format_default_value(value: Any, *, none_value: str = "null") -> str:
+    if value == "":
+        return '""'
+    return format_tree_value(value, none_value=none_value)
 
 
 def format_phase_value_groups(
