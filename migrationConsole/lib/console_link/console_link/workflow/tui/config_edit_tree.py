@@ -369,6 +369,8 @@ def _should_expand_edit_node(
     status, counts = _effective_status(edit_node, status_mode)
     if _has_attention_status(status, counts):
         return True
+    if _has_essential_visible_descendant(visible_children):
+        return True
     if _is_optional_unset_block(edit_node, visible_children):
         return False
     if _has_only_changed_status(status, counts) and not _changed_container_should_expand(
@@ -377,6 +379,16 @@ def _should_expand_edit_node(
     ):
         return False
     return True
+
+
+def _has_essential_visible_descendant(children: list[Dict[str, Any]]) -> bool:
+    stack = list(children)
+    while stack:
+        child = stack.pop()
+        if child.get("essential") and child.get("valueKind") != "command":
+            return True
+        stack.extend(child.get("children") or [])
+    return False
 
 
 def _has_attention_status(status: str, counts: Dict[str, Any]) -> bool:

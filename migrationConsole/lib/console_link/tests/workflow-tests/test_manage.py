@@ -3930,6 +3930,36 @@ def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
                                         "essential": True,
                                         "status": "ok",
                                     },
+                                    {
+                                        "id": "edit:traffic.replayers.replay.replayerConfig",
+                                        "path": ["traffic", "replayers", "replay", "replayerConfig"],
+                                        "label": "replayerConfig: <unset>",
+                                        "valueKind": "object",
+                                        "presence": "optional",
+                                        "status": "ok",
+                                        "children": [
+                                            {
+                                                "id": (
+                                                    "edit:traffic.replayers.replay"
+                                                    ".replayerConfig.speedupFactor"
+                                                ),
+                                                "path": [
+                                                    "traffic",
+                                                    "replayers",
+                                                    "replay",
+                                                    "replayerConfig",
+                                                    "speedupFactor",
+                                                ],
+                                                "label": "speedupFactor: 1.1",
+                                                "value": 1.1,
+                                                "valueDefaulted": True,
+                                                "valueKind": "scalar",
+                                                "presence": "optional",
+                                                "essential": True,
+                                                "status": "ok",
+                                            },
+                                        ],
+                                    },
                                 ],
                             },
                         ],
@@ -3958,6 +3988,16 @@ def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
         node.tree_id == "edit:traffic.replayers.replay.dependsOnSnapshotMigrations"
         for node in all_nodes
     )
+    replayer_config = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:traffic.replayers.replay.replayerConfig"
+    )
+    speedup_factor = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:traffic.replayers.replay.replayerConfig.speedupFactor"
+    )
+    assert replayer_config.tree_default_expanded is True
+    assert speedup_factor.tree_id == "edit:traffic.replayers.replay.replayerConfig.speedupFactor"
 
 
 def test_resource_view_edit_mode_marks_expert_fields_when_visible():
