@@ -147,6 +147,7 @@ function removeRawUiHintMetadata(jsonSchema: any): void {
     delete jsonSchema.externalRef;
     delete jsonSchema.effectiveDefault;
     delete jsonSchema.essential;
+    delete jsonSchema.expert;
     safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 

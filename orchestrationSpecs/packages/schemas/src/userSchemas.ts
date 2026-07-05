@@ -190,6 +190,7 @@ declare module "zod" {
         uiHint(hint: UiHint): this;
         externalRef(hint: ExternalRefHint): this;
         effectiveDefault(hint: EffectiveDefaultHint): this;
+        expert(): this;
     }
 }
 
@@ -221,6 +222,11 @@ z.ZodType.prototype.externalRef = function(hint: ExternalRefHint) {
 z.ZodType.prototype.effectiveDefault = function(hint: EffectiveDefaultHint) {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, effectiveDefault: hint });
+};
+
+z.ZodType.prototype.expert = function() {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, expert: true });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -1214,24 +1220,30 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .essential(),
     transformerConfig: z.string().optional()
         .describe("Inline request transformer configuration as a JSON string." + REQUEST_TRANSFORMER_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     transformerConfigEncoded: z.string().optional()
         .describe("Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field." + REQUEST_TRANSFORMER_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     transformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing request transformer configuration." + REQUEST_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     requestTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Request transform pipeline. Generates the existing transformerConfig inline JSON option.")
         .changeRestriction('gated'),
     tupleTransformerConfig: z.string().optional()
         .describe("Inline tuple transformer configuration as a JSON string." + TUPLE_TRANSFORMER_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     tupleTransformerConfigBase64: z.string().optional()
         .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     tupleTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .expert()
         .changeRestriction('gated'),
     tupleTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.")
@@ -1380,11 +1392,14 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .expert(),
     transformerConfig: z.string().optional()
-        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .expert(),
     transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .expert(),
     metadataTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.")
         .checksumFor('snapshot', 'replayer')
@@ -1464,14 +1479,17 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .changeRestriction('impossible'),
     docTransformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON transformer configuration." + DOC_TRANSFORMER_SUFFIX)
+        .expert()
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     docTransformerConfig: z.string().optional()
         .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + DOC_TRANSFORMER_SUFFIX)
+        .expert()
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     docTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing transformer configuration." + DOC_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .expert()
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     documentTransforms: TRANSFORM_PIPELINE.optional()

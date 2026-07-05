@@ -2366,11 +2366,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                      "x-expert": true
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "x-expert": true
                     },
                     "enableSourcelessMigrations": {
                       "type": "boolean",
@@ -2589,7 +2591,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "x-checksum-for": [
                         "replayer"
                       ],
-                      "x-change-restriction": "impossible"
+                      "x-change-restriction": "impossible",
+                      "x-expert": true
                     },
                     "docTransformerConfigFile": {
                       "type": "string",
@@ -2601,7 +2604,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "x-checksum-for": [
                         "replayer"
                       ],
-                      "x-change-restriction": "impossible"
+                      "x-change-restriction": "impossible",
+                      "x-expert": true
                     },
                     "documentsPerBulkRequest": {
                       "type": "number",
@@ -3443,37 +3447,43 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
                       "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "transformerConfigFile": {
                       "type": "string",
                       "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
                       "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
                       "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
                       "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "gated",
-                      "x-change-restriction": "gated"
+                      "x-change-restriction": "gated",
+                      "x-expert": true
                     },
                     "tupleS3Bucket": {
                       "type": "string",
@@ -5086,15 +5096,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "x-expert": true
                       },
                       "transformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "x-expert": true
                       },
                       "transformerConfigFile": {
                         "type": "string",
-                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "x-expert": true
                       },
                       "metadataTransforms": {
                         "type": "array",
@@ -5908,7 +5921,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "x-checksum-for": [
                           "replayer"
                         ],
-                        "x-change-restriction": "impossible"
+                        "x-change-restriction": "impossible",
+                        "x-expert": true
                       },
                       "docTransformerConfig": {
                         "type": "string",
@@ -5920,7 +5934,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "x-checksum-for": [
                           "replayer"
                         ],
-                        "x-change-restriction": "impossible"
+                        "x-change-restriction": "impossible",
+                        "x-expert": true
                       },
                       "docTransformerConfigFile": {
                         "type": "string",
@@ -5932,7 +5947,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "x-checksum-for": [
                           "replayer"
                         ],
-                        "x-change-restriction": "impossible"
+                        "x-change-restriction": "impossible",
+                        "x-expert": true
                       },
                       "documentTransforms": {
                         "type": "array",
@@ -8209,19 +8225,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
                     "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "transformerConfigFile": {
                     "type": "string",
                     "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "requestTransforms": {
                     "type": "array",
@@ -8806,19 +8825,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
                     "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
                     "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-expert": true
                   },
                   "tupleTransforms": {
                     "type": "array",
