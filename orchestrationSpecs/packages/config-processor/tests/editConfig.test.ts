@@ -619,9 +619,11 @@ describe("editConfig state", () => {
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.requestTransforms")).toMatchObject({
             expert: false,
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.tupleTransforms")).toMatchObject({
             expert: false,
+            essential: true,
         });
         for (const field of [
             "transformerConfig",
@@ -690,7 +692,16 @@ describe("editConfig state", () => {
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig.metadataTransforms")).toMatchObject({
             expert: false,
+            essential: true,
         });
+        for (const field of ["componentTemplateAllowlist", "indexAllowlist", "indexTemplateAllowlist"]) {
+            expect(findNode(
+                state.nodes,
+                `edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig.${field}`,
+            )).toMatchObject({
+                essential: true,
+            });
+        }
         for (const field of ["transformerConfigBase64", "transformerConfig", "transformerConfigFile"]) {
             expect(findNode(
                 state.nodes,
@@ -706,6 +717,13 @@ describe("editConfig state", () => {
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.documentTransforms")).toMatchObject({
             expert: false,
+            essential: true,
+        });
+        expect(findNode(
+            state.nodes,
+            "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.indexAllowlist",
+        )).toMatchObject({
+            essential: true,
         });
         for (const field of ["docTransformerConfigBase64", "docTransformerConfig", "docTransformerConfigFile"]) {
             expect(findNode(
@@ -1107,6 +1125,7 @@ describe("editConfig state", () => {
         expect(transform).toMatchObject({
             valueKind: "union",
             status: "required",
+            removable: true,
             variants: [
                 expect.objectContaining({value: "entryPoint"}),
                 expect.objectContaining({value: "transformName"}),
@@ -1128,6 +1147,7 @@ describe("editConfig state", () => {
         expect(entryPoint).toMatchObject({
             valueKind: "union",
             status: "required",
+            essential: true,
             variants: [
                 expect.objectContaining({label: "inline JavaScript", value: "javascript"}),
                 expect.objectContaining({label: "external JavaScript file", value: "javascriptFile"}),
@@ -1142,14 +1162,17 @@ describe("editConfig state", () => {
         expect(context).toMatchObject({
             valueKind: "object",
             label: "context: <unset>",
+            essential: true,
             children: [
                 expect.objectContaining({
                     id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.valueDirectories",
                     valueKind: "array",
+                    essential: true,
                 }),
                 expect.objectContaining({
                     id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.values",
                     valueKind: "record",
+                    essential: true,
                 }),
             ],
         });
@@ -1229,6 +1252,13 @@ describe("editConfig state", () => {
         )).toMatchObject({
             valueKind: "scalar",
             required: true,
+            validation: {
+                pattern: expect.any(String),
+            },
+            inputHint: {
+                kind: "text",
+                format: "oci-image-reference",
+            },
         });
 
         const transformNameSelected = applyEditOperationToObject(parse(javascriptSelected.yaml), {
@@ -1238,6 +1268,12 @@ describe("editConfig state", () => {
         });
         expect(parse(transformNameSelected.yaml).traffic.replayers.replay.replayerConfig.requestTransforms[0]).toEqual({
             transformName: "",
+        });
+        expect(findNode(
+            transformNameSelected.editState.nodes,
+            "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.transformName"
+        )).toMatchObject({
+            essential: true,
         });
     });
 

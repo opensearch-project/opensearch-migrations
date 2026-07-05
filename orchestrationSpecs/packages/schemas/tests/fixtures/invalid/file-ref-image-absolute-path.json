@@ -29,7 +29,7 @@
             {
               "entryPoint": {
                 "javascriptFile": {
-                  "image": "example.com/transforms@sha256:abc123",
+                  "image": "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "path": "/etc/passwd"
                 }
               }

@@ -37,6 +37,7 @@ export interface EditNode {
     essential?: boolean;
     description?: string;
     required?: boolean;
+    removable?: boolean;
     status?: EditNodeStatus;
     statusCounts?: {
         required?: number;
@@ -887,6 +888,7 @@ function jsonSchemaRecordChildren(
                 ? jsonSchemaFieldNode(rootPath, recordKey, itemSchema, {[recordKey]: recordItemValue}, true)
                 : genericDisplayNode([...rootPath, recordKey], recordKey, recordItemValue, "required", false, "");
             node.collapsed = false;
+            node.removable = true;
             return node;
         });
     children.push(addRow(
@@ -916,6 +918,7 @@ function jsonSchemaArrayItemNode(
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
     node.label = `${itemLabel} ${index + 1}${valueSuffix}`;
     node.collapsed = true;
+    node.removable = true;
     return node;
 }
 
@@ -1921,9 +1924,13 @@ function zodRecordNode(
     const children = [
         ...Object.entries(recordValue)
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([recordKey, recordItemValue]) => valueSchema
-                ? schemaFieldNode(path, recordKey, valueSchema, {[recordKey]: recordItemValue})
-                : genericDisplayNode([...path, recordKey], recordKey, recordItemValue, "required", false, "")),
+            .map(([recordKey, recordItemValue]) => {
+                const node = valueSchema
+                    ? schemaFieldNode(path, recordKey, valueSchema, {[recordKey]: recordItemValue})
+                    : genericDisplayNode([...path, recordKey], recordKey, recordItemValue, "required", false, "");
+                node.removable = true;
+                return node;
+            }),
         addRow(
             path,
             addLabel,
@@ -2050,6 +2057,7 @@ function zodArrayItemNode(
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
     node.label = `${itemLabel} ${index + 1}${valueSuffix}`;
     node.collapsed = true;
+    node.removable = true;
     return node;
 }
 

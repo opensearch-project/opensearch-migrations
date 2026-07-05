@@ -29,8 +29,8 @@
             {
               "entryPoint": {
                 "javascriptFile": {
-                  "image": "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                  "path": "scripts/../../etc/passwd"
+                  "image": "example.com/transforms:bad tag:extra",
+                  "path": "request.js"
                 }
               }
             }

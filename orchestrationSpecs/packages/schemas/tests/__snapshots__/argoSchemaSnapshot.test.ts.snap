@@ -1016,7 +1016,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "image": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                          "x-ui-hint": {
+                                            "kind": "text",
+                                            "format": "oci-image-reference",
+                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                            "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                          }
                                         },
                                         "pullPolicy": {
                                           "type": "string",
@@ -1316,7 +1323,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "image": {
                                           "type": "string",
                                           "minLength": 1,
-                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                          "x-ui-hint": {
+                                            "kind": "text",
+                                            "format": "oci-image-reference",
+                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                            "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                          }
                                         },
                                         "pullPolicy": {
                                           "type": "string",
@@ -5019,6 +5033,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "default": [],
                         "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates.",
+                        "x-essential": true,
                         "x-ui-hint": {
                           "kind": "array",
                           "addLabel": "component template"
@@ -5031,6 +5046,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "default": [],
                         "description": "Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices.",
+                        "x-essential": true,
                         "x-ui-hint": {
                           "kind": "array",
                           "addLabel": "index pattern"
@@ -5043,6 +5059,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "default": [],
                         "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates.",
+                        "x-essential": true,
                         "x-ui-hint": {
                           "kind": "array",
                           "addLabel": "index template"
@@ -5147,7 +5164,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image": {
                                                   "type": "string",
                                                   "minLength": 1,
-                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                  "x-ui-hint": {
+                                                    "kind": "text",
+                                                    "format": "oci-image-reference",
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                  }
                                                 },
                                                 "pullPolicy": {
                                                   "type": "string",
@@ -5247,7 +5271,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image": {
                                                   "type": "string",
                                                   "minLength": 1,
-                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                  "x-ui-hint": {
+                                                    "kind": "text",
+                                                    "format": "oci-image-reference",
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                  }
                                                 },
                                                 "pullPolicy": {
                                                   "type": "string",
@@ -5323,7 +5354,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     }
                                   ],
-                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.",
+                                  "x-essential": true
                                 },
                                 "context": {
                                   "anyOf": [
@@ -5377,7 +5409,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "image": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                    "x-ui-hint": {
+                                                      "kind": "text",
+                                                      "format": "oci-image-reference",
+                                                      "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                      "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                    }
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -5403,7 +5442,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
                                           },
-                                          "default": []
+                                          "default": [],
+                                          "x-essential": true
                                         },
                                         "values": {
                                           "type": "object",
@@ -5439,7 +5479,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image": {
                                                             "type": "string",
                                                             "minLength": 1,
-                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                            "x-ui-hint": {
+                                                              "kind": "text",
+                                                              "format": "oci-image-reference",
+                                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                              "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                            }
                                                           },
                                                           "pullPolicy": {
                                                             "type": "string",
@@ -5515,13 +5562,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               }
                                             ]
                                           },
-                                          "default": {}
+                                          "default": {},
+                                          "x-essential": true
                                         }
                                       },
                                       "additionalProperties": false
                                     }
                                   ],
-                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                                  "x-essential": true
                                 }
                               },
                               "required": [
@@ -5536,7 +5585,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "transformName": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Name of a built-in transform provider to run."
+                                  "description": "Name of a built-in transform provider to run.",
+                                  "x-essential": true
                                 },
                                 "context": {
                                   "anyOf": [
@@ -5590,7 +5640,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "image": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                    "x-ui-hint": {
+                                                      "kind": "text",
+                                                      "format": "oci-image-reference",
+                                                      "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                      "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                    }
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -5616,7 +5673,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
                                           },
-                                          "default": []
+                                          "default": [],
+                                          "x-essential": true
                                         },
                                         "values": {
                                           "type": "object",
@@ -5652,7 +5710,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image": {
                                                             "type": "string",
                                                             "minLength": 1,
-                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                            "x-ui-hint": {
+                                                              "kind": "text",
+                                                              "format": "oci-image-reference",
+                                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                              "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                            }
                                                           },
                                                           "pullPolicy": {
                                                             "type": "string",
@@ -5728,13 +5793,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               }
                                             ]
                                           },
-                                          "default": {}
+                                          "default": {},
+                                          "x-essential": true
                                         }
                                       },
                                       "additionalProperties": false
                                     }
                                   ],
-                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                                  "x-essential": true
                                 }
                               },
                               "required": [
@@ -5756,7 +5823,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "snapshot",
                           "replayer"
                         ],
-                        "x-change-restriction": "impossible"
+                        "x-change-restriction": "impossible",
+                        "x-essential": true
                       },
                       "enableSourcelessMigrations": {
                         "type": "boolean",
@@ -5953,6 +6021,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "x-change-restriction": "impossible",
+                        "x-essential": true,
                         "x-ui-hint": {
                           "kind": "array",
                           "addLabel": "index pattern"
@@ -6046,7 +6115,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image": {
                                                   "type": "string",
                                                   "minLength": 1,
-                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                  "x-ui-hint": {
+                                                    "kind": "text",
+                                                    "format": "oci-image-reference",
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                  }
                                                 },
                                                 "pullPolicy": {
                                                   "type": "string",
@@ -6146,7 +6222,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image": {
                                                   "type": "string",
                                                   "minLength": 1,
-                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                  "x-ui-hint": {
+                                                    "kind": "text",
+                                                    "format": "oci-image-reference",
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                  }
                                                 },
                                                 "pullPolicy": {
                                                   "type": "string",
@@ -6222,7 +6305,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     }
                                   ],
-                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.",
+                                  "x-essential": true
                                 },
                                 "context": {
                                   "anyOf": [
@@ -6276,7 +6360,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "image": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                    "x-ui-hint": {
+                                                      "kind": "text",
+                                                      "format": "oci-image-reference",
+                                                      "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                      "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                    }
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -6302,7 +6393,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
                                           },
-                                          "default": []
+                                          "default": [],
+                                          "x-essential": true
                                         },
                                         "values": {
                                           "type": "object",
@@ -6338,7 +6430,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image": {
                                                             "type": "string",
                                                             "minLength": 1,
-                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                            "x-ui-hint": {
+                                                              "kind": "text",
+                                                              "format": "oci-image-reference",
+                                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                              "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                            }
                                                           },
                                                           "pullPolicy": {
                                                             "type": "string",
@@ -6414,13 +6513,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               }
                                             ]
                                           },
-                                          "default": {}
+                                          "default": {},
+                                          "x-essential": true
                                         }
                                       },
                                       "additionalProperties": false
                                     }
                                   ],
-                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                                  "x-essential": true
                                 }
                               },
                               "required": [
@@ -6435,7 +6536,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "transformName": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Name of a built-in transform provider to run."
+                                  "description": "Name of a built-in transform provider to run.",
+                                  "x-essential": true
                                 },
                                 "context": {
                                   "anyOf": [
@@ -6489,7 +6591,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                   "image": {
                                                     "type": "string",
                                                     "minLength": 1,
-                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                    "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                    "x-ui-hint": {
+                                                      "kind": "text",
+                                                      "format": "oci-image-reference",
+                                                      "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                      "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                    }
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -6515,7 +6624,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
                                           },
-                                          "default": []
+                                          "default": [],
+                                          "x-essential": true
                                         },
                                         "values": {
                                           "type": "object",
@@ -6551,7 +6661,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image": {
                                                             "type": "string",
                                                             "minLength": 1,
-                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                            "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                            "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                            "x-ui-hint": {
+                                                              "kind": "text",
+                                                              "format": "oci-image-reference",
+                                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                              "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                            }
                                                           },
                                                           "pullPolicy": {
                                                             "type": "string",
@@ -6627,13 +6744,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               }
                                             ]
                                           },
-                                          "default": {}
+                                          "default": {},
+                                          "x-essential": true
                                         }
                                       },
                                       "additionalProperties": false
                                     }
                                   ],
-                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                                  "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                                  "x-essential": true
                                 }
                               },
                               "required": [
@@ -6653,7 +6772,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "x-checksum-for": [
                           "replayer"
                         ],
-                        "x-change-restriction": "impossible"
+                        "x-change-restriction": "impossible",
+                        "x-essential": true
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -7294,7 +7414,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "image": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                        "x-ui-hint": {
+                                          "kind": "text",
+                                          "format": "oci-image-reference",
+                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                        }
                                       },
                                       "pullPolicy": {
                                         "type": "string",
@@ -7594,7 +7721,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "image": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                        "x-ui-hint": {
+                                          "kind": "text",
+                                          "format": "oci-image-reference",
+                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                        }
                                       },
                                       "pullPolicy": {
                                         "type": "string",
@@ -8400,7 +8534,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                              "x-ui-hint": {
+                                                "kind": "text",
+                                                "format": "oci-image-reference",
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                              }
                                             },
                                             "pullPolicy": {
                                               "type": "string",
@@ -8500,7 +8641,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                              "x-ui-hint": {
+                                                "kind": "text",
+                                                "format": "oci-image-reference",
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                              }
                                             },
                                             "pullPolicy": {
                                               "type": "string",
@@ -8576,7 +8724,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 }
                               ],
-                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
+                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.",
+                              "x-essential": true
                             },
                             "context": {
                               "anyOf": [
@@ -8630,7 +8779,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "image": {
                                                 "type": "string",
                                                 "minLength": 1,
-                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                "x-ui-hint": {
+                                                  "kind": "text",
+                                                  "format": "oci-image-reference",
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                }
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -8656,7 +8812,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
                                       },
-                                      "default": []
+                                      "default": [],
+                                      "x-essential": true
                                     },
                                     "values": {
                                       "type": "object",
@@ -8692,7 +8849,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                        "x-ui-hint": {
+                                                          "kind": "text",
+                                                          "format": "oci-image-reference",
+                                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                        }
                                                       },
                                                       "pullPolicy": {
                                                         "type": "string",
@@ -8768,13 +8932,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           }
                                         ]
                                       },
-                                      "default": {}
+                                      "default": {},
+                                      "x-essential": true
                                     }
                                   },
                                   "additionalProperties": false
                                 }
                               ],
-                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                              "x-essential": true
                             }
                           },
                           "required": [
@@ -8789,7 +8955,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "transformName": {
                               "type": "string",
                               "minLength": 1,
-                              "description": "Name of a built-in transform provider to run."
+                              "description": "Name of a built-in transform provider to run.",
+                              "x-essential": true
                             },
                             "context": {
                               "anyOf": [
@@ -8843,7 +9010,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "image": {
                                                 "type": "string",
                                                 "minLength": 1,
-                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                "x-ui-hint": {
+                                                  "kind": "text",
+                                                  "format": "oci-image-reference",
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                }
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -8869,7 +9043,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
                                       },
-                                      "default": []
+                                      "default": [],
+                                      "x-essential": true
                                     },
                                     "values": {
                                       "type": "object",
@@ -8905,7 +9080,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                        "x-ui-hint": {
+                                                          "kind": "text",
+                                                          "format": "oci-image-reference",
+                                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                        }
                                                       },
                                                       "pullPolicy": {
                                                         "type": "string",
@@ -8981,13 +9163,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           }
                                         ]
                                       },
-                                      "default": {}
+                                      "default": {},
+                                      "x-essential": true
                                     }
                                   },
                                   "additionalProperties": false
                                 }
                               ],
-                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                              "x-essential": true
                             }
                           },
                           "required": [
@@ -9001,7 +9185,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "description": "Request transform pipeline. Generates the existing transformerConfig inline JSON option.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-essential": true
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
@@ -9058,7 +9243,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                              "x-ui-hint": {
+                                                "kind": "text",
+                                                "format": "oci-image-reference",
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                              }
                                             },
                                             "pullPolicy": {
                                               "type": "string",
@@ -9158,7 +9350,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                              "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                              "x-ui-hint": {
+                                                "kind": "text",
+                                                "format": "oci-image-reference",
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                              }
                                             },
                                             "pullPolicy": {
                                               "type": "string",
@@ -9234,7 +9433,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 }
                               ],
-                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
+                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.",
+                              "x-essential": true
                             },
                             "context": {
                               "anyOf": [
@@ -9288,7 +9488,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "image": {
                                                 "type": "string",
                                                 "minLength": 1,
-                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                "x-ui-hint": {
+                                                  "kind": "text",
+                                                  "format": "oci-image-reference",
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                }
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -9314,7 +9521,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
                                       },
-                                      "default": []
+                                      "default": [],
+                                      "x-essential": true
                                     },
                                     "values": {
                                       "type": "object",
@@ -9350,7 +9558,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                        "x-ui-hint": {
+                                                          "kind": "text",
+                                                          "format": "oci-image-reference",
+                                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                        }
                                                       },
                                                       "pullPolicy": {
                                                         "type": "string",
@@ -9426,13 +9641,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           }
                                         ]
                                       },
-                                      "default": {}
+                                      "default": {},
+                                      "x-essential": true
                                     }
                                   },
                                   "additionalProperties": false
                                 }
                               ],
-                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                              "x-essential": true
                             }
                           },
                           "required": [
@@ -9447,7 +9664,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "transformName": {
                               "type": "string",
                               "minLength": 1,
-                              "description": "Name of a built-in transform provider to run."
+                              "description": "Name of a built-in transform provider to run.",
+                              "x-essential": true
                             },
                             "context": {
                               "anyOf": [
@@ -9501,7 +9719,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "image": {
                                                 "type": "string",
                                                 "minLength": 1,
-                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
+                                                "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files.",
+                                                "x-ui-hint": {
+                                                  "kind": "text",
+                                                  "format": "oci-image-reference",
+                                                  "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                  "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                }
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -9527,7 +9752,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
                                       },
-                                      "default": []
+                                      "default": [],
+                                      "x-essential": true
                                     },
                                     "values": {
                                       "type": "object",
@@ -9563,7 +9789,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image": {
                                                         "type": "string",
                                                         "minLength": 1,
-                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                        "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file.",
+                                                        "x-ui-hint": {
+                                                          "kind": "text",
+                                                          "format": "oci-image-reference",
+                                                          "pattern": "^(?=.{1,255}$)(?:(?:localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::[0-9]+)?\\\\/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:\\\\/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$",
+                                                          "message": "Use an OCI image reference like repo/name:tag, registry:5000/repo/name:tag, or repo/name@sha256:<digest>; spaces and extra colons are not allowed."
+                                                        }
                                                       },
                                                       "pullPolicy": {
                                                         "type": "string",
@@ -9639,13 +9872,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           }
                                         ]
                                       },
-                                      "default": {}
+                                      "default": {},
+                                      "x-essential": true
                                     }
                                   },
                                   "additionalProperties": false
                                 }
                               ],
-                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files.",
+                              "x-essential": true
                             }
                           },
                           "required": [
@@ -9659,7 +9894,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "description": "Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.",
                     "changeRestriction": "gated",
-                    "x-change-restriction": "gated"
+                    "x-change-restriction": "gated",
+                    "x-essential": true
                   },
                   "tupleS3Bucket": {
                     "type": "string",

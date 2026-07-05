@@ -23,6 +23,7 @@ from .config_edit_exit_modal import ConfigEditExitModal
 from .confirm_modal import ConfirmModal
 from .container_select_modal import ContainerSelectModal
 from .config_edit_tree import (
+    EDIT_NODE_TYPE,
     EDIT_MODE_ALL,
     EDIT_MODE_CURRENT_WORKFLOW,
     EDIT_MODE_DEPLOYED,
@@ -808,10 +809,11 @@ class WorkflowTreeApp(App):
                 self._bindings.bind("space", "toggle_config_boolean", "Toggle", priority=True)
             if node and node.get("valueKind") == "command":
                 self.bind("a", "edit_selected_config_node", description="Add")
-            if self._is_removable_edit_node(node):
+            delete_target = self._nearest_config_delete_target()
+            if delete_target and delete_target[0] == "remove":
                 self.bind("delete", "remove_config_node", description="Remove")
                 self.bind("backspace", "remove_config_node", show=False)
-            elif self._config_node_can_unset(node or {}):
+            elif delete_target and delete_target[0] == "clear":
                 self.bind("delete", "clear_config_node", description="Clear")
                 self.bind("backspace", "clear_config_node", description="Clear", show=False)
             self.refresh_bindings()
@@ -2483,23 +2485,22 @@ class WorkflowTreeApp(App):
         return [str(part) for part in left] == [str(part) for part in right]
 
     def action_remove_config_node(self) -> None:
-        node = selected_edit_node(self.tree_root_widget)
-        if not node or node.get("valueKind") == "command":
+        target = self._nearest_config_delete_target()
+        if not target or target[0] != "remove":
             return
+        node = target[1]
         path = node.get("path") or []
-        if not self._is_removable_config_path(path):
-            self.notify("Remove is available for config resource entries", severity="warning")
-            return
+        label = strip_status_badge(str(node.get("label") or ".".join(path))).strip()
         self.push_screen(
-            ConfirmModal(f"Remove config entry '{'.'.join(path)}' from pending YAML?"),
+            ConfirmModal(f"Remove config entry '{label}' from pending YAML?"),
             lambda confirmed: self._remove_config_node(path) if confirmed else None,
         )
 
     def action_clear_config_node(self) -> None:
-        node = selected_edit_node(self.tree_root_widget)
-        if not node or not self._config_node_can_unset(node):
+        target = self._nearest_config_delete_target()
+        if not target or target[0] != "clear":
             return
-        self._unset_config_node(node)
+        self._unset_config_node(target[1])
 
     @staticmethod
     def _is_removable_config_path(path: list[str]) -> bool:
@@ -2525,7 +2526,29 @@ class WorkflowTreeApp(App):
     def _is_removable_edit_node(cls, node: Optional[Dict]) -> bool:
         if not node or node.get("valueKind") == "command":
             return False
-        return cls._is_removable_config_path(node.get("path") or [])
+        return bool(node.get("removable")) or cls._is_removable_config_path(node.get("path") or [])
+
+    @staticmethod
+    def _edit_node_from_tree_node(tree_node) -> Optional[Dict]:
+        data = tree_node.data if tree_node else None
+        if not data or data.get("type") != EDIT_NODE_TYPE:
+            return None
+        return data.get("edit_node") or data
+
+    def _nearest_config_delete_target(self) -> Optional[tuple[str, Dict]]:
+        tree_node = self.tree_root_widget.cursor_node
+        selected = self._edit_node_from_tree_node(tree_node)
+        if selected and selected.get("valueKind") == "command":
+            return None
+        while tree_node:
+            node = self._edit_node_from_tree_node(tree_node)
+            if node and node.get("valueKind") != "command":
+                if self._config_node_can_unset(node):
+                    return "clear", node
+                if self._is_removable_edit_node(node):
+                    return "remove", node
+            tree_node = getattr(tree_node, "parent", None)
+        return None
 
     @staticmethod
     def _edit_node_documentation(node: Dict) -> str:

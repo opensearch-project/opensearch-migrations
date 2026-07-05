@@ -258,7 +258,7 @@ describe('MigrationConfigTransformer validation', () => {
                     metadataTransforms: {
                         entryPoint: {
                             javascriptFile: {
-                                image: "example.com/transforms@sha256:abc123",
+                                image: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                                 path: "metadata.js"
                             }
                         },
@@ -305,7 +305,7 @@ describe('MigrationConfigTransformer validation', () => {
                 {
                     entryPoint: {
                         pythonFile: {
-                            image: "example.com/transforms@sha256:abc123",
+                            image: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                             path: "tuple.py"
                         }
                     },
@@ -325,7 +325,7 @@ describe('MigrationConfigTransformer validation', () => {
             {
                 name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
                 image: {
-                    reference: "example.com/transforms@sha256:abc123",
+                    reference: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     pullPolicy: "IfNotPresent"
                 }
             }
@@ -367,7 +367,7 @@ describe('MigrationConfigTransformer validation', () => {
             {
                 name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
                 image: {
-                    reference: "example.com/transforms@sha256:abc123",
+                    reference: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     pullPolicy: "IfNotPresent"
                 }
             }
@@ -437,7 +437,7 @@ describe('MigrationConfigTransformer validation', () => {
 
     it('should lower every supported transform context form and dedupe shared image sources', async () => {
         const config = cloneBaseConfig();
-        const transformImage = "example.com/transforms@sha256:abc123";
+        const transformImage = "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         config.traffic.replayers.replay1.replayerConfig = {
             requestTransforms: [
                 {

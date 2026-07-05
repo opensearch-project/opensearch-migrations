@@ -1109,6 +1109,7 @@ def edit_state_with_array_items(include_provisional_item=False):
             "label": "[OK] item 1: configured",
             "valueKind": "object",
             "description": "Kafka node role.",
+            "removable": True,
             "status": "ok",
             "statusCounts": {},
             "collapsed": True,
@@ -1134,6 +1135,7 @@ def edit_state_with_array_items(include_provisional_item=False):
             "label": "[REQ 1] item 2: configured",
             "valueKind": "object",
             "description": "Kafka node role.",
+            "removable": True,
             "status": "required",
             "statusCounts": {"required": 1},
             "collapsed": True,
@@ -5234,6 +5236,8 @@ async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_wo
             )
 
             app._select_tree_node_by_id("edit:roles.0")
+            await pilot.press("enter")
+            app._select_tree_node_by_id("edit:roles.0.name")
             app._update_dynamic_bindings()
             await pilot.pause()
             await pilot.press("delete")
@@ -5336,8 +5340,18 @@ async def test_resource_view_edit_mode_delete_and_backspace_clear_optional_value
             app._update_dynamic_bindings()
             await pilot.pause()
 
-            assert binding_descriptions(app, "delete") == []
-            assert binding_descriptions(app, "backspace") == []
+            assert binding_descriptions(app, "delete") == ["Clear"]
+            assert binding_descriptions(app, "backspace") == ["Clear"]
+            await pilot.press("backspace")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 3)
+            assert service.apply_calls[2] == (
+                "updated-yaml-2",
+                {
+                    "op": "unset",
+                    "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaFile"],
+                },
+            )
 
 
 @pytest.mark.asyncio
