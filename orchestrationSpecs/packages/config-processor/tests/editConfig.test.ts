@@ -1037,6 +1037,109 @@ describe("editConfig state", () => {
         )?.label).toBe("User-Agent: .*healthcheck.*");
     });
 
+    it("renders transform specs as mutually exclusive selector trees", () => {
+        const baseConfig = {
+            sourceClusters: {source: {endpoint: "https://source.example.com:9200", version: "ES 7.10.2"}},
+            targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
+            traffic: {
+                proxies: {
+                    cap: {
+                        source: "source",
+                        proxyConfig: {listenPort: 9201},
+                    },
+                },
+                replayers: {
+                    replay: {
+                        fromCapturedTraffic: "cap",
+                        toTarget: "target",
+                        replayerConfig: {
+                            requestTransforms: [{}],
+                        },
+                    },
+                },
+            },
+            snapshotMigrationConfigs: [],
+        };
+        const transformPath = ["traffic", "replayers", "replay", "replayerConfig", "requestTransforms", "0"];
+        const state = buildEditStateFromObject(baseConfig);
+
+        const transform = findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0");
+        expect(transform).toMatchObject({
+            valueKind: "union",
+            status: "required",
+            variants: [
+                expect.objectContaining({value: "entryPoint"}),
+                expect.objectContaining({value: "transformName"}),
+            ],
+        });
+
+        const entryPointSelected = applyEditOperationToObject(baseConfig, {
+            op: "set",
+            path: transformPath,
+            value: "entryPoint",
+        });
+        expect(parse(entryPointSelected.yaml).traffic.replayers.replay.replayerConfig.requestTransforms[0]).toEqual({
+            entryPoint: {},
+        });
+        const entryPoint = findNode(
+            entryPointSelected.editState.nodes,
+            "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.entryPoint"
+        );
+        expect(entryPoint).toMatchObject({
+            valueKind: "union",
+            status: "required",
+            variants: [
+                expect.objectContaining({value: "javascript"}),
+                expect.objectContaining({value: "javascriptFile"}),
+                expect.objectContaining({value: "python"}),
+                expect.objectContaining({value: "pythonFile"}),
+            ],
+        });
+        const context = findNode(
+            entryPointSelected.editState.nodes,
+            "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context"
+        );
+        expect(context).toMatchObject({
+            valueKind: "object",
+            label: "context: <unset>",
+            children: [
+                expect.objectContaining({
+                    id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.valueDirectories",
+                    valueKind: "array",
+                }),
+                expect.objectContaining({
+                    id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.values",
+                    valueKind: "record",
+                }),
+            ],
+        });
+
+        const javascriptSelected = applyEditOperationToObject(parse(entryPointSelected.yaml), {
+            op: "set",
+            path: [...transformPath, "entryPoint"],
+            value: "javascript",
+        });
+        expect(parse(javascriptSelected.yaml).traffic.replayers.replay.replayerConfig.requestTransforms[0]).toEqual({
+            entryPoint: {javascript: ""},
+        });
+        expect(findNode(
+            javascriptSelected.editState.nodes,
+            "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.entryPoint.javascript"
+        )).toMatchObject({
+            valueKind: "scalar",
+            status: "required",
+        });
+
+        const transformNameSelected = applyEditOperationToObject(parse(javascriptSelected.yaml), {
+            op: "set",
+            path: transformPath,
+            value: "transformName",
+        });
+        expect(parse(transformNameSelected.yaml).traffic.replayers.replay.replayerConfig.requestTransforms[0]).toEqual({
+            transformName: "",
+        });
+    });
+
     it("does not require replay config when traffic capture is configured alone", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},

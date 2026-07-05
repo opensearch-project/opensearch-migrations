@@ -65,8 +65,10 @@ import {
     jsonSchemaDiscriminator,
     jsonSchemaEnumValues,
     jsonSchemaForConfigPath,
+    jsonSchemaObjectUnionBranches,
     jsonSchemaType,
     jsonDiscriminatedUnionValueForVariant,
+    jsonObjectUnionValueForVariant,
     objectChildrenFromValue,
     objectUnionBranches,
     objectUnionValueForVariant,
@@ -1049,6 +1051,15 @@ function setAtPath(config: any, path: string[], value: unknown): void {
         }
         return;
     }
+    if (jsonSchema && jsonSchemaObjectUnionBranches(jsonSchema).length) {
+        const next = jsonObjectUnionValueForVariant(jsonSchema, parent[key], value);
+        if (next === undefined) {
+            delete parent[key];
+        } else {
+            parent[key] = next;
+        }
+        return;
+    }
     if (jsonSchema && jsonSchemaEnumValues(jsonSchema).length > 0 && value === "unset") {
         delete parent[key];
         return;
@@ -1125,7 +1136,12 @@ function defaultConfigValueForSchema(schema: any): unknown {
     if (schemaArrayElement(schema)) {
         return [];
     }
-    if (schemaShape(schema) || zodRecordValueSchema(schema)) {
+    if (
+        schemaShape(schema)
+        || zodRecordValueSchema(schema)
+        || objectUnionBranches(schema).length > 0
+        || discriminatorForSchema(schema)
+    ) {
         return {};
     }
     return "";

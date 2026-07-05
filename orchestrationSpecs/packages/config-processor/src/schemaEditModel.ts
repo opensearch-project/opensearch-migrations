@@ -538,6 +538,39 @@ export function jsonSchemaDiscriminator(schema: JsonSchema | undefined): string 
     );
 }
 
+export function jsonSchemaObjectUnionBranches(schema: JsonSchema | undefined): ObjectUnionBranch[] {
+    const branches = jsonSchemaBranches(schema);
+    if (!branches.length) {
+        return [];
+    }
+    const requiredKeysByBranch = branches.map(branch => [...jsonSchemaRequired(branch)]);
+    const sharedRequiredKeys = requiredKeysByBranch.reduce<Set<string>>((shared, keys, index) => {
+        const keySet = new Set(keys);
+        if (index === 0) {
+            return keySet;
+        }
+        return new Set([...shared].filter(key => keySet.has(key)));
+    }, new Set());
+    const objectBranches = branches.map((branch, index) => {
+        if (!Object.keys(jsonSchemaProperties(branch)).length) {
+            return undefined;
+        }
+        const selectorKeys = requiredKeysByBranch[index].filter(key => !sharedRequiredKeys.has(key));
+        if (selectorKeys.length !== 1) {
+            return undefined;
+        }
+        return {
+            value: selectorKeys[0],
+            optionSchema: branch,
+            description: jsonSchemaDescription(branch),
+        };
+    });
+    const values = objectBranches.map(branch => branch?.value);
+    return objectBranches.every(Boolean) && new Set(values).size === values.length
+        ? objectBranches as ObjectUnionBranch[]
+        : [];
+}
+
 function jsonSchemaUnionNode(
     path: string[],
     key: string,
@@ -589,6 +622,104 @@ function jsonSchemaUnionNode(
         children: selectedBranch
             ? jsonSchemaObjectChildren(path, selectedBranch, value, value, new Set([discriminator]))
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
+function jsonSchemaObjectUnionNode(
+    path: string[],
+    key: string,
+    schema: JsonSchema,
+    value: unknown,
+    hasValue: boolean,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+): EditNode | undefined {
+    const branches = jsonSchemaObjectUnionBranches(schema);
+    if (!branches.length) {
+        return undefined;
+    }
+
+    const selected = isPlainObject(value)
+        ? branches.find(branch => Object.hasOwn(value, branch.value))
+        : undefined;
+    const unset = !required && !hasValue && value === undefined;
+    const hasObjectValue = value !== undefined && value !== null;
+    const missing = required && !selected;
+    const unknown = hasObjectValue && !selected;
+    const diagnostics: EditDiagnostic[] = [];
+    if (missing) {
+        diagnostics.push({severity: "required", message: `${key} is required.`, path});
+    } else if (unknown) {
+        diagnostics.push({
+            severity: "error",
+            message: `Unknown ${key} variant. Expected ${branches.map(branch => branch.value).join(" or ")}.`,
+            path,
+        });
+    }
+
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: < ${unset ? "unset" : selected?.value ?? (required ? "required" : "unknown")} >`,
+        value: unset ? "unset" : selected?.value,
+        valueKind: "union",
+        presence,
+        expert,
+        description: jsonSchemaDescription(schema),
+        status: missing ? "required" : unknown ? "error" : "ok",
+        diagnostics,
+        variants: [
+            ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
+            ...branches.map(branch => ({
+                label: branch.value,
+                value: branch.value,
+                description: branch.description,
+            })),
+        ],
+        children: selected
+            ? jsonSchemaObjectChildren(path, selected.optionSchema, value, value)
+            : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
+    });
+}
+
+function jsonSchemaMixedObjectBranch(schema: JsonSchema): JsonSchema | undefined {
+    return jsonSchemaBranches(schema).find(branch =>
+        jsonSchemaType(branch) === "object" || Object.keys(jsonSchemaProperties(branch)).length > 0
+    );
+}
+
+function jsonSchemaMixedObjectNode(
+    path: string[],
+    key: string,
+    schema: JsonSchema,
+    value: unknown,
+    required: boolean,
+    expert: boolean,
+    presence: EditNode["presence"],
+    authoredValue: unknown,
+): EditNode | undefined {
+    if (value !== undefined && value !== null && !isPlainObject(value)) {
+        return undefined;
+    }
+    const objectBranch = jsonSchemaMixedObjectBranch(schema);
+    if (!objectBranch) {
+        return undefined;
+    }
+    const missing = required && (value === undefined || value === null);
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: `${key}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : Object.keys(value).length ? "configured" : "{}"}`,
+        value,
+        valueKind: "object",
+        presence,
+        expert,
+        description: jsonSchemaDescription(schema),
+        required,
+        status: missing ? "required" : "ok",
+        diagnostics: missing ? [{severity: "required", message: `${key} is required.`, path}] : [],
+        children: jsonSchemaObjectChildren(path, objectBranch, value, authoredValue),
     });
 }
 
@@ -775,6 +906,14 @@ function jsonSchemaFieldNode(
     const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence);
     if (unionNode) {
         return mark(unionNode);
+    }
+    const objectVariantNode = jsonSchemaObjectUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence);
+    if (objectVariantNode) {
+        return mark(objectVariantNode);
+    }
+    const mixedObjectNode = jsonSchemaMixedObjectNode(path, key, resolved, value, userRequired, expert, presence, authoredConfig[key]);
+    if (mixedObjectNode) {
+        return mark(mixedObjectNode);
     }
     if (jsonSchemaEnumValues(resolved).length > 0) {
         return mark(jsonEnumNode(path, key, resolved, value, userRequired, expert, presence));
@@ -1996,7 +2135,12 @@ function emptyRequiredValueForSchema(schema: any): unknown {
     if (schemaConstructorName(schema) === "ZodArray") {
         return [];
     }
-    if (schemaShape(schema) || schemaConstructorName(schema) === "ZodRecord") {
+    if (
+        schemaShape(schema)
+        || schemaConstructorName(schema) === "ZodRecord"
+        || objectUnionBranches(schema).length > 0
+        || discriminatorForSchema(schema)
+    ) {
         return {};
     }
     return "";
@@ -2076,4 +2220,29 @@ export function jsonDiscriminatedUnionValueForVariant(schema: JsonSchema, existi
         Object.entries(jsonSchemaProperties(branch)),
         fieldSchema => resolveJsonSchemaRef(fieldSchema)?.default,
     );
+}
+
+export function jsonObjectUnionValueForVariant(schema: JsonSchema, existing: any, variant: unknown): unknown {
+    if (isUnsetVariant(variant)) {
+        return undefined;
+    }
+    const branch = jsonSchemaObjectUnionBranches(schema).find(item => item.value === variant);
+    if (!branch) {
+        throw new Error(`Unknown variant: ${String(variant)}`);
+    }
+    const next: Record<string, unknown> = {};
+    const requiredKeys = jsonSchemaRequired(branch.optionSchema);
+    for (const [key, fieldSchema] of Object.entries(jsonSchemaProperties(branch.optionSchema))) {
+        if (isPlainObject(existing) && Object.hasOwn(existing, key)) {
+            next[key] = existing[key];
+            continue;
+        }
+        const resolvedField = resolveJsonSchemaRef(fieldSchema);
+        if (resolvedField?.default !== undefined) {
+            next[key] = structuredClone(resolvedField.default);
+        } else if (requiredKeys.has(key)) {
+            next[key] = defaultJsonValueForSchema(resolvedField);
+        }
+    }
+    return next;
 }

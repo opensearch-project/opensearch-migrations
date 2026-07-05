@@ -739,25 +739,21 @@ export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
     z.object({javascriptFile: FILE_REF}).strict(),
     z.object({python: z.string().min(1)}).strict(),
     z.object({pythonFile: FILE_REF}).strict()
-]);
+]).describe("Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image.");
 
-export const TRANSFORM_SPEC = z.object({
-    entryPoint: SCRIPT_TRANSFORM_ENTRY_POINT.optional(),
-    transformName: z.string().optional(),
-    context: TRANSFORM_CONTEXT.optional()
-}).strict().superRefine((value, ctx) => {
-    const selectorCount = [
-        value.entryPoint !== undefined,
-        value.transformName !== undefined
-    ].filter(Boolean).length;
-
-    if (selectorCount !== 1) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Exactly one of entryPoint or transformName is required"
-        });
-    }
-});
+export const TRANSFORM_SPEC = z.union([
+    z.object({
+        entryPoint: SCRIPT_TRANSFORM_ENTRY_POINT
+            .describe("Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."),
+        context: TRANSFORM_CONTEXT.optional()
+    }).strict().describe("Run an inline or file-backed JavaScript/Python transform."),
+    z.object({
+        transformName: z.string().min(1)
+            .describe("Name of a built-in transform provider to run."),
+        context: TRANSFORM_CONTEXT.optional()
+    }).strict().describe("Run a named built-in transform provider."),
+], {error: "Exactly one of entryPoint or transformName is required"})
+    .describe("Transform specification. Choose exactly one of entryPoint or transformName.");
 
 export const TRANSFORM_PIPELINE = z.preprocess(
     v => v === undefined || Array.isArray(v) ? v : [v],

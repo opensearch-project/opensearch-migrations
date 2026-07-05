@@ -236,14 +236,14 @@ function lowerTransformSpec(
     transform: TransformPipeline[number],
     fileSourceRegistry: FileSourceRegistry
 ): {providerName: string; config: unknown} {
-    if (transform.transformName !== undefined) {
+    if ("transformName" in transform && transform.transformName !== undefined) {
         return {
             providerName: transform.transformName,
             config: lowerNamedTransformContext(transform.context, fileSourceRegistry)
         };
     }
 
-    if (transform.entryPoint === undefined) {
+    if (!("entryPoint" in transform) || transform.entryPoint === undefined) {
         throw new Error("Transform spec is missing entryPoint or transformName after schema validation.");
     }
 
