@@ -135,6 +135,13 @@ function objectUnionVariantLabel(path: string[], key: string, value: string): st
     if (value === "configMap" && path.some(part => part.endsWith("File") || part === "fromFile")) {
         return "ConfigMap key";
     }
+    if (path.includes("context") && path.includes("values")) {
+        const labels: Record<string, string> = {
+            value: "inline value",
+            fromFile: "external file",
+        };
+        return labels[value] ?? value;
+    }
     return value;
 }
 
@@ -872,6 +879,10 @@ function recordAddLabel(inputHint: EditInputHint | undefined): string {
         : "item";
 }
 
+function fieldDisplayLabel(key: string, inputHint: EditInputHint | undefined): string {
+    return inputHint?.label ?? key;
+}
+
 function jsonSchemaRecordChildren(
     rootPath: string[],
     schema: JsonSchema,
@@ -934,6 +945,8 @@ function jsonSchemaFieldNode(
     const path = [...rootPath, key];
     const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, resolved.default, authoredConfig);
     const description = jsonSchemaDescription(resolved);
+    const fieldHint = jsonSchemaUiHint(resolved);
+    const displayKey = fieldDisplayLabel(key, fieldHint);
     const userRequired = jsonSchemaRequiredForUser(resolved, required, resolved.default) && !valueDefaulted;
     const presence: EditNode["presence"] = userRequired ? "required" : "optional";
     const expert = resolved["x-expert"] === true || isExpertDescription(description);
@@ -989,7 +1002,7 @@ function jsonSchemaFieldNode(
         return mark(finalizeNode({
             id: `edit:${path.join(".")}`,
             path,
-            label: `${key}: ${value === undefined || value === null ? (userRequired ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (recordItemSchema ? `${Object.keys(value).length} item${Object.keys(value).length === 1 ? "" : "s"}` : (Object.keys(value).length ? "configured" : "{}")) : String(value)}`,
+            label: `${displayKey}: ${value === undefined || value === null ? (userRequired ? "<required>" : "<unset>") : Array.isArray(value) ? `${value.length} item${value.length === 1 ? "" : "s"}` : isPlainObject(value) ? (recordItemSchema ? `${Object.keys(value).length} item${Object.keys(value).length === 1 ? "" : "s"}` : (Object.keys(value).length ? "configured" : "{}")) : String(value)}`,
             value,
             valueKind: recordItemSchema ? "record" : containerKind,
             presence,
@@ -1921,6 +1934,7 @@ function zodRecordNode(
     const recordValue = isPlainObject(value) ? value : {};
     const valueSchema = zodRecordValueSchema(schema);
     const addLabel = recordAddLabel(inputHint);
+    const displayKey = fieldDisplayLabel(key, inputHint);
     const children = [
         ...Object.entries(recordValue)
             .sort(([a], [b]) => a.localeCompare(b))
@@ -1945,7 +1959,7 @@ function zodRecordNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: ${Object.keys(recordValue).length} item${Object.keys(recordValue).length === 1 ? "" : "s"}`,
+        label: `${displayKey}: ${Object.keys(recordValue).length} item${Object.keys(recordValue).length === 1 ? "" : "s"}`,
         value,
         valueKind: "record",
         presence,
@@ -2020,6 +2034,7 @@ function zodArrayNode(
     const arrayValue = Array.isArray(value) ? value : [];
     const itemSchema = schemaArrayElement(schema);
     const addLabel = arrayAddLabel(inputHint);
+    const displayKey = fieldDisplayLabel(key, inputHint);
     const children = [
         ...arrayValue.map((itemValue, index) => zodArrayItemNode(path, itemSchema, itemValue, index, addLabel)),
         addRow(path, addLabel, arrayDescriptionForAdd(addLabel), false),
@@ -2028,7 +2043,7 @@ function zodArrayNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : `${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`}`,
+        label: `${displayKey}: ${value === undefined || value === null ? (required ? "<required>" : "<unset>") : `${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`}`,
         value,
         valueKind: "array",
         presence,

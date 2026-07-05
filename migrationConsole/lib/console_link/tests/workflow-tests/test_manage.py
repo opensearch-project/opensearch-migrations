@@ -1185,6 +1185,99 @@ def edit_state_with_array_items(include_provisional_item=False):
     }
 
 
+def edit_state_with_collapsed_transform_item():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:snapshotMigration",
+                "path": ["snapshotMigrationConfigs"],
+                "label": "Snapshot Migration",
+                "valueKind": "array",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:snapshotMigrationConfigs.0",
+                        "path": ["snapshotMigrationConfigs", "0"],
+                        "label": "snapshot migration: source -> target",
+                        "valueKind": "object",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:snapshotMigrationConfigs.0.metadataTransforms",
+                                "path": [
+                                    "snapshotMigrationConfigs", "0", "metadataMigrationConfig", "metadataTransforms"
+                                ],
+                                "label": "metadataTransforms: 1 item",
+                                "valueKind": "array",
+                                "essential": True,
+                                "status": "ok",
+                                "children": [
+                                    {
+                                        "id": "edit:snapshotMigrationConfigs.0.metadataTransforms.0",
+                                        "path": [
+                                            "snapshotMigrationConfigs", "0", "metadataMigrationConfig",
+                                            "metadataTransforms", "0",
+                                        ],
+                                        "label": "item 1: entryPoint",
+                                        "valueKind": "union",
+                                        "essential": True,
+                                        "collapsed": True,
+                                        "status": "ok",
+                                        "children": [
+                                            {
+                                                "id": "edit:snapshotMigrationConfigs.0.metadataTransforms.0.entryPoint",
+                                                "path": [
+                                                    "snapshotMigrationConfigs", "0", "metadataMigrationConfig",
+                                                    "metadataTransforms", "0", "entryPoint",
+                                                ],
+                                                "label": "entryPoint: < javascriptFile >",
+                                                "valueKind": "union",
+                                                "essential": True,
+                                                "status": "ok",
+                                                "children": [
+                                                    {
+                                                        "id": (
+                                                            "edit:snapshotMigrationConfigs.0.metadataTransforms.0"
+                                                            ".entryPoint.javascriptFile"
+                                                        ),
+                                                        "path": [
+                                                            "snapshotMigrationConfigs", "0", "metadataMigrationConfig",
+                                                            "metadataTransforms", "0", "entryPoint", "javascriptFile",
+                                                        ],
+                                                        "label": "javascriptFile: configured",
+                                                        "valueKind": "object",
+                                                        "essential": True,
+                                                        "status": "ok",
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "id": "edit:snapshotMigrationConfigs.0.metadataTransforms:add",
+                                        "path": [
+                                            "snapshotMigrationConfigs", "0", "metadataMigrationConfig", "metadataTransforms"
+                                        ],
+                                        "label": "+ Add item",
+                                        "valueKind": "command",
+                                        "status": "ok",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
 def edit_state_with_kafka_override_leaf():
     return {
         "formatVersion": 1,
@@ -1714,6 +1807,13 @@ def test_text_input_modal_regex101_help_markup_avoids_wrapped_url():
 
     assert "Test (t)" in rendered.plain
     assert url not in rendered.plain
+
+
+def test_text_input_modal_uses_consistent_inner_spacing():
+    assert "#dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }" in TextInputModal.CSS
+    assert "#prompt { margin-bottom: 1; }" in TextInputModal.CSS
+    assert "#value { margin-bottom: 1; }" in TextInputModal.CSS
+    assert "#regex-help { color: gray; margin-top: 1; margin-bottom: 0; }" in TextInputModal.CSS
 
 
 @pytest.mark.asyncio
@@ -4531,6 +4631,62 @@ async def test_resource_view_edit_mode_collapses_unset_blocks_one_level_at_a_tim
 
             assert cluster_overrides.is_expanded
             assert not kafka_overrides.is_expanded
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_expands_collapsed_items_with_essential_children(mock_workflow_with_two_pods):
+    """Schema-collapsed array items still open when their visible children are essential."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_collapsed_transform_item(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            transform_item = find_tree_node_by_id(tree.root, "edit:snapshotMigrationConfigs.0.metadataTransforms.0")
+            entry_point = find_tree_node_by_id(
+                tree.root,
+                "edit:snapshotMigrationConfigs.0.metadataTransforms.0.entryPoint",
+            )
+            javascript_file = find_tree_node_by_id(
+                tree.root,
+                "edit:snapshotMigrationConfigs.0.metadataTransforms.0.entryPoint.javascriptFile",
+            )
+
+            assert transform_item is not None
+            assert entry_point is not None
+            assert javascript_file is not None
+            assert transform_item.is_expanded
+            assert entry_point.is_expanded
 
 
 @pytest.mark.asyncio

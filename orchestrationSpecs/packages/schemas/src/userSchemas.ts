@@ -5,7 +5,9 @@ import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
 // Downstream dependency names used in checksumFor annotations.
 export type ChecksumDependency = 'snapshot' | 'snapshotMigration' | 'replayer';
 export type UiTextFormat = 'text' | 'http-endpoint' | 'optional-http-endpoint' | 'cluster-version' | 'k8s-name' | 'oci-image-reference';
-export type UiHint =
+export type UiHint = {
+    label?: string;
+} & (
     | {
         kind: 'text';
         format?: UiTextFormat;
@@ -36,7 +38,8 @@ export type UiHint =
     | {
         kind: 'array';
         addLabel: string;
-    };
+    }
+);
 
 export interface EffectiveDefaultHint {
     label: string;
@@ -739,30 +742,48 @@ export const TRANSFORM_CONTEXT_VALUE_DIRECTORY = z.union([
 ]).describe("Directory whose immediate files become transform context values.");
 
 export const CONFIG_VALUE_FROM_FILE = z.object({
-    fromFile: FILE_REF
-}).strict();
+    fromFile: FILE_REF.describe("File source for one named transform context value.")
+}).strict().describe("Load this named context value from a single ConfigMap key or mountable OCI image file.");
 
 export const TRANSFORM_CONTEXT_VALUE = z.union([
-    z.object({value: INLINE_JSON_VALUE}).strict(),
+    z.object({
+        value: INLINE_JSON_VALUE
+            .describe("Inline JSON-compatible value made available to the transform under this context name.")
+    }).strict().describe("Inline context value stored directly in workflow YAML."),
     CONFIG_VALUE_FROM_FILE
-]);
+]).describe("One named transform context value. Choose an inline JSON-compatible value or a file-backed value.");
 
 export const TRANSFORM_CONTEXT = z.union([
     z.string(),
     z.object({
-        valueDirectories: z.array(TRANSFORM_CONTEXT_VALUE_DIRECTORY).default([]).optional().essential(),
-        values: z.record(z.string(), TRANSFORM_CONTEXT_VALUE).default({}).optional().essential()
+        valueDirectories: z.array(TRANSFORM_CONTEXT_VALUE_DIRECTORY)
+            .uiHint({kind: "array", label: "value directories", addLabel: "context value directory"})
+            .default([])
+            .optional()
+            .essential()
+            .describe("Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value."),
+        values: z.record(z.string(), TRANSFORM_CONTEXT_VALUE)
+            .uiHint({
+                kind: "record",
+                label: "named values",
+                addLabel: "context value",
+                message: "Name used by transform code to read this context value."
+            })
+            .default({})
+            .optional()
+            .essential()
+            .describe("Named transform context values. Add a context name, then choose an inline value or a single file source for that name.")
     }).strict()
 ]).describe("Optional transform provider context. Values are either inline or loaded at runtime from mounted files.");
 
 export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
-    z.object({javascript: z.string().min(1)}).strict()
+    z.object({javascript: z.string().min(1).essential()}).strict()
         .describe("**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."),
-    z.object({javascriptFile: FILE_REF}).strict()
+    z.object({javascriptFile: FILE_REF.essential()}).strict()
         .describe("**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."),
-    z.object({python: z.string().min(1)}).strict()
+    z.object({python: z.string().min(1).essential()}).strict()
         .describe("**Inline Python** transform source. The script body is stored directly in workflow YAML."),
-    z.object({pythonFile: FILE_REF}).strict()
+    z.object({pythonFile: FILE_REF.essential()}).strict()
         .describe("**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference.")
 ]).describe("Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.");
 

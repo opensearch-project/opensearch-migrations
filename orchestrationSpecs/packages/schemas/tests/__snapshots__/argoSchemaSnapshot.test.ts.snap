@@ -5144,7 +5144,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "properties": {
                                         "javascript": {
                                           "type": "string",
-                                          "minLength": 1
+                                          "minLength": 1,
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -5237,7 +5238,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
-                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -5251,7 +5253,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "properties": {
                                         "python": {
                                           "type": "string",
-                                          "minLength": 1
+                                          "minLength": 1,
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -5344,7 +5347,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
-                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -5443,7 +5447,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "description": "Directory whose immediate files become transform context values."
                                           },
                                           "default": [],
-                                          "x-essential": true
+                                          "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "array",
+                                            "label": "value directories",
+                                            "addLabel": "context value directory"
+                                          }
                                         },
                                         "values": {
                                           "type": "object",
@@ -5453,6 +5463,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "type": "object",
                                                 "properties": {
                                                   "value": {
+                                                    "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                     "type": [
                                                       "string",
                                                       "number",
@@ -5466,7 +5477,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "value"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Inline context value stored directly in workflow YAML."
                                               },
                                               {
                                                 "type": "object",
@@ -5552,18 +5564,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                         "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
-                                                    "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                    "description": "File source for one named transform context value."
                                                   }
                                                 },
                                                 "required": [
                                                   "fromFile"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                               }
-                                            ]
+                                            ],
+                                            "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                           },
                                           "default": {},
-                                          "x-essential": true
+                                          "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "record",
+                                            "label": "named values",
+                                            "addLabel": "context value",
+                                            "message": "Name used by transform code to read this context value."
+                                          }
                                         }
                                       },
                                       "additionalProperties": false
@@ -5674,7 +5695,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "description": "Directory whose immediate files become transform context values."
                                           },
                                           "default": [],
-                                          "x-essential": true
+                                          "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "array",
+                                            "label": "value directories",
+                                            "addLabel": "context value directory"
+                                          }
                                         },
                                         "values": {
                                           "type": "object",
@@ -5684,6 +5711,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "type": "object",
                                                 "properties": {
                                                   "value": {
+                                                    "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                     "type": [
                                                       "string",
                                                       "number",
@@ -5697,7 +5725,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "value"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Inline context value stored directly in workflow YAML."
                                               },
                                               {
                                                 "type": "object",
@@ -5783,18 +5812,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                         "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
-                                                    "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                    "description": "File source for one named transform context value."
                                                   }
                                                 },
                                                 "required": [
                                                   "fromFile"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                               }
-                                            ]
+                                            ],
+                                            "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                           },
                                           "default": {},
-                                          "x-essential": true
+                                          "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "record",
+                                            "label": "named values",
+                                            "addLabel": "context value",
+                                            "message": "Name used by transform code to read this context value."
+                                          }
                                         }
                                       },
                                       "additionalProperties": false
@@ -6095,7 +6133,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "properties": {
                                         "javascript": {
                                           "type": "string",
-                                          "minLength": 1
+                                          "minLength": 1,
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -6188,7 +6227,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
-                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -6202,7 +6242,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "properties": {
                                         "python": {
                                           "type": "string",
-                                          "minLength": 1
+                                          "minLength": 1,
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -6295,7 +6336,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                               "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
-                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                          "x-essential": true
                                         }
                                       },
                                       "required": [
@@ -6394,7 +6436,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "description": "Directory whose immediate files become transform context values."
                                           },
                                           "default": [],
-                                          "x-essential": true
+                                          "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "array",
+                                            "label": "value directories",
+                                            "addLabel": "context value directory"
+                                          }
                                         },
                                         "values": {
                                           "type": "object",
@@ -6404,6 +6452,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "type": "object",
                                                 "properties": {
                                                   "value": {
+                                                    "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                     "type": [
                                                       "string",
                                                       "number",
@@ -6417,7 +6466,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "value"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Inline context value stored directly in workflow YAML."
                                               },
                                               {
                                                 "type": "object",
@@ -6503,18 +6553,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                         "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
-                                                    "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                    "description": "File source for one named transform context value."
                                                   }
                                                 },
                                                 "required": [
                                                   "fromFile"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                               }
-                                            ]
+                                            ],
+                                            "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                           },
                                           "default": {},
-                                          "x-essential": true
+                                          "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "record",
+                                            "label": "named values",
+                                            "addLabel": "context value",
+                                            "message": "Name used by transform code to read this context value."
+                                          }
                                         }
                                       },
                                       "additionalProperties": false
@@ -6625,7 +6684,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "description": "Directory whose immediate files become transform context values."
                                           },
                                           "default": [],
-                                          "x-essential": true
+                                          "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "array",
+                                            "label": "value directories",
+                                            "addLabel": "context value directory"
+                                          }
                                         },
                                         "values": {
                                           "type": "object",
@@ -6635,6 +6700,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "type": "object",
                                                 "properties": {
                                                   "value": {
+                                                    "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                     "type": [
                                                       "string",
                                                       "number",
@@ -6648,7 +6714,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "value"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Inline context value stored directly in workflow YAML."
                                               },
                                               {
                                                 "type": "object",
@@ -6734,18 +6801,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                         "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
-                                                    "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                    "description": "File source for one named transform context value."
                                                   }
                                                 },
                                                 "required": [
                                                   "fromFile"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                               }
-                                            ]
+                                            ],
+                                            "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                           },
                                           "default": {},
-                                          "x-essential": true
+                                          "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                          "x-essential": true,
+                                          "x-ui-hint": {
+                                            "kind": "record",
+                                            "label": "named values",
+                                            "addLabel": "context value",
+                                            "message": "Name used by transform code to read this context value."
+                                          }
                                         }
                                       },
                                       "additionalProperties": false
@@ -8514,7 +8590,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "properties": {
                                     "javascript": {
                                       "type": "string",
-                                      "minLength": 1
+                                      "minLength": 1,
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -8607,7 +8684,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
-                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -8621,7 +8699,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "properties": {
                                     "python": {
                                       "type": "string",
-                                      "minLength": 1
+                                      "minLength": 1,
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -8714,7 +8793,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
-                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -8813,7 +8893,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "description": "Directory whose immediate files become transform context values."
                                       },
                                       "default": [],
-                                      "x-essential": true
+                                      "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "array",
+                                        "label": "value directories",
+                                        "addLabel": "context value directory"
+                                      }
                                     },
                                     "values": {
                                       "type": "object",
@@ -8823,6 +8909,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "type": "object",
                                             "properties": {
                                               "value": {
+                                                "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                 "type": [
                                                   "string",
                                                   "number",
@@ -8836,7 +8923,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "value"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Inline context value stored directly in workflow YAML."
                                           },
                                           {
                                             "type": "object",
@@ -8922,18 +9010,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                     "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
-                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                "description": "File source for one named transform context value."
                                               }
                                             },
                                             "required": [
                                               "fromFile"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                           }
-                                        ]
+                                        ],
+                                        "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                       },
                                       "default": {},
-                                      "x-essential": true
+                                      "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "record",
+                                        "label": "named values",
+                                        "addLabel": "context value",
+                                        "message": "Name used by transform code to read this context value."
+                                      }
                                     }
                                   },
                                   "additionalProperties": false
@@ -9044,7 +9141,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "description": "Directory whose immediate files become transform context values."
                                       },
                                       "default": [],
-                                      "x-essential": true
+                                      "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "array",
+                                        "label": "value directories",
+                                        "addLabel": "context value directory"
+                                      }
                                     },
                                     "values": {
                                       "type": "object",
@@ -9054,6 +9157,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "type": "object",
                                             "properties": {
                                               "value": {
+                                                "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                 "type": [
                                                   "string",
                                                   "number",
@@ -9067,7 +9171,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "value"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Inline context value stored directly in workflow YAML."
                                           },
                                           {
                                             "type": "object",
@@ -9153,18 +9258,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                     "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
-                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                "description": "File source for one named transform context value."
                                               }
                                             },
                                             "required": [
                                               "fromFile"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                           }
-                                        ]
+                                        ],
+                                        "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                       },
                                       "default": {},
-                                      "x-essential": true
+                                      "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "record",
+                                        "label": "named values",
+                                        "addLabel": "context value",
+                                        "message": "Name used by transform code to read this context value."
+                                      }
                                     }
                                   },
                                   "additionalProperties": false
@@ -9223,7 +9337,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "properties": {
                                     "javascript": {
                                       "type": "string",
-                                      "minLength": 1
+                                      "minLength": 1,
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -9316,7 +9431,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
-                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -9330,7 +9446,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "properties": {
                                     "python": {
                                       "type": "string",
-                                      "minLength": 1
+                                      "minLength": 1,
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -9423,7 +9540,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                           "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
-                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image.",
+                                      "x-essential": true
                                     }
                                   },
                                   "required": [
@@ -9522,7 +9640,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "description": "Directory whose immediate files become transform context values."
                                       },
                                       "default": [],
-                                      "x-essential": true
+                                      "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "array",
+                                        "label": "value directories",
+                                        "addLabel": "context value directory"
+                                      }
                                     },
                                     "values": {
                                       "type": "object",
@@ -9532,6 +9656,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "type": "object",
                                             "properties": {
                                               "value": {
+                                                "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                 "type": [
                                                   "string",
                                                   "number",
@@ -9545,7 +9670,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "value"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Inline context value stored directly in workflow YAML."
                                           },
                                           {
                                             "type": "object",
@@ -9631,18 +9757,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                     "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
-                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                "description": "File source for one named transform context value."
                                               }
                                             },
                                             "required": [
                                               "fromFile"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                           }
-                                        ]
+                                        ],
+                                        "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                       },
                                       "default": {},
-                                      "x-essential": true
+                                      "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "record",
+                                        "label": "named values",
+                                        "addLabel": "context value",
+                                        "message": "Name used by transform code to read this context value."
+                                      }
                                     }
                                   },
                                   "additionalProperties": false
@@ -9753,7 +9888,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "description": "Directory whose immediate files become transform context values."
                                       },
                                       "default": [],
-                                      "x-essential": true
+                                      "description": "Directories of context values. Each ConfigMap key or immediate file under the mounted directory becomes a named context value.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "array",
+                                        "label": "value directories",
+                                        "addLabel": "context value directory"
+                                      }
                                     },
                                     "values": {
                                       "type": "object",
@@ -9763,6 +9904,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "type": "object",
                                             "properties": {
                                               "value": {
+                                                "description": "Inline JSON-compatible value made available to the transform under this context name.",
                                                 "type": [
                                                   "string",
                                                   "number",
@@ -9776,7 +9918,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "value"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Inline context value stored directly in workflow YAML."
                                           },
                                           {
                                             "type": "object",
@@ -9862,18 +10005,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                     "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
-                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                                "description": "File source for one named transform context value."
                                               }
                                             },
                                             "required": [
                                               "fromFile"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load this named context value from a single ConfigMap key or mountable OCI image file."
                                           }
-                                        ]
+                                        ],
+                                        "description": "One named transform context value. Choose an inline JSON-compatible value or a file-backed value."
                                       },
                                       "default": {},
-                                      "x-essential": true
+                                      "description": "Named transform context values. Add a context name, then choose an inline value or a single file source for that name.",
+                                      "x-essential": true,
+                                      "x-ui-hint": {
+                                        "kind": "record",
+                                        "label": "named values",
+                                        "addLabel": "context value",
+                                        "message": "Name used by transform code to read this context value."
+                                      }
                                     }
                                   },
                                   "additionalProperties": false

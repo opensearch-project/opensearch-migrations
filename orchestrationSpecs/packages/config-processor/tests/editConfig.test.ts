@@ -1167,13 +1167,48 @@ describe("editConfig state", () => {
                 expect.objectContaining({
                     id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.valueDirectories",
                     valueKind: "array",
+                    label: "value directories: 0 items",
                     essential: true,
                 }),
                 expect.objectContaining({
                     id: "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.values",
                     valueKind: "record",
+                    label: "named values: 0 items",
                     essential: true,
+                    children: [
+                        expect.objectContaining({
+                            label: "+ Add context value",
+                            inputHint: expect.objectContaining({
+                                kind: "text",
+                                message: "Name used by transform code to read this context value.",
+                            }),
+                        }),
+                    ],
                 }),
+            ],
+        });
+
+        const contextValueAdded = applyEditOperationToObject(parse(entryPointSelected.yaml), {
+            op: "add",
+            path: [...transformPath, "context", "values"],
+            value: {name: "tenantConfig"},
+        });
+        expect(parse(contextValueAdded.yaml).traffic.replayers.replay.replayerConfig.requestTransforms[0]).toEqual({
+            entryPoint: {},
+            context: {
+                values: {
+                    tenantConfig: {},
+                },
+            },
+        });
+        expect(findNode(
+            contextValueAdded.editState.nodes,
+            "edit:traffic.replayers.replay.replayerConfig.requestTransforms.0.context.values.tenantConfig"
+        )).toMatchObject({
+            valueKind: "union",
+            variants: [
+                expect.objectContaining({label: "inline value", value: "value"}),
+                expect.objectContaining({label: "external file", value: "fromFile"}),
             ],
         });
 
@@ -1191,6 +1226,7 @@ describe("editConfig state", () => {
         )).toMatchObject({
             valueKind: "scalar",
             status: "required",
+            essential: true,
         });
 
         const javascriptFileSelected = applyEditOperationToObject(parse(entryPointSelected.yaml), {
@@ -1208,6 +1244,7 @@ describe("editConfig state", () => {
         expect(javascriptFile).toMatchObject({
             valueKind: "union",
             status: "required",
+            essential: true,
             variants: [
                 expect.objectContaining({label: "mountable image", value: "image"}),
                 expect.objectContaining({label: "ConfigMap key", value: "configMap"}),

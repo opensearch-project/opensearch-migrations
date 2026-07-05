@@ -17,13 +17,13 @@ from .modal_results import CLEAR_VALUE
 class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     CSS = """
     TextInputModal { align: center middle; background: $background 60%; }
-    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
-    #prompt { margin-bottom: 0; }
+    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #prompt { margin-bottom: 1; }
     #documentation { color: gray; margin-bottom: 1; }
-    #value { margin-bottom: 0; }
+    #value { margin-bottom: 1; }
     #validation { color: $error; margin-bottom: 0; min-height: 1; }
     #remote-validation { margin-bottom: 1; min-height: 1; }
-    #regex-help { color: gray; margin-bottom: 0; }
+    #regex-help { color: gray; margin-top: 1; margin-bottom: 0; }
     #regex-samples { color: gray; margin-bottom: 1; }
     #buttons { align: center middle; height: 1; }
     Button { margin: 0 1 0 0; min-width: 5; height: 1; min-height: 1; border: none; padding: 0 1; }
