@@ -8,6 +8,7 @@ from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static, TextArea
 
+from .doc_markup import documentation_markup
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 from .modal_results import CLEAR_VALUE
 
@@ -50,7 +51,7 @@ class StructuredValueModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.prompt), id="prompt")
-            yield Static(escape(self.documentation), id="documentation")
+            yield Static(documentation_markup(self.documentation), id="documentation")
             yield TextArea(
                 self.initial_value,
                 id="value",

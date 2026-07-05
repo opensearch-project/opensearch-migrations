@@ -118,6 +118,25 @@ export interface ObjectUnionBranch {
     description?: string;
 }
 
+function objectUnionVariantLabel(path: string[], key: string, value: string): string {
+    if (key === "entryPoint") {
+        const labels: Record<string, string> = {
+            javascript: "inline JavaScript",
+            javascriptFile: "external JavaScript file",
+            python: "inline Python",
+            pythonFile: "external Python file",
+        };
+        return labels[value] ?? value;
+    }
+    if (value === "image" && path.some(part => part.endsWith("File") || part === "fromFile")) {
+        return "mountable image";
+    }
+    if (value === "configMap" && path.some(part => part.endsWith("File") || part === "fromFile")) {
+        return "ConfigMap key";
+    }
+    return value;
+}
+
 const STATUS_PRIORITY: EditNodeStatus[] = ["blocked", "error", "required", "gated", "warning", "changed", "ok"];
 const STATUS_COUNT_KEYS: Partial<Record<EditNodeStatus, keyof StatusCounts>> = {
     required: "required",
@@ -654,6 +673,9 @@ function jsonSchemaObjectUnionNode(
     const selected = isPlainObject(value)
         ? branches.find(branch => Object.hasOwn(value, branch.value))
         : undefined;
+    const selectedLabel = selected
+        ? objectUnionVariantLabel(path, key, selected.value)
+        : undefined;
     const unset = !required && !hasValue && value === undefined;
     const hasObjectValue = value !== undefined && value !== null;
     const missing = required && !selected;
@@ -672,7 +694,7 @@ function jsonSchemaObjectUnionNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: < ${unset ? "unset" : selected?.value ?? (required ? "required" : "unknown")} >`,
+        label: `${key}: < ${unset ? "unset" : selectedLabel ?? (required ? "required" : "unknown")} >`,
         value: unset ? "unset" : selected?.value,
         valueKind: "union",
         presence,
@@ -683,7 +705,7 @@ function jsonSchemaObjectUnionNode(
         variants: [
             ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
             ...branches.map(branch => ({
-                label: branch.value,
+                label: objectUnionVariantLabel(path, key, branch.value),
                 value: branch.value,
                 description: branch.description,
             })),
@@ -1455,6 +1477,9 @@ export function objectUnionNode(
     const selected = isPlainObject(value)
         ? branches.find(branch => Object.hasOwn(value, branch.value))
         : undefined;
+    const selectedLabel = selected
+        ? objectUnionVariantLabel(path, key, selected.value)
+        : undefined;
     const unset = !required && !hasValue && value === undefined;
     const hasObjectValue = value !== undefined && value !== null;
     const missing = required && !selected;
@@ -1473,7 +1498,7 @@ export function objectUnionNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: < ${unset ? "unset" : selected?.value ?? (required ? "required" : "unknown")} >`,
+        label: `${key}: < ${unset ? "unset" : selectedLabel ?? (required ? "required" : "unknown")} >`,
         value: unset ? "unset" : selected?.value,
         valueKind: "union",
         presence,
@@ -1484,7 +1509,7 @@ export function objectUnionNode(
         variants: [
             ...(!required ? [{label: "unset", value: "unset", description: "Remove this optional configuration."}] : []),
             ...branches.map(branch => ({
-                label: branch.value,
+                label: objectUnionVariantLabel(path, key, branch.value),
                 value: branch.value,
                 description: branch.description,
             })),

@@ -7,6 +7,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from .doc_markup import documentation_markup
 from .modal_button_navigation import (
     BUTTON_ARROW_BINDINGS,
     ButtonArrowNavigationMixin,
@@ -18,10 +19,10 @@ from .modal_button_navigation import (
 class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
     CSS = """
     ChoiceSelectModal { align: center middle; background: $background 60%; }
-    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
-    #title { text-align: center; margin-bottom: 0; }
+    #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #title { text-align: center; margin-bottom: 1; }
     #documentation { color: gray; margin-bottom: 1; }
-    #choice-doc { color: gray; margin-top: 0; min-height: 1; }
+    #choice-doc { color: gray; margin-top: 1; min-height: 1; }
     #buttons { height: auto; }
     #actions { align: center middle; height: 1; margin-top: 1; }
     Button { margin: 0 0 0 0; min-width: 24; height: 1; min-height: 1; border: none; padding: 0 1; }
@@ -52,7 +53,7 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.title_text), id="title")
-            yield Static(escape(self.documentation), id="documentation")
+            yield Static(documentation_markup(self.documentation), id="documentation")
             with Vertical(id="buttons"):
                 for index, choice in enumerate(self.choices):
                     label = str(choice.get("label") or choice.get("value") or "")
@@ -123,4 +124,4 @@ class ChoiceSelectModal(ButtonArrowNavigationMixin, ModalScreen[Any]):
             index = int(str(focused.id).removeprefix("choice-"))
         if index is not None and 0 <= index < len(self.choices):
             description = str(self.choices[index].get("description") or "")
-        self.query_one("#choice-doc", Static).update(escape(description))
+        self.query_one("#choice-doc", Static).update(documentation_markup(description))

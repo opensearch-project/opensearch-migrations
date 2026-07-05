@@ -17,6 +17,7 @@ from console_link.workflow.external_resource_validation import (
     looks_like_pem_certificate_chain,
     looks_like_pem_private_key,
 )
+from .doc_markup import documentation_markup
 from .modal_button_navigation import (
     BUTTON_ARROW_BINDINGS,
     ButtonArrowNavigationMixin,
@@ -526,7 +527,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         verb = "Update" if self.mode == "update" else "Create"
         with Container(id="dialog"):
             yield Static(escape(f"{verb} {create.get('label') or self.external_ref.get('displayName') or 'Resource'}"), id="title")
-            yield Static(escape(self.documentation), id="documentation")
+            yield Static(documentation_markup(self.documentation), id="documentation")
             for index, field in enumerate(self.fields):
                 field_id = f"field-{index}"
                 self._field_input_ids[field["name"]] = field_id

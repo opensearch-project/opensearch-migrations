@@ -5134,7 +5134,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "javascript"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Inline JavaScript transform source."
+                                      "description": "**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."
                                     },
                                     {
                                       "type": "object",
@@ -5220,7 +5220,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "javascriptFile"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
+                                      "description": "**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     },
                                     {
                                       "type": "object",
@@ -5234,7 +5234,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "python"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Inline Python transform source."
+                                      "description": "**Inline Python** transform source. The script body is stored directly in workflow YAML."
                                     },
                                     {
                                       "type": "object",
@@ -5320,10 +5320,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "pythonFile"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
+                                      "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     }
                                   ],
-                                  "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
+                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
                                 },
                                 "context": {
                                   "anyOf": [
@@ -5528,7 +5528,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "entryPoint"
                               ],
                               "additionalProperties": false,
-                              "description": "Run an inline or file-backed JavaScript/Python transform."
+                              "description": "Run a JavaScript/Python transform from inline source code or from an external file source."
                             },
                             {
                               "type": "object",
@@ -6033,7 +6033,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "javascript"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Inline JavaScript transform source."
+                                      "description": "**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."
                                     },
                                     {
                                       "type": "object",
@@ -6119,7 +6119,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "javascriptFile"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
+                                      "description": "**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     },
                                     {
                                       "type": "object",
@@ -6133,7 +6133,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "python"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Inline Python transform source."
+                                      "description": "**Inline Python** transform source. The script body is stored directly in workflow YAML."
                                     },
                                     {
                                       "type": "object",
@@ -6219,10 +6219,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "pythonFile"
                                       ],
                                       "additionalProperties": false,
-                                      "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
+                                      "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                     }
                                   ],
-                                  "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
+                                  "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
                                 },
                                 "context": {
                                   "anyOf": [
@@ -6427,7 +6427,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "entryPoint"
                               ],
                               "additionalProperties": false,
-                              "description": "Run an inline or file-backed JavaScript/Python transform."
+                              "description": "Run a JavaScript/Python transform from inline source code or from an external file source."
                             },
                             {
                               "type": "object",
@@ -8387,7 +8387,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "javascript"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Inline JavaScript transform source."
+                                  "description": "**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."
                                 },
                                 {
                                   "type": "object",
@@ -8473,7 +8473,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "javascriptFile"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 },
                                 {
                                   "type": "object",
@@ -8487,7 +8487,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "python"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Inline Python transform source."
+                                  "description": "**Inline Python** transform source. The script body is stored directly in workflow YAML."
                                 },
                                 {
                                   "type": "object",
@@ -8573,10 +8573,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "pythonFile"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 }
                               ],
-                              "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
+                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
                             },
                             "context": {
                               "anyOf": [
@@ -8781,7 +8781,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "entryPoint"
                           ],
                           "additionalProperties": false,
-                          "description": "Run an inline or file-backed JavaScript/Python transform."
+                          "description": "Run a JavaScript/Python transform from inline source code or from an external file source."
                         },
                         {
                           "type": "object",
@@ -9045,7 +9045,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "javascript"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Inline JavaScript transform source."
+                                  "description": "**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."
                                 },
                                 {
                                   "type": "object",
@@ -9131,7 +9131,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "javascriptFile"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 },
                                 {
                                   "type": "object",
@@ -9145,7 +9145,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "python"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Inline Python transform source."
+                                  "description": "**Inline Python** transform source. The script body is stored directly in workflow YAML."
                                 },
                                 {
                                   "type": "object",
@@ -9231,10 +9231,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "pythonFile"
                                   ],
                                   "additionalProperties": false,
-                                  "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
+                                  "description": "**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."
                                 }
                               ],
-                              "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
+                              "description": "Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."
                             },
                             "context": {
                               "anyOf": [
@@ -9439,7 +9439,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "entryPoint"
                           ],
                           "additionalProperties": false,
-                          "description": "Run an inline or file-backed JavaScript/Python transform."
+                          "description": "Run a JavaScript/Python transform from inline source code or from an external file source."
                         },
                         {
                           "type": "object",

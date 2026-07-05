@@ -9,6 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 from rich.markup import escape
 
+from .doc_markup import documentation_markup
 from .modal_button_navigation import BUTTON_ARROW_BINDINGS, ButtonArrowNavigationMixin, ModalButton
 from .modal_results import CLEAR_VALUE
 
@@ -62,7 +63,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.prompt), id="prompt")
-            yield Static(escape(self.documentation), id="documentation")
+            yield Static(documentation_markup(self.documentation), id="documentation")
             yield Input(value=self.initial_value, id="value", select_on_focus=False)
             yield Static("", id="validation")
             yield Static("", id="remote-validation")

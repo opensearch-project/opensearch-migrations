@@ -745,21 +745,21 @@ export const TRANSFORM_CONTEXT = z.union([
 
 export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
     z.object({javascript: z.string().min(1)}).strict()
-        .describe("Inline JavaScript transform source."),
+        .describe("**Inline JavaScript** transform source. The script body is stored directly in workflow YAML."),
     z.object({javascriptFile: FILE_REF}).strict()
-        .describe("JavaScript transform source loaded from a ConfigMap key or mountable OCI image."),
+        .describe("**External JavaScript file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference."),
     z.object({python: z.string().min(1)}).strict()
-        .describe("Inline Python transform source."),
+        .describe("**Inline Python** transform source. The script body is stored directly in workflow YAML."),
     z.object({pythonFile: FILE_REF}).strict()
-        .describe("Python transform source loaded from a ConfigMap key or mountable OCI image.")
-]).describe("Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image.");
+        .describe("**External Python file** loaded from a ConfigMap key or mountable OCI image. Use this when package-transforms.sh produced an image reference.")
+]).describe("Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image.");
 
 export const TRANSFORM_SPEC = z.union([
     z.object({
         entryPoint: SCRIPT_TRANSFORM_ENTRY_POINT
-            .describe("Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."),
+            .describe("Script transform entry point. Choose **javascript/python** for inline source code, or **javascriptFile/pythonFile** for a script loaded from a ConfigMap key or mountable OCI image."),
         context: TRANSFORM_CONTEXT.optional()
-    }).strict().describe("Run an inline or file-backed JavaScript/Python transform."),
+    }).strict().describe("Run a JavaScript/Python transform from inline source code or from an external file source."),
     z.object({
         transformName: z.string().min(1)
             .describe("Name of a built-in transform provider to run."),

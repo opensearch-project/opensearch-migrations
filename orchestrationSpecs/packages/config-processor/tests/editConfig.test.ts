@@ -1129,10 +1129,10 @@ describe("editConfig state", () => {
             valueKind: "union",
             status: "required",
             variants: [
-                expect.objectContaining({value: "javascript"}),
-                expect.objectContaining({value: "javascriptFile"}),
-                expect.objectContaining({value: "python"}),
-                expect.objectContaining({value: "pythonFile"}),
+                expect.objectContaining({label: "inline JavaScript", value: "javascript"}),
+                expect.objectContaining({label: "external JavaScript file", value: "javascriptFile"}),
+                expect.objectContaining({label: "inline Python", value: "python"}),
+                expect.objectContaining({label: "external Python file", value: "pythonFile"}),
             ],
         });
         const context = findNode(
@@ -1186,8 +1186,8 @@ describe("editConfig state", () => {
             valueKind: "union",
             status: "required",
             variants: [
-                expect.objectContaining({value: "image"}),
-                expect.objectContaining({value: "configMap"}),
+                expect.objectContaining({label: "mountable image", value: "image"}),
+                expect.objectContaining({label: "ConfigMap key", value: "configMap"}),
             ],
         });
 
