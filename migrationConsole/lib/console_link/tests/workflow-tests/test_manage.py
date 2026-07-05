@@ -5226,6 +5226,12 @@ async def test_resource_view_edit_mode_array_items_expand_add_and_delete(mock_wo
                     "path": ["roles", "1"],
                 },
             )
+            assert await wait_until(
+                pilot,
+                lambda: tree.cursor_node is not None
+                and (tree.cursor_node.data or {}).get("id") == "edit:roles",
+                timeout=5.0,
+            )
 
             app._select_tree_node_by_id("edit:roles.0")
             app._update_dynamic_bindings()

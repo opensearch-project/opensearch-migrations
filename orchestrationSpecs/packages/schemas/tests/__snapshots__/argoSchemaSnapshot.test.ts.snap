@@ -1038,7 +1038,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "image",
                                         "path"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Load one file from a mountable OCI image."
                                     },
                                     {
                                       "type": "object",
@@ -1077,7 +1078,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "configMap",
                                         "path"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Load one file from a Kubernetes ConfigMap key."
                                     }
                                   ],
                                   "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
@@ -1336,7 +1338,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "image",
                                         "path"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Load one file from a mountable OCI image."
                                     },
                                     {
                                       "type": "object",
@@ -1375,7 +1378,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "configMap",
                                         "path"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Load one file from a Kubernetes ConfigMap key."
                                     }
                                   ],
                                   "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
@@ -5129,7 +5133,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "javascript"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Inline JavaScript transform source."
                                     },
                                     {
                                       "type": "object",
@@ -5164,7 +5169,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a mountable OCI image."
                                             },
                                             {
                                               "type": "object",
@@ -5203,7 +5209,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "configMap",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
                                           "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -5212,7 +5219,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "javascriptFile"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
                                     },
                                     {
                                       "type": "object",
@@ -5225,7 +5233,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "python"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Inline Python transform source."
                                     },
                                     {
                                       "type": "object",
@@ -5260,7 +5269,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a mountable OCI image."
                                             },
                                             {
                                               "type": "object",
@@ -5299,7 +5309,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "configMap",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
                                           "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -5308,7 +5319,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "pythonFile"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
                                     }
                                   ],
                                   "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
@@ -5330,20 +5342,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "properties": {
                                                   "configMap": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   }
                                                 },
                                                 "required": [
                                                   "configMap"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from every key in a ConfigMap."
                                               },
                                               {
                                                 "type": "object",
                                                 "properties": {
                                                   "image": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -5363,7 +5397,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "image"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from files under a directory in a mountable OCI image."
                                               }
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
@@ -5426,7 +5461,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a mountable OCI image."
                                                       },
                                                       {
                                                         "type": "object",
@@ -5465,7 +5501,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "configMap",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
                                                     "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -5518,20 +5555,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "properties": {
                                                   "configMap": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   }
                                                 },
                                                 "required": [
                                                   "configMap"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from every key in a ConfigMap."
                                               },
                                               {
                                                 "type": "object",
                                                 "properties": {
                                                   "image": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -5551,7 +5610,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "image"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from files under a directory in a mountable OCI image."
                                               }
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
@@ -5614,7 +5674,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a mountable OCI image."
                                                       },
                                                       {
                                                         "type": "object",
@@ -5653,7 +5714,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "configMap",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
                                                     "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -5970,7 +6032,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "javascript"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Inline JavaScript transform source."
                                     },
                                     {
                                       "type": "object",
@@ -6005,7 +6068,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a mountable OCI image."
                                             },
                                             {
                                               "type": "object",
@@ -6044,7 +6108,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "configMap",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
                                           "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -6053,7 +6118,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "javascriptFile"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
                                     },
                                     {
                                       "type": "object",
@@ -6066,7 +6132,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "python"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Inline Python transform source."
                                     },
                                     {
                                       "type": "object",
@@ -6101,7 +6168,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "image",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a mountable OCI image."
                                             },
                                             {
                                               "type": "object",
@@ -6140,7 +6208,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "configMap",
                                                 "path"
                                               ],
-                                              "additionalProperties": false
+                                              "additionalProperties": false,
+                                              "description": "Load one file from a Kubernetes ConfigMap key."
                                             }
                                           ],
                                           "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -6149,7 +6218,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "required": [
                                         "pythonFile"
                                       ],
-                                      "additionalProperties": false
+                                      "additionalProperties": false,
+                                      "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
                                     }
                                   ],
                                   "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
@@ -6171,20 +6241,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "properties": {
                                                   "configMap": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   }
                                                 },
                                                 "required": [
                                                   "configMap"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from every key in a ConfigMap."
                                               },
                                               {
                                                 "type": "object",
                                                 "properties": {
                                                   "image": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -6204,7 +6296,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "image"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from files under a directory in a mountable OCI image."
                                               }
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
@@ -6267,7 +6360,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a mountable OCI image."
                                                       },
                                                       {
                                                         "type": "object",
@@ -6306,7 +6400,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "configMap",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
                                                     "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -6359,20 +6454,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "properties": {
                                                   "configMap": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                    "x-external-ref": {
+                                                      "kind": "kubernetesResource",
+                                                      "purpose": "file-ref-config-map",
+                                                      "displayName": "ConfigMap",
+                                                      "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                      "selection": {
+                                                        "target": "scalarName"
+                                                      },
+                                                      "k8s": {
+                                                        "resourceTypes": [
+                                                          {
+                                                            "group": "",
+                                                            "version": "v1",
+                                                            "kind": "ConfigMap",
+                                                            "namespaced": true
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
                                                   }
                                                 },
                                                 "required": [
                                                   "configMap"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from every key in a ConfigMap."
                                               },
                                               {
                                                 "type": "object",
                                                 "properties": {
                                                   "image": {
                                                     "type": "string",
-                                                    "minLength": 1
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference whose mounted filesystem contains transform context files."
                                                   },
                                                   "pullPolicy": {
                                                     "type": "string",
@@ -6392,7 +6509,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                 "required": [
                                                   "image"
                                                 ],
-                                                "additionalProperties": false
+                                                "additionalProperties": false,
+                                                "description": "Load transform context values from files under a directory in a mountable OCI image."
                                               }
                                             ],
                                             "description": "Directory whose immediate files become transform context values."
@@ -6455,7 +6573,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "image",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a mountable OCI image."
                                                       },
                                                       {
                                                         "type": "object",
@@ -6494,7 +6613,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                           "configMap",
                                                           "path"
                                                         ],
-                                                        "additionalProperties": false
+                                                        "additionalProperties": false,
+                                                        "description": "Load one file from a Kubernetes ConfigMap key."
                                                       }
                                                     ],
                                                     "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -7196,7 +7316,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "image",
                                       "path"
                                     ],
-                                    "additionalProperties": false
+                                    "additionalProperties": false,
+                                    "description": "Load one file from a mountable OCI image."
                                   },
                                   {
                                     "type": "object",
@@ -7235,7 +7356,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "configMap",
                                       "path"
                                     ],
-                                    "additionalProperties": false
+                                    "additionalProperties": false,
+                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                   }
                                 ],
                                 "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
@@ -7494,7 +7616,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "image",
                                       "path"
                                     ],
-                                    "additionalProperties": false
+                                    "additionalProperties": false,
+                                    "description": "Load one file from a mountable OCI image."
                                   },
                                   {
                                     "type": "object",
@@ -7533,7 +7656,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "configMap",
                                       "path"
                                     ],
-                                    "additionalProperties": false
+                                    "additionalProperties": false,
+                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                   }
                                 ],
                                 "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
@@ -8262,7 +8386,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "javascript"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Inline JavaScript transform source."
                                 },
                                 {
                                   "type": "object",
@@ -8297,7 +8422,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a mountable OCI image."
                                         },
                                         {
                                           "type": "object",
@@ -8336,7 +8462,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
                                       "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -8345,7 +8472,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "javascriptFile"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
                                 },
                                 {
                                   "type": "object",
@@ -8358,7 +8486,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "python"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Inline Python transform source."
                                 },
                                 {
                                   "type": "object",
@@ -8393,7 +8522,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a mountable OCI image."
                                         },
                                         {
                                           "type": "object",
@@ -8432,7 +8562,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
                                       "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -8441,7 +8572,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "pythonFile"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
                                 }
                               ],
                               "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
@@ -8463,20 +8595,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "properties": {
                                               "configMap": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                "x-external-ref": {
+                                                  "kind": "kubernetesResource",
+                                                  "purpose": "file-ref-config-map",
+                                                  "displayName": "ConfigMap",
+                                                  "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                  "selection": {
+                                                    "target": "scalarName"
+                                                  },
+                                                  "k8s": {
+                                                    "resourceTypes": [
+                                                      {
+                                                        "group": "",
+                                                        "version": "v1",
+                                                        "kind": "ConfigMap",
+                                                        "namespaced": true
+                                                      }
+                                                    ]
+                                                  }
+                                                }
                                               }
                                             },
                                             "required": [
                                               "configMap"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from every key in a ConfigMap."
                                           },
                                           {
                                             "type": "object",
                                             "properties": {
                                               "image": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -8496,7 +8650,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "image"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from files under a directory in a mountable OCI image."
                                           }
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
@@ -8559,7 +8714,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a mountable OCI image."
                                                   },
                                                   {
                                                     "type": "object",
@@ -8598,7 +8754,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
                                                 "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -8651,20 +8808,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "properties": {
                                               "configMap": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                "x-external-ref": {
+                                                  "kind": "kubernetesResource",
+                                                  "purpose": "file-ref-config-map",
+                                                  "displayName": "ConfigMap",
+                                                  "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                  "selection": {
+                                                    "target": "scalarName"
+                                                  },
+                                                  "k8s": {
+                                                    "resourceTypes": [
+                                                      {
+                                                        "group": "",
+                                                        "version": "v1",
+                                                        "kind": "ConfigMap",
+                                                        "namespaced": true
+                                                      }
+                                                    ]
+                                                  }
+                                                }
                                               }
                                             },
                                             "required": [
                                               "configMap"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from every key in a ConfigMap."
                                           },
                                           {
                                             "type": "object",
                                             "properties": {
                                               "image": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -8684,7 +8863,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "image"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from files under a directory in a mountable OCI image."
                                           }
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
@@ -8747,7 +8927,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a mountable OCI image."
                                                   },
                                                   {
                                                     "type": "object",
@@ -8786,7 +8967,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
                                                 "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -8862,7 +9044,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "javascript"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Inline JavaScript transform source."
                                 },
                                 {
                                   "type": "object",
@@ -8897,7 +9080,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a mountable OCI image."
                                         },
                                         {
                                           "type": "object",
@@ -8936,7 +9120,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
                                       "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -8945,7 +9130,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "javascriptFile"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "JavaScript transform source loaded from a ConfigMap key or mountable OCI image."
                                 },
                                 {
                                   "type": "object",
@@ -8958,7 +9144,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "python"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Inline Python transform source."
                                 },
                                 {
                                   "type": "object",
@@ -8993,7 +9180,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "image",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a mountable OCI image."
                                         },
                                         {
                                           "type": "object",
@@ -9032,7 +9220,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "configMap",
                                             "path"
                                           ],
-                                          "additionalProperties": false
+                                          "additionalProperties": false,
+                                          "description": "Load one file from a Kubernetes ConfigMap key."
                                         }
                                       ],
                                       "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -9041,7 +9230,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "required": [
                                     "pythonFile"
                                   ],
-                                  "additionalProperties": false
+                                  "additionalProperties": false,
+                                  "description": "Python transform source loaded from a ConfigMap key or mountable OCI image."
                                 }
                               ],
                               "description": "Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image."
@@ -9063,20 +9253,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "properties": {
                                               "configMap": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                "x-external-ref": {
+                                                  "kind": "kubernetesResource",
+                                                  "purpose": "file-ref-config-map",
+                                                  "displayName": "ConfigMap",
+                                                  "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                  "selection": {
+                                                    "target": "scalarName"
+                                                  },
+                                                  "k8s": {
+                                                    "resourceTypes": [
+                                                      {
+                                                        "group": "",
+                                                        "version": "v1",
+                                                        "kind": "ConfigMap",
+                                                        "namespaced": true
+                                                      }
+                                                    ]
+                                                  }
+                                                }
                                               }
                                             },
                                             "required": [
                                               "configMap"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from every key in a ConfigMap."
                                           },
                                           {
                                             "type": "object",
                                             "properties": {
                                               "image": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -9096,7 +9308,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "image"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from files under a directory in a mountable OCI image."
                                           }
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
@@ -9159,7 +9372,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a mountable OCI image."
                                                   },
                                                   {
                                                     "type": "object",
@@ -9198,7 +9412,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
                                                 "description": "Reference to one file from a ConfigMap key or mountable OCI image."
@@ -9251,20 +9466,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "properties": {
                                               "configMap": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.",
+                                                "x-external-ref": {
+                                                  "kind": "kubernetesResource",
+                                                  "purpose": "file-ref-config-map",
+                                                  "displayName": "ConfigMap",
+                                                  "description": "Kubernetes ConfigMap containing the referenced file key.",
+                                                  "selection": {
+                                                    "target": "scalarName"
+                                                  },
+                                                  "k8s": {
+                                                    "resourceTypes": [
+                                                      {
+                                                        "group": "",
+                                                        "version": "v1",
+                                                        "kind": "ConfigMap",
+                                                        "namespaced": true
+                                                      }
+                                                    ]
+                                                  }
+                                                }
                                               }
                                             },
                                             "required": [
                                               "configMap"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from every key in a ConfigMap."
                                           },
                                           {
                                             "type": "object",
                                             "properties": {
                                               "image": {
                                                 "type": "string",
-                                                "minLength": 1
+                                                "minLength": 1,
+                                                "description": "OCI image reference whose mounted filesystem contains transform context files."
                                               },
                                               "pullPolicy": {
                                                 "type": "string",
@@ -9284,7 +9521,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                             "required": [
                                               "image"
                                             ],
-                                            "additionalProperties": false
+                                            "additionalProperties": false,
+                                            "description": "Load transform context values from files under a directory in a mountable OCI image."
                                           }
                                         ],
                                         "description": "Directory whose immediate files become transform context values."
@@ -9347,7 +9585,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "image",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a mountable OCI image."
                                                   },
                                                   {
                                                     "type": "object",
@@ -9386,7 +9625,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                                       "configMap",
                                                       "path"
                                                     ],
-                                                    "additionalProperties": false
+                                                    "additionalProperties": false,
+                                                    "description": "Load one file from a Kubernetes ConfigMap key."
                                                   }
                                                 ],
                                                 "description": "Reference to one file from a ConfigMap key or mountable OCI image."

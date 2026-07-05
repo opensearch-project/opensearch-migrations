@@ -2682,11 +2682,34 @@ class WorkflowTreeApp(App):
         self._update_dynamic_bindings()
 
     def _restore_config_edit_selection(self, selected_id: str) -> None:
-        if not self._select_tree_node_by_id(selected_id):
+        for candidate_id in self._config_edit_selection_candidate_ids(selected_id):
+            if self._select_tree_node_by_id(candidate_id):
+                break
+        else:
             self._focus_config_edit_tree()
         self._update_edit_help()
         self.update_pod_status()
         self._update_dynamic_bindings()
+
+    @classmethod
+    def _config_edit_selection_candidate_ids(cls, selected_id: str) -> list[str]:
+        candidates: list[str] = []
+
+        def add(candidate: str) -> None:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        add(selected_id)
+        base_id = selected_id
+        if base_id.endswith(":add"):
+            base_id = base_id.removesuffix(":add")
+            add(base_id)
+        if base_id.startswith("edit:"):
+            path = base_id.removeprefix("edit:")
+            parts = path.split(".") if path else []
+            for length in range(len(parts) - 1, 0, -1):
+                add(f"edit:{'.'.join(parts[:length])}")
+        return candidates
 
     def _select_tree_node_by_id(self, selected_id: str) -> bool:
         stack = list(self.tree_root_widget.root.children)
@@ -2730,7 +2753,10 @@ class WorkflowTreeApp(App):
         selected_id: str,
         discard_path_on_cancel: Optional[list[str]] = None,
     ) -> None:
-        if not self._select_tree_node_by_id(selected_id):
+        if not any(
+            self._select_tree_node_by_id(candidate_id)
+            for candidate_id in self._config_edit_selection_candidate_ids(selected_id)
+        ):
             self._focus_config_edit_tree()
             self._update_edit_help()
             self.update_pod_status()

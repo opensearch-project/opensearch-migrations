@@ -695,14 +695,14 @@ export const FILE_REF_FROM_IMAGE = z.object({
     pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
         .describe("Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."),
     path: FILE_RELATIVE_PATH
-}).strict();
+}).strict().describe("Load one file from a mountable OCI image.");
 
 export const FILE_REF_FROM_CONFIGMAP = z.object({
     configMap: z.string().min(1)
         .externalRef(FILE_REF_CONFIG_MAP_EXTERNAL_REF)
         .describe("Name of a pre-existing Kubernetes ConfigMap."),
     path: CONFIGMAP_FILE_KEY
-}).strict();
+}).strict().describe("Load one file from a Kubernetes ConfigMap key.");
 
 export const FILE_REF = z.union([
     FILE_REF_FROM_IMAGE,
@@ -715,12 +715,15 @@ export const INLINE_JSON_VALUE = z.any()
 export const TRANSFORM_CONTEXT_VALUE_DIRECTORY = z.union([
     z.object({
         configMap: z.string().min(1)
-    }).strict(),
+            .externalRef(FILE_REF_CONFIG_MAP_EXTERNAL_REF)
+            .describe("Name of a pre-existing Kubernetes ConfigMap. Each key becomes one transform context value.")
+    }).strict().describe("Load transform context values from every key in a ConfigMap."),
     z.object({
-        image: z.string().min(1),
+        image: z.string().min(1)
+            .describe("OCI image reference whose mounted filesystem contains transform context files."),
         pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional(),
         path: FILE_RELATIVE_PATH.optional()
-    }).strict()
+    }).strict().describe("Load transform context values from files under a directory in a mountable OCI image.")
 ]).describe("Directory whose immediate files become transform context values.");
 
 export const CONFIG_VALUE_FROM_FILE = z.object({
@@ -741,10 +744,14 @@ export const TRANSFORM_CONTEXT = z.union([
 ]).describe("Optional transform provider context. Values are either inline or loaded at runtime from mounted files.");
 
 export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
-    z.object({javascript: z.string().min(1)}).strict(),
-    z.object({javascriptFile: FILE_REF}).strict(),
-    z.object({python: z.string().min(1)}).strict(),
+    z.object({javascript: z.string().min(1)}).strict()
+        .describe("Inline JavaScript transform source."),
+    z.object({javascriptFile: FILE_REF}).strict()
+        .describe("JavaScript transform source loaded from a ConfigMap key or mountable OCI image."),
+    z.object({python: z.string().min(1)}).strict()
+        .describe("Inline Python transform source."),
     z.object({pythonFile: FILE_REF}).strict()
+        .describe("Python transform source loaded from a ConfigMap key or mountable OCI image.")
 ]).describe("Script transform entry point. Choose inline JavaScript/Python source or a file reference loaded from a ConfigMap or image.");
 
 export const TRANSFORM_SPEC = z.union([
