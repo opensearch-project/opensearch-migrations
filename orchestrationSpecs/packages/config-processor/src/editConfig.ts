@@ -568,6 +568,7 @@ function snapshotPerConfigNode(path: string[], value: unknown): EditNode {
         value,
         valueKind: "record",
         presence: "required",
+        essential: true,
         description: schemaFieldDescription(
             NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
             "perSnapshotConfig",
@@ -603,6 +604,7 @@ function snapshotMigrationPassArrayNode(path: string[], snapshotName: string, va
         value,
         valueKind: "array",
         presence: "required",
+        essential: true,
         description: "Migration passes to run for this snapshot.",
         required: true,
         status: "ok",
@@ -617,10 +619,10 @@ function snapshotMigrationPassNode(path: string[], index: number, value: unknown
     const children = [
         schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "label", config),
         hasMetadata
-            ? schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "metadataMigrationConfig", config)
+            ? essentialSnapshotPassBranch(schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "metadataMigrationConfig", config))
             : addSnapshotMigrationPassBranch(path, "metadataMigrationConfig", "metadata migration"),
         hasBackfill
-            ? schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "documentBackfillConfig", config)
+            ? essentialSnapshotPassBranch(schemaFieldNodeFor(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, path, "documentBackfillConfig", config))
             : addSnapshotMigrationPassBranch(path, "documentBackfillConfig", "document backfill"),
     ];
     const missingMigrationType = !hasMetadata && !hasBackfill;
@@ -635,6 +637,7 @@ function snapshotMigrationPassNode(path: string[], index: number, value: unknown
         value,
         valueKind: "object",
         presence: "required",
+        essential: true,
         description: schemaDescription(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
         required: true,
         status: missingMigrationType ? "required" : "ok",
@@ -660,6 +663,11 @@ function addSnapshotMigrationPassBranch(path: string[], key: "metadataMigrationC
         false,
         false,
     );
+}
+
+function essentialSnapshotPassBranch(node: EditNode): EditNode {
+    node.essential = true;
+    return node;
 }
 
 function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext): EditNode {

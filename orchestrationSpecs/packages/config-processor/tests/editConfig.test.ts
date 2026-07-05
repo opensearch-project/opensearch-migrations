@@ -574,6 +574,7 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig")).toMatchObject({
             valueKind: "record",
             presence: "required",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig:add")?.label).toBe("+ Add snapshot name");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")?.label).toContain("+ Add snapshot migration");
@@ -650,16 +651,19 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig")).toMatchObject({
             valueKind: "record",
             presence: "required",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig:add")?.label).toBe("+ Add snapshot name");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1")).toMatchObject({
             valueKind: "array",
             presence: "required",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1:add")?.label).toBe("+ Add migration pass");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0")).toMatchObject({
             valueKind: "object",
             presence: "required",
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0")?.label).toContain("metadata + documents");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig")).toMatchObject({
@@ -669,6 +673,14 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig")).toMatchObject({
             valueKind: "object",
             presence: "optional",
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.podReplicas")).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+            essential: true,
+            value: 1,
+            valueDefaulted: true,
         });
     });
 
@@ -691,6 +703,7 @@ describe("editConfig state", () => {
         expect(findNode(addedSnapshotName.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all")).toMatchObject({
             valueKind: "array",
             presence: "required",
+            essential: true,
         });
 
         const addedMigrationPass = applyEditOperationToObject(addedSnapshotConfig, {
@@ -704,6 +717,7 @@ describe("editConfig state", () => {
         expect(findNode(addedMigrationPass.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0")).toMatchObject({
             valueKind: "object",
             presence: "required",
+            essential: true,
             status: "required",
             label: "migration pass 1: choose metadata and/or document backfill",
         });
@@ -736,12 +750,14 @@ describe("editConfig state", () => {
         ]);
         expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0")).toMatchObject({
             valueKind: "object",
+            essential: true,
             status: "ok",
             label: "migration pass 1: metadata",
         });
         expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.metadataMigrationConfig")).toMatchObject({
             valueKind: "object",
             presence: "optional",
+            essential: true,
         });
         expect(findNode(addedMetadataMigration.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0.documentBackfillConfig:add")).toMatchObject({
             valueKind: "command",

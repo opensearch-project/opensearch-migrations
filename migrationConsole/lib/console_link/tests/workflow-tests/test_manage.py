@@ -4000,6 +4000,183 @@ def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
     assert speedup_factor.tree_id == "edit:traffic.replayers.replay.replayerConfig.speedupFactor"
 
 
+def test_resource_view_edit_mode_keeps_essential_snapshot_pass_actions_visible():
+    """Essential edit mode shows snapshot migration pass actions even when only add rows exist."""
+    edit_state = {
+        "nodes": [
+            {
+                "id": "edit:snapshotMigrationConfigs",
+                "path": ["snapshotMigrationConfigs"],
+                "label": "Backfill",
+                "valueKind": "array",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:snapshotMigrationConfigs.0",
+                        "path": ["snapshotMigrationConfigs", "0"],
+                        "label": "snapshot migration: source -> target",
+                        "valueKind": "object",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:snapshotMigrationConfigs.0.perSnapshotConfig",
+                                "path": ["snapshotMigrationConfigs", "0", "perSnapshotConfig"],
+                                "label": "perSnapshotConfig: 1 item",
+                                "value": {"all": [{"documentBackfillConfig": {}}]},
+                                "valueKind": "record",
+                                "presence": "required",
+                                "essential": True,
+                                "status": "ok",
+                                "children": [
+                                    {
+                                        "id": "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all",
+                                        "path": [
+                                            "snapshotMigrationConfigs",
+                                            "0",
+                                            "perSnapshotConfig",
+                                            "all",
+                                        ],
+                                        "label": "all: 1 item",
+                                        "value": [{"documentBackfillConfig": {}}],
+                                        "valueKind": "array",
+                                        "presence": "required",
+                                        "essential": True,
+                                        "status": "ok",
+                                        "children": [
+                                            {
+                                                "id": (
+                                                    "edit:snapshotMigrationConfigs.0"
+                                                    ".perSnapshotConfig.all.0"
+                                                ),
+                                                "path": [
+                                                    "snapshotMigrationConfigs",
+                                                    "0",
+                                                    "perSnapshotConfig",
+                                                    "all",
+                                                    "0",
+                                                ],
+                                                "label": "migration pass 1: documents",
+                                                "valueKind": "object",
+                                                "presence": "required",
+                                                "essential": True,
+                                                "status": "ok",
+                                                "children": [
+                                                    {
+                                                        "id": (
+                                                            "edit:snapshotMigrationConfigs.0"
+                                                            ".perSnapshotConfig.all.0"
+                                                            ".documentBackfillConfig"
+                                                        ),
+                                                        "path": [
+                                                            "snapshotMigrationConfigs",
+                                                            "0",
+                                                            "perSnapshotConfig",
+                                                            "all",
+                                                            "0",
+                                                            "documentBackfillConfig",
+                                                        ],
+                                                        "label": "documentBackfillConfig: configured",
+                                                        "valueKind": "object",
+                                                        "presence": "optional",
+                                                        "essential": True,
+                                                        "status": "ok",
+                                                        "children": [
+                                                            {
+                                                                "id": (
+                                                                    "edit:snapshotMigrationConfigs.0"
+                                                                    ".perSnapshotConfig.all.0"
+                                                                    ".documentBackfillConfig.podReplicas"
+                                                                ),
+                                                                "path": [
+                                                                    "snapshotMigrationConfigs",
+                                                                    "0",
+                                                                    "perSnapshotConfig",
+                                                                    "all",
+                                                                    "0",
+                                                                    "documentBackfillConfig",
+                                                                    "podReplicas",
+                                                                ],
+                                                                "label": "podReplicas: 1",
+                                                                "value": 1,
+                                                                "valueKind": "scalar",
+                                                                "valueType": "number",
+                                                                "presence": "optional",
+                                                                "essential": True,
+                                                                "valueDefaulted": True,
+                                                                "status": "ok",
+                                                            },
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                "id": (
+                                                    "edit:snapshotMigrationConfigs.0"
+                                                    ".perSnapshotConfig.all:add"
+                                                ),
+                                                "path": [
+                                                    "snapshotMigrationConfigs",
+                                                    "0",
+                                                    "perSnapshotConfig",
+                                                    "all",
+                                                ],
+                                                "label": "+ Add migration pass",
+                                                "valueKind": "command",
+                                                "command": {
+                                                    "requiresName": False,
+                                                    "autoEditAdded": False,
+                                                },
+                                                "status": "ok",
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+    sections = edit_state_resource_sections(
+        edit_state,
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+
+    all_nodes = []
+    stack = [resource for section in sections for group in section.groups for resource in group.resources]
+    while stack:
+        node = stack.pop()
+        all_nodes.append(node)
+        stack.extend(node.children)
+
+    assert any(
+        node.tree_id == "edit:snapshotMigrationConfigs.0.perSnapshotConfig"
+        for node in all_nodes
+    )
+    assert any(
+        node.tree_id == "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all"
+        for node in all_nodes
+    )
+    assert any(
+        node.tree_id == "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all:add"
+        for node in all_nodes
+    )
+    assert any(
+        node.tree_id
+        == (
+            "edit:snapshotMigrationConfigs.0.perSnapshotConfig.all.0"
+            ".documentBackfillConfig.podReplicas"
+        )
+        and "podReplicas: 1" in str(node.tree_label)
+        for node in all_nodes
+    )
+
+
 def test_resource_view_edit_mode_marks_expert_fields_when_visible():
     """Expert edit fields should be visually distinguishable once All fields are shown."""
     sections = edit_state_resource_sections(

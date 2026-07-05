@@ -5511,7 +5511,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "podReplicas": {
                         "type": "number",
                         "default": 1,
-                        "description": "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel — throughput scales linearly up to the total number of source shards."
+                        "description": "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel — throughput scales linearly up to the total number of source shards.",
+                        "x-essential": true
                       },
                       "jvmArgs": {
                         "type": "string",
@@ -6300,6 +6301,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             },
             "description": "Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill).",
+            "x-essential": true,
             "x-ui-hint": {
               "kind": "record",
               "addLabel": "snapshot name",

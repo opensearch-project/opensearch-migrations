@@ -1421,8 +1421,9 @@ export const USER_METADATA_OPTIONS = z.object({
 
 export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" + 
-            " throughput scales linearly up to the total number of source shards."),
+        .describe("Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel —" +
+            " throughput scales linearly up to the total number of source shards.")
+        .essential(),
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -2077,7 +2078,8 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
             message: "Choose one target cluster from targetClusters.",
         }),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD
-        .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."),
+        .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill).")
+        .essential(),
 }).describe("A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings.").superRefine((data, ctx) => {
     if (!data.perSnapshotConfig) return;
     for (const [snapName, migrations] of Object.entries(data.perSnapshotConfig)) {
