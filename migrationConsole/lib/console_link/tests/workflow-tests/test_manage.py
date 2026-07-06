@@ -4008,6 +4008,108 @@ def test_resource_view_edit_mode_keeps_authored_object_config_visible():
     ]
 
 
+def test_resource_view_edit_mode_renders_direct_diagnostics_as_child_rows():
+    """Cross-reference errors on map keys get visible diagnostic leaves."""
+    message = (
+        "perSnapshotConfig references unknown snapshot 'a' in source 'source'. "
+        "Define sourceClusters.source.snapshotInfo.snapshots.a, "
+        "rename this entry to one of: snap1, or remove this perSnapshotConfig entry."
+    )
+    edit_state = {
+        "nodes": [
+            {
+                "id": "edit:snapshotMigrationConfigs",
+                "path": ["snapshotMigrationConfigs"],
+                "label": "Backfill",
+                "valueKind": "array",
+                "status": "error",
+                "statusCounts": {"errors": 1},
+                "children": [
+                    {
+                        "id": "edit:snapshotMigrationConfigs.0",
+                        "path": ["snapshotMigrationConfigs", "0"],
+                        "label": "snapshot migration: source -> target",
+                        "valueKind": "object",
+                        "status": "error",
+                        "statusCounts": {"errors": 1},
+                        "children": [
+                            {
+                                "id": "edit:snapshotMigrationConfigs.0.perSnapshotConfig",
+                                "path": ["snapshotMigrationConfigs", "0", "perSnapshotConfig"],
+                                "label": "perSnapshotConfig: 1 item",
+                                "valueKind": "record",
+                                "status": "error",
+                                "statusCounts": {"errors": 1},
+                                "children": [
+                                    {
+                                        "id": "edit:snapshotMigrationConfigs.0.perSnapshotConfig.a",
+                                        "path": [
+                                            "snapshotMigrationConfigs", "0", "perSnapshotConfig", "a",
+                                        ],
+                                        "label": "a: 1 item",
+                                        "valueKind": "array",
+                                        "status": "error",
+                                        "statusCounts": {"errors": 1},
+                                        "diagnostics": [{
+                                            "severity": "error",
+                                            "message": message,
+                                            "path": [
+                                                "snapshotMigrationConfigs", "0", "perSnapshotConfig", "a",
+                                            ],
+                                        }],
+                                        "children": [
+                                            {
+                                                "id": (
+                                                    "edit:snapshotMigrationConfigs.0"
+                                                    ".perSnapshotConfig.a.0"
+                                                ),
+                                                "path": [
+                                                    "snapshotMigrationConfigs", "0",
+                                                    "perSnapshotConfig", "a", "0",
+                                                ],
+                                                "label": "migration pass 1: metadata + documents",
+                                                "valueKind": "object",
+                                                "status": "ok",
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "validation": {"valid": False, "errors": [message]},
+    }
+
+    sections = edit_state_resource_sections(
+        edit_state,
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+
+    all_nodes = []
+    stack = [resource for section in sections for group in section.groups for resource in group.resources]
+    while stack:
+        node = stack.pop()
+        all_nodes.append(node)
+        stack.extend(node.children)
+
+    snapshot = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:snapshotMigrationConfigs.0.perSnapshotConfig.a"
+    )
+    diagnostic = next(
+        node for node in all_nodes
+        if node.tree_id == "edit:snapshotMigrationConfigs.0.perSnapshotConfig.a:diagnostic:0"
+    )
+    assert snapshot.tree_default_expanded is True
+    assert "error: perSnapshotConfig references unknown snapshot 'a'" in str(diagnostic.tree_label)
+    assert "Define sourceClusters.source.snapshotInfo.snapshots.a" in str(diagnostic.tree_label)
+
+
 def test_resource_view_edit_mode_keeps_essential_optional_fields_visible():
     """Essential edit mode shows schema-marked optional fields without making them required."""
     edit_state = {

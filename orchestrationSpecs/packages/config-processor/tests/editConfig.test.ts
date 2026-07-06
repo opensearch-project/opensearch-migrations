@@ -742,6 +742,47 @@ describe("editConfig state", () => {
         });
     });
 
+    it("reports unknown per-snapshot names with a repair action", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        snapshots: {
+                            snap1: {
+                                repoName: "",
+                                config: {externallyManagedSnapshotName: "snap1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
+            kafkaClusterConfiguration: {},
+            snapshotMigrationConfigs: [{
+                fromSource: "source",
+                toTarget: "target",
+                perSnapshotConfig: {
+                    a: [{documentBackfillConfig: {}}],
+                },
+            }],
+            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+        });
+
+        const snapshotNode = findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.a");
+        expect(snapshotNode).toMatchObject({
+            status: "error",
+            diagnostics: [
+                expect.objectContaining({
+                    path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig", "a"],
+                    message: expect.stringContaining("Define sourceClusters.source.snapshotInfo.snapshots.a"),
+                }),
+            ],
+        });
+        expect(snapshotNode?.diagnostics?.[0].message).toContain("rename this entry to one of: snap1");
+    });
+
     it("adds snapshot migration snapshot names without replacing the migration list", () => {
         const addedSnapshotName = applyEditOperationToObject({
             sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},

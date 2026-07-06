@@ -2237,9 +2237,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 const availableSnapshots = sourceCluster?.snapshotInfo?.snapshots ?? {};
                 for (const snapName of Object.keys(mc.perSnapshotConfig)) {
                     if (!(snapName in availableSnapshots)) {
+                        const available = Object.keys(availableSnapshots);
                         ctx.addIssue({
                             code: z.ZodIssueCode.custom,
-                            message: `perSnapshotConfig references unknown snapshot '${snapName}' in source '${mc.fromSource}'. Available: ${Object.keys(availableSnapshots).join(', ') || '(none)'}`,
+                            message: `perSnapshotConfig references unknown snapshot '${snapName}' in source '${mc.fromSource}'. ` +
+                                `Define sourceClusters.${mc.fromSource}.snapshotInfo.snapshots.${snapName}, ` +
+                                (available.length
+                                    ? `rename this entry to one of: ${available.join(', ')}, `
+                                    : "define at least one source snapshot, ") +
+                                "or remove this perSnapshotConfig entry.",
                             path: ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName]
                         });
                     }

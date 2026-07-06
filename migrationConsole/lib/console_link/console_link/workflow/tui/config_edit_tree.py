@@ -274,6 +274,10 @@ def _edit_node_to_resource_node(
         child for child in edit_node.get("children") or []
         if _should_render_edit_node(child, status_mode, field_visibility)
     ]
+    visible_children = [
+        *_diagnostic_child_nodes(edit_node, status_mode),
+        *visible_children,
+    ]
     if not visible_children:
         visible_children = _required_parent_repair_children(edit_node, status_mode, field_visibility)
     should_expand = _edit_node_should_expand(
@@ -325,6 +329,29 @@ def _required_parent_repair_children(
         child for child in edit_node.get("children") or []
         if child.get("valueKind") != "command" and not child.get("expert")
     ]
+
+
+def _diagnostic_child_nodes(edit_node: Dict[str, Any], status_mode: str) -> list[Dict[str, Any]]:
+    children = []
+    for index, diagnostic in enumerate(_direct_diagnostics(edit_node, status_mode)):
+        message = str(diagnostic.get("message") or "").strip()
+        if not message:
+            continue
+        severity = str(diagnostic.get("severity") or "error").lower()
+        if severity not in STATUS_STYLE:
+            severity = "error"
+        node_id = str(edit_node.get("id") or ".".join(str(part) for part in edit_node.get("path") or []))
+        children.append({
+            "id": f"{node_id}:diagnostic:{index}",
+            "path": [*list(edit_node.get("path") or []), f"$diagnostic{index}"],
+            "label": f"{severity}: {message}",
+            "valueKind": "diagnostic",
+            "presence": "required" if severity == "required" else "optional",
+            "status": severity,
+            "statusCounts": {},
+            "description": message,
+        })
+    return children
 
 
 def _edit_node_should_expand(
@@ -585,14 +612,17 @@ def _status_line(edit_node: Dict[str, Any], status_mode: str) -> str:
 
 
 def _iter_diagnostics(edit_node: Dict[str, Any], status_mode: str) -> Iterable[Dict[str, Any]]:
+    yield from _direct_diagnostics(edit_node, status_mode)
     if status_mode != EDIT_MODE_ALL:
-        state_diagnostics = (edit_node.get("states") or {}).get(status_mode, {}).get("diagnostics") or []
-        for diagnostic in state_diagnostics:
-            yield diagnostic
         return
-
-    direct = edit_node.get("diagnostics") or []
-    for diagnostic in direct:
-        yield diagnostic
     for child in edit_node.get("children") or []:
         yield from _iter_diagnostics(child, status_mode)
+
+
+def _direct_diagnostics(edit_node: Dict[str, Any], status_mode: str) -> Iterable[Dict[str, Any]]:
+    if status_mode != EDIT_MODE_ALL:
+        direct = (edit_node.get("states") or {}).get(status_mode, {}).get("diagnostics") or []
+    else:
+        direct = edit_node.get("diagnostics") or []
+    for diagnostic in direct:
+        yield diagnostic
