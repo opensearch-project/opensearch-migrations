@@ -9,8 +9,9 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -119,11 +120,11 @@ public class EndToEndCompressionTest extends SourceTestBase {
                     .build()
                     .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                     snapshotName,
                     snapshotRepoName,
                     sourceClient,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                    RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                     List.of(),
                     snapshotContext.createSnapshotCreateContext()
             );

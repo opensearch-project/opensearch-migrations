@@ -313,7 +313,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
         var snapshotArgs = new CreateSnapshot.Args();
         snapshotArgs.snapshotName = SNAPSHOT_NAME;
-        snapshotArgs.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+        snapshotArgs.repoUri = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         snapshotArgs.sourceArgs.host = sourceCluster.getUrl();
         new CreateSnapshot(snapshotArgs, testSnapshotContext.createSnapshotCreateContext()).run();
         sourceCluster.copySnapshotData(snapshotDir.toString());

@@ -9,8 +9,9 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
@@ -85,9 +86,9 @@ public class LuceneSnapshotSourceEndToEndTest {
             var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
             var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
@@ -224,8 +225,8 @@ public class LuceneSnapshotSourceEndToEndTest {
                 .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
             var client = clientFactory.determineVersionAndCreate();
 
-            SnapshotRunner.runAndWaitForCompletion(new FileSystemSnapshotCreator(
-                SNAPSHOT_V1, REPO_NAME, client, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+            SnapshotRunner.runAndWaitForCompletion(new SnapshotCreator(
+                SNAPSHOT_V1, REPO_NAME, client, RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext()));
 
             // Add two more docs and snapshot again — these become the delta additions.
@@ -233,8 +234,8 @@ public class LuceneSnapshotSourceEndToEndTest {
             ops.createDocument(INDEX_NAME, "doc5", "{\"title\": \"Fifth\", \"value\": 5}");
             ops.post("/" + INDEX_NAME + "/_refresh", null);
 
-            SnapshotRunner.runAndWaitForCompletion(new FileSystemSnapshotCreator(
-                SNAPSHOT_V2, REPO_NAME, client, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+            SnapshotRunner.runAndWaitForCompletion(new SnapshotCreator(
+                SNAPSHOT_V2, REPO_NAME, client, RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext()));
 
             cluster.copySnapshotData(localDirectory.toString());

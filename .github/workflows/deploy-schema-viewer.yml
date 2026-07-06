@@ -15,13 +15,30 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  # Release tags cannot deploy to the github-pages environment (restricted to main/2.x branches).
+  # Re-dispatch on main so the protection rules are satisfied; the deploy job then fetches all
+  # released schemas via the GitHub API, including the one that triggered this run.
+  redispatch-on-release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy from main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run deploy-schema-viewer.yml \
+            --repo ${{ github.repository }} \
+            --ref main
+
   deploy:
+    if: github.event_name != 'release'
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
     environment:

@@ -183,7 +183,7 @@ public abstract class MigratorEvaluatorBase {
     protected FailureClassification classifyFailure(Exception e) {
         var readFailure = SnapshotReadFailures.find(e);
         if (readFailure != null) {
-            var repo = arguments.fileSystemRepoPath != null ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
+            var repo = arguments.repoUri;
             var message = SnapshotReadFailures.describe(
                 readFailure, arguments.snapshotName, repo, arguments.s3Region);
             log.atError().setCause(e).setMessage("{}").addArgument(message).log();

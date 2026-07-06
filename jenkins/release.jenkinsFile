@@ -114,6 +114,7 @@ pipeline {
                         copyDockerImage('opensearch-migrations-traffic-capture-proxy');
                         copyDockerImage('opensearch-migrations-reindex-from-snapshot');
                         copyDockerImage('opensearch-migrations-transformation-shim');
+                        copyDockerImage('opensearch-migrations-migration-companion');
                     }
                 }
             }
