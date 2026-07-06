@@ -603,15 +603,8 @@ spec:
             discovery.type: single-node
             xpack.security.enabled: false
             xpack.ml.enabled: false
-            # repository-gcs client settings for local GCS testing. The endpoint
-            # points at fake-gcs-server and token_uri at gcs-token-stub (see the
-            # gcs/ helm templates). These are only consulted when a gcs snapshot
-            # repository is registered, so they are inert for non-GCS tests.
-            gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
-            gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
-            sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
 
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
