@@ -1,0 +1,10 @@
+{{- if .Values.migrationConfig }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migration-config
+data:
+  {{- range $key, $value := .Values.migrationConfig }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

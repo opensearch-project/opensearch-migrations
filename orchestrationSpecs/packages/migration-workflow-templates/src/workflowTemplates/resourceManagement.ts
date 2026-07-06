@@ -500,8 +500,8 @@ export const ResourceManagement = WorkflowBuilder.create({
             const snapshotOptions = expr.get(snapshotItemConfig, "config");
 
             return b.setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
+                action: "apply",
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
@@ -548,6 +548,11 @@ export const ResourceManagement = WorkflowBuilder.create({
             }))
         .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
         .addJsonPathOutput("resourceCreationTimestamp", "{.metadata.creationTimestamp}", typeToken<string>())
+        // Emit the real apiserver-assigned UID so downstream owned resources (RFS coordinator
+        // Secret/Service/StatefulSet) can set valid ownerReferences. Without this, callers
+        // would propagate a placeholder UID (e.g. "imported" for BYOS/imported-cluster paths)
+        // and Kubernetes GC would delete the owned resources within ~1s as orphaned children.
+        .addJsonPathOutput("resourceUid", "{.metadata.uid}", typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -956,6 +961,12 @@ export const ResourceManagement = WorkflowBuilder.create({
             expr.ternary(
                 expr.equals(c.steps.tryApply.status, "Succeeded"),
                 c.steps.tryApply.outputs.resourceCreationTimestamp,
+                expr.literal("")
+            ))
+        .addExpressionOutput("resourceUid", c =>
+            expr.ternary(
+                expr.equals(c.steps.tryApply.status, "Succeeded"),
+                c.steps.tryApply.outputs.resourceUid,
                 expr.literal("")
             ))
     )

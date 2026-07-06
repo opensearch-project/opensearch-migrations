@@ -35,29 +35,29 @@ public class ClusterReaderExtractorTest {
     @Test
     void testExtractClusterReader_invalidS3Snapshot_missingRegion() {
         var args = new MigrateOrEvaluateArgs();
-        args.s3RepoUri = "foo.bar";
-        args.s3LocalDirPath = "fizz.buzz";
+        args.repoUri = "s3://foo/bar";
+        args.localDir = "fizz.buzz";
         var extractor = new ClusterReaderExtractor(args);
 
         var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
-        assertThat(exception.getMessage(), equalTo("If an s3 repo is being used, s3-region and s3-local-dir-path must be set"));
+        assertThat(exception.getMessage(), equalTo("If an s3 repo is being used, --s3-region and --local-dir must be set"));
     }
 
     @Test
-    void testExtractClusterReader_invalidS3Snapshot_missingLocalDirPath() {
+    void testExtractClusterReader_invalidS3Snapshot_missingLocalDir() {
         var args = new MigrateOrEvaluateArgs();
-        args.s3RepoUri = "foo.bar";
+        args.repoUri = "s3://foo/bar";
         args.s3Region = "us-west-1";
         var extractor = new ClusterReaderExtractor(args);
 
         var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
-        assertThat(exception.getMessage(), equalTo("If an s3 repo is being used, s3-region and s3-local-dir-path must be set"));
+        assertThat(exception.getMessage(), equalTo("If an s3 repo is being used, --s3-region and --local-dir must be set"));
     }
 
     @Test
     void testExtractClusterReader_validLocalSnapshot_missingVersion() {
         var args = new MigrateOrEvaluateArgs();
-        args.fileSystemRepoPath = "foo.bar";
+        args.repoUri = "/foo/bar";
         var extractor = spy(new ClusterReaderExtractor(args));
 
         var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
@@ -67,7 +67,7 @@ public class ClusterReaderExtractorTest {
     @Test
     void testExtractClusterReader_validLocalSnapshot() {
         var args = new MigrateOrEvaluateArgs();
-        args.fileSystemRepoPath = "foo.bar";
+        args.repoUri = "/foo/bar";
         args.sourceVersion = Version.fromString("OS 1.1.1");
         var extractor = spy(new ClusterReaderExtractor(args));
         var mockReader = mock(ClusterReader.class);
@@ -82,9 +82,9 @@ public class ClusterReaderExtractorTest {
     @Test
     void testExtractClusterReader_validS3Snapshot() {
         var args = new MigrateOrEvaluateArgs();
-        args.s3RepoUri = "foo.bar";
+        args.repoUri = "s3://foo/bar";
         args.s3Region = "us-west-1";
-        args.s3LocalDirPath = "fizz.buzz";
+        args.localDir = "fizz.buzz";
         args.sourceVersion = Version.fromString("OS 9.9.9");
         args.versionStrictness.allowLooseVersionMatches = true;
         var extractor = spy(new ClusterReaderExtractor(args));

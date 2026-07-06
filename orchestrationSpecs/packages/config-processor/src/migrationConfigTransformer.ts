@@ -2,10 +2,10 @@ import {
     ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
-    DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
-    S3_REPO_CONFIG,
+    REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
@@ -21,6 +21,7 @@ import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
 
@@ -51,10 +52,12 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 }
 
 async function rewriteRepoEndpointIfLocalStack(
-    snapshotRepo: z.infer<typeof S3_REPO_CONFIG>,
+    snapshotRepo: z.infer<typeof REPO_CONFIG>,
     repoName: string
-): Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
+): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
+    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
+    // for gs:// URIs and the resulting useLocalStack stays false.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -734,6 +737,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             return {
                 ...m,
                 snapshotConfigChecksum,
+                resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
                     sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
@@ -791,6 +795,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                             ...dep,
                             migrationLabel: m.migrationLabel,
                             configChecksum: m.checksumForReplayer,
+                            resourceName: m.resourceName,
                         }))
                 ),
             });

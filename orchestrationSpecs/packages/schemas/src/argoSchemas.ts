@@ -8,7 +8,7 @@ import {
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
-    S3_REPO_CONFIG,
+    REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG,
@@ -148,8 +148,8 @@ export const NAMED_TARGET_CLUSTER_CONFIG =
         label: z.string().regex(/^[a-zA-Z0-9_]+$/), // override to required
     }));
 
-export const DENORMALIZED_S3_REPO_CONFIG =
-    makeOptionalDefaultedFieldsRequired(S3_REPO_CONFIG.safeExtend({
+export const DENORMALIZED_REPO_CONFIG =
+    makeOptionalDefaultedFieldsRequired(REPO_CONFIG.safeExtend({
         useLocalStack: z.boolean().default(false),
         repoName: z.string(),
     }));
@@ -157,14 +157,14 @@ export const DENORMALIZED_S3_REPO_CONFIG =
 export const COMPLETE_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.safeExtend({
         label: z.string(),
-        repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+        repoConfig: DENORMALIZED_REPO_CONFIG  // Replace string reference with actual config
     }));
 
 export const DYNAMIC_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
         .omit({repoName: true})
         .safeExtend({
-            repoConfig: DENORMALIZED_S3_REPO_CONFIG,  // Replace string reference with actual config
+            repoConfig: DENORMALIZED_REPO_CONFIG,  // Replace string reference with actual config
             label: z.string()
     }));
 
@@ -289,7 +289,7 @@ export const SNAPSHOT_NAME_RESOLUTION = z.union([
 
 export const SNAPSHOT_REPO_CONFIG = z.object({
     label: z.string(),
-    repoConfig: DENORMALIZED_S3_REPO_CONFIG
+    repoConfig: DENORMALIZED_REPO_CONFIG
 });
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
@@ -311,6 +311,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     checksumForReplayer: z.string(),
     workloadIdentityChecksum: z.string(),
     resourceUid: z.string(),
+    resourceName: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -348,7 +349,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
-    repo: DENORMALIZED_S3_REPO_CONFIG,
+    repo: DENORMALIZED_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
     semaphoreKey: z.string(),
     dependsOnProxySetups: z.array(z.object({
@@ -362,6 +363,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
     migrationLabel: z.string(),
     configChecksum: z.string(),
+    resourceName: z.string(),
 });
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({

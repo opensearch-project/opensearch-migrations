@@ -726,7 +726,10 @@ class ExprBuilder {
     }
 
     regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        // Sprig's regexReplaceAll arg order is (pattern, input, replacement).
+        // Sprig's regexReplaceAll Go signature is (regex, src, replacement). When used in Argo expr
+        // (expr-lang), arguments are passed positionally matching the Go signature, NOT the Sprig
+        // template pipe-style convention (regex, replacement, src). The TS API here keeps the
+        // template-style argument order for ergonomics, but emits args in Go/expr order.
         return fn<string, ExpressionType, "complicatedExpression">("sprig.regexReplaceAll", toExpression(pattern), toExpression(text), toExpression(replacement));
     }
 
