@@ -122,12 +122,14 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
             String recordId = String.format("%s.%d", connectionId, index);
             var byteBuffer = osh.byteBuffer;
+            // Use connectionId (without index) as the Kafka key so all fragments
+            // of the same connection hash to the same partition.
             ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(
                 topicNameForTraffic,
-                recordId,
+                connectionId,
                 Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position())
             );
-            log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
+            log.debug("Sending Kafka producer record: {} (key={}) for topic: {}", recordId, connectionId, topicNameForTraffic);
 
             var flushContext = rootScope.createKafkaRecordContext(
                 telemetryContext,
