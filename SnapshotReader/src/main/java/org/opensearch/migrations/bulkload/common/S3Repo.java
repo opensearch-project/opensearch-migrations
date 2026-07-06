@@ -199,7 +199,7 @@ public class S3Repo implements SourceRepo {
         return new S3Uri(fullUri);
     }
 
-    protected List<String> listFilesInS3Root() {
+    public List<String> listFilesInS3Root() {
         // Normalise the repository prefix and remove trailing “/” if present
         String prefixKey = s3RepoUri.key;
         if (prefixKey.endsWith("/")) {

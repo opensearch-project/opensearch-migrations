@@ -8,6 +8,7 @@ import java.util.List;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.S3Repo;
+import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout.SolrBackupMode;
 
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,51 @@ class SolrClusterReaderExtractorTest {
 
         assertThat(bare.collectionName(), equalTo("override_idx"));
         verify(s3Repo, never()).downloadFile(anyString());
+    }
+
+    @Test
+    void detectBareSolrLayoutInS3_flatRootStandaloneDerivesNameFromKey() {
+        var s3Repo = mock(S3Repo.class);
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2", "_0.si"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/backups/standalone/snapshot.nyc_taxis_7"));
+
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null);
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(bare.collectionName(), equalTo("nyc_taxis_7"));
+        assertThat(bare.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void detectBareSolrLayoutInS3_flatRootStandaloneOverrideWins() {
+        var s3Repo = mock(S3Repo.class);
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
+
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, "override_idx");
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(bare.collectionName(), equalTo("override_idx"));
+    }
+
+    @Test
+    void detectBareSolrLayoutInS3_nullWhenNoSubdirsAndNoRootSegments() {
+        var s3Repo = mock(S3Repo.class);
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("notes.txt"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/empty"));
+
+        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null), nullValue());
+    }
+
+    @Test
+    void detectBareSolrLayoutInS3_nullWhenRootListingFails() {
+        var s3Repo = mock(S3Repo.class);
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenThrow(new RuntimeException("cannot list root"));
+
+        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null), nullValue());
     }
 
     @Test

@@ -153,6 +153,46 @@ class SolrBackupLayoutHelpersTest {
         assertThat(SolrBackupLayout.detectBareLayoutFromListing(List.of("col_a", "col_b")), nullValue());
     }
 
+    // ---- detectFlatRootStandaloneFromS3 ----
+
+    @Test
+    void detectFlatRootStandaloneFromS3_derivesNameFromKeyLastSegment() {
+        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
+            List.of("segments_2", "_0.si"), "backups/standalone/snapshot.nyc_taxis_7", null);
+        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(layout.collectionName(), equalTo("nyc_taxis_7"));
+        assertThat(layout.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void detectFlatRootStandaloneFromS3_overrideWins() {
+        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
+            List.of("segments_2"), "snapshot.nyc_taxis_7", "my_index");
+        assertThat(layout.collectionName(), equalTo("my_index"));
+        assertThat(layout.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void detectFlatRootStandaloneFromS3_stripsPrefixlessKeySegment() {
+        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
+            List.of("segments_2"), "my_core/", null);
+        assertThat(layout.collectionName(), equalTo("my_core"));
+    }
+
+    @Test
+    void detectFlatRootStandaloneFromS3_emptyKeyYieldsEmptyName() {
+        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("segments_2"), "", null);
+        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(layout.collectionName(), equalTo(""));
+    }
+
+    @Test
+    void detectFlatRootStandaloneFromS3_nullWhenNoSegmentsFile() {
+        assertThat(
+            SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("_0.si", "random.txt"), "snapshot.x", null),
+            nullValue());
+    }
+
     // ---- readCollectionNameFromBackupProperties ----
 
     @Test

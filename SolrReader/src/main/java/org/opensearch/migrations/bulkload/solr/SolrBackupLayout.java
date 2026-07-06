@@ -486,6 +486,37 @@ public final class SolrBackupLayout {
         return null;
     }
 
+    /**
+     * S3 counterpart to the flat-root branch of {@link #classifyBareBackup}: detects a standalone core
+     * whose Lucene index sits <em>directly</em> at the backup root (a {@code segments_N} file among the
+     * top-level objects, with no {@code snapshot.<name>/} wrapper directory). {@link #detectBareLayoutFromListing}
+     * can't see this because it only inspects sub-directory names, so callers probe the root's file listing
+     * separately and pass it here.
+     *
+     * @param rootFiles    top-level file names under the backup root (from an S3 listing)
+     * @param rootName     the final path segment of the backup root's S3 key (e.g. {@code snapshot.<name>})
+     * @param nameOverride explicit core name; wins over the name derived from {@code rootName}
+     * @return a STANDALONE layout with {@code dataPath == ""}, or {@code null} if no root segments file exists
+     */
+    public static BareBackupLayout detectFlatRootStandaloneFromS3(
+        List<String> rootFiles, String rootName, String nameOverride
+    ) {
+        if (rootFiles.stream().noneMatch(n -> n.startsWith("segments_"))) {
+            return null;
+        }
+        var name = nameOverride != null ? nameOverride : stripSnapshotPrefix(lastPathSegment(rootName));
+        return new BareBackupLayout(SolrBackupMode.STANDALONE, name, "");
+    }
+
+    private static String lastPathSegment(String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        var trimmed = key.endsWith("/") ? key.substring(0, key.length() - 1) : key;
+        var idx = trimmed.lastIndexOf('/');
+        return idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
+    }
+
     /** Joins an S3/relative prefix to a suffix, avoiding a leading {@code /} when the base is empty. */
     public static String joinPrefix(String base, String suffix) {
         return base.isEmpty() ? suffix : base + "/" + suffix;

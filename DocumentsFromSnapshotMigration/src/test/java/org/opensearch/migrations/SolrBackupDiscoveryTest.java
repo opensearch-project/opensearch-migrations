@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.S3Repo;
+import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
 
 import org.junit.jupiter.api.Test;
@@ -89,6 +90,82 @@ class SolrBackupDiscoveryTest {
         assertThat(discovery.collections(), contains("products"));
         assertThat(discovery.dataDirByCollection().get("products"), equalTo("snapshot.products"));
         assertThat(discovery.shardPreparationNeeded(), is(false));
+    }
+
+    @Test
+    void s3StandaloneFlatRoot_derivesNameFromKeyLastSegment() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2", "_0.si", "_0.fdt"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/backups/standalone/snapshot.nyc_taxis_7"));
+
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+
+        assertThat(discovery.collections(), contains("nyc_taxis_7"));
+        assertThat(discovery.dataDirByCollection().get("nyc_taxis_7"), equalTo(""));
+        assertThat(discovery.shardPreparationNeeded(), is(false));
+    }
+
+    @Test
+    void s3StandaloneFlatRoot_nameOverrideWins() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
+
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, "my_index", List.of());
+
+        assertThat(discovery.collections(), contains("my_index"));
+        assertThat(discovery.dataDirByCollection().get("my_index"), equalTo(""));
+    }
+
+    @Test
+    void s3StandaloneFlatRoot_prepareCollection_downloadsWholeRoot() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/snapshot.catalog"));
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+
+        discovery.prepareCollection("catalog");
+
+        verify(s3Repo).downloadPrefix("");
+    }
+
+    @Test
+    void s3StandaloneFlatRoot_atBucketRoot_emptyKeyYieldsEmptyDerivedName() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket"));
+
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+
+        // Empty repo key -> empty derived core name (defensive guard in lastPathSegment).
+        assertThat(discovery.collections(), contains(""));
+        assertThat(discovery.dataDirByCollection().get(""), equalTo(""));
+    }
+
+    @Test
+    void s3NoSubdirsNoSegments_notBare_fallsBackToEmptyListing() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("random.txt"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/whatever"));
+
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+
+        assertThat(discovery.collections().isEmpty(), is(true));
+    }
+
+    @Test
+    void s3FlatRootProbe_listFilesFailure_notBare() throws Exception {
+        var s3Repo = s3Repo();
+        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
+        when(s3Repo.listFilesInS3Root()).thenThrow(new RuntimeException("cannot list root"));
+
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+
+        assertThat(discovery.collections().isEmpty(), is(true));
     }
 
     @Test

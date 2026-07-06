@@ -176,9 +176,11 @@ public class ClusterReaderExtractor {
     }
 
     static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
-        var bare = SolrBackupLayout.detectBareLayoutFromListing(s3Repo.listTopLevelDirectories());
+        var subDirs = s3Repo.listTopLevelDirectories();
+        var bare = SolrBackupLayout.detectBareLayoutFromListing(subDirs);
         if (bare == null) {
-            return null;
+            // A flat-root standalone index has no sub-directories at all; only then probe the root files.
+            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo, nameOverride) : null;
         }
         if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
             var name = nameOverride;
@@ -195,6 +197,24 @@ public class ClusterReaderExtractor {
         return nameOverride != null
             ? new SolrBackupLayout.BareBackupLayout(bare.mode(), nameOverride, bare.dataPath())
             : bare;
+    }
+
+    /** Standalone core whose flat Lucene index is at the S3 root (segments_N, no snapshot.<name>/ wrapper). */
+    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo, String nameOverride) {
+        final List<String> rootFiles;
+        try {
+            rootFiles = s3Repo.listFilesInS3Root();
+        } catch (RuntimeException e) {
+            log.atDebug().setMessage("No flat-root standalone index at S3 root: {}").addArgument(e.getMessage()).log();
+            return null;
+        }
+        var rootName = nameOverride == null ? s3Repo.getS3RepoUri().key : null;
+        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, rootName, nameOverride);
+        if (bare != null) {
+            log.atInfo().setMessage("Detected flat-root standalone Solr backup in S3 (core='{}')")
+                .addArgument(bare.collectionName()).log();
+        }
+        return bare;
     }
 
     private ClusterReader buildSolrSnapshotReader(
