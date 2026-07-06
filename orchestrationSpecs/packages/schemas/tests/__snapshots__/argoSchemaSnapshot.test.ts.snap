@@ -249,7 +249,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               },
                               "endpoint": {
                                 "type": "string",
-                                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                 "default": "",
                                 "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                               },
@@ -1371,7 +1371,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "endpoint": {
                             "type": "string",
-                            "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                            "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                             "default": ""
                           },
                           "s3RoleArn": {
@@ -2255,7 +2255,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "endpoint": {
                           "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": ""
                         },
                         "s3RoleArn": {
@@ -3238,7 +3238,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "endpoint": {
                       "type": "string",
-                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                       "default": "",
                       "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                     },
@@ -5157,7 +5157,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "endpoint": {
                 "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                 "default": "",
                 "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
               },
