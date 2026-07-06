@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 
@@ -118,7 +119,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
 
-            final var connectionId = telemetryContext.getConnectionId();
+            final var connectionId = Objects.requireNonNull(
+                telemetryContext.getConnectionId(),
+                "connectionId must not be null — partition locality requires a stable key"
+            );
 
             String recordId = String.format("%s.%d", connectionId, index);
             var byteBuffer = osh.byteBuffer;
@@ -180,8 +184,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                         completableFuture.complete(metadata);
                     }
                 });
-            } catch (Exception exception) {
-                completableFuture.completeExceptionally(exception);
+            } catch (Throwable throwable) {
+                completableFuture.completeExceptionally(throwable);
             }
         });
 

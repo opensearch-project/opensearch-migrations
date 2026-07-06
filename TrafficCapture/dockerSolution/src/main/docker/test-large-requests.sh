@@ -27,7 +27,7 @@ echo "=== Large Request Replay Test ==="
 echo ""
 
 # Wait for services
-echo "[1/6] Waiting for services to be ready..."
+echo "[1/7] Waiting for services to be ready..."
 for i in $(seq 1 30); do
     if curl $CURL_OPTS -o /dev/null -w "%{http_code}" "$PROXY_URL" 2>/dev/null | grep -q "401\|200"; then
         break
@@ -42,31 +42,28 @@ fi
 echo "  Services ready."
 
 # Generate bulk payload
-echo "[2/6] Generating ~5MB bulk request ($NUM_DOCS documents)..."
+echo "[2/7] Generating ~5MB bulk request ($NUM_DOCS documents)..."
 BULK_FILE="/tmp/test-bulk-payload.ndjson"
 rm -f "$BULK_FILE"
 
-for i in $(seq 1 $NUM_DOCS); do
-    echo "{\"index\":{\"_index\":\"$INDEX_NAME\",\"_id\":\"doc-$i\"}}" >> "$BULK_FILE"
-    # Each doc ~2.5KB with a large text field
-    python3 -c "
+python3 -c "
 import json
-doc = {
-    'title': f'Document {$i}',
-    'description': 'x' * 2000,
-    'timestamp': '2026-06-28T00:00:00Z',
-    'category': 'large-bulk-test',
-    'sequence': $i
-}
-print(json.dumps(doc))
-" >> "$BULK_FILE"
-done
+for i in range(1, $NUM_DOCS + 1):
+    print(json.dumps({'index': {'_index': '$INDEX_NAME', '_id': f'doc-{i}'}}))
+    print(json.dumps({
+        'title': f'Document {i}',
+        'description': 'x' * 2000,
+        'timestamp': '2026-06-28T00:00:00Z',
+        'category': 'large-bulk-test',
+        'sequence': i
+    }))
+" > "$BULK_FILE"
 
 PAYLOAD_SIZE=$(wc -c < "$BULK_FILE" | tr -d ' ')
 echo "  Payload size: ${PAYLOAD_SIZE} bytes (~$((PAYLOAD_SIZE / 1024 / 1024))MB)"
 
 # Send bulk request through capture proxy
-echo "[3/6] Sending bulk request through capture proxy..."
+echo "[3/7] Sending bulk request through capture proxy..."
 RESPONSE=$(curl $CURL_OPTS -u admin:admin -X POST \
     "$PROXY_URL/_bulk" \
     -H "Content-Type: application/x-ndjson" \
