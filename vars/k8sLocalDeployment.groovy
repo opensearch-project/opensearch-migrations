@@ -118,6 +118,8 @@ def call(Map config = [:]) {
                                 def sourceVer = sourceVersion ?: params.SOURCE_VERSION
                                 def targetVer = targetVersion ?: params.TARGET_VERSION
                                 currentBuild.description = "${sourceVer} → ${targetVer}"
+                                // --source-version accepts one or more space-separated values; convert commas for multi-source jobs
+                                def sourceVerArg = sourceVer.replace(',', ' ')
                                 def testIdsArg = ""
                                 def testIdsResolved = testIds ?: params.TEST_IDS
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
@@ -130,7 +132,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
+                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }

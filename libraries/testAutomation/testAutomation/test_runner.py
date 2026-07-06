@@ -547,7 +547,8 @@ def _generate_unique_id() -> str:
 
 
 def get_version_combinations(source_version, target_version, target_type):
-    source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
+    versions = source_version if isinstance(source_version, list) else [source_version]
+    source_list = VALID_SOURCE_VERSIONS if versions == ["all"] or versions == "all" else versions
     if target_type == TargetType.AOSS:
         return [(s, TargetType.AOSS.value) for s in source_list]
     target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
@@ -561,9 +562,10 @@ def parse_args() -> argparse.Namespace:
     source_versions = VALID_SOURCE_VERSIONS + ['all']
     parser.add_argument(
         "--source-version",
+        nargs='+',
         choices=source_versions,
-        default="ES_5.6",
-        help=f"Source version to use. Must be one of: {', '.join(source_versions)}"
+        default=["ES_5.6"],
+        help=f"One or more source versions to test, or 'all'. Must be from: {', '.join(source_versions)}"
     )
     parser.add_argument(
         "--target-type",

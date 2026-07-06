@@ -215,3 +215,11 @@ class TestVersionCombinations:
         combos = get_version_combinations("all", "OS_2.19", TargetType.AOSS)
         assert all(t == "AOSS" for _, t in combos)
         assert len(combos) == len(VALID_SOURCE_VERSIONS)
+
+    def test_multi_source_list(self):
+        combos = get_version_combinations(["SOLR_6.6", "SOLR_7.7", "SOLR_9.8"], "OS_3.1", TargetType.OPENSEARCH)
+        assert combos == [("SOLR_6.6", "OS_3.1"), ("SOLR_7.7", "OS_3.1"), ("SOLR_9.8", "OS_3.1")]
+
+    def test_single_source_as_list(self):
+        combos = get_version_combinations(["ES_7.10"], "OS_2.19", TargetType.OPENSEARCH)
+        assert combos == [("ES_7.10", "OS_2.19")]

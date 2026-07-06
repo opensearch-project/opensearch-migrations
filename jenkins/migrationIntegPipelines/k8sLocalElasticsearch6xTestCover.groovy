@@ -9,4 +9,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
 // This ensures the GenericTrigger regex stays in sync with the actual job name
 // (e.g., main-* vs pr-*) across runs.
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
-elasticsearch8xK8sLocalTest(jobName: jobNameOverride ?: null)
+k8sLocalElasticsearch6xTest(jobName: jobNameOverride ?: null)
