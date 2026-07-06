@@ -299,7 +299,7 @@ public class KafkaCaptureFactoryTest {
             .map(ProducerRecord::key)
             .collect(Collectors.toSet());
         Assertions.assertEquals(1, uniqueKeys.size(),
-            "All fragments should use the same Kafka key for partition co-locality, but got: " + uniqueKeys);
+            "All fragments should use the same Kafka key for partition locality, but got: " + uniqueKeys);
 
         // The key should be exactly the connectionId (not connectionId.index)
         String recordKey = uniqueKeys.iterator().next();
