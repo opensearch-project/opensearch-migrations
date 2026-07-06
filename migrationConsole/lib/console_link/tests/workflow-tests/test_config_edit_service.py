@@ -1,4 +1,5 @@
 import base64
+import json
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -277,6 +278,54 @@ def test_apply_operation_reports_config_processor_stderr():
     assert "Usage: editConfig apply --pending-config" in str(error.value)
 
 
+@patch("console_link.workflow.services.config_edit_service.load_k8s_config")
+@patch("console_link.workflow.services.config_edit_service.workflow_exists")
+def test_submit_saved_config_validates_before_touching_workflow(_workflow_exists, _load_k8s):
+    runner = MagicMock()
+    runner.run_config_processor_node_script.return_value = json.dumps({
+        "validation": {
+            "valid": False,
+            "errors": [
+                "traffic.replayers.sourceTarget.replayerConfig.requestTransforms.0: "
+                "Exactly one of entryPoint or transformName is required",
+            ],
+            "diagnostics": [
+                {
+                    "severity": "required",
+                    "path": [
+                        "traffic", "replayers", "sourceTarget", "replayerConfig",
+                        "requestTransforms", "0",
+                    ],
+                    "message": "Exactly one of entryPoint or transformName is required",
+                },
+            ],
+        }
+    })
+    service = ConfigEditService(
+        namespace="test",
+        store=FakeStore(WorkflowConfig(raw_yaml=(
+            "traffic:\n"
+            "  replayers:\n"
+            "    sourceTarget:\n"
+            "      replayerConfig:\n"
+            "        requestTransforms:\n"
+            "        - {}\n"
+        ))),
+        runner=runner,
+    )
+
+    with pytest.raises(ValueError) as error:
+        service.submit_saved_config("migration", unique_run_nonce="123")
+
+    message = str(error.value)
+    assert "Workflow configuration is not valid" in message
+    assert "traffic.replayers.sourceTarget.replayerConfig.requestTransforms.0" in message
+    assert "Exactly one of entryPoint or transformName is required" in message
+    runner.submit_workflow.assert_not_called()
+    _load_k8s.assert_not_called()
+    _workflow_exists.assert_not_called()
+
+
 @patch("console_link.workflow.services.config_edit_service.wait_until_workflow_deleted", return_value=True)
 @patch("console_link.workflow.services.config_edit_service.delete_workflow", return_value=True)
 @patch("console_link.workflow.services.config_edit_service.stop_workflow", return_value=True)
@@ -294,6 +343,9 @@ def test_submit_saved_config_replaces_existing_workflow(
     _wait_deleted,
 ):
     runner = MagicMock()
+    runner.run_config_processor_node_script.return_value = json.dumps({
+        "validation": {"valid": True, "errors": []},
+    })
     runner.submit_workflow.return_value = {"workflow_name": "migration"}
     service = ConfigEditService(
         namespace="test",

@@ -1816,6 +1816,29 @@ def test_text_input_modal_uses_consistent_inner_spacing():
     assert "#regex-help { color: gray; margin-top: 1; margin-bottom: 0; }" in TextInputModal.CSS
 
 
+def test_config_variant_choice_preserves_provisional_discard_path():
+    app = object.__new__(WorkflowTreeApp)
+    app._apply_config_edit_operation = MagicMock()
+    node = {
+        "id": "edit:traffic.replayers.sourceTarget.replayerConfig.requestTransforms.0",
+        "path": ["traffic", "replayers", "sourceTarget", "replayerConfig", "requestTransforms", "0"],
+        "value": None,
+    }
+    discard_path = ["traffic", "replayers", "sourceTarget", "replayerConfig", "requestTransforms", "0"]
+
+    app._handle_config_variant_choice(node, "entryPoint", discard_path_on_cancel=discard_path)
+
+    app._apply_config_edit_operation.assert_called_once_with({
+        "op": "set",
+        "path": node["path"],
+        "value": "entryPoint",
+    },
+        selected_id=node["id"],
+        auto_edit_required_child=True,
+        discard_path_on_cancel=discard_path,
+    )
+
+
 @pytest.mark.asyncio
 async def test_text_input_modal_test_regex_opens_regex101_url():
     class TestApp(App):

@@ -223,6 +223,8 @@ class ConfigEditService:
         if not config or not config.raw_yaml.strip():
             raise ValueError(f"No workflow configuration found for session '{self.session_name}'")
 
+        self._validate_raw_config_for_submit(config.raw_yaml)
+
         load_k8s_config()
         secret_store = get_credentials_secret_store_for_namespace(self.namespace)
         verify_configured_secrets_exist(secret_store, config.raw_yaml)
@@ -241,6 +243,13 @@ class ConfigEditService:
                 "--unique-run-nonce", unique_run_nonce or str(int(time.time())),
             ],
         )
+
+    def _validate_raw_config_for_submit(self, raw_yaml: str) -> None:
+        edit_state = self._run_edit_state(raw_yaml)
+        validation = edit_state.get("validation") or {}
+        if validation.get("valid", True):
+            return
+        raise ValueError(_format_submit_validation_error(validation))
 
     def _run_edit_state(self, raw_yaml: str) -> Dict[str, Any]:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as temp_file:
@@ -729,3 +738,21 @@ def _format_config_processor_error(error: subprocess.CalledProcessError) -> str:
         details.append(f"stdout: {stdout}")
     detail = "\n".join(details) or str(error)
     return f"config processor failed with exit code {error.returncode}: {detail}"
+
+
+def _format_submit_validation_error(validation: Dict[str, Any]) -> str:
+    messages: list[str] = []
+    for diagnostic in validation.get("diagnostics") or []:
+        message = str(diagnostic.get("message") or "").strip()
+        if not message:
+            continue
+        path = ".".join(str(part) for part in (diagnostic.get("path") or []))
+        messages.append(f"{path}: {message}" if path else message)
+    for error in validation.get("errors") or []:
+        message = str(error).strip()
+        if message:
+            messages.append(message)
+    deduped = list(dict.fromkeys(messages))
+    if not deduped:
+        return "Workflow configuration is not valid; fix the highlighted config errors before submit."
+    return "Workflow configuration is not valid; fix these config errors before submit: " + "; ".join(deduped[:5])

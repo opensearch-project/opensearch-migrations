@@ -2300,7 +2300,11 @@ class WorkflowTreeApp(App):
             "op": "set",
             "path": node.get("path"),
             "value": value,
-        }, selected_id=node.get("id"), auto_edit_required_child=True)
+        },
+            selected_id=node.get("id"),
+            auto_edit_required_child=True,
+            discard_path_on_cancel=discard_path_on_cancel,
+        )
 
     def _handle_add_config_name(self, node: Dict, value: Optional[str]) -> None:
         name = (value or "").strip()
