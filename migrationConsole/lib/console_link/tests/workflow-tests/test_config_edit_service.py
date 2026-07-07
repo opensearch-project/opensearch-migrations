@@ -802,6 +802,7 @@ def test_submit_saved_config_replaces_existing_workflow(
     runner.submit_workflow.assert_called_once_with(
         "sourceClusters: {}",
         ["--workflow-name", "migration", "--unique-run-nonce", "123"],
+        skip_dry_run=True,
     )
     _stop_workflow.assert_called_once_with("test", "migration")
     _delete_workflow.assert_called_once_with("test", "migration")

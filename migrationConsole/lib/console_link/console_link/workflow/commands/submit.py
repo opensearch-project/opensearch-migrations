@@ -99,6 +99,18 @@ def _remove_existing_workflow(workflow_name, namespace):
     help='Interval in seconds between status checks (only used with --wait, default: 2)'
 )
 @click.option(
+    '--dry-run',
+    is_flag=True,
+    default=False,
+    help='Validate the saved workflow configuration and generated Kubernetes resources without submitting'
+)
+@click.option(
+    '--skip-dry-run',
+    is_flag=True,
+    default=False,
+    help='Skip generated Kubernetes resource dry-run validation before submit'
+)
+@click.option(
     '--session',
     default='default',
     hidden=True,
@@ -119,7 +131,9 @@ def _remove_existing_workflow(workflow_name, namespace):
          'snapshotName downstream)'
 )
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
+def submit_command(
+        ctx, namespace, wait, timeout, wait_interval, dry_run, skip_dry_run,
+        session, workflow_name, unique_run_nonce):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -129,7 +143,11 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         workflow submit
         workflow submit --wait
         workflow submit --wait --timeout 300
+        workflow submit --dry-run
     """
+    if dry_run and skip_dry_run:
+        raise click.ClickException("--dry-run cannot be combined with --skip-dry-run")
+
     # Check if configuration exists
     store = WorkflowConfigStore(namespace=namespace)
     config = store.load_config(session_name=session)
@@ -153,6 +171,13 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
 
         config_yaml = config.raw_yaml
 
+        if not skip_dry_run:
+            click.echo("Validating workflow configuration and generated Kubernetes resources...")
+            runner.validate_generated_resources(config_yaml, workflow_name=workflow_name)
+            if dry_run:
+                click.echo("Dry run completed successfully.")
+                return
+
         click.echo(f"Initializing workflow from session: {session}")
         _remove_existing_workflow(workflow_name, namespace)
 
@@ -164,6 +189,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
                     "--workflow-name", workflow_name,
                     "--unique-run-nonce", unique_run_nonce
                 ],
+                skip_dry_run=True,
             )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')

@@ -1,7 +1,6 @@
 """Tests for script runner service."""
 
 import subprocess
-import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -105,27 +104,25 @@ class TestScriptRunner:
     def test_validate_generated_resources_uses_server_dry_run_and_trims_success_output(self, mock_run):
         runner = ScriptRunner()
 
-        def fake_initialize(*args, **_kwargs):
-            output_dir = Path(args[args.index("--output-dir") + 1])
-            resources_dir = output_dir / "resources"
-            resources_dir.mkdir(parents=True)
-            (resources_dir / "trafficreplay.yaml").write_text("kind: TrafficReplay\n")
-            (output_dir / "resolvedMigrationResources.json").write_text(json.dumps({
-                "resources": [{"kind": "TrafficReplay", "name": "sourceTarget"}],
-            }))
-            return ""
+        def fake_dry_run(args, **_kwargs):
+            resolved_path = Path(args[args.index("--resolved-resources-output") + 1])
+            resolved_path.write_text('{"resources":[{"kind":"TrafficReplay","name":"sourceTarget"}]}')
+            raise subprocess.CalledProcessError(
+                1,
+                args,
+                output="captureproxy.migrations.opensearch.org/cap created (server dry run)",
+                stderr="The TrafficReplay \"sourceTarget\" is invalid: metadata.name is invalid",
+            )
 
-        runner.run_config_processor_node_script = Mock(side_effect=fake_initialize)
-        mock_run.side_effect = subprocess.CalledProcessError(
-            1,
-            ["kubectl", "apply", "--dry-run=server"],
-            output="captureproxy.migrations.opensearch.org/cap created (server dry run)",
-            stderr="The TrafficReplay \"sourceTarget\" is invalid: metadata.name is invalid",
-        )
+        mock_run.side_effect = fake_dry_run
 
         with pytest.raises(GeneratedResourceValidationError) as exc_info:
             runner.validate_generated_resources("traffic: {}", workflow_name="migration-workflow")
 
+        args = mock_run.call_args.args[0]
+        assert "--dry-run" in args
+        assert "--resolved-resources-output" in args
+        assert "kubectl" not in args
         message = str(exc_info.value)
         assert "Generated Kubernetes resource validation failed" in message
         assert "TrafficReplay \"sourceTarget\" is invalid" in message
@@ -134,10 +131,14 @@ class TestScriptRunner:
             "resources": [{"kind": "TrafficReplay", "name": "sourceTarget"}],
         }
 
-    def test_validate_generated_resources_wraps_initializer_failures(self):
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_validate_generated_resources_wraps_submit_dry_run_failures(self, mock_run):
         runner = ScriptRunner()
-        runner.run_config_processor_node_script = Mock(
-            side_effect=RuntimeError("initialize failed: missing required value")
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1,
+            ["createMigrationWorkflowFromUserConfiguration.sh", "/tmp/config.yaml", "--dry-run"],
+            output="Running configuration conversion...",
+            stderr="initialize failed: missing required value",
         )
 
         with pytest.raises(GeneratedResourceValidationError) as exc_info:

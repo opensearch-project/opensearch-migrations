@@ -199,10 +199,50 @@ class TestWorkflowCLICommands:
         assert 'test-workflow-' in result.output
         assert "--workflow-name" in mock_subprocess.call_args[0][0]
         assert "migration-workflow" in mock_subprocess.call_args[0][0]
+        assert mock_subprocess.call_count == 2
+        assert "--dry-run" in mock_subprocess.call_args_list[0].args[0]
+        assert "--skip-dry-run" in mock_subprocess.call_args_list[1].args[0]
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
         _mock_verify_secrets.assert_called_once()
+
+    @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
+    @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
+    def test_submit_command_dry_run_does_not_replace_workflow(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+    ):
+        mock_subprocess.return_value = Mock(returncode=0, stdout="Dry run completed successfully.")
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.load_config.return_value = WorkflowConfig({
+            'parameters': {'message': 'test', 'requiresApproval': False, 'approver': ''}
+        })
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['submit', '--dry-run'])
+
+        assert result.exit_code == 0
+        assert "Dry run completed successfully." in result.output
+        assert mock_subprocess.call_count == 1
+        assert "--dry-run" in mock_subprocess.call_args.args[0]
+        mock_exists.assert_not_called()
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -347,6 +387,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
+        assert mock_subprocess.call_count == 2
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -404,6 +445,9 @@ class TestWorkflowCLICommands:
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
         mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
+        assert mock_subprocess.call_count == 2
+        assert "--dry-run" in mock_subprocess.call_args_list[0].args[0]
+        assert "--skip-dry-run" in mock_subprocess.call_args_list[1].args[0]
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -1715,6 +1759,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
+        assert mock_subprocess.call_count == 2
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 

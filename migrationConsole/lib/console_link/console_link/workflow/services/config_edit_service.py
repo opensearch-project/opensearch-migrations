@@ -273,13 +273,15 @@ class ConfigEditService:
         self,
         workflow_name: str = "migration",
         unique_run_nonce: Optional[str] = None,
+        skip_dry_run: bool = False,
     ) -> Dict[str, Any]:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
         config = store.load_config(self.session_name)
         if not config or not config.raw_yaml.strip():
             raise ValueError(f"No workflow configuration found for session '{self.session_name}'")
 
-        self._validate_raw_config_for_submit(config.raw_yaml)
+        if not skip_dry_run:
+            self._validate_raw_config_for_submit(config.raw_yaml)
 
         load_k8s_config()
         secret_store = get_credentials_secret_store_for_namespace(self.namespace)
@@ -298,6 +300,7 @@ class ConfigEditService:
                 "--workflow-name", workflow_name,
                 "--unique-run-nonce", unique_run_nonce or str(int(time.time())),
             ],
+            skip_dry_run=True,
         )
 
     def _validate_raw_config_for_submit(self, raw_yaml: str) -> None:

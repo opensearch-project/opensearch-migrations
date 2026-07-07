@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -230,6 +229,8 @@ class ScriptRunner:
         self,
         config_data: str,
         args: list[str],
+        *,
+        skip_dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Submit workflow using config processor submission script.
 
@@ -240,6 +241,7 @@ class ScriptRunner:
         Args:
             config_data: User configuration YAML as string
             args: Command line arguments to pass to the submission script
+            skip_dry_run: Skip the script's default generated-resource dry-run.
 
         Returns:
             Dict with workflow_name, workflow_uid, and namespace
@@ -262,8 +264,12 @@ class ScriptRunner:
             if not script_path.exists():
                 raise FileNotFoundError(f"Script not found: {script_path}")
 
+            script_args = [str(script_path), temp_file_path] + args
+            if skip_dry_run:
+                script_args.append("--skip-dry-run")
+
             result = subprocess.run(
-                [str(script_path), temp_file_path] + args,
+                script_args,
                 capture_output=True, text=True, check=True,
                 cwd=str(self.script_dir)
             )
@@ -306,60 +312,56 @@ class ScriptRunner:
         config_data: str,
         workflow_name: str = "migration-workflow",
     ) -> Dict[str, Any]:
-        """Run submit-equivalent server-side dry-run validation for generated resources."""
-        run_number = "0"
+        """Run submit-script dry-run validation and return generated resource provenance."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as config_file:
             config_file.write(config_data)
             config_file_path = config_file.name
-        output_dir = tempfile.mkdtemp()
+        resolved_resources_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        resolved_resources_path = resolved_resources_file.name
+        resolved_resources_file.close()
 
         try:
+            script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
+            if not script_path.exists():
+                raise FileNotFoundError(f"Script not found: {script_path}")
+
             try:
-                self.run_config_processor_node_script(
-                    "initialize",
-                    "--user-config",
-                    config_file_path,
-                    "--output-dir",
-                    output_dir,
-                    "--workflow-name",
-                    workflow_name,
-                    "--run-number",
-                    run_number,
+                subprocess.run(
+                    [
+                        str(script_path),
+                        config_file_path,
+                        "--dry-run",
+                        "--workflow-name", workflow_name,
+                        "--unique-run-nonce", "0",
+                        "--resolved-resources-output", resolved_resources_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    cwd=str(self.script_dir),
                 )
-            except RuntimeError as e:
+            except subprocess.CalledProcessError as e:
                 raise GeneratedResourceValidationError(
-                    str(e),
-                    resolved_resources=_read_resolved_resources(output_dir),
+                    _format_generated_resource_validation_failure(e),
+                    stdout=e.stdout or "",
+                    stderr=e.stderr or "",
+                    resolved_resources=_read_json_file(resolved_resources_path),
                 ) from e
-            resources_dir = Path(output_dir) / "resources"
-            if resources_dir.exists():
-                try:
-                    subprocess.run(
-                        ["kubectl", "apply", "--dry-run=server", "-f", str(resources_dir)],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                        cwd=str(self.script_dir),
-                    )
-                except subprocess.CalledProcessError as e:
-                    raise GeneratedResourceValidationError(
-                        _format_generated_resource_validation_failure(e),
-                        stdout=e.stdout or "",
-                        stderr=e.stderr or "",
-                        resolved_resources=_read_resolved_resources(output_dir),
-                    ) from e
-                except OSError as e:
-                    raise GeneratedResourceValidationError(
-                        f"Generated Kubernetes resource validation failed:\n{e}",
-                        resolved_resources=_read_resolved_resources(output_dir),
-                    ) from e
-            return _read_resolved_resources(output_dir)
+            except OSError as e:
+                raise GeneratedResourceValidationError(
+                    f"Generated Kubernetes resource validation failed:\n{e}",
+                    resolved_resources=_read_json_file(resolved_resources_path),
+                ) from e
+            return _read_json_file(resolved_resources_path)
         finally:
             try:
                 os.unlink(config_file_path)
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {config_file_path}: {e}")
-            shutil.rmtree(output_dir, ignore_errors=True)
+            try:
+                os.unlink(resolved_resources_path)
+            except OSError as e:
+                logger.warning(f"Failed to clean up temporary file {resolved_resources_path}: {e}")
 
     def _parse_kubectl_output(self, output: str) -> str:
         """Parse kubectl output to extract workflow name.
@@ -421,12 +423,12 @@ class ScriptRunner:
         return self._run_config_processor_with_temp_file("validate", config_data)
 
 
-def _read_resolved_resources(output_dir: str) -> Dict[str, Any]:
-    path = Path(output_dir) / "resolvedMigrationResources.json"
+def _read_json_file(path_value: str) -> Dict[str, Any]:
+    path = Path(path_value)
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text())
     except Exception:
-        logger.debug("Failed to read resolved migration resources from %s", path, exc_info=True)
+        logger.debug("Failed to read JSON file from %s", path, exc_info=True)
         return {}
