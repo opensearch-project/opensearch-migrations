@@ -1364,24 +1364,6 @@
           [
             {
               "templateRef": {
-                "template": "approvebackfill",
-                "name": "document-bulk-load"
-              },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap)))}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "name",
-                    "value": "{{='documentbackfill.'+inputs.parameters.crdName}}"
-                  }
-                ]
-              },
-              "name": "approveBackfill"
-            }
-          ],
-          [
-            {
-              "templateRef": {
                 "template": "setupandrunbulkload",
                 "name": "document-bulk-load"
               },
@@ -1459,6 +1441,24 @@
                 ]
               },
               "name": "bulkLoadDocuments"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "approvebackfill",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{='documentbackfill.'+inputs.parameters.crdName}}"
+                  }
+                ]
+              },
+              "name": "approveBackfill"
             }
           ]
         ],

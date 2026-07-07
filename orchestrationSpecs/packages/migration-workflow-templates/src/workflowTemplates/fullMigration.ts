@@ -468,6 +468,19 @@ export const FullMigration = WorkflowBuilder.create({
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
             )
+            .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
+                    c.register({
+                        ...(selectInputsForRegister(b, c)),
+                        sessionName: expr.concat(expr.literal("rfs-"), b.inputs.workloadIdentityChecksum),
+                        sourceVersion: b.inputs.sourceVersion,
+                        sourceLabel: b.inputs.sourceLabel,
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.resourceUid,
+                        configChecksum: b.inputs.configChecksum,
+                        checksumForReplayer: b.inputs.checksumForReplayer
+                    }),
+                {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
+            )
             .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
                     c.register({
                         name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
@@ -492,19 +505,6 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.skipApprovalMap)
                     ]))
                 )}}
-            )
-            .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
-                    c.register({
-                        ...(selectInputsForRegister(b, c)),
-                        sessionName: expr.concat(expr.literal("rfs-"), b.inputs.workloadIdentityChecksum),
-                        sourceVersion: b.inputs.sourceVersion,
-                        sourceLabel: b.inputs.sourceLabel,
-                        crdName: b.inputs.crdName,
-                        crdUid: b.inputs.resourceUid,
-                        configChecksum: b.inputs.configChecksum,
-                        checksumForReplayer: b.inputs.checksumForReplayer
-                    }),
-                {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
             )
         )
     )

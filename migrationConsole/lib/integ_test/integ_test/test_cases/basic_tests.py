@@ -3,7 +3,7 @@ import json
 import subprocess
 import time
 import uuid
-from ..cluster_version import RFS_MIGRATION_COMBINATIONS
+from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
@@ -83,24 +83,29 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
 class Test0003ApprovalGateIntegration(MATestBase):
     """Exercises the workflow approve CLI against a real approval gate.
 
-    Runs with skipApprovals=false so the full snapshot migration blocks at each
-    expected step approval gate. The test uses `workflow approve step --list`
-    to verify the active gate, approves each gate by name, and verifies the
-    migration completes successfully.
+    Runs a full CDC migration with skipApprovals=false so proxy setup,
+    metadata evaluation, metadata migration, and document backfill each block at
+    the expected step approval gate. The test uses `workflow approve step
+    --list` to verify the active gate, approves each gate by name, and verifies
+    the migration completes successfully.
     """
 
     def __init__(self, user_args: MATestUserArguments):
         description = "Verifies workflow approve CLI can approve a real gate."
         super().__init__(user_args=user_args,
                          description=description,
-                         migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
-                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
+                         migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL,
+                                              MigrationType.CAPTURE_AND_REPLAY],
+                         allow_source_target_combinations=CDC_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0003_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0003_doc"
         self.doc_type = "sample_type"
+        self.snapshot_migration_name = "source1-target1-testsnapshot-migration-0"
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
+        self.workflow_template = "cdc-e2e-migration-with-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
         self.parameters["skip-approvals"] = "false"
 
     def prepare_workflow_snapshot_and_migration_config(self):
@@ -127,18 +132,97 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self._wait_until_suspended_or_ended(timeout_seconds)
 
     def _approval_gate_names(self):
-        resource_path = "source1-target1-testsnapshot-migration-0"
         return [
-            f"evaluatemetadata.{resource_path}",
-            f"migratemetadata.{resource_path}",
-            f"documentbackfill.{resource_path}",
+            "captureproxysetup.capture-proxy",
+            f"evaluatemetadata.{self.snapshot_migration_name}",
+            f"migratemetadata.{self.snapshot_migration_name}",
+            f"documentbackfill.{self.snapshot_migration_name}",
         ]
 
     def _approve_expected_step_gates(self, timeout_seconds: int):
         for gate_name in self._approval_gate_names():
             self._wait_for_step_gate(gate_name, "waiting", timeout_seconds)
+            self._assert_gate_prerequisite_completed(gate_name)
             self._approve_step_gate(gate_name)
             self._wait_for_step_gate(gate_name, "approved", timeout_seconds)
+
+    def _assert_gate_prerequisite_completed(self, gate_name: str):
+        if gate_name.startswith("evaluatemetadata."):
+            self._assert_workflow_show_output_available("evaluatemetadata")
+        elif gate_name.startswith("migratemetadata."):
+            self._assert_workflow_show_output_available("migratemetadata")
+            self._assert_document_backfill_not_started()
+        elif gate_name.startswith("documentbackfill."):
+            self._assert_document_backfill_completed()
+
+    def _assert_workflow_show_output_available(self, task_name: str):
+        result = subprocess.run(
+            [
+                "workflow", "show",
+                f"snapshotmigration.{self.snapshot_migration_name}",
+                task_name,
+                "--clean",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Expected workflow show to find {task_name} output before its approval gate "
+                f"(rc={result.returncode}). stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        if not result.stdout.strip():
+            raise AssertionError(f"Expected workflow show {task_name} output to be non-empty")
+
+    def _assert_document_backfill_not_started(self):
+        snapshot_migration = self._get_snapshot_migration()
+        backfill_status = snapshot_migration.get("status", {}).get("documentBackfill")
+        if backfill_status:
+            raise AssertionError(
+                "Document backfill status was set before the document backfill step ran: "
+                f"{backfill_status}"
+            )
+        logger.info("Document backfill status is not set before the migrate metadata gate")
+
+    def _assert_document_backfill_completed(self):
+        snapshot_migration = self._get_snapshot_migration()
+        status = snapshot_migration.get("status", {})
+        backfill_status = status.get("documentBackfill")
+        if not isinstance(backfill_status, dict):
+            raise AssertionError(f"SnapshotMigration documentBackfill status was not set: {status}")
+
+        if status.get("phase") != "Completed":
+            raise AssertionError(f"SnapshotMigration phase was not Completed after backfill: {status}")
+        if backfill_status.get("phase") != "Completed":
+            raise AssertionError(f"Document backfill phase was not Completed: {backfill_status}")
+        if not backfill_status.get("updatedAt"):
+            raise AssertionError(f"Document backfill status did not include updatedAt: {backfill_status}")
+
+        summary = backfill_status.get("summary", {})
+        if summary.get("shardsTotal", 0) < 1:
+            raise AssertionError(f"Document backfill status did not report any shards: {backfill_status}")
+        if summary.get("shardsMigrated") != summary.get("shardsTotal"):
+            raise AssertionError(f"Document backfill did not migrate all shards: {backfill_status}")
+
+    def _get_snapshot_migration(self):
+        result = subprocess.run(
+            [
+                "kubectl", "get", "snapshotmigration", self.snapshot_migration_name,
+                "-n", self.argo_service.namespace,
+                "-o", "json",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Failed to get SnapshotMigration {self.snapshot_migration_name} "
+                f"(rc={result.returncode}). stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise AssertionError(
+                f"Failed to parse SnapshotMigration JSON: {e}. stdout={result.stdout!r}"
+            ) from e
 
     def _wait_for_step_gate(self, gate_name: str, expected_status: str, timeout_seconds: int):
         deadline = time.time() + timeout_seconds
