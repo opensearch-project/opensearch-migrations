@@ -1,4 +1,5 @@
 import logging
+import json
 import subprocess
 import time
 import uuid
@@ -82,9 +83,10 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
 class Test0003ApprovalGateIntegration(MATestBase):
     """Exercises the workflow approve CLI against a real approval gate.
 
-    Runs with skipApprovals=false so the workflow blocks at the evaluatemetadata
-    approval gate. The test then uses `workflow approve step --all` to unblock it
-    and verifies the migration completes successfully.
+    Runs with skipApprovals=false so the full snapshot migration blocks at each
+    expected step approval gate. The test uses `workflow approve step --list`
+    to verify the active gate, approves each gate by name, and verifies the
+    migration completes successfully.
     """
 
     def __init__(self, user_args: MATestUserArguments):
@@ -101,19 +103,92 @@ class Test0003ApprovalGateIntegration(MATestBase):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.parameters["skip-approvals"] = "false"
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        self.workflow_snapshot_and_migration_config = [{
+            "migrations": [{
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": {
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
+                }
+            }]
+        }]
+
     def prepare_clusters(self):
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
                                                doc_id=self.doc_id, doc_type=self.doc_type)
 
     def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-        self._approve_gates_until_suspended_or_ended(timeout_seconds)
+        self._approve_expected_step_gates(timeout_seconds)
+        self._wait_until_suspended_or_ended(timeout_seconds)
 
-    def _approve_gates_until_suspended_or_ended(self, timeout_seconds: int):
-        """Approve gates until the workflow suspends (post-migration verification) or ends."""
+    def _approval_gate_names(self):
+        resource_path = "source1-target1-testsnapshot-migration-0"
+        return [
+            f"evaluatemetadata.{resource_path}",
+            f"migratemetadata.{resource_path}",
+            f"documentbackfill.{resource_path}",
+        ]
+
+    def _approve_expected_step_gates(self, timeout_seconds: int):
+        for gate_name in self._approval_gate_names():
+            self._wait_for_step_gate(gate_name, "waiting", timeout_seconds)
+            self._approve_step_gate(gate_name)
+            self._wait_for_step_gate(gate_name, "approved", timeout_seconds)
+
+    def _wait_for_step_gate(self, gate_name: str, expected_status: str, timeout_seconds: int):
         deadline = time.time() + timeout_seconds
-        interval = 10
-        approved_any = False
+        last_gates = []
+        while time.time() < deadline:
+            gates = self._list_step_gates()
+            last_gates = gates
+            matching_gate = next((g for g in gates if g.get("name") == gate_name), None)
+            if matching_gate and matching_gate.get("status") == expected_status:
+                logger.info("Gate %s reached status %s", gate_name, expected_status)
+                return matching_gate
+            time.sleep(10)
+        raise TimeoutError(
+            f"Gate {gate_name} did not reach status {expected_status} within "
+            f"{timeout_seconds}s. Last gates: {last_gates}"
+        )
+
+    def _list_step_gates(self):
+        result = subprocess.run(
+            ["workflow", "approve", "step", "--list", "--output", "json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Failed to list approval gates (rc={result.returncode}). "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise AssertionError(
+                f"Failed to parse approval gate list as JSON: {e}. "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            ) from e
+
+    def _approve_step_gate(self, gate_name: str):
+        result = subprocess.run(
+            ["workflow", "approve", "step", gate_name],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Failed to approve {gate_name} (rc={result.returncode}). "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        logger.info("Approved gate %s: %s", gate_name, result.stdout.strip())
+
+    def _wait_until_suspended_or_ended(self, timeout_seconds: int):
+        """Wait until the workflow suspends for verification or ends."""
+        deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             status_result = self.argo_service.get_workflow_status(self.workflow_name)
             if status_result.success:
@@ -125,20 +200,9 @@ class Test0003ApprovalGateIntegration(MATestBase):
                 if phase in ENDING_ARGO_PHASES:
                     logger.info("Workflow reached ending phase: %s", phase)
                     return
-
-            result = subprocess.run(
-                ["workflow", "approve", "step", "--all"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                logger.info("Approval gates approved: %s", result.stdout.strip())
-                approved_any = True
-            else:
-                logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
-            time.sleep(interval)
+            time.sleep(10)
         raise TimeoutError(
             f"Workflow did not reach suspend or ending phase within {timeout_seconds}s "
-            f"(approved_any={approved_any})"
         )
 
     def verify_clusters(self):
