@@ -380,7 +380,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             ],
                             "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
                           },
-                          "description": "S3 snapshot repositories registered with the source cluster."
+                          "description": "S3 snapshot repositories registered with the source cluster.",
+                          "x-ui-hint": {
+                            "kind": "record",
+                            "addLabel": "snapshot repository"
+                          }
                         },
                         "snapshots": {
                           "type": "object",
@@ -576,7 +580,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             ],
                             "description": "A snapshot configuration bound to a specific repository."
                           },
-                          "description": "Snapshots to use or create for this source cluster."
+                          "description": "Snapshots to use or create for this source cluster.",
+                          "x-ui-hint": {
+                            "kind": "record",
+                            "addLabel": "source snapshot"
+                          }
                         },
                         "serializeSnapshotCreation": {
                           "type": "boolean",
@@ -586,7 +594,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "required": [
                         "snapshots"
                       ],
-                      "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source."
+                      "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.",
+                      "x-essential": true
                     },
                     "label": {
                       "type": "string"
@@ -4458,7 +4467,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   ],
                   "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
                 },
-                "description": "S3 snapshot repositories registered with the source cluster."
+                "description": "S3 snapshot repositories registered with the source cluster.",
+                "x-ui-hint": {
+                  "kind": "record",
+                  "addLabel": "snapshot repository"
+                }
               },
               "snapshots": {
                 "type": "object",
@@ -4654,7 +4667,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   ],
                   "description": "A snapshot configuration bound to a specific repository."
                 },
-                "description": "Snapshots to use or create for this source cluster."
+                "description": "Snapshots to use or create for this source cluster.",
+                "x-ui-hint": {
+                  "kind": "record",
+                  "addLabel": "source snapshot"
+                }
               },
               "serializeSnapshotCreation": {
                 "type": "boolean",
@@ -4664,7 +4681,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "required": [
               "snapshots"
             ],
-            "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source."
+            "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.",
+            "x-essential": true
           }
         },
         "required": [

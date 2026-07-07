@@ -66,6 +66,7 @@ export interface EditNode {
         requiresName?: boolean;
         editAdded?: boolean;
         autoEditAdded?: boolean;
+        blockedMessage?: string;
     };
     children?: EditNode[];
 }
@@ -1636,6 +1637,15 @@ export function applyValidationDiagnostics(nodes: EditNode[], diagnostics: EditD
         const path = diagnostic.path ?? [];
         const ancestors = findPathAncestors(nodes, path);
         if (!ancestors.length) {
+            const fallback = nodes[0];
+            if (!fallback) {
+                continue;
+            }
+            addDiagnosticIfNew(fallback, diagnostic);
+            fallback.essential = true;
+            fallback.statusCounts = fallback.statusCounts ?? {};
+            addCount(fallback.statusCounts, diagnostic.severity);
+            fallback.status = highestStatus(fallback.status ?? "ok", diagnostic.severity);
             continue;
         }
         const target = ancestors[ancestors.length - 1];
@@ -1644,8 +1654,10 @@ export function applyValidationDiagnostics(nodes: EditNode[], diagnostics: EditD
         if (!addDiagnosticIfNew(target, adjustedDiagnostic)) {
             continue;
         }
+        target.essential = true;
         const alreadyRepresentedRequired = severity === "required" && Boolean(target.statusCounts?.required);
         for (const node of ancestors) {
+            node.essential = true;
             node.statusCounts = node.statusCounts ?? {};
             if (!alreadyRepresentedRequired) {
                 addCount(node.statusCounts, severity);

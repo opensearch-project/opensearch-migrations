@@ -55,8 +55,10 @@ def validate_and_find_secrets(raw_yaml: str) -> dict:
 def process_secrets(secret_store: SecretStore, result: dict, interactive: bool = False) -> None:
     """Process secrets from a ``validate_and_find_secrets`` result.
 
-    In interactive mode, missing secrets trigger a prompt to create them.
-    In non-interactive mode, missing secrets cause a :class:`click.ClickException`.
+    In interactive mode, missing Kubernetes Secret resources trigger a prompt
+    to create them. In non-interactive mode, missing Secret resources cause a
+    :class:`click.ClickException`. Existing BYO Secrets are accepted even when
+    they were not created by the workflow credentials commands.
     """
     invalid_secrets = result.get('invalidSecrets')
     if invalid_secrets:
@@ -67,8 +69,9 @@ def process_secrets(secret_store: SecretStore, result: dict, interactive: bool =
     if not valid_secrets:
         return
 
-    existing = list(filter(secret_store.secret_exists, valid_secrets))
-    missing = list(set(valid_secrets) - set(existing))
+    existing = list(filter(secret_store.secret_resource_exists, valid_secrets))
+    existing_names = set(existing)
+    missing = [name for name in valid_secrets if name not in existing_names]
 
     _notify_existing_secrets(existing, interactive)
     _handle_missing_config_secrets(secret_store, missing, interactive)
@@ -90,8 +93,7 @@ def _notify_existing_secrets(existing, interactive: bool) -> None:
     if not existing:
         return
     msg = (f"Found {len(existing)} existing secret{'s' if len(existing) > 1 else ''} "
-           f"that will be used for HTTP-Basic authentication "
-           f"of requests to clusters:\n  " + "\n  ".join(existing))
+           f"that will be used for HTTP-Basic authentication:\n  " + "\n  ".join(existing))
     if interactive:
         click.echo(msg)
     else:
@@ -105,10 +107,11 @@ def _handle_missing_config_secrets(secret_store: SecretStore, missing, interacti
         _handle_add_basic_creds_secrets(secret_store, missing)
     else:
         raise click.ClickException(
-            f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
-            f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
+            f"Found {len(missing)} missing HTTP-Basic credential "
+            f"Secret{'s' if len(missing) > 1 else ''} referenced by the workflow config:\n  " +
             "\n  ".join(missing) +
-            "\n\nRun `workflow configure credentials create` before `workflow submit`."
+            "\n\nCreate the referenced Secret from manage, or run "
+            "`workflow configure credentials create <secret-name>` before `workflow submit`."
         )
 
 

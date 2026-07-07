@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
+def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError) -> str:
+    details = [f"{label} failed with exit code {error.returncode}"]
+    stderr = (error.stderr or "").strip()
+    stdout = (error.stdout or "").strip()
+    if stderr:
+        details.append(stderr)
+    if stdout:
+        details.append(f"stdout: {stdout}")
+    return "\n".join(details)
+
+
 class ScriptRunner:
     """Runs workflow scripts with standard interface."""
 
@@ -250,6 +261,8 @@ class ScriptRunner:
             workflow_info['warnings'] = warnings
             logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
             return workflow_info
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(_format_subprocess_failure("Workflow submit script", e)) from e
 
         finally:
             # Clean up temporary file

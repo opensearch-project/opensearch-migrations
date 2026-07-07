@@ -96,7 +96,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueKey);
-        }).toThrow(/Unrecognized keys at root: rogueTopLevel/);
+        }).toThrow(/Unrecognized key 'rogueTopLevel' at: rogueTopLevel/);
     });
 
     it('should reject rogue key in union (authConfig.basic)', () => {
@@ -118,7 +118,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueInUnion);
-        }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.authConfig\.basic: rogueInUnion/);
+        }).toThrow(/Unrecognized key 'rogueInUnion' at: sourceClusters\.source1\.authConfig\.basic\.rogueInUnion/);
     });
 
     it('should reject rogue key in nested object (snapshotInfo)', () => {
@@ -138,7 +138,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueInNested);
-        }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.snapshotInfo: rogueInNested/);
+        }).toThrow(/Unrecognized key 'rogueInNested' at: sourceClusters\.source1\.snapshotInfo\.rogueInNested/);
     });
 
     it('should validate refinements (bad repoName reference)', () => {
@@ -177,6 +177,27 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => transformer.validateInput(config))
             .toThrow(/Proxy 'proxy1' references unknown kafka cluster 'default'/);
+    });
+
+    it('should require source endpoint when snapshots or capture proxies reference the source', () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.endpoint = "";
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Source endpoint is required because snapshotMigrationConfigs\[0\], traffic\.proxies\.proxy1 references this source\. at: sourceClusters\.source1\.endpoint/);
+    });
+
+    it('should reject kafka cluster configs that define both modes', () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration.default = {
+            autoCreate: {},
+            existing: {
+                kafkaConnection: "broker:9092",
+            },
+        };
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate' at: kafkaClusterConfiguration\.default/);
     });
 
     it('should transform s3 captured traffic sources without a live proxy', async () => {
@@ -605,7 +626,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.transformsSources = {};
 
         expect(() => transformer.validateInput(config))
-            .toThrow(/Unrecognized keys at root: transformsSources/);
+            .toThrow(/Unrecognized key 'transformsSources' at: transformsSources/);
     });
 
     it('should lower capture proxy client-auth trust material into file-source mounts', async () => {

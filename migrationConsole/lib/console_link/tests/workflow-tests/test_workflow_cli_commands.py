@@ -223,9 +223,9 @@ class TestWorkflowCLICommands:
 
         # The secret check raises a click exception describing which secret is missing.
         mock_verify_secrets.side_effect = click.ClickException(
-            "Found 1 missing secret that must be created to make well-formed HTTP-Basic "
-            "requests to clusters:\n  source-cluster-secret\n\nRun `workflow configure edit` "
-            "to create them."
+            "Found 1 missing HTTP-Basic credential Secret referenced by the workflow config:\n"
+            "  source-cluster-secret\n\nCreate the referenced Secret from manage, or run "
+            "`workflow configure credentials create <secret-name>` before `workflow submit`."
         )
 
         runner = CliRunner()
@@ -245,11 +245,42 @@ class TestWorkflowCLICommands:
 
         assert result.exit_code != 0
         assert 'source-cluster-secret' in result.output
-        assert 'workflow configure edit' in result.output
+        assert 'HTTP-Basic credential Secret' in result.output
+        assert 'workflow configure credentials create <secret-name>' in result.output
         assert 'submitted successfully' not in result.output
         # The script_runner subprocess (which actually submits the workflow) must NOT
         # have been invoked — the check has to short-circuit before that.
         mock_subprocess.assert_not_called()
+
+    def test_secret_processing_missing_message_names_secrets_not_clusters(self):
+        import click
+        from console_link.workflow.commands.secret_utils import process_secrets
+
+        secret_store = Mock()
+        secret_store.secret_resource_exists.return_value = False
+
+        try:
+            process_secrets(secret_store, {"validSecrets": ["a"]}, interactive=False)
+        except click.ClickException as error:
+            message = str(error)
+        else:
+            raise AssertionError("process_secrets should reject missing referenced Secrets")
+
+        assert "missing HTTP-Basic credential Secret" in message
+        assert "referenced by the workflow config" in message
+        assert "\n  a" in message
+        assert "requests to clusters" not in message
+
+    def test_secret_processing_accepts_unmanaged_existing_kubernetes_secret(self):
+        from console_link.workflow.commands.secret_utils import process_secrets
+
+        secret_store = Mock()
+        secret_store.secret_resource_exists.return_value = True
+
+        process_secrets(secret_store, {"validSecrets": ["a"]}, interactive=False)
+
+        secret_store.secret_resource_exists.assert_called_once_with("a")
+        secret_store.secret_exists.assert_not_called()
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -1740,10 +1771,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {
-            'source-secret': False,
-            'target-secret': True,
-        }
+        mock_secret_store.secret_resource_exists.side_effect = lambda name: name == 'target-secret'
 
         result = runner.invoke(workflow_cli, ['configure', 'credentials', 'create', '--show-missing'])
 
@@ -1765,7 +1793,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {'source-secret': False}
+        mock_secret_store.secret_resource_exists.return_value = False
 
         result = runner.invoke(workflow_cli, ['configure', 'credentials', 'create', '--list'])
 
@@ -2002,10 +2030,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {
-            'cluster-creds': False,
-            'existing-creds': True,
-        }
+        mock_secret_store.secret_resource_exists.side_effect = lambda name: name == 'existing-creds'
 
         result = runner.invoke(
             workflow_cli,

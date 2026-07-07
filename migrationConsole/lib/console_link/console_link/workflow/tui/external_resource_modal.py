@@ -307,11 +307,11 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         entry = self._focused_entry()
         message = ""
         if entry and entry.get("type") == "resource":
-            message = _row_hint(entry.get("row") or {})
+            message = _row_hint_markup(entry.get("row") or {})
         elif entry and entry.get("type") == "group" and entry.get("group") == "nonmatching" and self._nonmatching_rows():
-            message = "Press Enter or Right to show resources that may not satisfy this reference."
+            message = escape("Press Enter or Right to show resources that may not satisfy this reference.")
         doc = self.query_one("#row-doc", Static)
-        doc.update(escape(message))
+        doc.update(message)
         doc.display = bool(message)
         self._update_action_buttons()
 
@@ -489,6 +489,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
     ExternalResourceFormModal { align: center middle; background: $background 60%; }
     #dialog { width: 76; height: auto; border: thick $primary; background: $surface; padding: 0 1; }
     #title { text-align: center; margin-bottom: 0; }
+    #notice { color: $error; margin-bottom: 1; }
     #documentation { color: gray; margin-bottom: 1; }
     .field-label { margin-top: 0; }
     #validation { color: $error; margin: 0 0 1 0; min-height: 1; }
@@ -511,6 +512,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         initial_values: Optional[Dict[str, str]] = None,
         existing_keys: Optional[List[str]] = None,
         documentation: str = "",
+        notice: str = "",
     ):
         super().__init__()
         self.external_ref = external_ref
@@ -518,6 +520,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         self.initial_values = initial_values or {}
         self.existing_keys = set(existing_keys or [])
         self.documentation = documentation
+        self.notice = notice
         self.fields = list(((external_ref.get("create") or {}).get("fields") or []))
         self._field_input_ids: Dict[str, str] = {}
         self._confirm_input_ids: Dict[str, str] = {}
@@ -527,6 +530,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
         verb = "Update" if self.mode == "update" else "Create"
         with Container(id="dialog"):
             yield Static(escape(f"{verb} {create.get('label') or self.external_ref.get('displayName') or 'Resource'}"), id="title")
+            yield Static(documentation_markup(self.notice), id="notice")
             yield Static(documentation_markup(self.documentation), id="documentation")
             for index, field in enumerate(self.fields):
                 field_id = f"field-{index}"
@@ -544,6 +548,7 @@ class ExternalResourceFormModal(ButtonArrowNavigationMixin, ModalScreen[Optional
                 yield ModalButton("Cancel (Esc)", id="cancel", variant="error")
 
     def on_mount(self) -> None:
+        self.query_one("#notice", Static).display = bool(self.notice)
         self.query_one("#documentation", Static).display = bool(self.documentation)
         self._focus_first_editable_field()
 
@@ -674,6 +679,22 @@ def _row_hint(row: Dict[str, Any]) -> str:
     if status == "warn":
         return "May not satisfy this reference."
     return ""
+
+
+def _row_hint_markup(row: Dict[str, Any]) -> str:
+    status = str(row.get("status") or "warn")
+    message = _row_hint(row)
+    if not message:
+        return ""
+    if status == "error":
+        return f"[bold red]ERROR:[/] {escape(_without_error_prefix(message))}"
+    if status == "warn":
+        return f"[yellow]Warning:[/] {escape(message)}"
+    return escape(message)
+
+
+def _without_error_prefix(message: str) -> str:
+    return re.sub(r"^\s*ERROR:\s*", "", message, flags=re.IGNORECASE)
 
 
 def _row_missing_keys(row: Dict[str, Any]) -> List[str]:

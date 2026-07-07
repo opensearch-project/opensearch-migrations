@@ -504,6 +504,41 @@ class TestConfigOverlays:
             'authConfig.basic.secretName: deployed=<absent> | pending=<absent> | to-submit=source-creds',
         ]
 
+    def test_virtual_source_config_shows_required_diagnostic_path_as_field(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {
+                'allow_insecure': False,
+                'version': 'ES 7.10',
+            },
+            'diagnostics': [{
+                'severity': 'required',
+                'path': ['sourceClusters', 'source', 'endpoint'],
+                'message': (
+                    'Source endpoint is required because snapshotMigrationConfigs[0], '
+                    'traffic.proxies.cap references this source.'
+                ),
+            }],
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'endpoint: deployed=<absent> | pending=<absent> | to-submit=<absent>',
+            'allow_insecure: deployed=<absent> | pending=<absent> | to-submit=false',
+            'version: deployed=<absent> | pending=<absent> | to-submit=ES 7.10',
+        ]
+        assert format_resource_diagnostics(resource) == [{
+            'severity': 'required',
+            'label': (
+                'required: sourceClusters.source.endpoint: Source endpoint is required because '
+                'snapshotMigrationConfigs[0], traffic.proxies.cap references this source.'
+            ),
+        }]
+        assert resource_config_change_summary(sections) == {'pending': 0, 'to_submit': 1, 'resources': 1}
+
     def test_virtual_source_config_shows_partial_consumer_adoption(self):
         sections = _build_tree_from_raw({
             'captureproxies': [

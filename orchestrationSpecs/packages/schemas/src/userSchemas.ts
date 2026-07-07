@@ -1822,6 +1822,10 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), S3_REPO_CONFIG)
+    .uiHint({
+        kind: 'record',
+        addLabel: 'snapshot repository',
+    })
     .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
 
 export const CAPTURE_CONFIG = z.object({
@@ -2014,7 +2018,10 @@ export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
 export const SNAPSHOT_CONFIGS_MAP = z.record(
     z.string(),
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
-).describe("Map of snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
+).uiHint({
+    kind: 'record',
+    addLabel: 'source snapshot',
+}).describe("Map of snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
 
 export const SNAPSHOT_INFO = z.object({
     repos: SOURCE_CLUSTER_REPOS_RECORD.optional()
@@ -2036,6 +2043,7 @@ const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
+        .essential()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
     const repos = data.snapshotInfo?.repos;
@@ -2205,6 +2213,16 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
         const duplicateClusterNames = Object.keys(data.sourceClusters)
             .filter(name => name in data.targetClusters);
+        const sourcesRequiringEndpoint = new Map<string, Set<string>>();
+        const addSourceEndpointRequirement = (sourceName: string, reason: string) => {
+            if (!sourceName || !(sourceName in data.sourceClusters)) {
+                return;
+            }
+            if (!sourcesRequiringEndpoint.has(sourceName)) {
+                sourcesRequiringEndpoint.set(sourceName, new Set());
+            }
+            sourcesRequiringEndpoint.get(sourceName)!.add(reason);
+        };
         for (const name of duplicateClusterNames) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
@@ -2222,6 +2240,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     message: `snapshotMigrationConfigs[${i}] references unknown source '${mc.fromSource}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
                     path: ['snapshotMigrationConfigs', i, 'fromSource']
                 });
+            } else {
+                addSourceEndpointRequirement(mc.fromSource, `snapshotMigrationConfigs[${i}]`);
             }
 
             if (!(mc.toTarget in data.targetClusters)) {
@@ -2264,6 +2284,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         message: `Proxy '${proxyName}' references unknown source '${proxyConfig.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'source']
                     });
+                } else {
+                    addSourceEndpointRequirement(proxyConfig.source, `traffic.proxies.${proxyName}`);
                 }
                 const kafkaRef = proxyConfig.kafka ?? 'default';
                 if (Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
@@ -2322,6 +2344,18 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     }
                 }
             }
+        }
+
+        for (const [sourceName, reasons] of sourcesRequiringEndpoint.entries()) {
+            const source = data.sourceClusters[sourceName];
+            if (typeof source.endpoint === 'string' && source.endpoint.trim()) {
+                continue;
+            }
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Source endpoint is required because ${Array.from(reasons).join(', ')} references this source.`,
+                path: ['sourceClusters', sourceName, 'endpoint']
+            });
         }
     })
 );

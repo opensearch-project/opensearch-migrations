@@ -246,8 +246,8 @@ def _show_secret_names(names, empty_message):
 
 def _missing_config_secret_names(ctx):
     names = _configured_secret_names(ctx)
-    existing = _credentials_secret_store(ctx).secrets_exist(names)
-    return [name for name in names if not existing.get(name)]
+    secret_store = _credentials_secret_store(ctx)
+    return [name for name in names if not secret_store.secret_resource_exists(name)]
 
 
 def _complete_managed_secret(ctx, _param, incomplete):

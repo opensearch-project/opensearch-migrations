@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import yaml
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
@@ -23,6 +24,26 @@ from ..models.config import WorkflowConfig
 from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
 from .script_runner import ScriptRunner
+
+
+STATUS_PRIORITY = {
+    "ok": 0,
+    "changed": 1,
+    "warning": 2,
+    "gated": 3,
+    "required": 4,
+    "error": 5,
+    "blocked": 6,
+}
+
+STATUS_COUNT_KEY = {
+    "changed": "changed",
+    "warning": "warnings",
+    "gated": "gated",
+    "required": "required",
+    "error": "errors",
+    "blocked": "blocked",
+}
 
 
 @dataclass
@@ -57,7 +78,7 @@ class ConfigEditService:
         raw_yaml = config.raw_yaml if config else ""
         return ConfigEditSession(
             raw_yaml=raw_yaml,
-            edit_state=self._run_edit_state(raw_yaml),
+            edit_state=self._run_edit_state(raw_yaml, validate_external_refs=True),
         )
 
     def load_edit_state(self) -> Dict[str, Any]:
@@ -81,6 +102,10 @@ class ConfigEditService:
                 )
 
         result = json.loads(output)
+        self._annotate_external_resource_diagnostics(
+            result["editState"],
+            _parse_raw_yaml(result.get("yaml") or ""),
+        )
         return ConfigEditApplyResult(
             raw_yaml=result["yaml"],
             edit_state=result["editState"],
@@ -88,7 +113,27 @@ class ConfigEditService:
 
     def validate_operation(self, raw_yaml: str, operation: Dict[str, Any]) -> ConfigEditApplyResult:
         """Preview one operation through TS validation without saving the result."""
-        return self.apply_operation(raw_yaml, operation)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as operation_file:
+            json.dump(operation, operation_file)
+            operation_file.flush()
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as config_file:
+                config_file.write(raw_yaml)
+                config_file.flush()
+                output = self._run_config_processor_node_script(
+                    "editConfig",
+                    "apply",
+                    "--pending-config",
+                    config_file.name,
+                    "--operation",
+                    operation_file.name,
+                )
+
+        result = json.loads(output)
+        return ConfigEditApplyResult(
+            raw_yaml=result["yaml"],
+            edit_state=result["editState"],
+        )
 
     def save_raw_yaml(self, raw_yaml: str) -> str:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
@@ -114,8 +159,8 @@ class ConfigEditService:
                 "group": current.get("group") or first_type.get("group") or "",
                 "version": first_type.get("version") or "",
                 "keys": [],
-                "status": "warn",
-                "message": "current YAML value was not found in Kubernetes",
+                "status": "error",
+                "message": "ERROR: current YAML value was not found in Kubernetes",
                 "current": True,
             })
         return _sort_external_rows(rows)
@@ -125,7 +170,12 @@ class ConfigEditService:
         resource_type = _create_output_resource_type(external_ref)
         kind = resource_type.get("kind")
         if kind == "Secret":
-            secret = self._core_v1().read_namespaced_secret(name=name, namespace=self.namespace)
+            try:
+                secret = self._core_v1().read_namespaced_secret(name=name, namespace=self.namespace)
+            except ApiException as e:
+                if e.status != 404:
+                    raise
+                return _missing_external_resource_payload("Secret", name, self.namespace)
             values = {
                 key: _decode_k8s_data_value(value)
                 for key, value in (secret.data or {}).items()
@@ -138,7 +188,12 @@ class ConfigEditService:
                 "values": values,
             }
         if kind == "ConfigMap":
-            config_map = self._core_v1().read_namespaced_config_map(name=name, namespace=self.namespace)
+            try:
+                config_map = self._core_v1().read_namespaced_config_map(name=name, namespace=self.namespace)
+            except ApiException as e:
+                if e.status != 404:
+                    raise
+                return _missing_external_resource_payload("ConfigMap", name, self.namespace)
             values = dict(config_map.data or {})
             return {
                 "kind": "ConfigMap",
@@ -245,13 +300,13 @@ class ConfigEditService:
         )
 
     def _validate_raw_config_for_submit(self, raw_yaml: str) -> None:
-        edit_state = self._run_edit_state(raw_yaml)
+        edit_state = self._run_edit_state(raw_yaml, validate_external_refs=True)
         validation = edit_state.get("validation") or {}
         if validation.get("valid", True):
             return
         raise ValueError(_format_submit_validation_error(validation))
 
-    def _run_edit_state(self, raw_yaml: str) -> Dict[str, Any]:
+    def _run_edit_state(self, raw_yaml: str, validate_external_refs: bool = False) -> Dict[str, Any]:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as temp_file:
             temp_file.write(raw_yaml)
             temp_file.flush()
@@ -262,7 +317,77 @@ class ConfigEditService:
                 temp_file.name,
             )
 
-        return json.loads(output)
+        edit_state = json.loads(output)
+        if validate_external_refs:
+            self._annotate_external_resource_diagnostics(edit_state, _parse_raw_yaml(raw_yaml))
+        return edit_state
+
+    def _annotate_external_resource_diagnostics(
+        self,
+        edit_state: Dict[str, Any],
+        pending_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Mark configured Secret/ConfigMap references that cannot satisfy the schema hint."""
+        cache: dict[tuple[str, str], Optional[Dict[str, Any]]] = {}
+        validation_diagnostics: list[Dict[str, Any]] = []
+
+        def visit(node: Dict[str, Any], ancestors: list[Dict[str, Any]]) -> None:
+            diagnostic = self._external_resource_node_diagnostic(node, cache, pending_config or {})
+            if diagnostic and _add_diagnostic_with_counts(node, ancestors, diagnostic):
+                validation_diagnostics.append(diagnostic)
+            for child in node.get("children") or []:
+                visit(child, [*ancestors, node])
+
+        for root in edit_state.get("nodes") or []:
+            visit(root, [])
+
+        if validation_diagnostics:
+            validation = edit_state.setdefault("validation", {})
+            existing = list(validation.get("diagnostics") or [])
+            for diagnostic in validation_diagnostics:
+                if not _diagnostic_exists(existing, diagnostic):
+                    existing.append(diagnostic)
+            validation["diagnostics"] = existing
+            if any(diagnostic.get("severity") in {"error", "required", "blocked"} for diagnostic in existing):
+                validation["valid"] = False
+
+    def _external_resource_node_diagnostic(
+        self,
+        node: Dict[str, Any],
+        cache: dict[tuple[str, str], Optional[Dict[str, Any]]],
+        pending_config: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        external_ref = node.get("externalRef") or {}
+        if not external_ref:
+            return None
+        current = _external_current_ref(_external_resource_config_value(node, pending_config))
+        name = current.get("name")
+        if not name or name == "unset":
+            return None
+        resource_type = _external_core_v1_resource_type(external_ref, current)
+        if resource_type is None:
+            return None
+        kind = str(resource_type.get("kind") or "")
+        cache_key = (kind, name)
+        if cache_key not in cache:
+            try:
+                cache[cache_key] = self.read_external_resource(external_ref, name)
+            except ApiException as e:
+                return {
+                    "severity": "warning",
+                    "message": f"Could not validate {kind} '{name}': {_format_api_exception(e)}",
+                    "path": node.get("path") or [],
+                }
+        resource = cache.get(cache_key) or {}
+        diagnostic = _external_resource_diagnostic_for_payload(
+            external_ref,
+            resource,
+            name,
+            self.namespace,
+        )
+        if not diagnostic:
+            return None
+        return {**diagnostic, "path": node.get("path") or []}
 
     def _run_resolve_migration_resources(
         self,
@@ -343,7 +468,16 @@ class ConfigEditService:
         required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
         accepted_types = set(_k8s_match_value(k8s_hint, "acceptedSecretTypes") or [])
         rows: list[Dict[str, Any]] = []
-        secrets = self._core_v1().list_namespaced_secret(namespace=self.namespace)
+        try:
+            secrets = self._core_v1().list_namespaced_secret(namespace=self.namespace)
+        except ApiException as e:
+            if current.get("name"):
+                return [_external_current_warning_row(
+                    current,
+                    "Secret",
+                    f"could not list Secrets: {_format_api_exception(e)}",
+                )]
+            return []
         for secret in secrets.items:
             name = getattr(secret.metadata, "name", None)
             if not name:
@@ -385,7 +519,16 @@ class ConfigEditService:
     ) -> list[Dict[str, Any]]:
         required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
         rows: list[Dict[str, Any]] = []
-        config_maps = self._core_v1().list_namespaced_config_map(namespace=self.namespace)
+        try:
+            config_maps = self._core_v1().list_namespaced_config_map(namespace=self.namespace)
+        except ApiException as e:
+            if current.get("name"):
+                return [_external_current_warning_row(
+                    current,
+                    "ConfigMap",
+                    f"could not list ConfigMaps: {_format_api_exception(e)}",
+                )]
+            return []
         for config_map in config_maps.items:
             name = getattr(config_map.metadata, "name", None)
             if not name:
@@ -479,11 +622,9 @@ class ConfigEditService:
         string_data: Dict[str, str] = {}
         existing_values: Dict[str, str] = {}
         if existing_name:
-            try:
-                existing_values = self.read_external_resource(external_ref, existing_name).get("values", {})
-            except ApiException as e:
-                if e.status != 404:
-                    raise
+            existing_resource = self.read_external_resource(external_ref, existing_name)
+            if not existing_resource.get("missing"):
+                existing_values = existing_resource.get("values", {})
         for key, source in (output.get("stringData") or {}).items():
             field_name = source.get("fromField")
             value = values.get(field_name)
@@ -564,6 +705,16 @@ def _decode_k8s_data_value(value: str) -> str:
         return ""
 
 
+def _parse_raw_yaml(raw_yaml: str) -> Dict[str, Any]:
+    if not raw_yaml.strip():
+        return {}
+    try:
+        parsed = yaml.safe_load(raw_yaml) or {}
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _normalized_k8s_hint(external_ref: Dict[str, Any]) -> Dict[str, Any]:
     k8s_hint = dict(external_ref.get("k8s") or {})
     match = dict(k8s_hint.get("match") or {})
@@ -610,6 +761,167 @@ def _create_output_resource_type(external_ref: Dict[str, Any]) -> Dict[str, Any]
     return resource_types[0] if resource_types else {}
 
 
+def _external_core_v1_resource_type(
+    external_ref: Dict[str, Any],
+    current: Dict[str, str],
+) -> Optional[Dict[str, Any]]:
+    for resource_type in _external_resource_types(external_ref, _normalized_k8s_hint(external_ref)):
+        group = str(resource_type.get("group") or "")
+        version = str(resource_type.get("version") or "v1")
+        kind = str(resource_type.get("kind") or "")
+        if group == "" and version == "v1" and kind in {"Secret", "ConfigMap"}:
+            if _current_matches_resource_type(current, resource_type):
+                return resource_type
+    return None
+
+
+def _external_resource_config_value(node: Dict[str, Any], pending_config: Dict[str, Any]) -> Any:
+    found, value = _lookup_config_path(pending_config, node.get("path") or [])
+    if found:
+        return value
+    return node.get("value")
+
+
+def _lookup_config_path(source: Dict[str, Any], path: list[Any]) -> tuple[bool, Any]:
+    current: Any = source
+    for part in path:
+        if isinstance(current, dict):
+            if part not in current:
+                return False, None
+            current = current[part]
+            continue
+        if isinstance(current, list) and str(part).isdigit():
+            index = int(str(part))
+            if index >= len(current):
+                return False, None
+            current = current[index]
+            continue
+        return False, None
+    return True, current
+
+
+def _missing_external_resource_payload(kind: str, name: str, namespace: str) -> Dict[str, Any]:
+    return {
+        "kind": kind,
+        "name": name,
+        "keys": [],
+        "values": {},
+        "missing": True,
+        "message": f"{kind} '{name}' was not found in namespace '{namespace}'.",
+    }
+
+
+def _external_resource_diagnostic_for_payload(
+    external_ref: Dict[str, Any],
+    resource: Dict[str, Any],
+    name: str,
+    namespace: str,
+) -> Optional[Dict[str, str]]:
+    kind = str(resource.get("kind") or _create_output_resource_type(external_ref).get("kind") or "Resource")
+    if resource.get("missing"):
+        return {
+            "severity": "error",
+            "message": f"{kind} '{name}' was not found in namespace '{namespace}'. Create it or choose another {kind}.",
+        }
+
+    k8s_hint = _normalized_k8s_hint(external_ref)
+    values = dict(resource.get("values") or {})
+    keys = sorted(str(key) for key in (resource.get("keys") or values.keys()))
+    if kind == "Secret":
+        messages = _external_secret_validation_messages(
+            str(resource.get("type") or "Opaque"),
+            keys,
+            k8s_hint,
+            values,
+        )
+    elif kind == "ConfigMap":
+        messages = _external_config_map_validation_messages(keys, k8s_hint, values)
+    else:
+        messages = []
+    if not messages:
+        return None
+    severity = "error" if any(item.get("severity") == "error" for item in messages) else "warning"
+    text = "; ".join(str(item.get("message") or "") for item in messages if item.get("message"))
+    return {
+        "severity": severity,
+        "message": f"{kind} '{name}' does not satisfy this reference: {text}",
+    }
+
+
+def _external_secret_validation_messages(
+    secret_type: str,
+    keys: list[str],
+    k8s_hint: Dict[str, Any],
+    values: Dict[str, str],
+) -> list[Dict[str, str]]:
+    required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
+    accepted_types = set(_k8s_match_value(k8s_hint, "acceptedSecretTypes") or [])
+    messages: list[Dict[str, str]] = []
+    if accepted_types and secret_type not in accepted_types:
+        messages.append({
+            "severity": "warning",
+            "message": f"type {secret_type} is not one of {', '.join(sorted(accepted_types))}",
+        })
+    missing = [key for key in required_keys if key not in keys]
+    if missing:
+        messages.append({"severity": "error", "message": f"missing {', '.join(missing)}"})
+    messages.extend({
+        "severity": "error",
+        "message": message,
+    } for message in _external_content_validation_messages(k8s_hint, values))
+    return messages
+
+
+def _external_config_map_validation_messages(
+    keys: list[str],
+    k8s_hint: Dict[str, Any],
+    values: Dict[str, str],
+) -> list[Dict[str, str]]:
+    required_keys = list(_k8s_match_value(k8s_hint, "requiredKeys") or [])
+    missing = [key for key in required_keys if key not in keys]
+    messages: list[Dict[str, str]] = []
+    if missing:
+        messages.append({"severity": "error", "message": f"missing {', '.join(missing)}"})
+    messages.extend({
+        "severity": "error",
+        "message": message,
+    } for message in _external_content_validation_messages(k8s_hint, values))
+    return messages
+
+
+def _add_diagnostic_with_counts(
+    node: Dict[str, Any],
+    ancestors: list[Dict[str, Any]],
+    diagnostic: Dict[str, Any],
+) -> bool:
+    diagnostics = list(node.get("diagnostics") or [])
+    if _diagnostic_exists(diagnostics, diagnostic):
+        return False
+    node["diagnostics"] = [*diagnostics, diagnostic]
+    severity = str(diagnostic.get("severity") or "error")
+    for target in [*ancestors, node]:
+        target["essential"] = True
+        counts = dict(target.get("statusCounts") or {})
+        count_key = STATUS_COUNT_KEY.get(severity)
+        if count_key:
+            counts[count_key] = int(counts.get(count_key) or 0) + 1
+            target["statusCounts"] = counts
+        target["status"] = _highest_status(str(target.get("status") or "ok"), severity)
+    return True
+
+
+def _diagnostic_exists(existing: list[Dict[str, Any]], diagnostic: Dict[str, Any]) -> bool:
+    return any(
+        item.get("message") == diagnostic.get("message")
+        and [str(part) for part in (item.get("path") or [])] == [str(part) for part in (diagnostic.get("path") or [])]
+        for item in existing
+    )
+
+
+def _highest_status(left: str, right: str) -> str:
+    return left if STATUS_PRIORITY.get(left, 0) >= STATUS_PRIORITY.get(right, 0) else right
+
+
 def _k8s_match_value(k8s_hint: Dict[str, Any], key: str) -> list[str]:
     match = k8s_hint.get("match") or {}
     return [str(value) for value in match.get(key) or k8s_hint.get(key) or []]
@@ -635,6 +947,19 @@ def _row_matches_current(row: Dict[str, Any], current: Dict[str, str]) -> bool:
     if current.get("group") and row.get("group") != current.get("group"):
         return False
     return True
+
+
+def _external_current_warning_row(current: Dict[str, str], kind: str, message: str) -> Dict[str, Any]:
+    return {
+        "name": current["name"],
+        "kind": current.get("kind") or kind,
+        "group": current.get("group") or "",
+        "version": "v1",
+        "keys": [],
+        "status": "warn",
+        "message": message,
+        "current": True,
+    }
 
 
 def _current_matches_resource_type(current: Dict[str, str], resource_type: Dict[str, Any]) -> bool:
@@ -725,6 +1050,8 @@ def _external_resource_labels(external_ref: Dict[str, Any]) -> Dict[str, str]:
     purpose = external_ref.get("purpose")
     if purpose:
         labels["workflow.opensearch.org/external-ref-purpose"] = str(purpose)
+    if purpose == "http-basic-auth":
+        labels["use-case"] = "http-basic-credentials"
     return labels
 
 
@@ -738,6 +1065,12 @@ def _format_config_processor_error(error: subprocess.CalledProcessError) -> str:
         details.append(f"stdout: {stdout}")
     detail = "\n".join(details) or str(error)
     return f"config processor failed with exit code {error.returncode}: {detail}"
+
+
+def _format_api_exception(error: ApiException) -> str:
+    status = f"HTTP {error.status}" if getattr(error, "status", None) else "Kubernetes API error"
+    reason = str(getattr(error, "reason", "") or "").strip()
+    return f"{status} {reason}".strip()
 
 
 def _format_submit_validation_error(validation: Dict[str, Any]) -> str:

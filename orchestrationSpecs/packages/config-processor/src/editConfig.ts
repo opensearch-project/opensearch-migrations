@@ -24,6 +24,7 @@ import {
     PROXY_TLS_CONFIG,
     REPLAYER_CONFIG,
     S3_CAPTURED_TRAFFIC_SOURCE,
+    SNAPSHOT_INFO,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTER_CONFIG,
@@ -95,6 +96,8 @@ type EditOption = NonNullable<EditInputHint["options"]>[number];
 
 interface EditContext {
     sourceOptions: EditOption[];
+    snapshotSourceOptions: EditOption[];
+    sourceSnapshotOptions: Record<string, EditOption[]>;
     targetOptions: EditOption[];
     kafkaOptions: EditOption[];
     capturedTrafficOptions: EditOption[];
@@ -194,9 +197,21 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
 }
 
 function optionsFromRecord(record: Record<string, unknown> | undefined): EditOption[] {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+        return [];
+    }
     return Object.keys(record ?? {})
         .sort((a, b) => a.localeCompare(b))
         .map(name => ({label: name, value: name}));
+}
+
+function sourceSnapshotOptions(sourceClusters: Record<string, any> | undefined): Record<string, EditOption[]> {
+    return Object.fromEntries(
+        Object.entries(sourceClusters ?? {}).map(([sourceName, sourceConfig]) => [
+            sourceName,
+            optionsFromRecord(sourceConfig?.snapshotInfo?.snapshots),
+        ]),
+    );
 }
 
 function capturedTrafficOptions(traffic: any): EditOption[] {
@@ -210,8 +225,18 @@ function capturedTrafficOptions(traffic: any): EditOption[] {
 }
 
 function buildEditContext(config: any): EditContext {
+    const snapshotOptions = sourceSnapshotOptions(config?.sourceClusters);
     return {
         sourceOptions: optionsFromRecord(config?.sourceClusters),
+        snapshotSourceOptions: Object.entries(snapshotOptions)
+            .filter(([, snapshots]) => snapshots.length > 0)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([sourceName, snapshots]) => ({
+                label: sourceName,
+                value: sourceName,
+                description: `${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} defined`,
+            })),
+        sourceSnapshotOptions: snapshotOptions,
         targetOptions: optionsFromRecord(config?.targetClusters),
         kafkaOptions: optionsFromRecord(config?.kafkaClusterConfiguration),
         capturedTrafficOptions: capturedTrafficOptions(config?.traffic),
@@ -295,23 +320,95 @@ function proxyTlsNode(
     return finalizeNode(node);
 }
 
+function snapshotRepoReferenceHint(sourceName: string, repoOptions: EditOption[]): EditInputHint {
+    const repoPath = ["sourceClusters", sourceName || "<source>", "snapshotInfo", "repos"];
+    return {
+        kind: "reference",
+        sourcePath: repoPath,
+        options: repoOptions,
+        message: repoOptions.length
+            ? `Choose a repository defined under ${repoPath.join(".")}.`
+            : `First define at least one repository under ${repoPath.join(".")} before binding source snapshots.`,
+    };
+}
+
+function missingSnapshotRepoMessage(sourceName: string): string {
+    const repoPath = ["sourceClusters", sourceName || "<source>", "snapshotInfo", "repos"];
+    return `First define at least one repository under ${repoPath.join(".")} before adding source snapshots.`;
+}
+
+function withSnapshotRepoHint(description: string | undefined, sourceName: string): string {
+    const repoPath = `sourceClusters.${sourceName || "<source>"}.snapshotInfo.repos`;
+    const hint = `First define repositories under ${repoPath}.`;
+    return description?.includes(repoPath)
+        ? description
+        : `${description ? `${description} ` : ""}${hint}`;
+}
+
+function applySnapshotRepoReferenceOptions(children: EditNode[], path: string[], info: Record<string, any>): void {
+    const sourceName = path[1] ?? "";
+    const repoOptions = optionsFromRecord(info.repos);
+    const repoHint = snapshotRepoReferenceHint(sourceName, repoOptions);
+    const snapshotsNode = children.find(child => child.path[child.path.length - 1] === "snapshots");
+    if (!repoOptions.length && snapshotsNode) {
+        const addNode = snapshotsNode.children?.find(child => child.valueKind === "command" && child.id.endsWith(":add"));
+        if (addNode) {
+            const message = missingSnapshotRepoMessage(sourceName);
+            addNode.description = message;
+            addNode.command = {...addNode.command, blockedMessage: message};
+        }
+    }
+    for (const snapshotNode of snapshotsNode?.children ?? []) {
+        const repoNameNode = snapshotNode.children?.find(child => child.path[child.path.length - 1] === "repoName");
+        if (!repoNameNode) {
+            continue;
+        }
+        repoNameNode.inputHint = repoHint;
+        repoNameNode.description = withSnapshotRepoHint(repoNameNode.description, sourceName);
+    }
+}
+
 function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
     const info = snapshotInfo && typeof snapshotInfo === "object" ? snapshotInfo as any : {};
     const repos = Object.keys(info.repos ?? {}).length;
     const snapshots = Object.keys(info.snapshots ?? {}).length;
+    const present = snapshotInfo !== undefined && snapshotInfo !== null;
+    const children = schemaFieldNodes(SNAPSHOT_INFO, path, info, [
+        "repos",
+        "snapshots",
+        "serializeSnapshotCreation",
+    ]);
+    for (const child of children) {
+        const childKey = child.path[child.path.length - 1];
+        if (childKey === "repos" || childKey === "snapshots") {
+            child.essential = true;
+        }
+        if (!present && childKey === "snapshots") {
+            child.presence = "optional";
+            child.required = false;
+            child.status = "ok";
+            child.statusCounts = {};
+            child.diagnostics = [];
+        }
+    }
+    applySnapshotRepoReferenceOptions(children, path, info);
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `snapshotInfo: repos ${repos}, snapshots ${snapshots}`,
+        label: present
+            ? `snapshotInfo: repos ${repos}, snapshots ${snapshots}`
+            : "snapshotInfo: <unset>",
         value: snapshotInfo,
         valueKind: "object",
         presence: "optional",
+        essential: true,
         description: schemaFieldDescription(
             SOURCE_CLUSTER_CONFIG,
             "snapshotInfo",
             "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.",
         ),
         status: "ok",
+        children,
     });
 }
 
@@ -536,10 +633,12 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
     const fromSource = value?.fromSource ?? "";
     const toTarget = value?.toTarget ?? "";
     const children = schemaFieldNodes(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, value, [
-        {key: "fromSource", referenceOptions: ctx.sourceOptions},
+        {key: "fromSource", referenceOptions: ctx.snapshotSourceOptions},
         {key: "toTarget", referenceOptions: ctx.targetOptions},
     ]);
-    children.push(snapshotPerConfigNode([...rootPath, "perSnapshotConfig"], value?.perSnapshotConfig));
+    if (fromSource || Object.keys(value?.perSnapshotConfig ?? {}).length > 0) {
+        children.push(snapshotPerConfigNode([...rootPath, "perSnapshotConfig"], value?.perSnapshotConfig, ctx, fromSource));
+    }
     children.push(schemaFieldNodeFor(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, "skipApprovals", value));
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
@@ -553,43 +652,77 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
     });
 }
 
-function snapshotPerConfigNode(path: string[], value: unknown): EditNode {
+function snapshotPerConfigNode(path: string[], value: unknown, ctx: EditContext, fromSource: string): EditNode {
     const recordValue = isPlainObject(value) ? value : {};
-    const children = Object.entries(recordValue)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([snapshotName, migrations]) => {
-            const node = snapshotMigrationPassArrayNode([...path, snapshotName], snapshotName, migrations);
-            node.removable = true;
-            return node;
-        });
-    children.push(addRow(
-        path,
-        "snapshot name",
-        "Create a new snapshot name in pending workflow YAML.",
-        true,
-        recordKeyHint(SNAPSHOT_PER_CONFIG_HINT),
-        false,
-        true,
-    ));
+    const snapshotOptions = ctx.sourceSnapshotOptions[fromSource] ?? [];
+    const availableNames = snapshotOptions.map(option => option.value);
+    const recordNames = Object.keys(recordValue);
+    const configuredAvailableCount = recordNames.filter(name => availableNames.includes(name)).length;
+    const configuredNames = new Set(recordNames);
+    const orderedNames = [
+        ...availableNames,
+        ...recordNames.filter(name => !availableNames.includes(name)).sort((a, b) => a.localeCompare(b)),
+    ];
+    const children = orderedNames.map(snapshotName => {
+        if (!configuredNames.has(snapshotName)) {
+            return snapshotConfigureSlotNode([...path, snapshotName], snapshotName);
+        }
+        const node = snapshotMigrationPassArrayNode([...path, snapshotName], snapshotName, recordValue[snapshotName]);
+        node.removable = true;
+        return node;
+    });
     const missing = value === undefined || value === null;
+    const noSnapshots = Boolean(fromSource) && snapshotOptions.length === 0;
+    const diagnostics: EditDiagnostic[] = noSnapshots
+        ? [{
+            severity: "warning",
+            message: `Source '${fromSource}' has no snapshots. Define snapshots under sourceClusters.${fromSource}.snapshotInfo.snapshots before configuring per-snapshot migrations.`,
+            path,
+        }]
+        : [];
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `perSnapshotConfig: ${missing ? "<required>" : `${Object.keys(recordValue).length} item${Object.keys(recordValue).length === 1 ? "" : "s"}`}`,
+        label: snapshotPerConfigLabel(missing, configuredAvailableCount, snapshotOptions.length),
         value,
         valueKind: "record",
-        presence: "required",
+        presence: "optional",
         essential: true,
         description: schemaFieldDescription(
             NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
             "perSnapshotConfig",
             "Per-snapshot migration configurations.",
         ),
-        required: true,
+        required: false,
         inputHint: SNAPSHOT_PER_CONFIG_HINT,
-        status: missing ? "required" : "ok",
-        diagnostics: missing ? [{severity: "required", message: "perSnapshotConfig is required.", path}] : [],
+        status: noSnapshots ? "warning" : "ok",
+        diagnostics,
         children,
+    });
+}
+
+function snapshotPerConfigLabel(missing: boolean, configuredCount: number, availableCount: number): string {
+    if (availableCount === 0) {
+        return "perSnapshotConfig: no source snapshots";
+    }
+    if (missing) {
+        return `perSnapshotConfig: <unset>, ${availableCount} available`;
+    }
+    const unconfiguredCount = Math.max(availableCount - configuredCount, 0);
+    return `perSnapshotConfig: ${configuredCount} configured, ${unconfiguredCount} unconfigured`;
+}
+
+function snapshotConfigureSlotNode(path: string[], snapshotName: string): EditNode {
+    return finalizeNode({
+        id: `edit:${path.join(".")}:add`,
+        path,
+        label: `${snapshotName}: not configured`,
+        valueKind: "command",
+        presence: "optional",
+        essential: true,
+        description: `Configure migration passes for source snapshot '${snapshotName}'.`,
+        command: {requiresName: false, editAdded: false, autoEditAdded: false},
+        status: "ok",
     });
 }
 
@@ -685,7 +818,15 @@ function essentialSnapshotPassBranch(node: EditNode): EditNode {
 function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext): EditNode {
     const path = ["snapshotMigrationConfigs"];
     const children = (Array.isArray(configs) ? configs : []).map((value, index) => snapshotMigrationNode(index, value, ctx));
-    children.push(addRow(path, "snapshot migration", "Create a snapshot migration configuration in pending workflow YAML.", false));
+    const hasSourceSnapshots = ctx.snapshotSourceOptions.length > 0;
+    if (hasSourceSnapshots) {
+        children.push(addRow(
+            path,
+            "snapshot migration",
+            "Create a snapshot migration configuration in pending workflow YAML.",
+            false,
+        ));
+    }
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -697,7 +838,14 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
             "List of snapshot-based migration configurations.",
         ),
         inputHint: SNAPSHOT_MIGRATION_ARRAY_HINT,
-        status: "ok",
+        status: hasSourceSnapshots || children.length > 0 ? "ok" : "warning",
+        diagnostics: hasSourceSnapshots || children.length > 0
+            ? []
+            : [{
+                severity: "warning",
+                message: "Define at least one source snapshot under sourceClusters.<source>.snapshotInfo.snapshots before adding a snapshot migration.",
+                path,
+            }],
         children,
     });
 }
@@ -799,49 +947,67 @@ function zodIssueSeverity(issue: z.core.$ZodIssue): EditDiagnostic["severity"] {
     return messageSeverity(issue.message);
 }
 
+function validationSuccess(): EditStateV1["validation"] {
+    return {valid: true, errors: []};
+}
+
+function validationFromError(error: unknown): EditStateV1["validation"] {
+    if (error instanceof InputValidationError) {
+        return {
+            valid: false,
+            errors: [formatInputValidationError(error)],
+            diagnostics: error.errors.map(item => ({
+                severity: messageSeverity(item.message),
+                message: item.message,
+                path: diagnosticPath(item.path),
+            })),
+        };
+    }
+    if (error instanceof z.ZodError) {
+        return {
+            valid: false,
+            errors: error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`),
+            diagnostics: error.issues.map(issue => ({
+                severity: zodIssueSeverity(issue),
+                message: issue.message,
+                path: diagnosticPath(issue.path),
+            })),
+        };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+        valid: false,
+        errors: [message],
+        diagnostics: [{severity: "error", message, path: []}],
+    };
+}
+
 export function validationForConfig(config: unknown): EditStateV1["validation"] {
     try {
         new MigrationConfigTransformer().validateInput(config);
-        return {valid: true, errors: []};
+        return validationSuccess();
     } catch (error) {
-        if (error instanceof InputValidationError) {
-            return {
-                valid: false,
-                errors: [formatInputValidationError(error)],
-                diagnostics: error.errors.map(item => ({
-                    severity: messageSeverity(item.message),
-                    message: item.message,
-                    path: diagnosticPath(item.path),
-                })),
-            };
-        }
-        if (error instanceof z.ZodError) {
-            return {
-                valid: false,
-                errors: error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`),
-                diagnostics: error.issues.map(issue => ({
-                    severity: zodIssueSeverity(issue),
-                    message: issue.message,
-                    path: diagnosticPath(issue.path),
-                })),
-            };
-        }
-        return {
-            valid: false,
-            errors: [String(error)],
-            diagnostics: [{severity: "error", message: String(error), path: []}],
-        };
+        return validationFromError(error);
     }
 }
 
-export function buildEditStateFromObject(config: any): EditStateV1 {
+export async function submitValidationForConfig(config: unknown): Promise<EditStateV1["validation"]> {
+    try {
+        await new MigrationConfigTransformer().processFromObject(config);
+        return validationSuccess();
+    } catch (error) {
+        return validationFromError(error);
+    }
+}
+
+export function buildEditStateFromObject(config: any, validationOverride?: EditStateV1["validation"]): EditStateV1 {
     const ctx = buildEditContext(config);
     const nodes = [
         workflowConfigurationNode(config),
         snapshotMigrationSectionNode(config, ctx),
         trafficGroupNode(config?.traffic, ctx),
     ];
-    const validation = validationForConfig(config);
+    const validation = validationOverride ?? validationForConfig(config);
     applyValidationDiagnostics(nodes, validation.diagnostics ?? []);
     return {
         formatVersion: 1,
@@ -853,6 +1019,10 @@ export function buildEditStateFromObject(config: any): EditStateV1 {
         nodes,
         validation,
     };
+}
+
+export async function buildEditStateFromObjectForSubmit(config: any): Promise<EditStateV1> {
+    return buildEditStateFromObject(config, await submitValidationForConfig(config));
 }
 
 function ensureContainer(parent: any, key: string): Record<string, unknown> {
@@ -993,8 +1163,107 @@ function proxyClientAuthForVariant(existing: any, variant: unknown): unknown {
     throw new Error(`Unknown proxy clientAuth mode: ${String(variant)}`);
 }
 
+function removePerSnapshotConfigReferences(config: any, sourceName: string, snapshotNames: string[]): void {
+    const migrations = Array.isArray(config?.snapshotMigrationConfigs) ? config.snapshotMigrationConfigs : [];
+    const names = new Set(snapshotNames);
+    for (const migration of migrations) {
+        if (migration?.fromSource !== sourceName || !isPlainObject(migration?.perSnapshotConfig)) {
+            continue;
+        }
+        for (const snapshotName of names) {
+            delete migration.perSnapshotConfig[snapshotName];
+        }
+    }
+}
+
+function sourceClusterRemovedByPath(path: string[]): string | undefined {
+    return path[0] === "sourceClusters" && path.length === 2 ? path[1] : undefined;
+}
+
+function capturedTrafficNamesForSource(config: any, sourceName: string): Set<string> {
+    const names = new Set<string>();
+    if (isPlainObject(config?.traffic?.proxies)) {
+        for (const [proxyName, proxy] of Object.entries(config.traffic.proxies)) {
+            if (isPlainObject(proxy) && proxy.source === sourceName) {
+                names.add(proxyName);
+            }
+        }
+    }
+    if (isPlainObject(config?.traffic?.s3Sources)) {
+        for (const [s3SourceName, s3Source] of Object.entries(config.traffic.s3Sources)) {
+            if (isPlainObject(s3Source) && s3Source.sourceLabel === sourceName) {
+                names.add(s3SourceName);
+            }
+        }
+    }
+    return names;
+}
+
+function removeSourceClusterReferences(config: any, sourceName: string): void {
+    const removedCapturedTraffic = capturedTrafficNamesForSource(config, sourceName);
+    if (Array.isArray(config?.snapshotMigrationConfigs)) {
+        config.snapshotMigrationConfigs = config.snapshotMigrationConfigs.filter((migration: unknown) =>
+            !(isPlainObject(migration) && migration.fromSource === sourceName)
+        );
+    }
+    if (isPlainObject(config?.traffic?.proxies)) {
+        for (const [proxyName, proxy] of Object.entries(config.traffic.proxies)) {
+            if (isPlainObject(proxy) && proxy.source === sourceName) {
+                delete config.traffic.proxies[proxyName];
+            }
+        }
+    }
+    if (isPlainObject(config?.traffic?.s3Sources)) {
+        for (const [s3SourceName, s3Source] of Object.entries(config.traffic.s3Sources)) {
+            if (isPlainObject(s3Source) && s3Source.sourceLabel === sourceName) {
+                delete config.traffic.s3Sources[s3SourceName];
+            }
+        }
+    }
+    if (isPlainObject(config?.traffic?.replayers)) {
+        for (const [replayerName, replayer] of Object.entries(config.traffic.replayers)) {
+            if (isPlainObject(replayer) && removedCapturedTraffic.has(String(replayer.fromCapturedTraffic ?? ""))) {
+                delete config.traffic.replayers[replayerName];
+            }
+        }
+    }
+}
+
+function sourceSnapshotsRemovedByPath(config: any, path: string[]): {sourceName: string; snapshotNames: string[]} | undefined {
+    if (path[0] !== "sourceClusters" || !path[1]) {
+        return undefined;
+    }
+    const sourceName = path[1];
+    const snapshots = config?.sourceClusters?.[sourceName]?.snapshotInfo?.snapshots;
+    if (!isPlainObject(snapshots)) {
+        return undefined;
+    }
+    if (path.length === 5 && path[2] === "snapshotInfo" && path[3] === "snapshots") {
+        return {sourceName, snapshotNames: [path[4]]};
+    }
+    if (path.length === 4 && path[2] === "snapshotInfo" && path[3] === "snapshots") {
+        return {sourceName, snapshotNames: Object.keys(snapshots)};
+    }
+    if (path.length === 3 && path[2] === "snapshotInfo") {
+        return {sourceName, snapshotNames: Object.keys(snapshots)};
+    }
+    return undefined;
+}
+
 function setAtPath(config: any, path: string[], value: unknown): void {
     const {parent, key} = parentAtPath(config, path);
+    if (
+        key === "fromSource" &&
+        path.length === 3 &&
+        path[0] === "snapshotMigrationConfigs" &&
+        isArrayIndex(path[1])
+    ) {
+        if (parent[key] !== value && isPlainObject(parent.perSnapshotConfig)) {
+            delete parent.perSnapshotConfig;
+        }
+        parent[key] = value;
+        return;
+    }
     if (key === "authConfig") {
         const next = authConfigForVariant(parent[key], value);
         if (next === undefined) {
@@ -1085,18 +1354,31 @@ function removeAtPath(config: any, path: string[]): void {
     if (path.length < 2) {
         throw new Error("Only named config entries can be removed");
     }
+    const removedSourceName = sourceClusterRemovedByPath(path);
+    const removedSourceSnapshots = sourceSnapshotsRemovedByPath(config, path);
     const {parent, key} = parentAtPath(config, path);
     if (!parent || typeof parent !== "object" || !(key in parent)) {
         throw new Error(`Config entry does not exist at path ${path.join(".")}`);
     }
     if (Array.isArray(parent)) {
         parent.splice(Number(key), 1);
+        if (removedSourceSnapshots) {
+            removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
+        }
         return;
     }
     delete parent[key];
+    if (removedSourceName) {
+        removeSourceClusterReferences(config, removedSourceName);
+    }
+    if (removedSourceSnapshots) {
+        removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
+    }
 }
 
 function unsetAtPath(config: any, path: string[]): void {
+    const removedSourceName = sourceClusterRemovedByPath(path);
+    const removedSourceSnapshots = sourceSnapshotsRemovedByPath(config, path);
     const resolved = existingParentAtPath(config, path);
     if (!resolved) {
         return;
@@ -1104,9 +1386,18 @@ function unsetAtPath(config: any, path: string[]): void {
     const {parent, key} = resolved;
     if (Array.isArray(parent) && isArrayIndex(key)) {
         parent.splice(Number(key), 1);
+        if (removedSourceSnapshots) {
+            removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
+        }
         return;
     }
     delete parent[key];
+    if (removedSourceName) {
+        removeSourceClusterReferences(config, removedSourceName);
+    }
+    if (removedSourceSnapshots) {
+        removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
+    }
 }
 
 function defaultConfigForPath(path: string[]): unknown {
@@ -1237,7 +1528,17 @@ export function applyEditOperationToObject(config: any, operation: EditOperation
     };
 }
 
-function withConsoleDiagnosticsOnStderr<T>(callback: () => T): T {
+async function applyEditOperationToObjectForSubmit(config: any, operation: EditOperation): Promise<EditApplyResultV1> {
+    const nextConfig = applyEditOperation(config, operation);
+    const yaml = stringify(nextConfig);
+    return {
+        formatVersion: 1,
+        yaml,
+        editState: await buildEditStateFromObjectForSubmit(nextConfig),
+    };
+}
+
+async function withConsoleDiagnosticsOnStderr<T>(callback: () => T | Promise<T>): Promise<T> {
     const originalLog = console.log;
     const originalInfo = console.info;
     const originalWarn = console.warn;
@@ -1247,7 +1548,7 @@ function withConsoleDiagnosticsOnStderr<T>(callback: () => T): T {
     console.info = redirect;
     console.warn = redirect;
     try {
-        return callback();
+        return await callback();
     } finally {
         console.log = originalLog;
         console.info = originalInfo;
@@ -1277,7 +1578,7 @@ export async function main() {
         if (args.length > 0) {
             usage();
         }
-        const editState = withConsoleDiagnosticsOnStderr(() => buildEditStateFromObject(config));
+        const editState = await withConsoleDiagnosticsOnStderr(() => buildEditStateFromObjectForSubmit(config));
         process.stdout.write(JSON.stringify(editState, null, 2));
         return;
     }
@@ -1288,7 +1589,7 @@ export async function main() {
         usage();
     }
     const operation = await parseYaml(operationPath) as EditOperation;
-    const result = withConsoleDiagnosticsOnStderr(() => applyEditOperationToObject(config, operation));
+    const result = await withConsoleDiagnosticsOnStderr(() => applyEditOperationToObjectForSubmit(config, operation));
     process.stdout.write(JSON.stringify(result, null, 2));
 }
 

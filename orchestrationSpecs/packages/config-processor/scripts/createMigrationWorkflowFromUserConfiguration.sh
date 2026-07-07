@@ -68,6 +68,11 @@ WORKFLOW_NAME="migration-workflow"
 echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" "${ALL_ARGS[@]}"
 
+echo "Validating generated Kubernetes resources..."
+if [ -d "$TEMP_DIR/resources" ]; then
+    kubectl apply --dry-run=server -f "$TEMP_DIR/resources"
+fi
+
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
     "$TEMP_DIR/handleK8sResources.sh"

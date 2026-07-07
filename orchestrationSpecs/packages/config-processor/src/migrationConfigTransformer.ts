@@ -16,7 +16,7 @@ import {
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
 } from '@opensearch-migrations/schemas';
-import {StreamSchemaTransformer} from './streamSchemaTransformer';
+import {InputValidationElement, InputValidationError, StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
@@ -118,6 +118,28 @@ function makeProxyServiceEndpoint(proxyName: string, listenPort: number, hasTls:
     return `${hasTls ? "https" : "http"}://${proxyName}:${listenPort}`;
 }
 
+function extraKeysError(path: string[], extraKeys: string[]): InputValidationError {
+    return new InputValidationError(extraKeys.map(key =>
+        new InputValidationElement(
+            [...path, key],
+            `Unrecognized key '${key}'`
+        )
+    ));
+}
+
+function kafkaClusterUnionError(path: string[]): InputValidationError {
+    return new InputValidationError([
+        new InputValidationElement(
+            path,
+            "Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'"
+        ),
+    ]);
+}
+
+function isKafkaClusterConfigPath(path: string[]): boolean {
+    return path.length === 2 && path[0] === "kafkaClusterConfiguration";
+}
+
 function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = []): void {
     const schemaType = schema.constructor.name;
     
@@ -129,8 +151,7 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
         const extraKeys = actualKeys.filter(key => !allowedKeys.includes(key));
         
         if (extraKeys.length > 0) {
-            const pathStr = path.length > 0 ? path.join('.') : 'root';
-            throw new Error(`Unrecognized keys at ${pathStr}: ${extraKeys.join(', ')}`);
+            throw extraKeysError(path, extraKeys);
         }
         
         // Recursively validate nested objects
@@ -146,8 +167,16 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
     } else if (schemaType === 'ZodUnion' && data !== null && data !== undefined) {
         // For unions, we need to manually check which option matches AND validate extra keys
         let foundValidMatch = false;
-        let extraKeyError: Error | null = null;
+        let extraKeyError: InputValidationError | null = null;
         let parseError: Error | null = null;
+        if (
+            isKafkaClusterConfigPath(path) &&
+            typeof data === "object" &&
+            "existing" in data &&
+            "autoCreate" in data
+        ) {
+            throw kafkaClusterUnionError(path);
+        }
         
         for (const option of (schema as z.ZodUnion<any>).options) {
             try {
@@ -159,11 +188,10 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
                 foundValidMatch = true;
                 break; // Found a valid match, no need to check other options
             } catch (e) {
-                const error = e as Error;
-                if (error.message.includes('Unrecognized keys')) {
-                    extraKeyError = error;
+                if (e instanceof InputValidationError) {
+                    extraKeyError = e;
                 } else {
-                    parseError = error;
+                    parseError = e as Error;
                 }
                 // Continue to next option
             }
@@ -178,8 +206,8 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
             validateNoExtraKeys(data, (schema as z.ZodOptional<any> | z.ZodDefault<any>).unwrap(), path);
         }
     } else if (schemaType === 'ZodRecord' && typeof data === 'object' && data !== null) {
-        Object.values(data).forEach((value, index) => {
-            validateNoExtraKeys(value, (schema as z.ZodRecord<any, any>).valueType, [...path, `[${index}]`]);
+        Object.entries(data).forEach(([key, value]) => {
+            validateNoExtraKeys(value, (schema as z.ZodRecord<any, any>).valueType, [...path, key]);
         });
     }
 }

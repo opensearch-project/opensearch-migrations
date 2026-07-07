@@ -20,7 +20,7 @@ describe("valid configs parse successfully", () => {
         const result = OVERALL_MIGRATION_CONFIG.safeParse({
             sourceClusters: {
                 source: {
-                    endpoint: "",
+                    endpoint: "https://source.example.com:9200",
                     version: "ES 7.10.2",
                 },
             },

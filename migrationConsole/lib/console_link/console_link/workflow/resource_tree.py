@@ -186,6 +186,7 @@ def apply_config_overlays(
         )
         node.config_diff = _build_config_diff(
             node.plural,
+            node.name,
             node.spec,
             submitted.get(key),
             pending.get(key),
@@ -215,6 +216,7 @@ def apply_config_overlays(
         )
         virtual.config_diff = _build_config_diff(
             plural,
+            name,
             virtual.spec,
             submitted.get(key),
             pending.get(key),
@@ -268,7 +270,8 @@ def resource_config_change_summary(sections: List[ResourceSection]) -> Dict[str,
         diff = node.config_diff or {}
         submitted_presence_changed = _has_submitted_presence_change(node)
         pending_presence_changed = _has_pending_presence_change(node)
-        if not diff and not submitted_presence_changed and not pending_presence_changed:
+        has_diff_change = bool(diff.get('has_submitted_changes') or diff.get('has_pending_submit_changes'))
+        if not has_diff_change and not submitted_presence_changed and not pending_presence_changed:
             continue
         summary['resources'] += 1
         if diff.get('has_submitted_changes') or submitted_presence_changed:
@@ -622,6 +625,7 @@ def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
 
 def _build_config_diff(
     plural: str,
+    resource_name: str,
     deployed_parameters: Dict[str, Any],
     submitted_resource: Optional[Dict[str, Any]],
     pending_resource: Optional[Dict[str, Any]],
@@ -641,17 +645,20 @@ def _build_config_diff(
     if submitted_parameters is None and pending_parameters is None and not deployed_parameters:
         return None
 
+    diagnostic_path_map = _diagnostic_parameter_path_map(plural, resource_name, submitted_resource, pending_resource)
     paths = _ordered_config_paths(
         _merged_display_fields(submitted_resource, pending_resource),
         deployed_parameters,
         submitted_parameters,
         pending_parameters,
+        list(diagnostic_path_map),
     )
     fields = []
     has_submitted_changes = False
     has_pending_submit_changes = False
     compare_submitted_to_deployed = plural not in VIRTUAL_CONFIG_PLURALS
     for path in paths:
+        path_key = tuple(path)
         values = {
             'deployed': _value_state(deployed_parameters, path),
             'submitted': _value_state(
@@ -670,7 +677,7 @@ def _build_config_diff(
             not same_value_state(values['deployed'], values['submitted'])
         )
         pending_submit_changed = not same_value_state(values['submitted'], values['pending'])
-        if not submitted_changed and not pending_submit_changed:
+        if not submitted_changed and not pending_submit_changed and path_key not in diagnostic_path_map:
             continue
         if _is_pending_only_auto_filled_change(values):
             continue
@@ -678,11 +685,14 @@ def _build_config_diff(
             has_submitted_changes = True
         if pending_submit_changed:
             has_pending_submit_changes = True
-        fields.append({
+        field = {
             'path': '.'.join(path),
             'label': _config_diff_field_label(plural, path, values),
             'values': values,
-        })
+        }
+        if path_key in diagnostic_path_map:
+            field['diagnosticPath'] = '.'.join(diagnostic_path_map[path_key])
+        fields.append(field)
 
     if not fields:
         return None
@@ -700,8 +710,10 @@ def _ordered_config_paths(
     deployed_parameters: Dict[str, Any],
     submitted_parameters: Optional[Dict[str, Any]],
     pending_parameters: Optional[Dict[str, Any]],
+    extra_paths: Optional[List[List[str]]] = None,
 ) -> List[List[str]]:
     configured = [field.split('.') for field in display_fields]
+    extra = {tuple(path) for path in extra_paths or []}
     discovered = set()
     for source in (deployed_parameters, submitted_parameters, pending_parameters):
         for path in _leaf_paths(source or {}):
@@ -711,12 +723,50 @@ def _ordered_config_paths(
     seen = set()
     for path in configured:
         key = tuple(path)
-        if key in discovered and key not in seen:
+        if (key in discovered or key in extra) and key not in seen:
             ordered.append(path)
             seen.add(key)
+    for key in sorted(extra - seen):
+        ordered.append(list(key))
+        seen.add(key)
     for key in sorted(discovered - seen):
         ordered.append(list(key))
     return ordered
+
+
+def _diagnostic_parameter_path_map(
+    plural: str,
+    resource_name: str,
+    *resources: Optional[Dict[str, Any]],
+) -> Dict[tuple[str, ...], List[str]]:
+    result: Dict[tuple[str, ...], List[str]] = {}
+    for resource in resources:
+        for diagnostic in (resource or {}).get('diagnostics') or []:
+            path = [str(part) for part in diagnostic.get('path') or []]
+            parameter_path = _diagnostic_parameter_path(plural, resource_name, path)
+            if parameter_path:
+                result[tuple(parameter_path)] = path
+    return result
+
+
+def _diagnostic_parameter_path(
+    plural: str,
+    resource_name: str,
+    path: List[str],
+) -> Optional[List[str]]:
+    prefixes = {
+        'sourceconfigs': ['sourceClusters', resource_name],
+        'targetconfigs': ['targetClusters', resource_name],
+        'kafkaconfigs': ['kafkaClusterConfiguration', resource_name],
+        'captureproxies': ['traffic', 'proxies', resource_name],
+        'capturedtraffics': ['traffic', 's3Sources', resource_name],
+        'trafficreplays': ['traffic', 'replayers', resource_name],
+    }
+    prefix = prefixes.get(plural)
+    if not prefix or path[:len(prefix)] != prefix:
+        return None
+    parameter_path = path[len(prefix):]
+    return parameter_path or None
 
 
 def _config_diff_field_label(plural: str, path: List[str], values: Dict[str, Dict[str, Any]]) -> str:
