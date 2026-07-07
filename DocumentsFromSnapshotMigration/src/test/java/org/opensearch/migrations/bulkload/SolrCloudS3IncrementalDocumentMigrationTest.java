@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * uploaded to S3 verbatim migrates through the real {@code RfsMigrateDocuments} S3 path.
  *
  * <p>This is the layout produced by SolrCloud 8.9+ when {@code BACKUP} is invoked with
- * {@code incremental=true}, and it matches the real {@code nyc_taxis_8} fixture:
+ * {@code incremental=true} (the backup here is generated fresh; its name is arbitrary):
  * <pre>
  *   &lt;snapshotName&gt;/&lt;collection&gt;/
  *     backup_0.properties           (indexVersion=8.11.x)
@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link org.opensearch.migrations.SolrBackupDiscovery}'s per-UUID lazy S3 download
  * ({@code prepareShard}) were exercised only from a local directory (see
  * {@code SolrSnapshotToOpenSearchTest}) or, over S3, only for <em>bare non-incremental</em> layouts
- * (see {@code SolrBareS3DocumentMigrationTest}). Nothing drove the wrapped incremental layout —
- * i.e. {@code nyc_taxis_8} — through the S3 CLI path until now.
+ * (see {@code SolrBareS3DocumentMigrationTest}). Nothing drove the wrapped incremental layout
+ * through the S3 CLI path until now.
  *
  * <p>Lucene 8.11 segments are read via the Lucene 9 reader's backward-codecs (Solr 8 → Lucene 9
  * in {@code SolrBackupSource.newLuceneReader}).
@@ -68,7 +68,9 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
     private static final String REGION = "us-east-1";
     private static final String LOCALSTACK_ALIAS = "localstack";
     private static final String COLLECTION = "movies";
-    private static final String SNAPSHOT_NAME = "movies_8";
+    // Arbitrary generated-backup name; for a wrapped SolrCloud backup the target index is the
+    // collection name (COLLECTION), not the snapshot name, so this string carries no meaning.
+    private static final String SNAPSHOT_NAME = "solrcloud8_incremental_backup";
     private static final int NUM_SHARDS = 2;
     private static final int DOC_COUNT = 20;
 
@@ -201,7 +203,7 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
         SOLR_CLOUD.execInContainer("mkdir", "-p", backupLocation);
 
         // incremental=true forces the SIP-12 UUID layout (index/<UUID> + shard_backup_metadata/)
-        // that matches the real nyc_taxis_8 fixture, rather than Solr 8's non-incremental default.
+        // rather than Solr 8's non-incremental default.
         var backup = SOLR_CLOUD.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=BACKUP"
                 + "&name=" + SNAPSHOT_NAME
