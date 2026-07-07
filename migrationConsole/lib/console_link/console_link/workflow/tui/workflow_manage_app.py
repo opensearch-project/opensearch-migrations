@@ -2916,46 +2916,22 @@ class WorkflowTreeApp(App):
         if len(path) != 2 or path[0] != "sourceClusters":
             return []
         source_name = path[1]
-        removals: list[Dict[str, str]] = []
-
-        migrations = config.get("snapshotMigrationConfigs")
-        if isinstance(migrations, list):
-            for index, migration in enumerate(migrations):
-                if isinstance(migration, dict) and migration.get("fromSource") == source_name:
-                    removals.append({
-                        "path": f"snapshotMigrationConfigs.{index}",
-                        "reason": f"fromSource={source_name}",
-                    })
-
-        removed_captured = set()
-        traffic = config.get("traffic") if isinstance(config.get("traffic"), dict) else {}
-        proxies = traffic.get("proxies") if isinstance(traffic.get("proxies"), dict) else {}
-        for proxy_name, proxy in sorted(proxies.items()):
-            if isinstance(proxy, dict) and proxy.get("source") == source_name:
-                removed_captured.add(str(proxy_name))
-                removals.append({
-                    "path": f"traffic.proxies.{proxy_name}",
-                    "reason": f"source={source_name}",
-                })
-
-        s3_sources = traffic.get("s3Sources") if isinstance(traffic.get("s3Sources"), dict) else {}
-        for s3_source_name, s3_source in sorted(s3_sources.items()):
-            if isinstance(s3_source, dict) and s3_source.get("sourceLabel") == source_name:
-                removed_captured.add(str(s3_source_name))
-                removals.append({
-                    "path": f"traffic.s3Sources.{s3_source_name}",
-                    "reason": f"sourceLabel={source_name}",
-                })
-
-        replayers = traffic.get("replayers") if isinstance(traffic.get("replayers"), dict) else {}
-        for replayer_name, replayer in sorted(replayers.items()):
-            if isinstance(replayer, dict) and str(replayer.get("fromCapturedTraffic") or "") in removed_captured:
-                removals.append({
-                    "path": f"traffic.replayers.{replayer_name}",
-                    "reason": f"fromCapturedTraffic={replayer.get('fromCapturedTraffic')}",
-                })
-
-        return removals
+        graph = cls._config_dependency_graph(config)
+        source_path = ["sourceClusters", source_name]
+        direct_removals = [
+            edge for edge in graph
+            if cls._paths_equal(edge["to_path"], source_path)
+        ]
+        removed_proxy_path_keys = {
+            cls._config_path_key(edge["from_path"])
+            for edge in direct_removals
+            if edge["from_path"][:2] == ["traffic", "proxies"] and len(edge["from_path"]) == 3
+        }
+        transitive_replayers = [
+            edge for edge in graph
+            if cls._config_path_key(edge["to_path"]) in removed_proxy_path_keys
+        ]
+        return cls._dedupe_config_removals(direct_removals + transitive_replayers)
 
     @classmethod
     def _per_snapshot_entries_removed_by_snapshot_delete(
@@ -2971,19 +2947,152 @@ class WorkflowTreeApp(App):
         migrations = config.get("snapshotMigrationConfigs")
         if not isinstance(migrations, list):
             return []
-        removals = []
-        for index, migration in enumerate(migrations):
-            if not isinstance(migration, dict) or migration.get("fromSource") != source_name:
+        snapshot_path_keys = {
+            cls._config_path_key(["sourceClusters", source_name, "snapshotInfo", "snapshots", snapshot_name])
+            for snapshot_name in snapshots
+        }
+        return cls._dedupe_config_removals([
+            edge for edge in cls._config_dependency_graph(config)
+            if cls._config_path_key(edge["to_path"]) in snapshot_path_keys
+        ])
+
+    @staticmethod
+    def _config_path_key(path: list[str]) -> str:
+        return "\0".join(str(part) for part in path)
+
+    @staticmethod
+    def _config_path_label(path: list[str]) -> str:
+        return ".".join(str(part) for part in path)
+
+    @classmethod
+    def _dedupe_config_removals(cls, edges: list[Dict[str, Any]]) -> list[Dict[str, str]]:
+        removals: list[Dict[str, str]] = []
+        seen = set()
+        for edge in edges:
+            key = cls._config_path_key(edge["from_path"])
+            if key in seen:
                 continue
-            per_snapshot = migration.get("perSnapshotConfig")
-            if not isinstance(per_snapshot, dict):
-                continue
-            for snapshot_name in sorted(snapshots.intersection(per_snapshot)):
-                removals.append({
-                    "source": source_name,
-                    "path": f"snapshotMigrationConfigs.{index}.perSnapshotConfig.{snapshot_name}",
-                })
+            seen.add(key)
+            removals.append({
+                "path": cls._config_path_label(edge["from_path"]),
+                "reason": str(edge.get("reason") or ""),
+            })
         return removals
+
+    @classmethod
+    def _config_dependency_graph(cls, config: Dict[str, Any]) -> list[Dict[str, Any]]:
+        edges: list[Dict[str, Any]] = []
+
+        def add(from_path, from_field_path, to_path, reason):
+            edges.append({
+                "from_path": [str(part) for part in from_path],
+                "from_field_path": [str(part) for part in from_field_path],
+                "to_path": [str(part) for part in to_path],
+                "reason": str(reason),
+            })
+
+        traffic = config.get("traffic") if isinstance(config.get("traffic"), dict) else {}
+        proxies = traffic.get("proxies") if isinstance(traffic.get("proxies"), dict) else {}
+        s3_sources = traffic.get("s3Sources") if isinstance(traffic.get("s3Sources"), dict) else {}
+        replayers = traffic.get("replayers") if isinstance(traffic.get("replayers"), dict) else {}
+
+        migrations = config.get("snapshotMigrationConfigs")
+        if isinstance(migrations, list):
+            for index, migration in enumerate(migrations):
+                if not isinstance(migration, dict):
+                    continue
+                migration_path = ["snapshotMigrationConfigs", str(index)]
+                from_source = str(migration.get("fromSource") or "")
+                if from_source:
+                    add(migration_path, [*migration_path, "fromSource"], ["sourceClusters", from_source], f"fromSource={from_source}")
+                to_target = str(migration.get("toTarget") or "")
+                if to_target:
+                    add(migration_path, [*migration_path, "toTarget"], ["targetClusters", to_target], f"toTarget={to_target}")
+                per_snapshot = migration.get("perSnapshotConfig")
+                if from_source and isinstance(per_snapshot, dict):
+                    for snapshot_name in per_snapshot:
+                        snapshot_path = [*migration_path, "perSnapshotConfig", str(snapshot_name)]
+                        add(
+                            snapshot_path,
+                            snapshot_path,
+                            ["sourceClusters", from_source, "snapshotInfo", "snapshots", str(snapshot_name)],
+                            f"snapshot={snapshot_name}",
+                        )
+
+        for proxy_name, proxy in proxies.items():
+            if not isinstance(proxy, dict):
+                continue
+            proxy_path = ["traffic", "proxies", str(proxy_name)]
+            source = str(proxy.get("source") or "")
+            if source:
+                add(proxy_path, [*proxy_path, "source"], ["sourceClusters", source], f"source={source}")
+            kafka = str(proxy.get("kafka") or "default")
+            add(proxy_path, [*proxy_path, "kafka"], ["kafkaClusterConfiguration", kafka], f"kafka={kafka}")
+
+        for s3_name, s3_source in s3_sources.items():
+            if not isinstance(s3_source, dict):
+                continue
+            s3_path = ["traffic", "s3Sources", str(s3_name)]
+            kafka = str(s3_source.get("kafka") or "default")
+            add(s3_path, [*s3_path, "kafka"], ["kafkaClusterConfiguration", kafka], f"kafka={kafka}")
+
+        for replayer_name, replayer in replayers.items():
+            if not isinstance(replayer, dict):
+                continue
+            replayer_path = ["traffic", "replayers", str(replayer_name)]
+            from_captured_traffic = str(replayer.get("fromCapturedTraffic") or "")
+            if from_captured_traffic:
+                if from_captured_traffic in proxies:
+                    to_path = ["traffic", "proxies", from_captured_traffic]
+                elif from_captured_traffic in s3_sources:
+                    to_path = ["traffic", "s3Sources", from_captured_traffic]
+                else:
+                    to_path = None
+                if to_path:
+                    add(replayer_path, [*replayer_path, "fromCapturedTraffic"], to_path, f"fromCapturedTraffic={from_captured_traffic}")
+            to_target = str(replayer.get("toTarget") or "")
+            if to_target:
+                add(replayer_path, [*replayer_path, "toTarget"], ["targetClusters", to_target], f"toTarget={to_target}")
+            dependencies = replayer.get("dependsOnSnapshotMigrations")
+            if isinstance(dependencies, list):
+                for index, dependency in enumerate(dependencies):
+                    if not isinstance(dependency, dict):
+                        continue
+                    dependency_path = [*replayer_path, "dependsOnSnapshotMigrations", str(index)]
+                    source = str(dependency.get("source") or "")
+                    if source:
+                        add(dependency_path, [*dependency_path, "source"], ["sourceClusters", source], f"source={source}")
+                    snapshot = str(dependency.get("snapshot") or "")
+                    if source and snapshot:
+                        add(
+                            dependency_path,
+                            [*dependency_path, "snapshot"],
+                            ["sourceClusters", source, "snapshotInfo", "snapshots", snapshot],
+                            f"snapshot={snapshot}",
+                        )
+
+        sources = config.get("sourceClusters") if isinstance(config.get("sourceClusters"), dict) else {}
+        for source_name, source in sources.items():
+            if not isinstance(source, dict):
+                continue
+            snapshot_info = source.get("snapshotInfo") if isinstance(source.get("snapshotInfo"), dict) else {}
+            repos = snapshot_info.get("repos") if isinstance(snapshot_info.get("repos"), dict) else {}
+            snapshots = snapshot_info.get("snapshots") if isinstance(snapshot_info.get("snapshots"), dict) else {}
+            if not repos or not snapshots:
+                continue
+            for snapshot_name, snapshot in snapshots.items():
+                if not isinstance(snapshot, dict):
+                    continue
+                repo_name = str(snapshot.get("repoName") or "")
+                if repo_name:
+                    snapshot_path = ["sourceClusters", str(source_name), "snapshotInfo", "snapshots", str(snapshot_name)]
+                    add(
+                        snapshot_path,
+                        [*snapshot_path, "repoName"],
+                        ["sourceClusters", str(source_name), "snapshotInfo", "repos", repo_name],
+                        f"repoName={repo_name}",
+                    )
+        return edges
 
     @staticmethod
     def _source_snapshots_removed_by_path(

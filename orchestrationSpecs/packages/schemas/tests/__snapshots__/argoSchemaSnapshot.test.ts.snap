@@ -3174,7 +3174,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "snapshot": {
                         "type": "string",
-                        "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                        "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots.",
+                        "x-ui-hint": {
+                          "kind": "reference",
+                          "sourcePathTemplate": [
+                            "sourceClusters",
+                            {
+                              "valueFrom": [
+                                "..",
+                                "source"
+                              ]
+                            },
+                            "snapshotInfo",
+                            "snapshots"
+                          ],
+                          "message": "Choose a snapshot defined under the selected source cluster's snapshotInfo.snapshots."
+                        }
                       },
                       "migrationLabel": {
                         "type": "string"
@@ -8217,7 +8232,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "default",
-                "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."
+                "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePath": [
+                    "kafkaClusterConfiguration"
+                  ],
+                  "emptyMeansDefault": "default",
+                  "message": "Choose one Kafka cluster from kafkaClusterConfiguration."
+                }
               },
               "kafkaTopic": {
                 "type": "string",
@@ -8258,9 +8281,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "description": "Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump).",
                 "x-ui-hint": {
                   "kind": "reference",
-                  "sourcePath": [
-                    "traffic",
-                    "proxies"
+                  "sourcePaths": [
+                    [
+                      "traffic",
+                      "proxies"
+                    ],
+                    [
+                      "traffic",
+                      "s3Sources"
+                    ]
                   ],
                   "allowCustom": true,
                   "message": "Choose one captured-traffic source from traffic.proxies or traffic.s3Sources."
@@ -8295,7 +8324,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "snapshot": {
                       "type": "string",
-                      "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                      "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots.",
+                      "x-ui-hint": {
+                        "kind": "reference",
+                        "sourcePathTemplate": [
+                          "sourceClusters",
+                          {
+                            "valueFrom": [
+                              "..",
+                              "source"
+                            ]
+                          },
+                          "snapshotInfo",
+                          "snapshots"
+                        ],
+                        "message": "Choose a snapshot defined under the selected source cluster's snapshotInfo.snapshots."
+                      }
                     }
                   },
                   "required": [

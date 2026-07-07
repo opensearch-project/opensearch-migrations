@@ -645,7 +645,14 @@ describe("editConfig state", () => {
                 },
                 replayers: {
                     "replay-cap": {fromCapturedTraffic: "cap", toTarget: "prod"},
-                    "replay-archive": {fromCapturedTraffic: "archive", toTarget: "prod"},
+                    "replay-archive": {
+                        fromCapturedTraffic: "archive",
+                        toTarget: "prod",
+                        dependsOnSnapshotMigrations: [
+                            {source: "legacy", snapshot: "snap1"},
+                            {source: "aux", snapshot: "snap2"},
+                        ],
+                    },
                     "replay-aux": {fromCapturedTraffic: "auxcap", toTarget: "prod"},
                 },
             },
@@ -659,8 +666,15 @@ describe("editConfig state", () => {
         expect(config.sourceClusters.aux).toBeDefined();
         expect(config.snapshotMigrationConfigs).toEqual([{fromSource: "aux", toTarget: "prod"}]);
         expect(config.traffic.proxies).toEqual({auxcap: {source: "aux"}});
-        expect(config.traffic.s3Sources).toEqual({});
+        expect(config.traffic.s3Sources).toEqual({
+            archive: {sourceLabel: "legacy", s3Uri: "s3://bucket/archive", awsRegion: "us-east-1"},
+        });
         expect(config.traffic.replayers).toEqual({
+            "replay-archive": {
+                fromCapturedTraffic: "archive",
+                toTarget: "prod",
+                dependsOnSnapshotMigrations: [{source: "aux", snapshot: "snap2"}],
+            },
             "replay-aux": {fromCapturedTraffic: "auxcap", toTarget: "prod"},
         });
         expect(findNode(result.editState.nodes, "edit:snapshotMigrationConfigs.0.fromSource")?.value).toBe("aux");
@@ -670,7 +684,21 @@ describe("editConfig state", () => {
 
     it("renders and applies map-backed resource config groups", () => {
         const state = buildEditStateFromObject({
-            sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},
+            sourceClusters: {
+                legacy: {
+                    endpoint: "https://legacy.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo1: {awsRegion: "us-east-1", s3RepoPathUri: "s3://snapshots/repo1/"},
+                        },
+                        snapshots: {
+                            snap1: {repoName: "repo1", config: {externallyManagedSnapshotName: "snap1"}},
+                            snap2: {repoName: "repo1", config: {externallyManagedSnapshotName: "snap2"}},
+                        },
+                    },
+                },
+            },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
             kafkaClusterConfiguration: {
                 default: {autoCreate: {}},
@@ -683,7 +711,11 @@ describe("editConfig state", () => {
                     archive: {s3Uri: "s3://bucket/path/export.proto.gz", awsRegion: "us-east-1", sourceLabel: "legacy"},
                 },
                 replayers: {
-                    replay: {fromCapturedTraffic: "archive", toTarget: "prod"},
+                    replay: {
+                        fromCapturedTraffic: "archive",
+                        toTarget: "prod",
+                        dependsOnSnapshotMigrations: [{source: "legacy", snapshot: "snap1"}],
+                    },
                 },
             },
             snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
@@ -722,7 +754,7 @@ describe("editConfig state", () => {
             valueKind: "object",
             presence: "optional",
             essential: true,
-            label: "snapshotInfo: <unset>",
+            label: "snapshotInfo: repos 1, snapshots 2",
         });
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.repos")).toMatchObject({
             valueKind: "record",
@@ -734,20 +766,14 @@ describe("editConfig state", () => {
         );
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots")).toMatchObject({
             valueKind: "record",
-            presence: "optional",
+            presence: "required",
             essential: true,
             status: "ok",
         });
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots:add")?.label).toBe(
             "+ Add source snapshot"
         );
-        expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots:add")).toMatchObject({
-            command: {
-                blockedMessage: "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before adding source snapshots.",
-            },
-            description: "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before adding source snapshots.",
-            status: "ok",
-        });
+        expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots:add")?.command?.blockedMessage).toBeUndefined();
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.serializeSnapshotCreation")).toMatchObject({
             valueKind: "boolean",
             presence: "optional",
@@ -781,10 +807,12 @@ describe("editConfig state", () => {
             valueKind: "record",
             presence: "optional",
             essential: true,
-            status: "warning",
+            status: "ok",
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig:add")).toBeUndefined();
-        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toBeUndefined();
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toMatchObject({
+            label: "+ Add snapshot migration",
+        });
         expect(findNode(state.nodes, "edit:traffic.proxies.capture.source")?.inputHint).toMatchObject({
             kind: "reference",
             sourcePath: ["sourceClusters"],
@@ -792,7 +820,7 @@ describe("editConfig state", () => {
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic")?.inputHint).toMatchObject({
             kind: "reference",
-            sourcePath: ["traffic", "proxies"],
+            sourcePaths: [["traffic", "proxies"], ["traffic", "s3Sources"]],
             options: [{label: "archive", value: "archive"}, {label: "capture", value: "capture"}],
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.toTarget")?.inputHint).toMatchObject({
@@ -804,6 +832,21 @@ describe("editConfig state", () => {
             valueKind: "array",
             presence: "optional",
             essential: true,
+        });
+        const snapshotDependency = findNode(state.nodes, "edit:traffic.replayers.replay.dependsOnSnapshotMigrations.0.snapshot");
+        expect(snapshotDependency).toMatchObject({
+            valueKind: "scalar",
+            value: "snap1",
+        });
+        expect(snapshotDependency?.inputHint).toMatchObject({
+            kind: "reference",
+            sourcePathTemplate: [
+                "sourceClusters",
+                {valueFrom: ["..", "source"]},
+                "snapshotInfo",
+                "snapshots",
+            ],
+            options: [{label: "snap1", value: "snap1"}, {label: "snap2", value: "snap2"}],
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig")).toMatchObject({
             valueKind: "object",
@@ -2334,6 +2377,6 @@ describe("editConfig state", () => {
         expect(result.status).toBe(0);
         expect(result.stdout.trimStart().startsWith("{")).toBe(true);
         expect(() => JSON.parse(result.stdout)).not.toThrow();
-        expect(result.stderr).toContain("TLS was auto-configured");
+        expect(result.stderr).toBe("");
     });
 });

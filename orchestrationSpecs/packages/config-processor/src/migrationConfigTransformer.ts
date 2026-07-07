@@ -506,7 +506,6 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
         // Secure-by-default: inject self-signed TLS when no TLS config is specified.
         // Users can opt out with tls.mode: "plaintext".
         if (!normalized.proxyConfig?.tls) {
-            console.info(`TLS was auto-configured for '${key}' (secure-by-default). Use tls.mode: "plaintext" to opt out.`);
             normalized = {
                 ...normalized,
                 proxyConfig: {

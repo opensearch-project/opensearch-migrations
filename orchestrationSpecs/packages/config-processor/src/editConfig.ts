@@ -47,6 +47,7 @@ import {
     EditNode,
     EditOperation,
     EditStateV1,
+    SchemaEditContext,
     addRow,
     applyValidationDiagnostics,
     childSchemaAtPath,
@@ -95,12 +96,9 @@ import {
 type EditOption = NonNullable<EditInputHint["options"]>[number];
 
 interface EditContext {
-    sourceOptions: EditOption[];
     snapshotSourceOptions: EditOption[];
     sourceSnapshotOptions: Record<string, EditOption[]>;
-    targetOptions: EditOption[];
-    kafkaOptions: EditOption[];
-    capturedTrafficOptions: EditOption[];
+    schemaContext: SchemaEditContext;
 }
 
 const SOURCE_CLUSTER_DESCRIPTION = descriptionOf(SOURCE_CLUSTER_CONFIG);
@@ -147,10 +145,16 @@ const DEFAULT_CONFIG_FACTORIES: Record<string, () => Record<string, unknown>> = 
 
 type SchemaFieldSpec = string | { key: string; referenceOptions?: EditInputHint["options"] };
 
-function schemaFieldNodes(parentSchema: any, rootPath: string[], value: unknown, fields: SchemaFieldSpec[]): EditNode[] {
+function schemaFieldNodes(
+    parentSchema: any,
+    rootPath: string[],
+    value: unknown,
+    fields: SchemaFieldSpec[],
+    context?: SchemaEditContext,
+): EditNode[] {
     return fields.map(field => typeof field === "string"
-        ? schemaFieldNodeFor(parentSchema, rootPath, field, value)
-        : schemaFieldNodeFor(parentSchema, rootPath, field.key, value, field.referenceOptions));
+        ? schemaFieldNodeFor(parentSchema, rootPath, field, value, undefined, context)
+        : schemaFieldNodeFor(parentSchema, rootPath, field.key, value, field.referenceOptions, context));
 }
 
 interface RecordGroupSpec {
@@ -214,20 +218,9 @@ function sourceSnapshotOptions(sourceClusters: Record<string, any> | undefined):
     );
 }
 
-function capturedTrafficOptions(traffic: any): EditOption[] {
-    const names = new Set([
-        ...Object.keys(traffic?.proxies ?? {}),
-        ...Object.keys(traffic?.s3Sources ?? {}),
-    ]);
-    return [...names]
-        .sort((a, b) => a.localeCompare(b))
-        .map(name => ({label: name, value: name}));
-}
-
 function buildEditContext(config: any): EditContext {
     const snapshotOptions = sourceSnapshotOptions(config?.sourceClusters);
     return {
-        sourceOptions: optionsFromRecord(config?.sourceClusters),
         snapshotSourceOptions: Object.entries(snapshotOptions)
             .filter(([, snapshots]) => snapshots.length > 0)
             .sort(([a], [b]) => a.localeCompare(b))
@@ -237,9 +230,7 @@ function buildEditContext(config: any): EditContext {
                 description: `${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} defined`,
             })),
         sourceSnapshotOptions: snapshotOptions,
-        targetOptions: optionsFromRecord(config?.targetClusters),
-        kafkaOptions: optionsFromRecord(config?.kafkaClusterConfiguration),
-        capturedTrafficOptions: capturedTrafficOptions(config?.traffic),
+        schemaContext: {rootConfig: config},
     };
 }
 
@@ -522,10 +513,10 @@ function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode 
         status: "ok",
         children: [
             ...schemaFieldNodes(CAPTURE_CONFIG, rootPath, value, [
-                {key: "source", referenceOptions: ctx.sourceOptions},
-                {key: "kafka", referenceOptions: ctx.kafkaOptions},
+                "source",
+                "kafka",
                 "kafkaTopic",
-            ]),
+            ], ctx.schemaContext),
             captureProxyConfigNode([...rootPath, "proxyConfig"], value?.proxyConfig),
         ],
     });
@@ -544,10 +535,10 @@ function s3CapturedTrafficSourceNode(name: string, value: any, ctx: EditContext)
             "s3Uri",
             "awsRegion",
             "endpoint",
-            {key: "kafka", referenceOptions: ctx.kafkaOptions},
+            "kafka",
             "kafkaTopic",
             "sourceLabel",
-        ]),
+        ], ctx.schemaContext),
     });
 }
 
@@ -561,11 +552,11 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
         description: REPLAYER_DESCRIPTION,
         status: "ok",
         children: schemaFieldNodes(REPLAYER_CONFIG, rootPath, value, [
-            {key: "fromCapturedTraffic", referenceOptions: ctx.capturedTrafficOptions},
-            {key: "toTarget", referenceOptions: ctx.targetOptions},
+            "fromCapturedTraffic",
+            "toTarget",
             "dependsOnSnapshotMigrations",
             "replayerConfig",
-        ]),
+        ], ctx.schemaContext),
     });
 }
 
@@ -634,8 +625,8 @@ function snapshotMigrationNode(index: number, value: any, ctx: EditContext): Edi
     const toTarget = value?.toTarget ?? "";
     const children = schemaFieldNodes(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, rootPath, value, [
         {key: "fromSource", referenceOptions: ctx.snapshotSourceOptions},
-        {key: "toTarget", referenceOptions: ctx.targetOptions},
-    ]);
+        "toTarget",
+    ], ctx.schemaContext);
     if (fromSource || Object.keys(value?.perSnapshotConfig ?? {}).length > 0) {
         children.push(snapshotPerConfigNode([...rootPath, "perSnapshotConfig"], value?.perSnapshotConfig, ctx, fromSource));
     }
@@ -1164,69 +1155,253 @@ function proxyClientAuthForVariant(existing: any, variant: unknown): unknown {
 }
 
 function removePerSnapshotConfigReferences(config: any, sourceName: string, snapshotNames: string[]): void {
-    const migrations = Array.isArray(config?.snapshotMigrationConfigs) ? config.snapshotMigrationConfigs : [];
-    const names = new Set(snapshotNames);
-    for (const migration of migrations) {
-        if (migration?.fromSource !== sourceName || !isPlainObject(migration?.perSnapshotConfig)) {
-            continue;
-        }
-        for (const snapshotName of names) {
-            delete migration.perSnapshotConfig[snapshotName];
-        }
-    }
+    const snapshotPaths = new Set(snapshotNames.map(snapshotName =>
+        configPathKey(["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName])
+    ));
+    removeConfigReferencePaths(config, buildConfigDependencyGraph(config)
+        .filter(edge => snapshotPaths.has(configPathKey(edge.toPath)))
+        .map(edge => edge.fromPath));
 }
 
 function sourceClusterRemovedByPath(path: string[]): string | undefined {
     return path[0] === "sourceClusters" && path.length === 2 ? path[1] : undefined;
 }
 
-function capturedTrafficNamesForSource(config: any, sourceName: string): Set<string> {
-    const names = new Set<string>();
-    if (isPlainObject(config?.traffic?.proxies)) {
-        for (const [proxyName, proxy] of Object.entries(config.traffic.proxies)) {
-            if (isPlainObject(proxy) && proxy.source === sourceName) {
-                names.add(proxyName);
+interface ConfigReferenceEdge {
+    fromPath: string[];
+    fromFieldPath: string[];
+    toPath: string[];
+    reason: string;
+}
+
+function configPathKey(path: string[]): string {
+    return path.join("\0");
+}
+
+function addConfigReference(
+    edges: ConfigReferenceEdge[],
+    fromPath: string[],
+    fromFieldPath: string[],
+    toPath: string[],
+    reason: string,
+): void {
+    edges.push({fromPath, fromFieldPath, toPath, reason});
+}
+
+function buildConfigDependencyGraph(config: any): ConfigReferenceEdge[] {
+    const edges: ConfigReferenceEdge[] = [];
+    const traffic = isPlainObject(config?.traffic) ? config.traffic : {};
+    const proxies = isPlainObject(traffic.proxies) ? traffic.proxies : {};
+    const s3Sources = isPlainObject(traffic.s3Sources) ? traffic.s3Sources : {};
+    const replayers = isPlainObject(traffic.replayers) ? traffic.replayers : {};
+
+    if (Array.isArray(config?.snapshotMigrationConfigs)) {
+        config.snapshotMigrationConfigs.forEach((migration: unknown, index: number) => {
+            if (!isPlainObject(migration)) {
+                return;
+            }
+            const migrationPath = ["snapshotMigrationConfigs", String(index)];
+            const fromSource = typeof migration.fromSource === "string" ? migration.fromSource : "";
+            if (fromSource) {
+                addConfigReference(
+                    edges,
+                    migrationPath,
+                    [...migrationPath, "fromSource"],
+                    ["sourceClusters", fromSource],
+                    `fromSource=${fromSource}`,
+                );
+            }
+            const toTarget = typeof migration.toTarget === "string" ? migration.toTarget : "";
+            if (toTarget) {
+                addConfigReference(
+                    edges,
+                    migrationPath,
+                    [...migrationPath, "toTarget"],
+                    ["targetClusters", toTarget],
+                    `toTarget=${toTarget}`,
+                );
+            }
+            if (fromSource && isPlainObject(migration.perSnapshotConfig)) {
+                for (const snapshotName of Object.keys(migration.perSnapshotConfig)) {
+                    const snapshotPath = [...migrationPath, "perSnapshotConfig", snapshotName];
+                    addConfigReference(
+                        edges,
+                        snapshotPath,
+                        snapshotPath,
+                        ["sourceClusters", fromSource, "snapshotInfo", "snapshots", snapshotName],
+                        `snapshot=${snapshotName}`,
+                    );
+                }
+            }
+        });
+    }
+
+    for (const [proxyName, proxy] of Object.entries(proxies)) {
+        if (!isPlainObject(proxy)) {
+            continue;
+        }
+        const proxyPath = ["traffic", "proxies", proxyName];
+        if (typeof proxy.source === "string" && proxy.source) {
+            addConfigReference(
+                edges,
+                proxyPath,
+                [...proxyPath, "source"],
+                ["sourceClusters", proxy.source],
+                `source=${proxy.source}`,
+            );
+        }
+        const kafka = typeof proxy.kafka === "string" && proxy.kafka ? proxy.kafka : "default";
+        addConfigReference(
+            edges,
+            proxyPath,
+            [...proxyPath, "kafka"],
+            ["kafkaClusterConfiguration", kafka],
+            `kafka=${kafka}`,
+        );
+    }
+
+    for (const [s3Name, s3Source] of Object.entries(s3Sources)) {
+        if (!isPlainObject(s3Source)) {
+            continue;
+        }
+        const s3Path = ["traffic", "s3Sources", s3Name];
+        const kafka = typeof s3Source.kafka === "string" && s3Source.kafka ? s3Source.kafka : "default";
+        addConfigReference(
+            edges,
+            s3Path,
+            [...s3Path, "kafka"],
+            ["kafkaClusterConfiguration", kafka],
+            `kafka=${kafka}`,
+        );
+    }
+
+    for (const [replayerName, replayer] of Object.entries(replayers)) {
+        if (!isPlainObject(replayer)) {
+            continue;
+        }
+        const replayerPath = ["traffic", "replayers", replayerName];
+        const fromCapturedTraffic = typeof replayer.fromCapturedTraffic === "string" ? replayer.fromCapturedTraffic : "";
+        if (fromCapturedTraffic) {
+            const targetRoot = Object.hasOwn(proxies, fromCapturedTraffic)
+                ? ["traffic", "proxies", fromCapturedTraffic]
+                : Object.hasOwn(s3Sources, fromCapturedTraffic)
+                    ? ["traffic", "s3Sources", fromCapturedTraffic]
+                    : undefined;
+            if (targetRoot) {
+                addConfigReference(
+                    edges,
+                    replayerPath,
+                    [...replayerPath, "fromCapturedTraffic"],
+                    targetRoot,
+                    `fromCapturedTraffic=${fromCapturedTraffic}`,
+                );
             }
         }
-    }
-    if (isPlainObject(config?.traffic?.s3Sources)) {
-        for (const [s3SourceName, s3Source] of Object.entries(config.traffic.s3Sources)) {
-            if (isPlainObject(s3Source) && s3Source.sourceLabel === sourceName) {
-                names.add(s3SourceName);
-            }
+        const toTarget = typeof replayer.toTarget === "string" ? replayer.toTarget : "";
+        if (toTarget) {
+            addConfigReference(
+                edges,
+                replayerPath,
+                [...replayerPath, "toTarget"],
+                ["targetClusters", toTarget],
+                `toTarget=${toTarget}`,
+            );
+        }
+        if (Array.isArray(replayer.dependsOnSnapshotMigrations)) {
+            replayer.dependsOnSnapshotMigrations.forEach((dependency: unknown, index: number) => {
+                if (!isPlainObject(dependency)) {
+                    return;
+                }
+                const dependencyPath = [...replayerPath, "dependsOnSnapshotMigrations", String(index)];
+                const source = typeof dependency.source === "string" ? dependency.source : "";
+                if (source) {
+                    addConfigReference(
+                        edges,
+                        dependencyPath,
+                        [...dependencyPath, "source"],
+                        ["sourceClusters", source],
+                        `source=${source}`,
+                    );
+                }
+                const snapshot = typeof dependency.snapshot === "string" ? dependency.snapshot : "";
+                if (source && snapshot) {
+                    addConfigReference(
+                        edges,
+                        dependencyPath,
+                        [...dependencyPath, "snapshot"],
+                        ["sourceClusters", source, "snapshotInfo", "snapshots", snapshot],
+                        `snapshot=${snapshot}`,
+                    );
+                }
+            });
         }
     }
-    return names;
+
+    for (const [sourceName, source] of Object.entries(isPlainObject(config?.sourceClusters) ? config.sourceClusters : {})) {
+        if (!isPlainObject(source)) {
+            continue;
+        }
+        const snapshotInfo = isPlainObject(source.snapshotInfo) ? source.snapshotInfo : {};
+        const repos = snapshotInfo.repos;
+        const snapshots = snapshotInfo.snapshots;
+        if (!isPlainObject(repos) || !isPlainObject(snapshots)) {
+            continue;
+        }
+        for (const [snapshotName, snapshot] of Object.entries(snapshots)) {
+            if (!isPlainObject(snapshot) || typeof snapshot.repoName !== "string" || !snapshot.repoName) {
+                continue;
+            }
+            const snapshotPath = ["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName];
+            addConfigReference(
+                edges,
+                snapshotPath,
+                [...snapshotPath, "repoName"],
+                ["sourceClusters", sourceName, "snapshotInfo", "repos", snapshot.repoName],
+                `repoName=${snapshot.repoName}`,
+            );
+        }
+    }
+
+    return edges;
+}
+
+function removeConfigReferencePaths(config: any, paths: string[][]): void {
+    const uniquePaths = [...new Map(paths.map(path => [configPathKey(path), path])).values()];
+    uniquePaths.sort((left, right) => {
+        const leftParent = left.slice(0, -1);
+        const rightParent = right.slice(0, -1);
+        if (configPathKey(leftParent) === configPathKey(rightParent) && isArrayIndex(left.at(-1) ?? "") && isArrayIndex(right.at(-1) ?? "")) {
+            return Number(right.at(-1)) - Number(left.at(-1));
+        }
+        return right.length - left.length || configPathKey(right).localeCompare(configPathKey(left));
+    });
+    for (const path of uniquePaths) {
+        const resolved = existingParentAtPath(config, path);
+        if (!resolved) {
+            continue;
+        }
+        const {parent, key} = resolved;
+        if (Array.isArray(parent) && isArrayIndex(key)) {
+            parent.splice(Number(key), 1);
+        } else if (parent && typeof parent === "object") {
+            delete parent[key];
+        }
+    }
 }
 
 function removeSourceClusterReferences(config: any, sourceName: string): void {
-    const removedCapturedTraffic = capturedTrafficNamesForSource(config, sourceName);
-    if (Array.isArray(config?.snapshotMigrationConfigs)) {
-        config.snapshotMigrationConfigs = config.snapshotMigrationConfigs.filter((migration: unknown) =>
-            !(isPlainObject(migration) && migration.fromSource === sourceName)
-        );
-    }
-    if (isPlainObject(config?.traffic?.proxies)) {
-        for (const [proxyName, proxy] of Object.entries(config.traffic.proxies)) {
-            if (isPlainObject(proxy) && proxy.source === sourceName) {
-                delete config.traffic.proxies[proxyName];
-            }
-        }
-    }
-    if (isPlainObject(config?.traffic?.s3Sources)) {
-        for (const [s3SourceName, s3Source] of Object.entries(config.traffic.s3Sources)) {
-            if (isPlainObject(s3Source) && s3Source.sourceLabel === sourceName) {
-                delete config.traffic.s3Sources[s3SourceName];
-            }
-        }
-    }
-    if (isPlainObject(config?.traffic?.replayers)) {
-        for (const [replayerName, replayer] of Object.entries(config.traffic.replayers)) {
-            if (isPlainObject(replayer) && removedCapturedTraffic.has(String(replayer.fromCapturedTraffic ?? ""))) {
-                delete config.traffic.replayers[replayerName];
-            }
-        }
-    }
+    const graph = buildConfigDependencyGraph(config);
+    const sourcePathKey = configPathKey(["sourceClusters", sourceName]);
+    const directRemovalPaths = graph
+        .filter(edge => configPathKey(edge.toPath) === sourcePathKey)
+        .map(edge => edge.fromPath);
+    const removedCapturedTrafficKeys = new Set(directRemovalPaths
+        .filter(path => path.length === 3 && path[0] === "traffic" && path[1] === "proxies")
+        .map(path => configPathKey(path)));
+    const replayersForDeletedTraffic = graph
+        .filter(edge => removedCapturedTrafficKeys.has(configPathKey(edge.toPath)))
+        .map(edge => edge.fromPath);
+    removeConfigReferencePaths(config, [...directRemovalPaths, ...replayersForDeletedTraffic]);
 }
 
 function sourceSnapshotsRemovedByPath(config: any, path: string[]): {sourceName: string; snapshotNames: string[]} | undefined {

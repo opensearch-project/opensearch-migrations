@@ -263,6 +263,11 @@ traffic:
     replay-archive:
       fromCapturedTraffic: archive
       toTarget: prod
+      dependsOnSnapshotMigrations:
+        - source: legacy
+          snapshot: snap1
+        - source: aux
+          snapshot: snap2
     replay-aux:
       fromCapturedTraffic: aux-cap
       toTarget: prod
@@ -277,9 +282,10 @@ traffic:
     assert "Removing source cluster 'legacy' will remove dependent config entries" in message
     assert "- snapshotMigrationConfigs.0 (fromSource=legacy)" in message
     assert "- traffic.proxies.cap (source=legacy)" in message
-    assert "- traffic.s3Sources.archive (sourceLabel=legacy)" in message
+    assert "- traffic.replayers.replay-archive.dependsOnSnapshotMigrations.0 (source=legacy)" in message
     assert "- traffic.replayers.replay-cap (fromCapturedTraffic=cap)" in message
-    assert "- traffic.replayers.replay-archive (fromCapturedTraffic=archive)" in message
+    assert "traffic.s3Sources.archive" not in message
+    assert "traffic.replayers.replay-archive (fromCapturedTraffic=archive)" not in message
     assert "snapshotMigrationConfigs.1" not in message
     assert "aux-cap" not in message
 

@@ -5,6 +5,7 @@ import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
 // Downstream dependency names used in checksumFor annotations.
 export type ChecksumDependency = 'snapshot' | 'snapshotMigration' | 'replayer';
 export type UiTextFormat = 'text' | 'http-endpoint' | 'optional-http-endpoint' | 'cluster-version' | 'k8s-name' | 'oci-image-reference';
+export type UiReferencePathTemplateSegment = string | { valueFrom: string[] };
 export type UiHint = {
     label?: string;
 } & (
@@ -23,7 +24,9 @@ export type UiHint = {
     }
     | {
         kind: 'reference';
-        sourcePath: string[];
+        sourcePath?: string[];
+        sourcePaths?: string[][];
+        sourcePathTemplate?: UiReferencePathTemplateSegment[];
         allowCustom?: boolean;
         emptyMeansDefault?: string;
         message?: string;
@@ -1861,7 +1864,13 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
         .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
-        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."),
+        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration.")
+        .uiHint({
+            kind: 'reference',
+            sourcePath: ['kafkaClusterConfiguration'],
+            emptyMeansDefault: 'default',
+            message: "Choose one Kafka cluster from kafkaClusterConfiguration.",
+        }),
     kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
         .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
     sourceLabel: z.string()
@@ -1883,6 +1892,16 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
         }),
     snapshot: z.string()
         .describe("Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'sourceClusters',
+                {valueFrom: ['..', 'source']},
+                'snapshotInfo',
+                'snapshots',
+            ],
+            message: "Choose a snapshot defined under the selected source cluster's snapshotInfo.snapshots.",
+        })
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
@@ -1890,7 +1909,10 @@ export const REPLAYER_CONFIG = z.object({
         .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump).")
         .uiHint({
             kind: 'reference',
-            sourcePath: ['traffic', 'proxies'],
+            sourcePaths: [
+                ['traffic', 'proxies'],
+                ['traffic', 's3Sources'],
+            ],
             allowCustom: true,
             message: "Choose one captured-traffic source from traffic.proxies or traffic.s3Sources.",
         }),

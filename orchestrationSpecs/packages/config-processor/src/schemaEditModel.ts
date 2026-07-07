@@ -100,6 +100,11 @@ export interface EditApplyResultV1 {
 
 export type JsonSchema = Record<string, any>;
 type StatusCounts = NonNullable<EditNode["statusCounts"]>;
+type EditOption = NonNullable<EditInputHint["options"]>[number];
+
+export interface SchemaEditContext {
+    rootConfig?: unknown;
+}
 
 export interface SingleKeyUnionBranch {
     value: string;
@@ -309,6 +314,129 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function valueAtPath(value: unknown, path: string[]): unknown {
+    let current = value;
+    for (const part of path) {
+        if (Array.isArray(current) && isArrayIndex(part)) {
+            current = current[Number(part)];
+        } else if (isPlainObject(current)) {
+            current = current[part];
+        } else {
+            return undefined;
+        }
+    }
+    return current;
+}
+
+function referenceOptionsFromRecord(record: unknown): EditOption[] {
+    if (!isPlainObject(record)) {
+        return [];
+    }
+    return Object.keys(record)
+        .sort((a, b) => a.localeCompare(b))
+        .map(name => ({label: name, value: name}));
+}
+
+function resolveRelativeConfigPath(basePath: string[], relativePath: unknown): string[] | undefined {
+    if (!Array.isArray(relativePath)) {
+        return undefined;
+    }
+    const resolved = [...basePath];
+    for (const rawPart of relativePath) {
+        const part = String(rawPart);
+        if (part === ".") {
+            continue;
+        }
+        if (part === "..") {
+            resolved.pop();
+        } else {
+            resolved.push(part);
+        }
+    }
+    return resolved;
+}
+
+function resolveReferencePathTemplate(
+    template: unknown,
+    currentPath: string[],
+    context?: SchemaEditContext,
+): string[] | undefined {
+    if (!Array.isArray(template)) {
+        return undefined;
+    }
+    const path: string[] = [];
+    for (const segment of template) {
+        if (typeof segment === "string") {
+            path.push(segment);
+            continue;
+        }
+        if (!isPlainObject(segment) || !Array.isArray(segment.valueFrom)) {
+            return undefined;
+        }
+        const valuePath = resolveRelativeConfigPath(currentPath, segment.valueFrom);
+        const value = valuePath ? valueAtPath(context?.rootConfig, valuePath) : undefined;
+        if (value === undefined || value === null || value === "") {
+            return undefined;
+        }
+        path.push(String(value));
+    }
+    return path;
+}
+
+function resolveReferenceSourcePaths(
+    inputHint: EditInputHint,
+    currentPath: string[],
+    context?: SchemaEditContext,
+): string[][] {
+    if (inputHint.kind !== "reference") {
+        return [];
+    }
+    const paths: string[][] = [];
+    if (Array.isArray(inputHint.sourcePath)) {
+        paths.push(inputHint.sourcePath);
+    }
+    if (Array.isArray(inputHint.sourcePaths)) {
+        paths.push(...inputHint.sourcePaths.filter((path): path is string[] => Array.isArray(path)));
+    }
+    const templatedPath = resolveReferencePathTemplate(inputHint.sourcePathTemplate, currentPath, context);
+    if (templatedPath) {
+        paths.push(templatedPath);
+    }
+    return paths;
+}
+
+function resolveReferenceOptions(
+    inputHint: EditInputHint | undefined,
+    currentPath: string[],
+    context?: SchemaEditContext,
+): EditOption[] | undefined {
+    if (!inputHint || inputHint.kind !== "reference" || !context?.rootConfig) {
+        return undefined;
+    }
+    const optionsByValue = new Map<string, EditOption>();
+    for (const sourcePath of resolveReferenceSourcePaths(inputHint, currentPath, context)) {
+        for (const option of referenceOptionsFromRecord(valueAtPath(context.rootConfig, sourcePath))) {
+            if (!optionsByValue.has(option.value)) {
+                optionsByValue.set(option.value, option);
+            }
+        }
+    }
+    return [...optionsByValue.values()].sort((a, b) => a.value.localeCompare(b.value));
+}
+
+function resolveInputHint(
+    inputHint: EditInputHint | undefined,
+    currentPath: string[],
+    context?: SchemaEditContext,
+    referenceOptions?: EditInputHint["options"],
+): EditInputHint | undefined {
+    if (!inputHint) {
+        return undefined;
+    }
+    const options = referenceOptions ?? resolveReferenceOptions(inputHint, currentPath, context);
+    return options ? {...inputHint, options} : inputHint;
+}
+
 function schemaConstructorName(schema: any): string {
     return String(unwrapSchema(schema)?.constructor?.name ?? "");
 }
@@ -504,18 +632,25 @@ function jsonSchemaAdditionalPropertiesSchema(schema: JsonSchema | undefined): J
     return isJsonSchemaObject(additional) ? resolveJsonSchemaRef(additional) : undefined;
 }
 
-function jsonSchemaInputHint(schema: JsonSchema | undefined): EditInputHint | undefined {
+function jsonSchemaInputHint(
+    schema: JsonSchema | undefined,
+    currentPath: string[],
+    context?: SchemaEditContext,
+): EditInputHint | undefined {
     const resolved = resolveJsonSchemaRef(schema);
     const schemaHint = jsonSchemaUiHint(resolved);
     const pattern = typeof resolved?.pattern === "string" ? resolved.pattern : undefined;
     if (schemaHint?.kind === "javaRegex") {
-        return schemaHint;
+        return resolveInputHint(schemaHint, currentPath, context);
     }
     if (schemaHint?.kind === "text") {
-        return {
+        return resolveInputHint({
             ...schemaHint,
             pattern: schemaHint.pattern ?? pattern,
-        };
+        }, currentPath, context);
+    }
+    if (schemaHint) {
+        return resolveInputHint(schemaHint, currentPath, context);
     }
     return pattern ? {
         kind: "text",
@@ -619,6 +754,7 @@ function jsonSchemaUnionNode(
     required: boolean,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode | undefined {
     const discriminator = jsonSchemaDiscriminator(schema);
     if (!discriminator) {
@@ -659,7 +795,7 @@ function jsonSchemaUnionNode(
         }] : [],
         variants,
         children: selectedBranch
-            ? jsonSchemaObjectChildren(path, selectedBranch, value, value, new Set([discriminator]))
+            ? jsonSchemaObjectChildren(path, selectedBranch, value, value, new Set([discriminator]), context)
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -673,6 +809,7 @@ function jsonSchemaObjectUnionNode(
     required: boolean,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode | undefined {
     const branches = jsonSchemaObjectUnionBranches(schema);
     if (!branches.length) {
@@ -720,7 +857,7 @@ function jsonSchemaObjectUnionNode(
             })),
         ],
         children: selected
-            ? jsonSchemaObjectChildren(path, selected.optionSchema, value, value)
+            ? jsonSchemaObjectChildren(path, selected.optionSchema, value, value, new Set(), context)
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -740,6 +877,7 @@ function jsonSchemaMixedObjectNode(
     expert: boolean,
     presence: EditNode["presence"],
     authoredValue: unknown,
+    context?: SchemaEditContext,
 ): EditNode | undefined {
     if (value !== undefined && value !== null && !isPlainObject(value)) {
         return undefined;
@@ -761,7 +899,7 @@ function jsonSchemaMixedObjectNode(
         required,
         status: missing ? "required" : "ok",
         diagnostics: missing ? [{severity: "required", message: `${key} is required.`, path}] : [],
-        children: jsonSchemaObjectChildren(path, objectBranch, value, authoredValue),
+        children: jsonSchemaObjectChildren(path, objectBranch, value, authoredValue, new Set(), context),
     });
 }
 
@@ -844,6 +982,7 @@ function jsonSchemaObjectChildren(
     value: unknown,
     authoredValue: unknown,
     excludedKeys: Set<string> = new Set(),
+    context?: SchemaEditContext,
 ): EditNode[] {
     const requiredKeys = jsonSchemaRequired(schema);
     const objectValue = isPlainObject(value) ? value : {};
@@ -857,6 +996,7 @@ function jsonSchemaObjectChildren(
             objectValue,
             requiredKeys.has(key),
             authoredObject,
+            context,
         ));
 }
 
@@ -864,12 +1004,13 @@ function jsonSchemaArrayChildren(
     rootPath: string[],
     schema: JsonSchema,
     value: unknown,
+    context?: SchemaEditContext,
 ): EditNode[] {
     const arrayValue = Array.isArray(value) ? value : [];
     const itemSchema = resolveJsonSchemaRef(schema.items);
     const addLabel = arrayAddLabel(jsonSchemaUiHint(schema));
     return [
-        ...arrayValue.map((itemValue, index) => jsonSchemaArrayItemNode(rootPath, itemSchema, itemValue, index, addLabel)),
+        ...arrayValue.map((itemValue, index) => jsonSchemaArrayItemNode(rootPath, itemSchema, itemValue, index, addLabel, context)),
         addRow(rootPath, addLabel, arrayDescriptionForAdd(addLabel), false),
     ];
 }
@@ -888,6 +1029,7 @@ function jsonSchemaRecordChildren(
     rootPath: string[],
     schema: JsonSchema,
     value: unknown,
+    context?: SchemaEditContext,
 ): EditNode[] {
     const recordValue = isPlainObject(value) ? value : {};
     const itemSchema = jsonSchemaAdditionalPropertiesSchema(schema);
@@ -897,7 +1039,7 @@ function jsonSchemaRecordChildren(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([recordKey, recordItemValue]) => {
             const node = itemSchema
-                ? jsonSchemaFieldNode(rootPath, recordKey, itemSchema, {[recordKey]: recordItemValue}, true)
+                ? jsonSchemaFieldNode(rootPath, recordKey, itemSchema, {[recordKey]: recordItemValue}, true, {[recordKey]: recordItemValue}, context)
                 : genericDisplayNode([...rootPath, recordKey], recordKey, recordItemValue, "required", false, "");
             node.collapsed = false;
             node.removable = true;
@@ -921,10 +1063,11 @@ function jsonSchemaArrayItemNode(
     value: unknown,
     index: number,
     itemLabel = "item",
+    context?: SchemaEditContext,
 ): EditNode {
     const key = String(index);
     const node = schema
-        ? jsonSchemaFieldNode(rootPath, key, schema, {[key]: value}, true)
+        ? jsonSchemaFieldNode(rootPath, key, schema, {[key]: value}, true, {[key]: value}, context)
         : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
     const label = node.label;
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
@@ -941,6 +1084,7 @@ function jsonSchemaFieldNode(
     config: Record<string, unknown>,
     required = false,
     authoredConfig: Record<string, unknown> = config,
+    context?: SchemaEditContext,
 ): EditNode {
     const resolved = resolveJsonSchemaRef(schema) ?? schema;
     const path = [...rootPath, key];
@@ -954,15 +1098,15 @@ function jsonSchemaFieldNode(
     const essential = jsonSchemaEssential(resolved);
     const externalRef = jsonSchemaExternalRef(resolved);
     const mark = (node: EditNode) => markValueState(node, valueDefaulted, hasValue, essential);
-    const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence);
+    const unionNode = jsonSchemaUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence, context);
     if (unionNode) {
         return mark(unionNode);
     }
-    const objectVariantNode = jsonSchemaObjectUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence);
+    const objectVariantNode = jsonSchemaObjectUnionNode(path, key, resolved, value, hasValue, userRequired, expert, presence, context);
     if (objectVariantNode) {
         return mark(objectVariantNode);
     }
-    const mixedObjectNode = jsonSchemaMixedObjectNode(path, key, resolved, value, userRequired, expert, presence, authoredConfig[key]);
+    const mixedObjectNode = jsonSchemaMixedObjectNode(path, key, resolved, value, userRequired, expert, presence, authoredConfig[key], context);
     if (mixedObjectNode) {
         return mark(mixedObjectNode);
     }
@@ -974,7 +1118,7 @@ function jsonSchemaFieldNode(
         return mark(booleanNode(path, key, value === true, description, expert, presence));
     }
     if (valueType === "number" || valueType === "string") {
-        return mark(scalarNode(path, key, value ?? "", description, userRequired, jsonSchemaInputHint(resolved), valueType, expert, presence, externalRef));
+        return mark(scalarNode(path, key, value ?? "", description, userRequired, jsonSchemaInputHint(resolved, path, context), valueType, expert, presence, externalRef));
     }
     if (externalRef?.selection?.target === "objectRef") {
         return mark(objectRefNode(path, key, value, description, userRequired, externalRef));
@@ -983,10 +1127,10 @@ function jsonSchemaFieldNode(
     const containerKind = jsonSchemaType(resolved) === "array" ? "array" : "object";
     const recordItemSchema = containerKind === "object" ? jsonSchemaAdditionalPropertiesSchema(resolved) : undefined;
     const childNodes = recordItemSchema
-        ? jsonSchemaRecordChildren(path, resolved, value)
+        ? jsonSchemaRecordChildren(path, resolved, value, context)
         : containerKind === "object"
-            ? jsonSchemaObjectChildren(path, resolved, value, authoredConfig[key])
-            : jsonSchemaArrayChildren(path, resolved, value);
+            ? jsonSchemaObjectChildren(path, resolved, value, authoredConfig[key], new Set(), context)
+            : jsonSchemaArrayChildren(path, resolved, value, context);
     const minItems = containerKind === "array" ? jsonSchemaMinItems(resolved) : undefined;
     const missingArrayItems = userRequired && minItems !== undefined && Array.isArray(value) && value.length < minItems;
     const missing = userRequired && (value === undefined || value === null || missingArrayItems);
@@ -1173,12 +1317,13 @@ export function schemaObjectChildren(
     schema: any,
     value: unknown,
     excludedKeys: Set<string> = new Set(),
+    context?: SchemaEditContext,
 ): EditNode[] {
     const shape = schemaShape(schema) ?? {};
     const config = isPlainObject(value) ? value : {};
     return Object.entries(shape)
         .filter(([key]) => !excludedKeys.has(key))
-        .map(([key, fieldSchema]) => schemaFieldNode(rootPath, key, fieldSchema, config));
+        .map(([key, fieldSchema]) => schemaFieldNode(rootPath, key, fieldSchema, config, config, context));
 }
 
 export function schemaFieldNodeFor(
@@ -1187,15 +1332,13 @@ export function schemaFieldNodeFor(
     key: string,
     value: unknown,
     referenceOptions?: EditInputHint["options"],
+    context?: SchemaEditContext,
 ): EditNode {
     const fieldSchema = schemaShape(parentSchema)?.[key];
     const config = isPlainObject(value) ? value : {};
     const node = fieldSchema
-        ? schemaFieldNode(rootPath, key, fieldSchema, config)
+        ? schemaFieldNode(rootPath, key, fieldSchema, config, config, context, referenceOptions)
         : genericDisplayNode([...rootPath, key], key, config[key], "optional", false, "");
-    if (referenceOptions && node.inputHint) {
-        node.inputHint = {...node.inputHint, options: referenceOptions};
-    }
     return node;
 }
 
@@ -1204,10 +1347,11 @@ export function schemaNestedObjectChildren(
     rootPath: string[],
     key: string,
     value: any,
+    context?: SchemaEditContext,
 ): EditNode[] {
     const nestedSchema = schemaShape(parentSchema)?.[key];
     return nestedSchema
-        ? schemaObjectChildren([...rootPath, key], nestedSchema, value?.[key])
+        ? schemaObjectChildren([...rootPath, key], nestedSchema, value?.[key], new Set(), context)
         : [];
 }
 
@@ -1222,6 +1366,7 @@ export function singleKeyUnionMode(
     value: unknown,
     description: string | undefined,
     fallbackValue?: string,
+    context?: SchemaEditContext,
 ): { modeNode: EditNode; branchChildren: EditNode[] } {
     const branches = singleKeyUnionBranches(schema);
     const selected = selectedSingleKeyUnionBranch(branches, value, fallbackValue);
@@ -1251,7 +1396,7 @@ export function singleKeyUnionMode(
             })),
         }),
         branchChildren: selected
-            ? schemaObjectChildren([...rootPath, selected.value], selected.fieldSchema, branchValue)
+            ? schemaObjectChildren([...rootPath, selected.value], selected.fieldSchema, branchValue, new Set(), context)
             : [],
     };
 }
@@ -1270,6 +1415,7 @@ export function optionalSingleKeyUnionNode(
         presence?: EditNode["presence"];
         expert?: boolean;
     },
+    context?: SchemaEditContext,
 ): EditNode {
     const branches = singleKeyUnionBranches(schema);
     const presentBranch = isPlainObject(value)
@@ -1313,7 +1459,7 @@ export function optionalSingleKeyUnionNode(
             })),
         ],
         children: presentBranch
-            ? schemaNestedObjectChildren(presentBranch.optionSchema, path, presentBranch.value, value)
+            ? schemaNestedObjectChildren(presentBranch.optionSchema, path, presentBranch.value, value, context)
             : unknown ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -1335,6 +1481,7 @@ export function optionalObjectToggleNode(
         presence?: EditNode["presence"];
         expert?: boolean;
     },
+    context?: SchemaEditContext,
 ): EditNode {
     const enabled = isPlainObject(value);
     const disabled = value === undefined || value === null;
@@ -1372,7 +1519,7 @@ export function optionalObjectToggleNode(
             },
         ],
         children: enabled
-            ? schemaObjectChildren(path, schema, objectValue)
+            ? schemaObjectChildren(path, schema, objectValue, new Set(), context)
             : unknown ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -1410,6 +1557,7 @@ export function discriminatedUnionNode(
     required: boolean,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode | undefined {
     const discriminator = discriminatorForSchema(schema);
     if (!discriminator) {
@@ -1470,7 +1618,7 @@ export function discriminatedUnionNode(
         diagnostics,
         variants,
         children: selected
-            ? schemaObjectChildren(path, selected.optionSchema, value, new Set([discriminator]))
+            ? schemaObjectChildren(path, selected.optionSchema, value, new Set([discriminator]), context)
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -1485,6 +1633,7 @@ export function objectUnionNode(
     required: boolean,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode | undefined {
     const branches = objectUnionBranches(schema);
     if (!branches.length) {
@@ -1532,7 +1681,7 @@ export function objectUnionNode(
             })),
         ],
         children: selected
-            ? schemaObjectChildren(path, selected.optionSchema, value)
+            ? schemaObjectChildren(path, selected.optionSchema, value, new Set(), context)
             : isPlainObject(value) ? objectChildrenFromValue(path, value) : [],
     });
 }
@@ -1831,6 +1980,8 @@ export function schemaFieldNode(
     schema: any,
     config: Record<string, unknown>,
     authoredConfig: Record<string, unknown> = config,
+    context?: SchemaEditContext,
+    referenceOptions?: EditInputHint["options"],
 ): EditNode {
     const path = [...rootPath, key];
     const description = schemaDescription(schema);
@@ -1842,7 +1993,7 @@ export function schemaFieldNode(
     const essential = essentialOf(schema);
     const {hasValue, value, valueDefaulted} = effectiveConfigValue(config, key, defaultValue, authoredConfig);
     const authoredValue = hasValue ? authoredConfig[key] : undefined;
-    const inputHint = uiHintOf(schema);
+    const inputHint = resolveInputHint(uiHintOf(schema), path, context, referenceOptions);
     const externalRef = externalRefOf(schema);
     const scalarType = schemaScalarType(schema);
     const mark = (node: EditNode) => markValueState(node, valueDefaulted, hasValue, essential);
@@ -1850,9 +2001,9 @@ export function schemaFieldNode(
     if (schemaConstructorName(schema) === "ZodArray") {
         const jsonSchema = jsonSchemaForConfigPath(path);
         if (jsonSchema && jsonSchemaType(jsonSchema) === "array") {
-            return mark(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required));
+            return mark(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required, authoredConfig, context));
         }
-        return mark(zodArrayNode(path, key, schema, value, userRequired, inputHint, description, expert, presence));
+        return mark(zodArrayNode(path, key, schema, value, userRequired, inputHint, description, expert, presence, context));
     }
     if (schemaConstructorName(schema) === "ZodRecord") {
         const jsonSchema = jsonSchemaForConfigPath(path);
@@ -1861,7 +2012,7 @@ export function schemaFieldNode(
             || jsonSchemaBranches(jsonSchema).length > 0
             || jsonSchemaEnumValues(jsonSchema).length > 0
         )) {
-            return mark(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required));
+            return mark(jsonSchemaFieldNode(rootPath, key, jsonSchema, config, required, authoredConfig, context));
         }
         return mark(zodRecordNode(
             path,
@@ -1873,13 +2024,14 @@ export function schemaFieldNode(
             description,
             expert,
             presence,
+            context,
         ));
     }
-    const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
+    const unionNode = discriminatedUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence, context);
     if (unionNode) {
         return mark(unionNode);
     }
-    const objectVariantNode = objectUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence);
+    const objectVariantNode = objectUnionNode(path, key, schema, value, hasValue, description, userRequired, expert, presence, context);
     if (objectVariantNode) {
         return mark(objectVariantNode);
     }
@@ -1900,7 +2052,7 @@ export function schemaFieldNode(
     }
     if (schemaShape(schema)) {
         if (isPlainObject(value)) {
-            return mark(zodObjectNode(path, key, schema, value, authoredValue, userRequired, description, expert, presence));
+            return mark(zodObjectNode(path, key, schema, value, authoredValue, userRequired, description, expert, presence, context));
         }
         const jsonSchema = jsonSchemaForConfigPath(path);
         if (jsonSchema && (
@@ -1942,6 +2094,7 @@ function zodRecordNode(
     description: string,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode {
     const recordValue = isPlainObject(value) ? value : {};
     const valueSchema = zodRecordValueSchema(schema);
@@ -1952,7 +2105,7 @@ function zodRecordNode(
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([recordKey, recordItemValue]) => {
                 const node = valueSchema
-                    ? schemaFieldNode(path, recordKey, valueSchema, {[recordKey]: recordItemValue})
+                    ? schemaFieldNode(path, recordKey, valueSchema, {[recordKey]: recordItemValue}, {[recordKey]: recordItemValue}, context)
                     : genericDisplayNode([...path, recordKey], recordKey, recordItemValue, "required", false, "");
                 node.removable = true;
                 return node;
@@ -1995,13 +2148,14 @@ function zodObjectNode(
     description: string,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode {
     const shape = schemaShape(schema) ?? {};
     const authoredObject = isPlainObject(authoredValue) ? authoredValue : {};
     const knownKeys = new Set(Object.keys(shape));
     const children = [
         ...Object.entries(shape).map(([childKey, childSchema]) =>
-            schemaFieldNode(path, childKey, childSchema, value, authoredObject)
+            schemaFieldNode(path, childKey, childSchema, value, authoredObject, context)
         ),
         ...Object.keys(value)
             .filter(childKey => !knownKeys.has(childKey))
@@ -2042,13 +2196,14 @@ function zodArrayNode(
     description: string,
     expert: boolean,
     presence: EditNode["presence"],
+    context?: SchemaEditContext,
 ): EditNode {
     const arrayValue = Array.isArray(value) ? value : [];
     const itemSchema = schemaArrayElement(schema);
     const addLabel = arrayAddLabel(inputHint);
     const displayKey = fieldDisplayLabel(key, inputHint);
     const children = [
-        ...arrayValue.map((itemValue, index) => zodArrayItemNode(path, itemSchema, itemValue, index, addLabel)),
+        ...arrayValue.map((itemValue, index) => zodArrayItemNode(path, itemSchema, itemValue, index, addLabel, context)),
         addRow(path, addLabel, arrayDescriptionForAdd(addLabel), false),
     ];
     const missing = required && (value === undefined || value === null);
@@ -2075,10 +2230,11 @@ function zodArrayItemNode(
     value: unknown,
     index: number,
     itemLabel: string,
+    context?: SchemaEditContext,
 ): EditNode {
     const key = String(index);
     const node = schema
-        ? schemaFieldNode(rootPath, key, schema, {[key]: value})
+        ? schemaFieldNode(rootPath, key, schema, {[key]: value}, {[key]: value}, context)
         : genericDisplayNode([...rootPath, key], key, value, "required", false, "");
     const label = node.label;
     const valueSuffix = label.includes(":") ? label.slice(label.indexOf(":")) : "";
