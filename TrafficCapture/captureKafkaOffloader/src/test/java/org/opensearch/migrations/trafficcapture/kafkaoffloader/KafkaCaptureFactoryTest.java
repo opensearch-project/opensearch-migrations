@@ -474,4 +474,24 @@ public class KafkaCaptureFactoryTest {
         bb.release();
         producer.close();
     }
+
+    @Test
+    public void testNullConnectionIdFailsFastAtCreation() {
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            1024 * 1024
+        );
+        var nullCtx = new ConnectionContext(new TestRootKafkaOffloaderContext(), null, "test");
+
+        var exception = Assertions.assertThrows(NullPointerException.class,
+            () -> kafkaCaptureFactory.createOffloader(nullCtx));
+        Assertions.assertTrue(exception.getMessage().contains("partition locality"));
+
+        producer.close();
+    }
 }
