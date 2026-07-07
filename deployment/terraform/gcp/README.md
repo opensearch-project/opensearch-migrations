@@ -183,3 +183,8 @@ provided repo URI.
   under 5 GiB, so a lowered `maxShardSizeBytes` of `5368709120` is sufficient.
 - The bucket region should match the GKE region for best performance;
   cross-region reads work but are slower and incur egress.
+- When the workflow **creates** the snapshot (not BYOS), the **source** cluster must
+  support GCS snapshot repositories. Elasticsearch 8.0+ and OpenSearch bundle this;
+  Elasticsearch 7.x requires the `repository-gcs` plugin on every source node, or
+  snapshot registration fails with `repository type [gcs] does not exist`. See
+  [Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md#snapshot-storage-cloud-storage).

@@ -50,11 +50,25 @@ managed OpenSearch service that offers a private endpoint).
    terraform output target_private_endpoint   # e.g. 10.0.0.42 (IP fallback)
    ```
 
-4. **Use the endpoint in your migration.** Endpoints are not injected automatically —
+4. **Approve the connection on the producer side (if not auto-accepted).** Applying
+   creates a PSC endpoint (a forwarding rule) that dials the producer's service
+   attachment. If the attachment uses manual acceptance, the connection stays in a
+   **pending** state until the producer approves it — often keyed to the consumer
+   endpoint's internal IP (`target_private_endpoint` above). Producers whose accept-list
+   already includes your project may auto-accept. Confirm the connection reaches an
+   **accepted** state before migrating; you can check the consumer side with:
+
+   ```bash
+   gcloud compute forwarding-rules describe NAME --region REGION \
+     --format='value(pscConnectionStatus)'   # want: ACCEPTED
+   ```
+
+5. **Use the endpoint in your migration.** Endpoints are not injected automatically —
    put the **hostname** into your workflow user config's `targetClusters` (or
    `sourceClusters`) entry as the cluster `endpoint`, e.g.
-   `https://myservice-myproj.example.com:9200`. (If you omitted `dns_name`, use the IP
-   with relaxed TLS instead.) The migration workflow reads cluster endpoints from this
+   `https://myservice-myproj.example.com:9200`. Use the **port the producer serves on**
+   (managed services often use a non-9200 port). If you omitted `dns_name`, use the IP
+   with relaxed TLS instead. The migration workflow reads cluster endpoints from this
    config at submission time.
 
 ## Target/Source over VPC peering (`vpc_peering`)
@@ -102,6 +116,21 @@ that subnet and cannot set the flag — enable Private Google Access on it yours
 ```bash
 gcloud compute networks subnets update YOUR_SUBNET --region REGION --enable-private-ip-google-access
 ```
+
+> **Source-cluster prerequisite — the `repository-gcs` plugin (Elasticsearch < 8.0).**
+> The backfill snapshots the **source** cluster to Cloud Storage, which requires the
+> source to support GCS snapshot repositories. Elasticsearch **8.0+** and OpenSearch
+> bundle GCS support; **Elasticsearch 7.x does not** — it needs the `repository-gcs`
+> plugin installed on every source node, or snapshot-repository registration fails with
+> `repository type [gcs] does not exist`. Install it on the source before migrating,
+> e.g.:
+>
+> ```bash
+> bin/elasticsearch-plugin install --batch repository-gcs   # each ES 7.x node, then restart
+> ```
+>
+> This is a property of the source cluster and independent of the private-networking
+> configuration here.
 
 ## Control-plane privacy (operator access)
 
