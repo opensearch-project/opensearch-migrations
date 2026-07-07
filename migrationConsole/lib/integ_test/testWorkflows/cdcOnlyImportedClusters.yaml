@@ -21,6 +21,8 @@ spec:
         value: "LoadBalancer"
       - name: otel-trace-collector-endpoint
         value: ""
+      - name: kafka-cluster-config
+        value: '{"default":{"autoCreate":{}}}'
 
   templates:
     - name: main
@@ -53,6 +55,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                 - name: otel-trace-collector-endpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: kafka-cluster-config
+                  value: "{{workflow.parameters.kafka-cluster-config}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:
@@ -77,6 +81,7 @@ spec:
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: otel-trace-collector-endpoint
+          - name: kafka-cluster-config
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -88,6 +93,7 @@ spec:
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otel-trace-collector-endpoint}}'
+            KAFKA_CLUSTER_CONFIG='{{inputs.parameters.kafka-cluster-config}}'
 
             # Transform source cluster config (same field renames as fullMigrationImportedClusters)
             SOURCE_CLUSTER=$(echo "$SOURCE_CONFIGS" | jq '
@@ -111,13 +117,14 @@ spec:
             CDC_CONFIG=$(jq -n \
               --argjson source "$SOURCE_CLUSTER" \
               --argjson target "$TARGET_CLUSTER" \
+              --argjson kafkaClusterConfig "$KAFKA_CLUSTER_CONFIG" \
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": { "default": { "autoCreate": {} } },
+                "kafkaClusterConfiguration": $kafkaClusterConfig,
                 "traffic": {
                   "proxies": {
                     "capture-proxy": {

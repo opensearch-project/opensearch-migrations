@@ -4,5 +4,6 @@ export * from "./getSchemaFromZod";
 export * from "./schemaUtilities";
 export * from "./unifiedSchemaBuilder";
 export * from "./kafkaBrokerConfigSchema";
+export * from "./kafkaClientFilePaths";
 export * from "./migrationResourceProjections";
 export * from "./generateMigrationResources";

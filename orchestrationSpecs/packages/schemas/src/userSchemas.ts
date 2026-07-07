@@ -357,6 +357,10 @@ export const KAFKA_CLIENT_CONFIG = z.object({
       .describe("Resolved Kubernetes secret containing the Kafka cluster CA certificate for TLS trust."),
     kafkaUserName: z.string().default("").optional()
       .describe("Resolved Kafka principal name used by migration applications."),
+    producerClientProperties: z.string().default("").optional()
+      .describe("Rendered workflow-owned Java properties file content for the capture proxy Kafka producer."),
+    consumerClientProperties: z.string().default("").optional()
+      .describe("Rendered workflow-owned Java properties file content for the traffic replayer Kafka consumer."),
     topicSpecOverrides: GENERIC_JSON_OBJECT.default({}).optional()
       .describe("Resolved Strimzi KafkaTopic.spec overrides used when the workflow creates the topic resource."),
 }).describe("Connection configuration for an externally managed Kafka cluster.");
@@ -381,6 +385,22 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
         type: z.literal("scram-sha-512"),
     }),
 ]);
+
+export const KAFKA_CLIENT_PROPERTY_VALUE = z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+]);
+
+export const KAFKA_CLIENT_PROPERTIES = z.record(
+    z.string().min(1),
+    KAFKA_CLIENT_PROPERTY_VALUE
+).default({});
+
+export const KAFKA_CLIENT_PROPERTIES_CONFIG = z.object({
+    producer: KAFKA_CLIENT_PROPERTIES.optional(),
+    consumer: KAFKA_CLIENT_PROPERTIES.optional(),
+}).default({});
 
 export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
     partitions: 1,
@@ -471,6 +491,8 @@ export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
         .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
     kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
     auth: KAFKA_EXISTING_AUTH_CONFIG.default({type: "none"}).optional(),
+    clientProperties: KAFKA_CLIENT_PROPERTIES_CONFIG.optional()
+        .describe("Flat Kafka producer and consumer Java client properties for externally managed Kafka clusters."),
 });
 
 export const CPU_QUANTITY = z.string()
