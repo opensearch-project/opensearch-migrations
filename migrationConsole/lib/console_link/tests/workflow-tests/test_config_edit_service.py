@@ -9,6 +9,7 @@ from kubernetes.client.rest import ApiException
 
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.services.config_edit_service import ConfigEditService
+from console_link.workflow.services.script_runner import GeneratedResourceValidationError
 
 
 class FakeStore:
@@ -105,6 +106,55 @@ def edit_state_with_external_ref(value, external_ref):
                                 "status": "ok",
                                 "statusCounts": {},
                                 "externalRef": external_ref,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
+def edit_state_with_replayer():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "ok",
+                "statusCounts": {},
+                "children": [
+                    {
+                        "id": "edit:traffic.replayers",
+                        "path": ["traffic", "replayers"],
+                        "label": "Replay",
+                        "valueKind": "record",
+                        "status": "ok",
+                        "statusCounts": {},
+                        "children": [
+                            {
+                                "id": "edit:traffic.replayers.sourceTarget",
+                                "path": ["traffic", "replayers", "sourceTarget"],
+                                "label": "sourceTarget",
+                                "valueKind": "object",
+                                "status": "ok",
+                                "statusCounts": {},
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.replayers.sourceTarget.replayerConfig",
+                                        "path": ["traffic", "replayers", "sourceTarget", "replayerConfig"],
+                                        "label": "replayerConfig",
+                                        "valueKind": "object",
+                                        "status": "ok",
+                                        "statusCounts": {},
+                                        "children": [],
+                                    },
+                                ],
                             },
                         ],
                     },
@@ -381,6 +431,107 @@ def test_load_edit_session_accepts_unmanaged_matching_secret():
     assert secret["statusCounts"] == {}
     assert session.edit_state["validation"] == {"valid": True, "errors": []}
     core.read_namespaced_secret.assert_called_once_with(name="a", namespace="ma")
+
+
+def test_load_edit_session_marks_generated_resource_dry_run_errors():
+    class FakeRunner:
+        def run_config_processor_node_script(self, *_args):
+            return json.dumps(edit_state_with_replayer())
+
+        def validate_generated_resources(self, *_args, **_kwargs):
+            raise GeneratedResourceValidationError(
+                "Generated Kubernetes resource validation failed:\n"
+                "The TrafficReplay \"sourceTarget\" is invalid: metadata.name: Invalid value: "
+                "\"sourceTarget\": a lowercase RFC 1123 subdomain must consist of lower case "
+                "alphanumeric characters, '-' or '.'",
+                stderr=(
+                    "The TrafficReplay \"sourceTarget\" is invalid: metadata.name: Invalid value: "
+                    "\"sourceTarget\": a lowercase RFC 1123 subdomain must consist of lower case "
+                    "alphanumeric characters, '-' or '.'"
+                ),
+                resolved_resources={
+                    "resources": [
+                        {
+                            "kind": "TrafficReplay",
+                            "name": "sourceTarget",
+                            "parameterProvenance": {
+                                "target": {
+                                    "sourcePath": [
+                                        "traffic", "replayers", "sourceTarget",
+                                        "replayerConfig", "target",
+                                    ],
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+
+    service = ConfigEditService(
+        namespace="ma",
+        store=FakeStore(WorkflowConfig(raw_yaml=(
+            "traffic:\n"
+            "  replayers:\n"
+            "    sourceTarget:\n"
+            "      replayerConfig: {}\n"
+        ))),
+        runner=FakeRunner(),
+    )
+
+    session = service.load_edit_session()
+
+    replay = session.edit_state["nodes"][0]["children"][0]["children"][0]
+    replayer_config = replay["children"][0]
+    assert replay["status"] == "error"
+    assert replay["statusCounts"]["errors"] == 1
+    assert replayer_config["status"] == "error"
+    assert "TrafficReplay \"sourceTarget\" is invalid" in replayer_config["diagnostics"][0]["message"]
+    assert session.edit_state["validation"]["valid"] is False
+    assert session.edit_state["validation"]["diagnostics"][0]["path"] == [
+        "traffic", "replayers", "sourceTarget", "replayerConfig", "target",
+    ]
+
+
+def test_apply_operation_marks_generated_resource_dry_run_errors():
+    class FakeRunner:
+        def run_config_processor_node_script(self, *_args):
+            return json.dumps({
+                "yaml": (
+                    "traffic:\n"
+                    "  replayers:\n"
+                    "    sourceTarget:\n"
+                    "      replayerConfig: {}\n"
+                ),
+                "editState": edit_state_with_replayer(),
+            })
+
+        def validate_generated_resources(self, *_args, **_kwargs):
+            raise GeneratedResourceValidationError(
+                "Generated Kubernetes resource validation failed:\n"
+                "The TrafficReplay \"sourceTarget\" is invalid: metadata.name is invalid",
+                stderr="The TrafficReplay \"sourceTarget\" is invalid: metadata.name is invalid",
+                resolved_resources={
+                    "resources": [
+                        {
+                            "kind": "TrafficReplay",
+                            "name": "sourceTarget",
+                            "parameterProvenance": {
+                                "name": {
+                                    "sourcePath": ["traffic", "replayers", "sourceTarget"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+
+    service = ConfigEditService(namespace="ma", store=FakeStore(), runner=FakeRunner())
+
+    result = service.apply_operation("traffic: {}", {"op": "noop"})
+
+    replay = result.edit_state["nodes"][0]["children"][0]["children"][0]
+    assert replay["status"] == "error"
+    assert result.edit_state["validation"]["valid"] is False
 
 
 def test_load_edit_session_validates_external_secret_from_pending_yaml_value():

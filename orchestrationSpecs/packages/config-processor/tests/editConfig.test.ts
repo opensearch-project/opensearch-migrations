@@ -644,9 +644,9 @@ describe("editConfig state", () => {
                     archive: {sourceLabel: "legacy", s3Uri: "s3://bucket/archive", awsRegion: "us-east-1"},
                 },
                 replayers: {
-                    replayCap: {fromCapturedTraffic: "cap", toTarget: "prod"},
-                    replayArchive: {fromCapturedTraffic: "archive", toTarget: "prod"},
-                    replayAux: {fromCapturedTraffic: "auxcap", toTarget: "prod"},
+                    "replay-cap": {fromCapturedTraffic: "cap", toTarget: "prod"},
+                    "replay-archive": {fromCapturedTraffic: "archive", toTarget: "prod"},
+                    "replay-aux": {fromCapturedTraffic: "auxcap", toTarget: "prod"},
                 },
             },
         }, {
@@ -661,11 +661,11 @@ describe("editConfig state", () => {
         expect(config.traffic.proxies).toEqual({auxcap: {source: "aux"}});
         expect(config.traffic.s3Sources).toEqual({});
         expect(config.traffic.replayers).toEqual({
-            replayAux: {fromCapturedTraffic: "auxcap", toTarget: "prod"},
+            "replay-aux": {fromCapturedTraffic: "auxcap", toTarget: "prod"},
         });
         expect(findNode(result.editState.nodes, "edit:snapshotMigrationConfigs.0.fromSource")?.value).toBe("aux");
         expect(findNode(result.editState.nodes, "edit:traffic.proxies.cap")).toBeUndefined();
-        expect(findNode(result.editState.nodes, "edit:traffic.replayers.replayCap")).toBeUndefined();
+        expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay-cap")).toBeUndefined();
     });
 
     it("renders and applies map-backed resource config groups", () => {

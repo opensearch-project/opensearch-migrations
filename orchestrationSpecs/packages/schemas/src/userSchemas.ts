@@ -1929,11 +1929,14 @@ export const TRAFFIC_CONFIG = z.object({
             keyPattern: K8S_NAMING_PATTERN.source,
             message: "Use a valid Kubernetes DNS name for the optional S3 archive source.",
         }),
-    replayers: z.record(z.string(), REPLAYER_CONFIG).default({}).optional()
+    replayers: z.record(z.string().regex(K8S_NAMING_PATTERN), REPLAYER_CONFIG).default({}).optional()
         .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
         .uiHint({
             kind: 'record',
             addLabel: 'traffic replay',
+            keyFormat: 'k8s-name',
+            keyPattern: K8S_NAMING_PATTERN.source,
+            message: "Replay names become Kubernetes TrafficReplay resource names and must use lower-case RFC 1123 syntax.",
         })
 }).superRefine((data, ctx) => {
     const proxies = data.proxies ?? {};

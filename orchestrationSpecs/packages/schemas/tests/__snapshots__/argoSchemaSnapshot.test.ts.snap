@@ -10133,7 +10133,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "description": "Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.",
           "x-ui-hint": {
             "kind": "record",
-            "addLabel": "traffic replay"
+            "addLabel": "traffic replay",
+            "keyFormat": "k8s-name",
+            "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "message": "Replay names become Kubernetes TrafficReplay resource names and must use lower-case RFC 1123 syntax."
           }
         }
       },

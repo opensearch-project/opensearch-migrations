@@ -115,11 +115,11 @@ function multiResourceConfig() {
                 },
             },
             replayers: {
-                replayA: {
+                "replay-a": {
                     fromCapturedTraffic: "proxy-a",
                     toTarget: "targetX",
                 },
-                replayB: {
+                "replay-b": {
                     fromCapturedTraffic: "proxy-b",
                     toTarget: "targetY",
                 },
@@ -271,13 +271,13 @@ describe("console resources", () => {
                 name: "replayer-targetX",
                 targetRef: "targetX",
                 kafkaRef: "default",
-                replayRef: "replayA",
+                replayRef: "replay-a",
             },
             {
                 name: "replayer-targetY",
                 targetRef: "targetY",
                 kafkaRef: "my-kafka",
-                replayRef: "replayB",
+                replayRef: "replay-b",
             },
         ]);
         expect(resources.sources[0].proxy?.aliases).not.toContain(
@@ -325,7 +325,7 @@ describe("console resources", () => {
             },
         };
         config.traffic.replayers = {
-            replayA: {
+            "replay-a": {
                 fromCapturedTraffic: "proxy-a",
                 toTarget: "targetX",
             },

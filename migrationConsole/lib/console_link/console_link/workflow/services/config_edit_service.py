@@ -23,7 +23,7 @@ from ..external_resource_validation import (
 from ..models.config import WorkflowConfig
 from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
-from .script_runner import ScriptRunner
+from .script_runner import GeneratedResourceValidationError, ScriptRunner
 
 
 STATUS_PRIORITY = {
@@ -106,6 +106,7 @@ class ConfigEditService:
             result["editState"],
             _parse_raw_yaml(result.get("yaml") or ""),
         )
+        self._annotate_generated_resource_diagnostics(result["editState"], result.get("yaml") or "")
         return ConfigEditApplyResult(
             raw_yaml=result["yaml"],
             edit_state=result["editState"],
@@ -320,6 +321,7 @@ class ConfigEditService:
         edit_state = json.loads(output)
         if validate_external_refs:
             self._annotate_external_resource_diagnostics(edit_state, _parse_raw_yaml(raw_yaml))
+            self._annotate_generated_resource_diagnostics(edit_state, raw_yaml)
         return edit_state
 
     def _annotate_external_resource_diagnostics(
@@ -388,6 +390,45 @@ class ConfigEditService:
         if not diagnostic:
             return None
         return {**diagnostic, "path": node.get("path") or []}
+
+    def _annotate_generated_resource_diagnostics(self, edit_state: Dict[str, Any], raw_yaml: str) -> None:
+        if not raw_yaml.strip() or _edit_state_has_blocking_validation(edit_state):
+            return
+        runner = self.runner or ScriptRunner()
+        try:
+            runner.validate_generated_resources(raw_yaml, workflow_name="migration-workflow")
+        except GeneratedResourceValidationError as e:
+            diagnostics = _generated_resource_diagnostics(e)
+            if not diagnostics:
+                diagnostics = [{
+                    "severity": "error",
+                    "message": str(e),
+                    "path": [],
+                }]
+            self._merge_validation_diagnostics(edit_state, diagnostics)
+
+    def _merge_validation_diagnostics(self, edit_state: Dict[str, Any], diagnostics: list[Dict[str, Any]]) -> None:
+        indexed_nodes = _index_edit_nodes_by_path(edit_state)
+        added: list[Dict[str, Any]] = []
+        for diagnostic in diagnostics:
+            path = [str(part) for part in (diagnostic.get("path") or [])]
+            target = _nearest_node_for_path(indexed_nodes, path)
+            if target:
+                node, ancestors = target
+                if _add_diagnostic_with_counts(node, ancestors, diagnostic):
+                    added.append(diagnostic)
+            else:
+                added.append(diagnostic)
+        if not added:
+            return
+        validation = edit_state.setdefault("validation", {})
+        existing = list(validation.get("diagnostics") or [])
+        for diagnostic in added:
+            if not _diagnostic_exists(existing, diagnostic):
+                existing.append(diagnostic)
+        validation["diagnostics"] = existing
+        if any(diagnostic.get("severity") in {"error", "required", "blocked"} for diagnostic in existing):
+            validation["valid"] = False
 
     def _run_resolve_migration_resources(
         self,
@@ -920,6 +961,104 @@ def _diagnostic_exists(existing: list[Dict[str, Any]], diagnostic: Dict[str, Any
 
 def _highest_status(left: str, right: str) -> str:
     return left if STATUS_PRIORITY.get(left, 0) >= STATUS_PRIORITY.get(right, 0) else right
+
+
+def _edit_state_has_blocking_validation(edit_state: Dict[str, Any]) -> bool:
+    validation = edit_state.get("validation") or {}
+    if validation.get("valid") is False:
+        return True
+    return bool(validation.get("diagnostics") or validation.get("errors"))
+
+
+def _generated_resource_diagnostics(error: GeneratedResourceValidationError) -> list[Dict[str, Any]]:
+    text = str(error)
+    resources = {
+        (str(resource.get("kind") or ""), str(resource.get("name") or "")): resource
+        for resource in (error.resolved_resources.get("resources") or [])
+        if isinstance(resource, dict)
+    }
+    diagnostics: list[Dict[str, Any]] = []
+    for message in _kubectl_invalid_resource_messages(text):
+        kind = message.get("kind") or ""
+        name = message.get("name") or ""
+        resource = resources.get((kind, name), {})
+        diagnostics.append({
+            "severity": "error",
+            "message": message["message"],
+            "path": _generated_resource_source_path(resource),
+        })
+    return diagnostics
+
+
+def _kubectl_invalid_resource_messages(text: str) -> list[Dict[str, str]]:
+    import re
+    pattern = re.compile(r'^The (?P<kind>\S+) "(?P<name>[^"]+)" is invalid: (?P<detail>.*)$')
+    messages: list[Dict[str, str]] = []
+    current: Optional[Dict[str, str]] = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        match = pattern.match(line)
+        if match:
+            current = {
+                "kind": match.group("kind"),
+                "name": match.group("name"),
+                "message": line,
+            }
+            messages.append(current)
+            continue
+        if current and line and not line.startswith("Generated Kubernetes resource validation failed"):
+            current["message"] = f"{current['message']} {line}"
+    return messages
+
+
+def _generated_resource_source_path(resource: Dict[str, Any]) -> list[str]:
+    provenance = resource.get("parameterProvenance") or {}
+    paths = [
+        [str(part) for part in (entry.get("sourcePath") or [])]
+        for entry in provenance.values()
+        if isinstance(entry, dict) and entry.get("sourcePath")
+    ]
+    prefix = _common_path_prefix(paths)
+    if prefix:
+        return prefix
+    return []
+
+
+def _common_path_prefix(paths: list[list[str]]) -> list[str]:
+    if not paths:
+        return []
+    prefix = list(paths[0])
+    for path in paths[1:]:
+        while prefix and prefix != path[:len(prefix)]:
+            prefix.pop()
+    return prefix
+
+
+def _index_edit_nodes_by_path(edit_state: Dict[str, Any]) -> Dict[tuple[str, ...], tuple[Dict[str, Any], list[Dict[str, Any]]]]:
+    indexed: Dict[tuple[str, ...], tuple[Dict[str, Any], list[Dict[str, Any]]]] = {}
+
+    def visit(node: Dict[str, Any], ancestors: list[Dict[str, Any]]) -> None:
+        path = tuple(str(part) for part in (node.get("path") or []))
+        if path:
+            indexed[path] = (node, ancestors)
+        for child in node.get("children") or []:
+            visit(child, [*ancestors, node])
+
+    for root in edit_state.get("nodes") or []:
+        visit(root, [])
+    return indexed
+
+
+def _nearest_node_for_path(
+    indexed_nodes: Dict[tuple[str, ...], tuple[Dict[str, Any], list[Dict[str, Any]]]],
+    path: list[str],
+) -> Optional[tuple[Dict[str, Any], list[Dict[str, Any]]]]:
+    current = tuple(path)
+    while current:
+        if current in indexed_nodes:
+            return indexed_nodes[current]
+        current = current[:-1]
+    return None
 
 
 def _k8s_match_value(k8s_hint: Dict[str, Any], key: str) -> list[str]:

@@ -13,6 +13,23 @@ logger = logging.getLogger(__name__)
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
+class GeneratedResourceValidationError(RuntimeError):
+    """Raised when generated Kubernetes resources fail server-side dry-run validation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        resolved_resources: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.resolved_resources = resolved_resources or {}
+
+
 def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError) -> str:
     details = [f"{label} failed with exit code {error.returncode}"]
     stderr = (error.stderr or "").strip()
@@ -22,6 +39,17 @@ def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError)
     if stdout:
         details.append(f"stdout: {stdout}")
     return "\n".join(details)
+
+
+def _format_generated_resource_validation_failure(error: subprocess.CalledProcessError) -> str:
+    details = ["Generated Kubernetes resource validation failed"]
+    stderr = (error.stderr or "").strip()
+    stdout = (error.stdout or "").strip()
+    if stderr:
+        details.append(stderr)
+    elif stdout:
+        details.append(stdout)
+    return ":\n".join(details)
 
 
 class ScriptRunner:
@@ -46,6 +74,7 @@ class ScriptRunner:
             logger.debug(f"Using CONFIG_PROCESSOR_DIR: {self.script_dir}")
         else:
             self.script_dir = Path(script_dir)
+            self.config_processor_dir = str(self.script_dir)
             logger.debug(f"Using provided script_dir: {self.script_dir}")
 
         if not self.script_dir.exists():
@@ -272,6 +301,66 @@ class ScriptRunner:
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
 
+    def validate_generated_resources(
+        self,
+        config_data: str,
+        workflow_name: str = "migration-workflow",
+    ) -> Dict[str, Any]:
+        """Run submit-equivalent server-side dry-run validation for generated resources."""
+        run_number = "0"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as config_file:
+            config_file.write(config_data)
+            config_file_path = config_file.name
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            try:
+                self.run_config_processor_node_script(
+                    "initialize",
+                    "--user-config",
+                    config_file_path,
+                    "--output-dir",
+                    output_dir,
+                    "--workflow-name",
+                    workflow_name,
+                    "--run-number",
+                    run_number,
+                )
+            except RuntimeError as e:
+                raise GeneratedResourceValidationError(
+                    str(e),
+                    resolved_resources=_read_resolved_resources(output_dir),
+                ) from e
+            resources_dir = Path(output_dir) / "resources"
+            if resources_dir.exists():
+                try:
+                    subprocess.run(
+                        ["kubectl", "apply", "--dry-run=server", "-f", str(resources_dir)],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        cwd=str(self.script_dir),
+                    )
+                except subprocess.CalledProcessError as e:
+                    raise GeneratedResourceValidationError(
+                        _format_generated_resource_validation_failure(e),
+                        stdout=e.stdout or "",
+                        stderr=e.stderr or "",
+                        resolved_resources=_read_resolved_resources(output_dir),
+                    ) from e
+                except OSError as e:
+                    raise GeneratedResourceValidationError(
+                        f"Generated Kubernetes resource validation failed:\n{e}",
+                        resolved_resources=_read_resolved_resources(output_dir),
+                    ) from e
+            return _read_resolved_resources(output_dir)
+        finally:
+            try:
+                os.unlink(config_file_path)
+            except OSError as e:
+                logger.warning(f"Failed to clean up temporary file {config_file_path}: {e}")
+            shutil.rmtree(output_dir, ignore_errors=True)
+
     def _parse_kubectl_output(self, output: str) -> str:
         """Parse kubectl output to extract workflow name.
 
@@ -330,3 +419,14 @@ class ScriptRunner:
     def validate_config(self, config_data: str):
         """Validate config against Zod schema. Returns dict with 'valid' bool and optional 'errors'."""
         return self._run_config_processor_with_temp_file("validate", config_data)
+
+
+def _read_resolved_resources(output_dir: str) -> Dict[str, Any]:
+    path = Path(output_dir) / "resolvedMigrationResources.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        logger.debug("Failed to read resolved migration resources from %s", path, exc_info=True)
+        return {}

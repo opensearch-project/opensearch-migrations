@@ -83,9 +83,9 @@ traffic:
       proxyConfig:
         listenPort: 9202
   replayers:
-    replayA:
+    replay-a:
       fromCapturedTraffic: "proxyA"
       toTarget: "targetX"
-    replayB:
+    replay-b:
       fromCapturedTraffic: "proxyB"
       toTarget: "targetY"
