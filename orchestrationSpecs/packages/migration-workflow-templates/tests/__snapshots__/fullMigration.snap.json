@@ -24,10 +24,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -1272,17 +1268,6 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
-            },
-            {
-              "name": "skipApprovalMap",
-              "value": "{}",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "name": "{{workflow.parameters.approvalConfigMapName}}",
-                  "key": "autoApprove",
-                  "optional": true
-                }
-              }
             }
           ]
         },
@@ -1347,10 +1332,6 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "skipApprovalMap",
-                    "value": "{{inputs.parameters.skipApprovalMap}}"
                   },
                   {
                     "name": "crdUid",
@@ -1449,7 +1430,7 @@
                 "template": "approvebackfill",
                 "name": "document-bulk-load"
               },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap)))}}",
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
               "arguments": {
                 "parameters": [
                   {
