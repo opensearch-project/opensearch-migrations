@@ -18,7 +18,14 @@ _CLUSTER_CONNECT_WAIT_S = 30
 
 def _wait_for_connection(cluster, retries: int = _CLUSTER_CONNECT_RETRIES,
                          wait_s: int = _CLUSTER_CONNECT_WAIT_S) -> ConnectionResult:
-    """Retry connection_check to tolerate transient AOS domain unavailability."""
+    """Retry connection_check to tolerate transient AOS domain unavailability.
+
+    connection_check catches all network exceptions internally (including the AOSS
+    serverless path) and always returns a ConnectionResult — it never raises. A
+    truly unexpected exception should therefore propagate immediately rather than
+    be absorbed into the retry loop.
+    """
+    assert retries >= 1, "retries must be at least 1"
     for attempt in range(1, retries + 1):
         result = connection_check(cluster)
         if result.connection_established:
