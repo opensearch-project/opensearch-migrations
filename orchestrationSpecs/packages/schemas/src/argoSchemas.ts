@@ -335,8 +335,9 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     topicConfigChecksum: z.string(),
     checksumForSnapshot: z.string(),
     checksumForReplayer: z.string(),
-    // When true, the proxy-setup approval gate is auto-skipped (driven by the user
-    // config's skipApprovals, mirroring how metadata/backfill approvals are skipped).
+    // When true, the proxy-setup approval gate is auto-skipped. The config
+    // processor resolves this from proxy-level skipApproval first, then global
+    // skipApprovals, then false.
     skipApproval: z.boolean().default(false),
     resourceUid: z.string(),
 });

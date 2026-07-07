@@ -1176,7 +1176,7 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."),
     source: z.string()
         .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."),
-    skipApproval: z.boolean().default(false).optional()
+    skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after this proxy is configured and ready."),
     proxyConfig: USER_PROXY_OPTIONS
         .describe("Configuration for the capture proxy deployment and process options.")
@@ -1451,7 +1451,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional()
-            .describe("Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."),
+            .describe("Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."),
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),

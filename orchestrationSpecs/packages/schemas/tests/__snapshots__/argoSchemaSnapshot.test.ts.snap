@@ -2972,7 +2972,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "skipApprovals": {
       "type": "boolean",
       "default": false,
-      "description": "Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."
+      "description": "Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."
     },
     "kafkaClusterConfiguration": {
       "type": "object",
@@ -4629,6 +4629,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "source": {
                 "type": "string",
                 "description": "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."
+              },
+              "skipApproval": {
+                "type": "boolean",
+                "description": "When true, skips the manual approval gate after this proxy is configured and ready."
               },
               "proxyConfig": {
                 "type": "object",

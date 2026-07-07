@@ -7,7 +7,6 @@ import {
     Serialized,
     selectInputsForRegister,
     typeToken,
-    widenComplexity,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
@@ -775,7 +774,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     c.register({
                         resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
                     }),
-                    { when: c => ({templateExp: widenComplexity(expr.not(skipProxyApproval))}) }
+                    {when: expr.not(skipProxyApproval)}
                 )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({

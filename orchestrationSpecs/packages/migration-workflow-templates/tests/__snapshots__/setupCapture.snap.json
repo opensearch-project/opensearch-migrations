@@ -890,7 +890,7 @@
                 "template": "waitforuserapproval",
                 "name": "resource-management"
               },
-              "when": "{{=!(inputs.parameters.skipApproval)}}",
+              "when": "!({{inputs.parameters.skipApproval}})",
               "arguments": {
                 "parameters": [
                   {

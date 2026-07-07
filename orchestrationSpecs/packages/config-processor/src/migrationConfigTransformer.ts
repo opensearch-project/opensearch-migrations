@@ -639,7 +639,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
-        const proxies = this.buildProxies(userConfig);
+        const proxies = this.buildProxies(userConfig, userConfig.skipApprovals ?? false);
         const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
@@ -652,9 +652,6 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
         const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
 
-        // Operational flag (not part of any checksum): when skip-approvals is set
-        // globally or for a proxy, the proxy-setup approval gate is auto-skipped.
-        const globalSkipApprovals = userConfig.skipApprovals ?? false;
         const proxiesWithChecksums = proxies.map(p => ({
             ...p,
             kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
@@ -662,7 +659,6 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
-            skipApproval: globalSkipApprovals || (p.skipApproval ?? false),
         }));
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
@@ -853,7 +849,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
-    private buildProxies(userConfig: NormalizedUserConfig) {
+    private buildProxies(userConfig: NormalizedUserConfig, globalSkipApprovals: boolean) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
@@ -866,7 +862,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig),
-                skipApproval: proxy.skipApproval ?? false,
+                skipApproval: proxy.skipApproval ?? globalSkipApprovals,
             };
         });
     }

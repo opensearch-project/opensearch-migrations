@@ -125,7 +125,27 @@ describe('MigrationConfigTransformer validation', () => {
         config.skipApprovals = false;
         config.traffic.proxies.proxy1.skipApproval = true;
 
-        const result = await transformer.transform(config);
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(true);
+    });
+
+    it('should let per-proxy skipApproval false override global skipApprovals true', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        config.traffic.proxies.proxy1.skipApproval = false;
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(false);
+    });
+
+    it('should inherit global skipApprovals when per-proxy skipApproval is omitted', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.traffic.proxies.proxy1.skipApproval;
+
+        const result = await transformer.processFromObject(config);
 
         expect(result.proxies?.[0]?.skipApproval).toBe(true);
     });
