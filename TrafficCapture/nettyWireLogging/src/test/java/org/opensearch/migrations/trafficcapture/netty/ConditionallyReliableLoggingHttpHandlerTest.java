@@ -303,7 +303,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
-    @WrapWithNettyLeakDetection(repetitions = 4)
+    @WrapWithNettyLeakDetection(repetitions = 32)
     public void testMessageForwardedDownstreamEvenWhenOffloadFails() throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
 

@@ -184,8 +184,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                         completableFuture.complete(metadata);
                     }
                 });
-            } catch (Throwable throwable) {
-                completableFuture.completeExceptionally(throwable);
+            } catch (Exception exception) {
+                completableFuture.completeExceptionally(exception);
             }
         });
 
