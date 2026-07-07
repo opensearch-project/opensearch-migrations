@@ -13,23 +13,6 @@ logger = logging.getLogger(__name__)
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
-class GeneratedResourceValidationError(RuntimeError):
-    """Raised when generated Kubernetes resources fail server-side dry-run validation."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        stdout: str = "",
-        stderr: str = "",
-        resolved_resources: Optional[Dict[str, Any]] = None,
-    ):
-        super().__init__(message)
-        self.stdout = stdout
-        self.stderr = stderr
-        self.resolved_resources = resolved_resources or {}
-
-
 def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError) -> str:
     details = [f"{label} failed with exit code {error.returncode}"]
     stderr = (error.stderr or "").strip()
@@ -39,17 +22,6 @@ def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError)
     if stdout:
         details.append(f"stdout: {stdout}")
     return "\n".join(details)
-
-
-def _format_generated_resource_validation_failure(error: subprocess.CalledProcessError) -> str:
-    details = ["Generated Kubernetes resource validation failed"]
-    stderr = (error.stderr or "").strip()
-    stdout = (error.stdout or "").strip()
-    if stderr:
-        details.append(stderr)
-    elif stdout:
-        details.append(stdout)
-    return ":\n".join(details)
 
 
 class ScriptRunner:
@@ -230,8 +202,6 @@ class ScriptRunner:
         self,
         config_data: str,
         args: list[str],
-        *,
-        skip_dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Submit workflow using config processor submission script.
 
@@ -242,8 +212,6 @@ class ScriptRunner:
         Args:
             config_data: User configuration YAML as string
             args: Command line arguments to pass to the submission script
-            skip_dry_run: Skip the script's default generated-resource dry-run.
-
         Returns:
             Dict with workflow_name, workflow_uid, and namespace
 
@@ -265,12 +233,8 @@ class ScriptRunner:
             if not script_path.exists():
                 raise FileNotFoundError(f"Script not found: {script_path}")
 
-            script_args = [str(script_path), temp_file_path] + args
-            if skip_dry_run:
-                script_args.append("--skip-dry-run")
-
             result = subprocess.run(
-                script_args,
+                [str(script_path), temp_file_path] + args,
                 capture_output=True, text=True, check=True,
                 cwd=str(self.script_dir)
             )
@@ -307,62 +271,6 @@ class ScriptRunner:
                 logger.debug(f"Cleaned up temporary file: {temp_file_path}")
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
-
-    def validate_generated_resources(
-        self,
-        config_data: str,
-        workflow_name: str = "migration-workflow",
-    ) -> Dict[str, Any]:
-        """Run submit-script dry-run validation and return generated resource provenance."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as config_file:
-            config_file.write(config_data)
-            config_file_path = config_file.name
-        resolved_resources_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        resolved_resources_path = resolved_resources_file.name
-        resolved_resources_file.close()
-
-        try:
-            script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
-            if not script_path.exists():
-                raise FileNotFoundError(f"Script not found: {script_path}")
-
-            try:
-                subprocess.run(
-                    [
-                        str(script_path),
-                        config_file_path,
-                        "--dry-run",
-                        "--workflow-name", workflow_name,
-                        "--unique-run-nonce", "0",
-                        "--resolved-resources-output", resolved_resources_path,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    cwd=str(self.script_dir),
-                )
-            except subprocess.CalledProcessError as e:
-                raise GeneratedResourceValidationError(
-                    _format_generated_resource_validation_failure(e),
-                    stdout=e.stdout or "",
-                    stderr=e.stderr or "",
-                    resolved_resources=_read_json_file(resolved_resources_path),
-                ) from e
-            except OSError as e:
-                raise GeneratedResourceValidationError(
-                    f"Generated Kubernetes resource validation failed:\n{e}",
-                    resolved_resources=_read_json_file(resolved_resources_path),
-                ) from e
-            return _read_json_file(resolved_resources_path)
-        finally:
-            try:
-                os.unlink(config_file_path)
-            except OSError as e:
-                logger.warning(f"Failed to clean up temporary file {config_file_path}: {e}")
-            try:
-                os.unlink(resolved_resources_path)
-            except OSError as e:
-                logger.warning(f"Failed to clean up temporary file {resolved_resources_path}: {e}")
 
     def _parse_kubectl_output(self, output: str) -> str:
         """Parse kubectl output to extract workflow name.
@@ -422,14 +330,3 @@ class ScriptRunner:
     def validate_config(self, config_data: str):
         """Validate config against Zod schema. Returns dict with 'valid' bool and optional 'errors'."""
         return self._run_config_processor_with_temp_file("validate", config_data)
-
-
-def _read_json_file(path_value: str) -> Dict[str, Any]:
-    path = Path(path_value)
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        logger.debug("Failed to read JSON file from %s", path, exc_info=True)
-        return {}

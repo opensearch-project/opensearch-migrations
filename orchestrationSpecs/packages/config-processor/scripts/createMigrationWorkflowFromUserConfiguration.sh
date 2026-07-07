@@ -8,7 +8,7 @@ fi
 # Check if config filename argument is provided
 if [ $# -eq 0 ]; then
     echo "Error: CONFIG_FILENAME argument is required"
-    echo "Usage: $0 <config-filename> [--dry-run] [--skip-dry-run] [additional-args...]"
+    echo "Usage: $0 <config-filename> [additional-args...]"
     exit 1
 fi
 
@@ -19,28 +19,9 @@ shift  # Remove first argument, leaving any additional args in $@
 # It is not part of INITIALIZE_CMD input, so filter it out while preserving all
 # other arguments for the config processor.
 RUN_NONCE=""
-DRY_RUN_ONLY=0
-SKIP_DRY_RUN=0
-RESOLVED_RESOURCES_OUTPUT=""
 ALL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run)
-            DRY_RUN_ONLY=1
-            shift
-            ;;
-        --skip-dry-run|--skip-resource-validation)
-            SKIP_DRY_RUN=1
-            shift
-            ;;
-        --resolved-resources-output)
-            if [[ $# -lt 2 ]]; then
-                echo "Error: --resolved-resources-output requires a value" >&2
-                exit 1
-            fi
-            RESOLVED_RESOURCES_OUTPUT="$2"
-            shift 2
-            ;;
         --unique-run-nonce)
             if [[ $# -lt 2 ]]; then
                 echo "Error: --unique-run-nonce requires a value" >&2
@@ -56,11 +37,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$DRY_RUN_ONLY" == "1" && "$SKIP_DRY_RUN" == "1" ]]; then
-    echo "Error: --dry-run cannot be combined with --skip-dry-run" >&2
-    exit 1
-fi
-
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${NODEJS:=node}"
@@ -72,13 +48,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMP_DIR=$(mktemp -d)
 
 # Ensure cleanup on exit
-cleanup() {
-    if [[ -n "$RESOLVED_RESOURCES_OUTPUT" && -f "$TEMP_DIR/resolvedMigrationResources.json" ]]; then
-        cp "$TEMP_DIR/resolvedMigrationResources.json" "$RESOLVED_RESOURCES_OUTPUT"
-    fi
-    rm -rf "$TEMP_DIR"
-}
-trap cleanup EXIT
+trap "rm -rf $TEMP_DIR" EXIT
 
 if [ -n "${EPOCHREALTIME:-}" ]; then
     RUN_SECONDS="${EPOCHREALTIME%.*}"
@@ -100,18 +70,6 @@ WORKFLOW_NAME="migration-workflow"
 
 echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" "${ALL_ARGS[@]}"
-
-if [[ "$SKIP_DRY_RUN" != "1" ]]; then
-    echo "Validating generated Kubernetes resources..."
-    if [ -d "$TEMP_DIR/resources" ]; then
-        kubectl apply --dry-run=server -f "$TEMP_DIR/resources" >/dev/null
-    fi
-fi
-
-if [[ "$DRY_RUN_ONLY" == "1" ]]; then
-    echo "Dry run completed successfully."
-    exit 0
-fi
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
