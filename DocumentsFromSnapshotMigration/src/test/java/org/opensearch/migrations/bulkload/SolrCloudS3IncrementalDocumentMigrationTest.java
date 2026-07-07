@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -20,9 +21,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -34,29 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Issue #3147 — end-to-end proof that a <em>wrapped, incremental (SIP-12)</em> SolrCloud 8 backup
- * uploaded to S3 verbatim migrates through the real {@code RfsMigrateDocuments} S3 path.
- *
- * <p>This is the layout produced by SolrCloud 8.9+ when {@code BACKUP} is invoked with
- * {@code incremental=true} (the backup here is generated fresh; its name is arbitrary):
- * <pre>
- *   &lt;snapshotName&gt;/&lt;collection&gt;/
- *     backup_0.properties           (indexVersion=8.11.x)
- *     index/&lt;UUID files&gt;            (content-addressed Lucene files, no segments_N name)
- *     shard_backup_metadata/md_shardN_0.json   (logical Lucene name → UUID mapping, one per shard)
- *     zk_backup_0/configs/&lt;name&gt;/schema.xml
- * </pre>
- *
- * <p>Coverage gap this closes: {@link org.opensearch.migrations.bulkload.solr.SolrBackupSource}'s
- * UUID-mapped read path ({@code readLuceneIndexMapped} + {@code MappedDirectory}) and
- * {@link org.opensearch.migrations.SolrBackupDiscovery}'s per-UUID lazy S3 download
- * ({@code prepareShard}) were exercised only from a local directory (see
- * {@code SolrSnapshotToOpenSearchTest}) or, over S3, only for <em>bare non-incremental</em> layouts
- * (see {@code SolrBareS3DocumentMigrationTest}). Nothing drove the wrapped incremental layout
- * through the S3 CLI path until now.
- *
- * <p>Lucene 8.11 segments are read via the Lucene 9 reader's backward-codecs (Solr 8 → Lucene 9
- * in {@code SolrBackupSource.newLuceneReader}).
+ * Migrates a wrapped, incremental (SIP-12) SolrCloud backup uploaded verbatim to S3 through the
+ * {@code RfsMigrateDocuments} S3 path, for both Solr 8 and Solr 9.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -68,9 +49,6 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
     private static final String REGION = "us-east-1";
     private static final String LOCALSTACK_ALIAS = "localstack";
     private static final String COLLECTION = "movies";
-    // Arbitrary generated-backup name; for a wrapped SolrCloud backup the target index is the
-    // collection name (COLLECTION), not the snapshot name, so this string carries no meaning.
-    private static final String SNAPSHOT_NAME = "solrcloud8_incremental_backup";
     private static final int NUM_SHARDS = 2;
     private static final int DOC_COUNT = 20;
 
@@ -95,65 +73,75 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
         .withNetwork(NETWORK)
         .withNetworkAliases(LOCALSTACK_ALIAS);
 
-    @Container
-    static final SolrClusterContainer SOLR_CLOUD = SolrClusterContainer.cloud(SolrClusterContainer.SOLR_8);
-
     @BeforeAll
     static void createBucket() throws Exception {
         LOCAL_STACK.execInContainer("awslocal", "s3", "mb", "s3://" + BUCKET_NAME);
     }
 
+    static Stream<SolrClusterContainer.SolrVersion> solrCloudVersions() {
+        return Stream.of(SolrClusterContainer.SOLR_8, SolrClusterContainer.SOLR_9);
+    }
+
     @TempDir
     Path tempDir;
 
-    @Test
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("solrCloudVersions")
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
-    void wrappedIncrementalSolrCloud8BackupInS3MigratesAllShards() throws Exception {
-        createCollection();
-        indexDocuments(DOC_COUNT);
-        var localBackup = incrementalBackupAndCopyToHost();
+    void wrappedIncrementalSolrCloudBackupInS3MigratesAllShards(
+        SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        // Per-version snapshot prefix so the two invocations don't collide on the shared bucket.
+        var snapshotName = "solrcloud" + version.major() + "_incremental_backup";
 
-        // Guard: assert the copied tree really is the wrapped incremental (UUID) layout — otherwise
-        // this test would silently degrade into re-covering the non-incremental path.
-        var collectionDir = localBackup.resolve(COLLECTION);
-        assertTrue(Files.isDirectory(collectionDir.resolve("index")),
-            "expected an index/ dir of UUID files in the incremental backup");
-        assertTrue(Files.isDirectory(collectionDir.resolve("shard_backup_metadata")),
-            "expected shard_backup_metadata/ (SIP-12 incremental marker)");
-        var shardMdCount = countMatchingFiles(collectionDir.resolve("shard_backup_metadata"), "md_", ".json");
-        assertEquals(NUM_SHARDS, shardMdCount, "expected one shard-metadata file per shard");
+        try (var solr = SolrClusterContainer.cloud(version)) {
+            solr.start();
 
-        uploadVerbatimToS3(localBackup, SNAPSHOT_NAME);
+            createCollection(solr);
+            indexDocuments(solr, DOC_COUNT);
+            var localBackup = incrementalBackupAndCopyToHost(solr, snapshotName);
 
-        try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
-            CompletableFuture.runAsync(target::start).join();
+            // Confirm the copied tree is the wrapped incremental (UUID) layout, not the non-incremental path.
+            var collectionDir = localBackup.resolve(COLLECTION);
+            assertTrue(Files.isDirectory(collectionDir.resolve("index")),
+                "expected an index/ dir of UUID files in the incremental backup");
+            assertTrue(Files.isDirectory(collectionDir.resolve("shard_backup_metadata")),
+                "expected shard_backup_metadata/ (SIP-12 incremental marker)");
+            var shardMdCount = countMatchingFiles(collectionDir.resolve("shard_backup_metadata"), "md_", ".json");
+            assertEquals(NUM_SHARDS, shardMdCount, "expected one shard-metadata file per shard");
 
-            // RFS migrates one shard per process invocation; re-run until no work is left.
-            for (int attempt = 0; attempt < NUM_SHARDS + 2; attempt++) {
-                var result = runProcessCapturing(buildMigrateProcess(target.getUrl()), 300);
-                log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
-                    .addArgument(attempt).addArgument(result.exitCode).log();
-                if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
-                    || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
-                    break;
+            uploadVerbatimToS3(localBackup, snapshotName);
+
+            try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
+                CompletableFuture.runAsync(target::start).join();
+
+                // RFS migrates one shard per process invocation; re-run until no work is left.
+                for (int attempt = 0; attempt < NUM_SHARDS + 2; attempt++) {
+                    var result = runProcessCapturing(buildMigrateProcess(target.getUrl(), snapshotName, version), 300);
+                    log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
+                        .addArgument(attempt).addArgument(result.exitCode).log();
+                    if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
+                        || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
+                        break;
+                    }
+                    assertEquals(0, result.exitCode, "each shard migration should succeed");
                 }
-                assertEquals(0, result.exitCode, "each shard migration should succeed");
-            }
 
-            var targetOps = new ClusterOperations(target);
-            targetOps.get("/" + COLLECTION + "/_refresh");
-            var countResp = targetOps.get("/" + COLLECTION + "/_count");
-            assertEquals(200, countResp.getKey(), "target index '" + COLLECTION + "' should exist");
-            var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
-            assertEquals(DOC_COUNT, count,
-                "all docs across all " + NUM_SHARDS + " shards should migrate from the S3 incremental backup");
+                var targetOps = new ClusterOperations(target);
+                targetOps.get("/" + COLLECTION + "/_refresh");
+                var countResp = targetOps.get("/" + COLLECTION + "/_count");
+                assertEquals(200, countResp.getKey(), "target index '" + COLLECTION + "' should exist");
+                var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
+                assertEquals(DOC_COUNT, count,
+                    "all docs across all " + NUM_SHARDS + " shards should migrate from the S3 incremental backup");
+            }
         }
     }
 
     // ---- Solr collection + docs ----
 
-    private void createCollection() throws Exception {
-        var create = SOLR_CLOUD.execInContainer("curl", "-s",
+    private void createCollection(SolrClusterContainer solr) throws Exception {
+        var create = solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=" + COLLECTION
                 + "&numShards=" + NUM_SHARDS
@@ -161,12 +149,12 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
                 + "&maxShardsPerNode=" + NUM_SHARDS
                 + "&wt=json");
         log.atInfo().setMessage("Create collection: {}").addArgument(create.getStdout()).log();
-        waitForCollectionActive();
+        waitForCollectionActive(solr);
     }
 
-    private void waitForCollectionActive() throws Exception {
+    private void waitForCollectionActive(SolrClusterContainer solr) throws Exception {
         for (int i = 0; i < 60; i++) {
-            var status = SOLR_CLOUD.execInContainer("curl", "-s",
+            var status = solr.execInContainer("curl", "-s",
                 "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&collection="
                     + COLLECTION + "&wt=json");
             var body = status.getStdout();
@@ -182,7 +170,7 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
         throw new IllegalStateException("Collection " + COLLECTION + " did not become active");
     }
 
-    private void indexDocuments(int count) throws Exception {
+    private void indexDocuments(SolrClusterContainer solr, int count) throws Exception {
         var sb = new StringBuilder("[");
         for (int i = 1; i <= count; i++) {
             if (i > 1) {
@@ -191,22 +179,21 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
             sb.append("{\"id\":\"doc").append(i).append("\",\"title_s\":\"Document ").append(i).append("\"}");
         }
         sb.append("]");
-        SOLR_CLOUD.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+        solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
             "http://localhost:8983/solr/" + COLLECTION + "/update?commit=true",
             "-d", sb.toString());
     }
 
     // ---- Incremental BACKUP → host (preserving the <collection>/ wrapper) ----
 
-    private Path incrementalBackupAndCopyToHost() throws Exception {
+    private Path incrementalBackupAndCopyToHost(SolrClusterContainer solr, String snapshotName) throws Exception {
         var backupLocation = "/var/solr/data/backups";
-        SOLR_CLOUD.execInContainer("mkdir", "-p", backupLocation);
+        solr.execInContainer("mkdir", "-p", backupLocation);
 
-        // incremental=true forces the SIP-12 UUID layout (index/<UUID> + shard_backup_metadata/)
-        // rather than Solr 8's non-incremental default.
-        var backup = SOLR_CLOUD.execInContainer("curl", "-s",
+        // incremental=true forces the SIP-12 UUID layout; default in Solr 9, opt-in in Solr 8.x.
+        var backup = solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=BACKUP"
-                + "&name=" + SNAPSHOT_NAME
+                + "&name=" + snapshotName
                 + "&collection=" + COLLECTION
                 + "&location=" + backupLocation
                 + "&incremental=true"
@@ -216,12 +203,11 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
             throw new IllegalStateException("Incremental BACKUP failed: " + backup.getStdout());
         }
 
-        // Poll on the incremental completion signal: backup_*.properties + md_*.json both present
-        // (the pair guards against triggering on a partial write). No segments_* file is written.
-        var backupDir = backupLocation + "/" + SNAPSHOT_NAME;
+        // Incremental backup is complete once backup_*.properties and md_*.json are both present.
+        var backupDir = backupLocation + "/" + snapshotName;
         boolean ready = false;
         for (int i = 0; i < 60; i++) {
-            var check = SOLR_CLOUD.execInContainer("sh", "-c",
+            var check = solr.execInContainer("sh", "-c",
                 "if find \"" + backupDir + "\" -name 'backup_*.properties' -type f 2>/dev/null | grep -q . "
                 + "  && find \"" + backupDir + "\" -name 'md_*.json' -type f 2>/dev/null | grep -q .; "
                 + "then echo OK; fi");
@@ -232,19 +218,18 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
             Thread.sleep(1000);
         }
         if (!ready) {
-            var listing = SOLR_CLOUD.execInContainer("sh", "-c", "ls -laR " + backupDir + " 2>&1 | head -200");
+            var listing = solr.execInContainer("sh", "-c", "ls -laR " + backupDir + " 2>&1 | head -200");
             throw new IllegalStateException(
                 "Incremental SolrCloud BACKUP did not complete under " + backupDir
                     + " within 60s.\nContainer listing:\n" + listing.getStdout());
         }
 
-        // Copy <backupDir>/<collection>/... to host, preserving the <collection>/ wrapper directory
-        // so the on-S3 shape is s3://bucket/<snapshotName>/<collection>/... (the wrapped layout).
+        // Keep the <collection>/ wrapper so S3 holds s3://bucket/<snapshotName>/<collection>/...
         var containerCollectionDir = backupDir + "/" + COLLECTION;
         var localBackupRoot = tempDir.resolve("incremental_backup");
         var localCollectionDir = localBackupRoot.resolve(COLLECTION);
         Files.createDirectories(localCollectionDir);
-        var find = SOLR_CLOUD.execInContainer("find", containerCollectionDir, "-type", "f");
+        var find = solr.execInContainer("find", containerCollectionDir, "-type", "f");
         for (var line : find.getStdout().trim().split("\n")) {
             if (line.isEmpty()) {
                 continue;
@@ -252,7 +237,7 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
             var rel = line.substring(containerCollectionDir.length()).replaceFirst("^/", "");
             var localFile = localCollectionDir.resolve(rel);
             Files.createDirectories(localFile.getParent());
-            SOLR_CLOUD.copyFileFromContainer(line, localFile.toString());
+            solr.copyFileFromContainer(line, localFile.toString());
         }
         return localBackupRoot;
     }
@@ -278,15 +263,17 @@ public class SolrCloudS3IncrementalDocumentMigrationTest {
 
     // ---- RfsMigrateDocuments subprocess ----
 
-    private ProcessBuilder buildMigrateProcess(String targetUrl) throws Exception {
+    private ProcessBuilder buildMigrateProcess(
+        String targetUrl, String snapshotName, SolrClusterContainer.SolrVersion version
+    ) throws Exception {
         var s3LocalDir = tempDir.resolve("s3-download");
         Files.createDirectories(s3LocalDir);
 
         String classpath = System.getProperty("java.class.path");
         String javaExecutable = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         var args = new ArrayList<>(List.of(
-            "--snapshot-name", SNAPSHOT_NAME,
-            "--source-version", "SOLR_" + SolrClusterContainer.SOLR_8.tag(),
+            "--snapshot-name", snapshotName,
+            "--source-version", "SOLR_" + version.tag(),
             "--s3-repo-uri", "s3://" + BUCKET_NAME,
             "--s3-region", REGION,
             "--s3-local-dir", s3LocalDir.toString(),

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -20,9 +21,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -33,14 +35,12 @@ import org.testcontainers.utility.MountableFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Issue #3147 — end-to-end proof that a bare SolrCloud 7 backup uploaded to S3 <em>verbatim</em>
- * (no manual reshape) migrates through the real {@code RfsMigrateDocuments} S3 path.
- *
- * <p>Solr 7 has no S3 backup repository, so this mirrors the real customer flow: BACKUP to local
- * disk, then upload the backup tree to S3 unchanged. The on-disk shape is the bare layout
- * ({@code <snapshotName>/{backup.properties, snapshot.shardN/, zk_backup/}}), and the target index
- * name is recovered from {@code backup.properties} — exercised here against real S3 (LocalStack),
- * which is a different code path from the filesystem discovery covered by unit tests.
+ * Migrates a bare, non-incremental SolrCloud backup uploaded to S3 verbatim through the
+ * {@code RfsMigrateDocuments} S3 path, for Solr 6, 7, 8, and 9. The non-incremental backup writes
+ * {@code backup.properties} + {@code snapshot.shardN/} + {@code zk_backup/} directly under the
+ * backup name (no collection wrapper), so the target index name is recovered from
+ * {@code backup.properties} rather than supplied via an override. It is the default in Solr 6/7/8
+ * and requires {@code incremental=false} in Solr 9.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -52,7 +52,6 @@ public class SolrBareS3DocumentMigrationTest {
     private static final String REGION = "us-east-1";
     private static final String LOCALSTACK_ALIAS = "localstack";
     private static final String COLLECTION = "cloud_test";
-    private static final String SNAPSHOT_NAME = "cloud_backup";
     private static final int NUM_SHARDS = 2;
     private static final int DOC_COUNT = 20;
 
@@ -77,66 +76,89 @@ public class SolrBareS3DocumentMigrationTest {
         .withNetwork(NETWORK)
         .withNetworkAliases(LOCALSTACK_ALIAS);
 
-    @Container
-    static final SolrClusterContainer SOLR_CLOUD = SolrClusterContainer.cloud(SolrClusterContainer.SOLR_7);
-
     @BeforeAll
     static void createBucket() throws Exception {
         LOCAL_STACK.execInContainer("awslocal", "s3", "mb", "s3://" + BUCKET_NAME);
     }
 
+    static Stream<SolrClusterContainer.SolrVersion> versions() {
+        return Stream.of(
+            SolrClusterContainer.SOLR_6, SolrClusterContainer.SOLR_7,
+            SolrClusterContainer.SOLR_8, SolrClusterContainer.SOLR_9);
+    }
+
     @TempDir
     Path tempDir;
 
-    @Test
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("versions")
     @Timeout(value = 8, unit = TimeUnit.MINUTES)
-    void bareSolrCloud7BackupInS3MigratesToRecoveredIndexName() throws Exception {
-        createCollection();
-        indexDocuments(DOC_COUNT);
-        var localBackup = backupAndCopyToHost();
-        uploadVerbatimToS3(localBackup, SNAPSHOT_NAME);
+    void bareSolrCloudBackupInS3MigratesToRecoveredIndexName(
+        SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        var snapshotName = "cloud_backup_solr" + version.major();
 
-        try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
-            CompletableFuture.runAsync(target::start).join();
+        try (var solr = SolrClusterContainer.cloud(version)) {
+            solr.start();
 
-            // RFS migrates one shard per process invocation; re-run until no work is left.
-            for (int attempt = 0; attempt < NUM_SHARDS + 2; attempt++) {
-                var result = runProcessCapturing(buildMigrateProcess(target.getUrl()), 300);
-                log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
-                    .addArgument(attempt).addArgument(result.exitCode).log();
-                if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
-                    || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
-                    break;
+            createCollection(solr, version);
+            indexDocuments(solr, DOC_COUNT);
+            var localBackup = backupAndCopyToHost(solr, snapshotName, version);
+            uploadVerbatimToS3(localBackup, snapshotName);
+
+            try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
+                CompletableFuture.runAsync(target::start).join();
+
+                // RFS migrates one shard per process invocation; re-run until no work is left.
+                for (int attempt = 0; attempt < NUM_SHARDS + 2; attempt++) {
+                    var result = runProcessCapturing(buildMigrateProcess(target.getUrl(), snapshotName, version), 300);
+                    log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
+                        .addArgument(attempt).addArgument(result.exitCode).log();
+                    if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
+                        || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
+                        break;
+                    }
+                    assertEquals(0, result.exitCode, "each shard migration should succeed");
                 }
-                assertEquals(0, result.exitCode, "each shard migration should succeed");
-            }
 
-            var targetOps = new ClusterOperations(target);
-            targetOps.get("/" + COLLECTION + "/_refresh");
-            var countResp = targetOps.get("/" + COLLECTION + "/_count");
-            assertEquals(200, countResp.getKey(), "target index '" + COLLECTION + "' should exist");
-            var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
-            assertEquals(DOC_COUNT, count, "all docs should be migrated into the recovered index name");
+                var targetOps = new ClusterOperations(target);
+                targetOps.get("/" + COLLECTION + "/_refresh");
+                var countResp = targetOps.get("/" + COLLECTION + "/_count");
+                assertEquals(200, countResp.getKey(), "target index '" + COLLECTION + "' should exist");
+                var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
+                assertEquals(DOC_COUNT, count, "all docs should be migrated into the recovered index name");
+            }
         }
     }
 
     // ---- Solr backup → host ----
 
-    private void createCollection() throws Exception {
-        var create = SOLR_CLOUD.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/admin/collections?action=CREATE"
-                + "&name=" + COLLECTION
-                + "&numShards=" + NUM_SHARDS
-                + "&replicationFactor=1"
-                + "&maxShardsPerNode=" + NUM_SHARDS
-                + "&wt=json");
-        log.atInfo().setMessage("Create collection: {}").addArgument(create.getStdout()).log();
-        waitForCollectionActive();
+    private void createCollection(SolrClusterContainer solr, SolrClusterContainer.SolrVersion version) throws Exception {
+        if (version.major() <= 6) {
+            // Solr 6 cloud has no auto-provisioned _default configset, so the Collections API CREATE
+            // has no config to use; `solr create` uploads a built-in configset as part of creation.
+            var create = solr.execInContainer("solr", "create", "-c", COLLECTION,
+                "-shards", String.valueOf(NUM_SHARDS), "-replicationFactor", "1");
+            log.atInfo().setMessage("solr create: {}").addArgument(create.getStdout()).log();
+            if (create.getExitCode() != 0) {
+                throw new IllegalStateException("solr create failed: " + create.getStderr());
+            }
+        } else {
+            var create = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + COLLECTION
+                    + "&numShards=" + NUM_SHARDS
+                    + "&replicationFactor=1"
+                    + "&maxShardsPerNode=" + NUM_SHARDS
+                    + "&wt=json");
+            log.atInfo().setMessage("Create collection: {}").addArgument(create.getStdout()).log();
+        }
+        waitForCollectionActive(solr);
     }
 
-    private void waitForCollectionActive() throws Exception {
+    private void waitForCollectionActive(SolrClusterContainer solr) throws Exception {
         for (int i = 0; i < 60; i++) {
-            var status = SOLR_CLOUD.execInContainer("curl", "-s",
+            var status = solr.execInContainer("curl", "-s",
                 "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&collection="
                     + COLLECTION + "&wt=json");
             var body = status.getStdout();
@@ -152,7 +174,7 @@ public class SolrBareS3DocumentMigrationTest {
         throw new IllegalStateException("Collection " + COLLECTION + " did not become active");
     }
 
-    private void indexDocuments(int count) throws Exception {
+    private void indexDocuments(SolrClusterContainer solr, int count) throws Exception {
         var sb = new StringBuilder("[");
         for (int i = 1; i <= count; i++) {
             if (i > 1) {
@@ -161,13 +183,15 @@ public class SolrBareS3DocumentMigrationTest {
             sb.append("{\"id\":\"doc").append(i).append("\",\"title_s\":\"Document ").append(i).append("\"}");
         }
         sb.append("]");
-        SOLR_CLOUD.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+        solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
             "http://localhost:8983/solr/" + COLLECTION + "/update?commit=true",
             "-d", sb.toString());
     }
 
-    private Path backupAndCopyToHost() throws Exception {
-        var probe = SOLR_CLOUD.execInContainer("sh", "-c",
+    private Path backupAndCopyToHost(
+        SolrClusterContainer solr, String snapshotName, SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        var probe = solr.execInContainer("sh", "-c",
             "for d in /var/solr/data /opt/solr/server/solr; do "
             + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; done");
         var solrDataDir = probe.getStdout().trim();
@@ -175,22 +199,25 @@ public class SolrBareS3DocumentMigrationTest {
             throw new IllegalStateException("No writable Solr data directory found in container");
         }
         var backupLocation = solrDataDir + "/backups";
-        SOLR_CLOUD.execInContainer("mkdir", "-p", backupLocation);
+        solr.execInContainer("mkdir", "-p", backupLocation);
 
-        var backup = SOLR_CLOUD.execInContainer("curl", "-s",
+        // Solr 9 defaults to incremental; force the bare non-incremental layout. Solr 7 predates the flag.
+        var incrementalParam = version.major() >= 8 ? "&incremental=false" : "";
+        var backup = solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=BACKUP"
-                + "&name=" + SNAPSHOT_NAME
+                + "&name=" + snapshotName
                 + "&collection=" + COLLECTION
                 + "&location=" + backupLocation
+                + incrementalParam
                 + "&wt=json");
         if (backup.getStdout().contains("\"status\":500") || backup.getStdout().contains("\"status\":400")) {
             throw new IllegalStateException("BACKUP failed: " + backup.getStdout());
         }
 
-        var containerBackupDir = backupLocation + "/" + SNAPSHOT_NAME;
+        var containerBackupDir = backupLocation + "/" + snapshotName;
         var localBackupRoot = tempDir.resolve("bare_backup");
         Files.createDirectories(localBackupRoot);
-        var find = SOLR_CLOUD.execInContainer("find", containerBackupDir, "-type", "f");
+        var find = solr.execInContainer("find", containerBackupDir, "-type", "f");
         for (var line : find.getStdout().trim().split("\n")) {
             if (line.isEmpty()) {
                 continue;
@@ -198,7 +225,7 @@ public class SolrBareS3DocumentMigrationTest {
             var rel = line.substring(containerBackupDir.length()).replaceFirst("^/", "");
             var localFile = localBackupRoot.resolve(rel);
             Files.createDirectories(localFile.getParent());
-            SOLR_CLOUD.copyFileFromContainer(line, localFile.toString());
+            solr.copyFileFromContainer(line, localFile.toString());
         }
         return localBackupRoot;
     }
@@ -215,15 +242,17 @@ public class SolrBareS3DocumentMigrationTest {
 
     // ---- RfsMigrateDocuments subprocess ----
 
-    private ProcessBuilder buildMigrateProcess(String targetUrl) throws Exception {
-        var s3LocalDir = tempDir.resolve("s3-download");
+    private ProcessBuilder buildMigrateProcess(
+        String targetUrl, String snapshotName, SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        var s3LocalDir = tempDir.resolve("s3-download-" + snapshotName);
         Files.createDirectories(s3LocalDir);
 
         String classpath = System.getProperty("java.class.path");
         String javaExecutable = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         var args = new ArrayList<>(List.of(
-            "--snapshot-name", SNAPSHOT_NAME,
-            "--source-version", "SOLR_" + SolrClusterContainer.SOLR_7.tag(),
+            "--snapshot-name", snapshotName,
+            "--source-version", "SOLR_" + version.tag(),
             "--s3-repo-uri", "s3://" + BUCKET_NAME,
             "--s3-region", REGION,
             "--s3-local-dir", s3LocalDir.toString(),

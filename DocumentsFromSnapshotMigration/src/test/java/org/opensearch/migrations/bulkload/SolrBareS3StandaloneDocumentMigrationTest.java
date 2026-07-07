@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -20,9 +21,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -33,14 +35,12 @@ import org.testcontainers.utility.MountableFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Issue #3147 — end-to-end proof that a standalone Solr 7 backup uploaded to S3 <em>verbatim</em>
- * migrates through the real {@code RfsMigrateDocuments} S3 path.
- *
- * <p>A standalone replication-handler backup is a flat {@code snapshot.<name>/} Lucene index with no
- * {@code zk_backup}/{@code backup.properties}, and nothing records the core name — so the target
- * index name is supplied via {@code --solr-collection-name} (the "derive with override" decision).
- * This exercises the STANDALONE branch of the S3 discovery: detection from an S3 listing and the
- * eager whole-index download (the shard data is the data dir itself).
+ * Migrates a standalone Solr backup uploaded to S3 verbatim through the {@code RfsMigrateDocuments}
+ * S3 path, for Solr 7, 8, and 9. A standalone replication-handler backup is a flat
+ * {@code snapshot.<name>/} Lucene index with no {@code zk_backup}/{@code backup.properties} and no
+ * recorded core name, so the target index name is supplied via {@code --solr-collection-name}. The
+ * {@code snapshot.<name>/} wrapper is preserved on S3, exercising the wrapped STANDALONE branch of
+ * the S3 discovery (distinct from the flat-root branch).
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -53,7 +53,6 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
     private static final String LOCALSTACK_ALIAS = "localstack";
     private static final String CORE = "standalone_core";
     private static final String BACKUP_NAME = "standalone_backup";
-    private static final String SNAPSHOT_NAME = "standalone_snap";
     private static final int DOC_COUNT = 20;
 
     static {
@@ -77,60 +76,72 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
         .withNetwork(NETWORK)
         .withNetworkAliases(LOCALSTACK_ALIAS);
 
-    @Container
-    static final SolrClusterContainer SOLR = new SolrClusterContainer(SolrClusterContainer.SOLR_7);
-
     @BeforeAll
     static void createBucket() throws Exception {
         LOCAL_STACK.execInContainer("awslocal", "s3", "mb", "s3://" + BUCKET_NAME);
     }
 
+    static Stream<SolrClusterContainer.SolrVersion> versions() {
+        return Stream.of(
+            SolrClusterContainer.SOLR_7, SolrClusterContainer.SOLR_8, SolrClusterContainer.SOLR_9);
+    }
+
     @TempDir
     Path tempDir;
 
-    @Test
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("versions")
     @Timeout(value = 8, unit = TimeUnit.MINUTES)
-    void bareStandaloneSolr7BackupInS3MigratesToOverriddenIndexName() throws Exception {
-        createCore();
-        indexDocuments(DOC_COUNT);
-        var localBackup = backupAndCopyToHost();
-        uploadVerbatimToS3(localBackup, SNAPSHOT_NAME);
+    void wrappedStandaloneInS3MigratesToOverriddenIndexName(
+        SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        var index = "standalone_solr" + version.major();
+        var snapshotName = "snapshot_" + index;
 
-        try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
-            CompletableFuture.runAsync(target::start).join();
+        try (var solr = new SolrClusterContainer(version)) {
+            solr.start();
 
-            // RFS migrates one shard per process invocation; re-run until no work is left.
-            for (int attempt = 0; attempt < 3; attempt++) {
-                var result = runProcessCapturing(buildMigrateProcess(target.getUrl()), 300);
-                log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
-                    .addArgument(attempt).addArgument(result.exitCode).log();
-                if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
-                    || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
-                    break;
+            createCore(solr);
+            indexDocuments(solr, DOC_COUNT);
+            var localBackup = backupAndCopyToHost(solr);
+            uploadVerbatimToS3(localBackup, snapshotName);
+
+            try (var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)) {
+                CompletableFuture.runAsync(target::start).join();
+
+                // RFS migrates one shard per process invocation; re-run until no work is left.
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    var result = runProcessCapturing(buildMigrateProcess(target.getUrl(), snapshotName, index, version), 300);
+                    log.atInfo().setMessage("RfsMigrateDocuments attempt {} exited with {}")
+                        .addArgument(attempt).addArgument(result.exitCode).log();
+                    if (result.exitCode == RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE
+                        || result.exitCode == RfsMigrateDocuments.NO_WORK_AVAILABLE_EXIT_CODE) {
+                        break;
+                    }
+                    assertEquals(0, result.exitCode, "each shard migration should succeed");
                 }
-                assertEquals(0, result.exitCode, "each shard migration should succeed");
-            }
 
-            var targetOps = new ClusterOperations(target);
-            targetOps.get("/" + CORE + "/_refresh");
-            var countResp = targetOps.get("/" + CORE + "/_count");
-            assertEquals(200, countResp.getKey(),
-                "target index '" + CORE + "' (from --solr-collection-name) should exist");
-            var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
-            assertEquals(DOC_COUNT, count, "all docs should be migrated into the overridden index name");
+                var targetOps = new ClusterOperations(target);
+                targetOps.get("/" + index + "/_refresh");
+                var countResp = targetOps.get("/" + index + "/_count");
+                assertEquals(200, countResp.getKey(),
+                    "target index '" + index + "' (from --solr-collection-name) should exist");
+                var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
+                assertEquals(DOC_COUNT, count, "all docs should be migrated into the overridden index name");
+            }
         }
     }
 
     // ---- Solr backup → host ----
 
-    private void createCore() throws Exception {
-        var result = SOLR.execInContainer("solr", "create_core", "-c", CORE);
+    private void createCore(SolrClusterContainer solr) throws Exception {
+        var result = solr.execInContainer("solr", "create_core", "-c", CORE);
         if (result.getExitCode() != 0) {
             throw new IllegalStateException("Failed to create Solr core: " + result.getStderr());
         }
     }
 
-    private void indexDocuments(int count) throws Exception {
+    private void indexDocuments(SolrClusterContainer solr, int count) throws Exception {
         var sb = new StringBuilder("[");
         for (int i = 1; i <= count; i++) {
             if (i > 1) {
@@ -139,13 +150,13 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
             sb.append("{\"id\":\"doc").append(i).append("\",\"title_s\":\"Document ").append(i).append("\"}");
         }
         sb.append("]");
-        SOLR.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+        solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
             "http://localhost:8983/solr/" + CORE + "/update?commit=true",
             "-d", sb.toString());
     }
 
-    private Path backupAndCopyToHost() throws Exception {
-        var probe = SOLR.execInContainer("sh", "-c",
+    private Path backupAndCopyToHost(SolrClusterContainer solr) throws Exception {
+        var probe = solr.execInContainer("sh", "-c",
             "for d in /var/solr/data /opt/solr/server/solr; do "
             + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; done");
         var solrDataDir = probe.getStdout().trim();
@@ -153,7 +164,7 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
             throw new IllegalStateException("No writable Solr data directory found in container");
         }
 
-        SOLR.execInContainer("curl", "-s",
+        solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/" + CORE
                 + "/replication?command=backup&location=" + solrDataDir + "&name=" + BACKUP_NAME);
 
@@ -161,7 +172,7 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
         var snapshotDir = solrDataDir + "/" + snapshotDirName;
         boolean ready = false;
         for (int i = 0; i < 60; i++) {
-            var find = SOLR.execInContainer("sh", "-c",
+            var find = solr.execInContainer("sh", "-c",
                 "find " + snapshotDir + " -name 'segments_*' -type f 2>/dev/null | head -1");
             if (!find.getStdout().trim().isEmpty()) {
                 ready = true;
@@ -173,10 +184,9 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
             throw new IllegalStateException("Backup did not produce a segments_* file under " + snapshotDir);
         }
 
-        // Preserve the snapshot.<name>/ directory in the host tree so the S3 upload keeps the
-        // bare standalone layout (<snapshotName>/snapshot.<name>/<flat index>).
+        // Keep the snapshot.<name>/ wrapper so S3 holds <snapshotName>/snapshot.<name>/<flat index>.
         var localBackupRoot = tempDir.resolve("bare_backup");
-        var find = SOLR.execInContainer("find", snapshotDir, "-type", "f");
+        var find = solr.execInContainer("find", snapshotDir, "-type", "f");
         for (var line : find.getStdout().trim().split("\n")) {
             if (line.isEmpty()) {
                 continue;
@@ -184,7 +194,7 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
             var rel = line.substring(solrDataDir.length()).replaceFirst("^/", "");
             var localFile = localBackupRoot.resolve(rel);
             Files.createDirectories(localFile.getParent());
-            SOLR.copyFileFromContainer(line, localFile.toString());
+            solr.copyFileFromContainer(line, localFile.toString());
         }
         return localBackupRoot;
     }
@@ -201,23 +211,25 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
 
     // ---- RfsMigrateDocuments subprocess ----
 
-    private ProcessBuilder buildMigrateProcess(String targetUrl) throws Exception {
-        var s3LocalDir = tempDir.resolve("s3-download");
+    private ProcessBuilder buildMigrateProcess(
+        String targetUrl, String snapshotName, String index, SolrClusterContainer.SolrVersion version
+    ) throws Exception {
+        var s3LocalDir = tempDir.resolve("s3-download-" + snapshotName);
         Files.createDirectories(s3LocalDir);
 
         String classpath = System.getProperty("java.class.path");
         String javaExecutable = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         var args = new ArrayList<>(List.of(
-            "--snapshot-name", SNAPSHOT_NAME,
-            "--source-version", "SOLR_" + SolrClusterContainer.SOLR_7.tag(),
-            "--solr-collection-name", CORE,
+            "--snapshot-name", snapshotName,
+            "--source-version", "SOLR_" + version.tag(),
+            "--solr-collection-name", index,
             "--s3-repo-uri", "s3://" + BUCKET_NAME,
             "--s3-region", REGION,
             "--s3-local-dir", s3LocalDir.toString(),
             "--s3-endpoint", LOCAL_STACK.getEndpoint().toString(),
             "--target-host", targetUrl,
             "--coordinator-host", targetUrl,
-            "--index-allowlist", CORE,
+            "--index-allowlist", index,
             "--documents-per-bulk-request", "10",
             "--max-connections", "1",
             "--initial-lease-duration", "PT10M"
