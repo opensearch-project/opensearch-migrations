@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
@@ -50,7 +51,23 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     @Override
     public void run() {
-        var backupLocation = args.fileSystemRepoPath != null ? args.fileSystemRepoPath : args.s3RepoUri;
+        var parsedUri = RepoUri.parse(args.repoUri);
+        // Solr + GCS is intentionally out of scope for this release: the metadata
+        // (ClusterReaderExtractor) and document (RfsMigrateDocuments) read paths only
+        // handle file:// and s3:// for Solr sources. Reject gs:// on the create path so a
+        // user can't write a Solr backup to GCS that then can't be read back, matching the
+        // read-side messages.
+        if (parsedUri instanceof RepoUri.GcsRepoUri) {
+            throw new ParameterException(
+                "Solr backup to gs:// is not supported in this release; use --repo-uri with a file:// or s3:// scheme.");
+        }
+        // Resolve file repos to the scheme-less filesystem path. Solr's backup APIs expect a
+        // bare path for local filesystem locations (the legacy standalone replication handler
+        // joins `location` onto the core data dir, so a leading file:// scheme produces a
+        // mangled path and an HTTP 400). S3/GCS keep the raw URI — the cloud path strips the
+        // scheme/bucket downstream (buildPerCollectionLocation), and the standalone S3 branch
+        // re-derives the key from the raw URI itself.
+        var backupLocation = parsedUri instanceof RepoUri.FileRepoUri f ? f.path() : parsedUri.rawUri();
         var solrUrl = connectionContext.getUri().toString();
 
         if (args.solrCollections.isEmpty()) {
@@ -68,9 +85,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         if (isSolrCloud(solrUrl, httpClient)) {
-            runCloudBackup(solrUrl, backupLocation);
+            runCloudBackup(solrUrl, backupLocation, parsedUri);
         } else {
-            runStandaloneBackup(solrUrl, backupLocation);
+            runStandaloneBackup(solrUrl, backupLocation, parsedUri);
         }
     }
 
@@ -134,20 +151,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Backup execution ----
 
-    private void runCloudBackup(String solrUrl, String backupLocation) {
+    private void runCloudBackup(String solrUrl, String backupLocation, RepoUri parsedUri) {
         log.info("Detected SolrCloud — using Collections API backup");
-        // Solr's BACKUP API validates that the `location` directory exists before writing
-        // (both S3BackupRepository and LocalFileSystemRepository enforce this). Per-collection
-        // backups use location=<base>/<snapshotName>, so we create that directory up-front.
-        if (args.s3RepoUri != null && args.s3Region != null) {
-            // S3: create markers at <prefix>/ (parent, when the URI has a subpath) and
-            // <prefix>/<snapshotName>/ (the per-snapshot directory Solr checks via HeadObject).
-            ensureS3LocationExists(args.s3RepoUri, args.snapshotName, args.s3Region, args.s3Endpoint);
-        } else if (args.fileSystemRepoPath != null) {
-            // Filesystem: create <fileSystemRepoPath>/<snapshotName>/ before the BACKUP call.
-            // Solr runs inside its own container in real deployments, so this only works when
-            // the backup target is a shared volume accessible from the CreateSnapshot process.
-            ensureFileSystemLocationExists(args.fileSystemRepoPath, args.snapshotName);
+        switch (parsedUri) {
+            case RepoUri.S3RepoUri s -> ensureS3LocationExists(s.rawUri(), args.snapshotName, args.s3Region, args.endpoint);
+            case RepoUri.FileRepoUri f -> ensureFileSystemLocationExists(f.path(), args.snapshotName);
+            case RepoUri.GcsRepoUri g -> {} // GCS doesn't require pre-created directories
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
@@ -158,17 +167,21 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         waitForCompletion(creator::isSnapshotFinished);
     }
 
-    private void runStandaloneBackup(String solrUrl, String backupLocation) {
+    private void runStandaloneBackup(String solrUrl, String backupLocation, RepoUri parsedUri) {
         log.info("Detected standalone Solr — using replication API backup");
         String repositoryName = null;
-        if (args.s3RepoUri != null) {
+        // For cloud repositories (S3/GCS) the bucket is configured in solr.xml; Solr's `location`
+        // must be the bucket-relative path/key, NOT the full s3://bucket/... or gs://bucket/... URI.
+        // Strip the scheme+bucket to the in-bucket path (leading slash removed) for both.
+        if (parsedUri instanceof RepoUri.S3RepoUri || parsedUri instanceof RepoUri.GcsRepoUri) {
             repositoryName = args.snapshotRepoName;
-            var uri = URI.create(args.s3RepoUri);
-            backupLocation = uri.getPath();
+            var path = URI.create(parsedUri.rawUri()).getPath();
+            backupLocation = path == null ? "" : path;
             if (backupLocation.startsWith("/")) {
                 backupLocation = backupLocation.substring(1);
             }
-            log.info("Using S3 backup repository '{}' with location prefix '{}'", repositoryName, backupLocation);
+            var scheme = parsedUri instanceof RepoUri.S3RepoUri ? "S3" : "GCS";
+            log.info("Using {} backup repository '{}' with location prefix '{}'", scheme, repositoryName, backupLocation);
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,

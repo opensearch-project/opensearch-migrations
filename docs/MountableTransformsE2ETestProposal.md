@@ -257,10 +257,10 @@ Use `cdc-full-e2e-imported-clusters`, matching the EKS CDC path. The test should
    - `targetRequest` or a tuple-local marker contains `x-mountable-tuple-transform-1: tuple-one`.
    - `targetRequest` or a tuple-local marker contains `x-mountable-tuple-transform-2: tuple-two`.
 
-The replayer writes tuple files to S3, and the migration-console mounts that artifact bucket read-only at `/s3/artifacts`. With the default tuple S3 prefix, the test searches:
+The replayer writes tuple files to the artifact bucket, and the migration-console mounts that bucket read-only at `/artifacts`. With the default tuple prefix, the test searches:
 
 ```python
-tuple_glob = "/s3/artifacts/tuples/**/tuples-*.log.gz"
+tuple_glob = "/artifacts/tuples/**/tuples-*.log.gz"
 tuple_files = glob.glob(tuple_glob, recursive=True)
 ```
 

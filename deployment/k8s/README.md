@@ -12,6 +12,29 @@ This README focuses on the helm installation of the [Migration Assistant](charts
 If you're looking to use EKS as your Kubernetes cluster, follow the
 [instructions here](aws/README.md).
 
+### GKE
+
+If you're looking to use Google Kubernetes Engine (GKE) as your Kubernetes cluster,
+the [GCP Terraform module](../terraform/gcp/README.md) provisions a GKE cluster, a
+GCS bucket for snapshots, and the Google Service Account / Workload Identity
+bindings required by the migration workflows.
+
+After `terraform apply` succeeds and you've fetched cluster credentials with
+`gcloud container clusters get-credentials`, install the Helm chart using the
+GKE overlay
+[valuesGke.yaml](charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml):
+
+```bash
+helm install --create-namespace -n ma ma \
+  charts/aggregates/migrationAssistantWithArgo \
+  --values charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml \
+  --set gcp.project=<your-gcp-project>
+```
+
+GCS snapshot repositories are configured per-workflow at workflow-submission time
+(via the `gcs` snapshot type in the workflow config) rather than at Helm-install
+time, in the same way S3 repositories are configured for EKS deployments.
+
 ### Minikube
 
 Install prerequisites (see below).

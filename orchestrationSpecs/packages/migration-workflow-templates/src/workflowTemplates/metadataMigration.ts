@@ -6,7 +6,7 @@ import {
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
     NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
-    S3_REPO_CONFIG
+    REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression, configMapKey,
@@ -92,24 +92,32 @@ const COMMON_METADATA_PARAMETERS = {
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
+// Provider-agnostic repo param dict. The URI scheme in repoPathUri determines the backend.
+// `s3Region`, `s3Endpoint`, and `s3RoleArn` are only emitted when non-empty; the Java tools
+// ignore them for gs:// URIs.
 export function makeRepoParamDict(
-    repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
-    includes3LocalDir: boolean) {
+    repoConfig: BaseExpression<z.infer<typeof REPO_CONFIG>>,
+    includeLocalDir: boolean) {
     return expr.mergeDicts(
         expr.mergeDicts(
+            expr.mergeDicts(
+                expr.ternary(
+                    expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
+                    expr.makeDict({}),
+                    expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
+                expr.ternary(
+                    expr.isEmpty(expr.dig(repoConfig, ["s3RoleArn"], (""))),
+                    expr.makeDict({}),
+                    expr.makeDict({"s3RoleArn": expr.getLoose(repoConfig, "s3RoleArn")}))
+            ),
             expr.ternary(
-                expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
+                expr.isEmpty(expr.dig(repoConfig, ["awsRegion"], (""))),
                 expr.makeDict({}),
-                expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
-            expr.ternary(
-                expr.isEmpty(expr.dig(repoConfig, ["s3RoleArn"], (""))),
-                expr.makeDict({}),
-                expr.makeDict({"s3RoleArn": expr.getLoose(repoConfig, "s3RoleArn")}))
+                expr.makeDict({"s3Region": expr.getLoose(repoConfig, "awsRegion")}))
         ),
         expr.makeDict({
-            "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
-            "s3Region": expr.get(repoConfig, "awsRegion"),
-            ...(includes3LocalDir ? {"s3LocalDir": expr.literal("/tmp")} : {})
+            "repoUri": expr.get(repoConfig, "repoPathUri"),
+            ...(includeLocalDir ? {"localDir": expr.literal("/tmp")} : {})
         })
     );
 }

@@ -10,7 +10,8 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
@@ -81,11 +82,11 @@ public class TestCreateSnapshot {
                     .build()
                     .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new S3SnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                     snapshotName,
                     snapshotRepoName,
                     sourceClient,
-                    "s3://new-bucket/path-to-repo",
+                    RepoUri.parse("s3://new-bucket/path-to-repo"),
                     "us-east-2",
                     List.of(),
                     snapshotContext.createSnapshotCreateContext()
@@ -160,11 +161,11 @@ public class TestCreateSnapshot {
                     .build()
                     .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new S3SnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                     snapshotName,
                     snapshotRepoName,
                     sourceClient,
-                    "s3://new-bucket",
+                    RepoUri.parse("s3://new-bucket"),
                     "us-east-2",
                     indexAllowlist,
                     snapshotContext.createSnapshotCreateContext()
