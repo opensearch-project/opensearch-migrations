@@ -659,9 +659,13 @@ def show_command(ctx, list_resources, all_resources, history, run_selector, clea
 
     output_task = _canonical_task_name(resource_name)
     if output_task:
-        output_shown = _handle_task_show(ctx, namespace, output_task, task, list_resources, history, run_selector, clean)
+        output_shown = _handle_task_show(
+            ctx, namespace, output_task, task, list_resources, history, run_selector, clean
+        )
     else:
-        output_shown = _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
+        output_shown = _handle_resource_show(
+            ctx, namespace, resource_name, task, list_resources, history, run_selector, clean
+        )
 
     # Only nudge toward the next step when output was actually displayed. Error paths
     # exit, and no-output paths print their own explanatory message and return False, so a
