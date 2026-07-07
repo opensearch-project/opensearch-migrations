@@ -52,7 +52,7 @@ public class S3RepoTest {
         }
 
         @Override
-        protected List<String> listFilesInS3Root() {
+        public List<String> listFilesInS3Root() {
             return super.listFilesInS3Root();
         }
     }
