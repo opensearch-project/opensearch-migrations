@@ -194,6 +194,22 @@ class TestFormatSpecFields:
 
         assert format_spec_fields(resource) == ['type: strimzi', 'clusterName: default']
 
+    def test_projected_resource_without_display_fields_uses_concise_defaults(self):
+        resource = make_resource('snapshotmigrations', spec={
+            'metadataMigrationAllowLooseVersionMatching': True,
+            'metadataMigrationOtelMetricsCollectorEndpoint': 'http://otel-collector:4317',
+            'documentBackfillPodReplicas': 1,
+            'documentBackfillDocumentsPerBulkRequest': 2147483647,
+            'sourceVersion': 'ES 7.10',
+            'sourceLabel': 'source',
+        })
+        resource.config_presence = {'deployed': True, 'submitted': True}
+
+        assert format_spec_fields(resource) == [
+            'documentBackfillPodReplicas: 1',
+            'sourceVersion: ES 7.10',
+        ]
+
 
 class TestConfigOverlays:
     def test_attaches_pending_and_to_submit_values(self):
@@ -297,6 +313,34 @@ class TestConfigOverlays:
         assert format_config_diff_fields(resource) == [
             'fromSource: deployed=<absent> | pending=<absent> | to-submit=source',
             'toTarget: deployed=<absent> | pending=<absent> | to-submit=target',
+        ]
+
+    def test_deployed_snapshot_migration_config_diff_uses_concise_defaults(self):
+        sections = _build_tree_from_raw({
+            'snapshotmigrations': [
+                make_cr('snapshotmigrations', 'migration-0', 'Pending', spec={
+                    'metadataMigrationAllowLooseVersionMatching': True,
+                    'metadataMigrationOtelMetricsCollectorEndpoint': 'http://otel-collector:4317',
+                    'documentBackfillPodReplicas': 1,
+                    'documentBackfillDocumentsPerBulkRequest': 2147483647,
+                    'sourceVersion': 'ES 7.10',
+                    'sourceLabel': 'source',
+                }),
+            ],
+        })
+        submitted = {'resources': [{
+            'kind': 'SnapshotMigration',
+            'name': 'migration-0',
+            'parameters': {},
+        }]}
+
+        apply_config_overlays(sections, submitted_resolved_config=submitted)
+
+        resource = group_by_plural(sections, 'snapshotmigrations').resources[0]
+        lines = format_config_diff_fields(resource)
+        assert lines == [
+            'documentBackfillPodReplicas: deployed=1 | pending=<absent> | to-submit=<absent>',
+            'sourceVersion: deployed=ES 7.10 | pending=<absent> | to-submit=<absent>',
         ]
 
     def test_hides_pending_only_defaulted_and_generated_fields(self):

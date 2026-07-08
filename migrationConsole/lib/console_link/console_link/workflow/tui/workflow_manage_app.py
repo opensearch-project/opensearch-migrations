@@ -7,6 +7,7 @@ import copy
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -86,6 +87,32 @@ DISABLE_MOUSE_SEQUENCES = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?100
 DISABLE_MOUSE_PIXELS_SEQUENCE = "\x1b[?1016l"
 
 
+def _single_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _format_workflow_submit_error(error: Exception) -> str:
+    """Return a concise submit error suitable for a TUI toast."""
+    text = str(error)
+    denial = re.search(r"denied request:\s*(?P<reason>.+?)(?:\nstdout:|\Z)", text, flags=re.DOTALL)
+    if denial:
+        reason = _single_line(denial.group("reason"))
+        kind_match = re.search(r"Kind=([A-Za-z0-9]+)", text)
+        name_match = re.search(r'Name:\s+"([^"]+)"', text)
+        policy_match = re.search(r"ValidatingAdmissionPolicy\s+'([^']+)'", text)
+        target = ""
+        if kind_match and name_match:
+            target = f"{kind_match.group(1)} {name_match.group(1)} "
+        policy = f" by {policy_match.group(1)}" if policy_match else ""
+        return f"Workflow submit failed: {target}denied{policy}: {reason}"
+
+    invalid = re.search(r'((?:The )?[A-Za-z][A-Za-z0-9]* "[^"]+" is invalid: .+?)(?:\n|stdout:|\Z)', text)
+    if invalid:
+        return f"Workflow submit failed: {_single_line(invalid.group(1))}"
+
+    return f"Workflow submit failed: {text}"
+
+
 def reset_terminal_mouse_reporting(output=None) -> None:
     """Best-effort terminal guard for leaked mouse reporting modes."""
     target = output or sys.stdout
@@ -111,6 +138,10 @@ class WorkflowTreeApp(App):
         display: none;
     }
     #pod-status { height: 1; padding: 0 1; }
+    Toast {
+        width: 90;
+        max-width: 75%;
+    }
     """
 
     def __init__(self,
@@ -681,6 +712,17 @@ class WorkflowTreeApp(App):
         if pod_name:
             self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
 
+    def action_view_resource_progress_logs(self) -> None:
+        """View logs for the latest notable workflow pod attached to a resource."""
+        node = self.current_node_data or {}
+        pod_id = node.get('resource_log_node_id')
+        pod_name = self._pods.get_name(pod_id)
+        if not pod_name:
+            self.action_view_resource_logs()
+            return
+        display_name = node.get('display_name') or node.get('resource_path') or pod_name
+        self._logs.show_in_pager(self, pod_name, display_name)
+
     def action_view_resource_logs(self) -> None:
         """View logs for a migration resource via the workflow log CLI."""
         node = self.current_node_data
@@ -722,7 +764,13 @@ class WorkflowTreeApp(App):
             self.notify(f"Error: {e}", severity="error")
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action in {"expand_node", "collapse_node", "edit_selected_config_node"} and isinstance(self.screen, ModalScreen):
+        if action in {
+            "expand_node",
+            "collapse_node",
+            "edit_selected_config_node",
+            "reload_config_edit",
+            "rename_config_node",
+        } and isinstance(self.screen, ModalScreen):
             return False
         return super().check_action(action, parameters)
 
@@ -755,12 +803,12 @@ class WorkflowTreeApp(App):
                 self._set_pod_status(
                     f"Config edit: [bold cyan]{status}[/]  [{dirty}]  "
                     f"Values: {value_mode}  Status: {status_mode}  "
-                    f"Fields: {field_visibility}  s/Ctrl+s saves, Esc exits"
+                    f"Fields: {field_visibility}  w/Ctrl+s saves, Esc exits"
                 )
             else:
                 self._set_pod_status(
                     f"Config edit: [{dirty}]  Values: {value_mode}  "
-                    f"Status: {status_mode}  Fields: {field_visibility}  s/Ctrl+s saves, Esc exits"
+                    f"Status: {status_mode}  Fields: {field_visibility}  w/Ctrl+s saves, Esc exits"
                 )
             return
         if self._resource_view:
@@ -821,7 +869,6 @@ class WorkflowTreeApp(App):
         self._bindings = self._bindings.__class__()
 
         self.bind("ctrl+p", "command_palette", show=False)
-        self.bind("r", "manual_refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
         self.bind(
             "m",
@@ -831,10 +878,11 @@ class WorkflowTreeApp(App):
 
         if self._edit_mode:
             self.bind("escape", "exit_config_edit", description="Exit Edit")
+            self.bind("r", "reload_config_edit", description="Reload")
             self.bind("s", "submit_workflow", description="Submit")
             self.bind("w", "save_config_edit", description="Save")
             self.bind("ctrl+s", "save_config_edit", description="Save")
-            self.bind("?", "show_config_edit_help", description="Help")
+            self.bind("?", "show_config_edit_help", description="Help", show=False)
             self.bind("f", "cycle_config_field_visibility", description=self._next_field_visibility_description())
             self.bind("i", "edit_selected_config_node", show=False)
             self._bindings.bind(
@@ -862,6 +910,8 @@ class WorkflowTreeApp(App):
                 self._bindings.bind("space", "toggle_config_boolean", "Toggle", priority=True)
             if node and node.get("valueKind") == "command":
                 self.bind("a", "edit_selected_config_node", description="Add")
+            if self._nearest_config_rename_target():
+                self.bind("n", "rename_config_node", description="Rename")
             delete_target = self._nearest_config_delete_target()
             if delete_target and delete_target[0] == "remove":
                 self.bind("delete", "remove_config_node", description="Remove")
@@ -871,6 +921,8 @@ class WorkflowTreeApp(App):
                 self.bind("backspace", "clear_config_node", description="Clear", show=False)
             self.refresh_bindings()
             return
+
+        self.bind("r", "manual_refresh", description="Refresh")
 
         self._bindings.bind(
             "left",
@@ -910,6 +962,7 @@ class WorkflowTreeApp(App):
                 (node or {}).get("valueKind"),
                 bool((node or {}).get("command")),
                 self._is_removable_edit_node(node),
+                bool(self._nearest_config_rename_target()),
                 self._config_node_can_unset(node or {}),
             )
 
@@ -923,6 +976,8 @@ class WorkflowTreeApp(App):
             node.get('phase'),
             is_approval_node(node),
             bool(self._pods.get_name(node_id)) if node_type == NODE_TYPE_POD else False,
+            bool(node.get('resource_path')),
+            bool(self._pods.get_name(node.get('resource_log_node_id'))),
             output_available,
         )
 
@@ -932,7 +987,10 @@ class WorkflowTreeApp(App):
         ntype = node.get('type')
 
         if node_id.startswith(RESOURCE_ID_PREFIX):
-            self.bind("l", "view_resource_logs", description="View Logs")
+            if self._pods.get_name(node.get('resource_log_node_id')):
+                self.bind("l", "view_resource_progress_logs", description="View Logs")
+            else:
+                self.bind("l", "view_resource_logs", description="View Logs")
             if output_available:
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
         elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
@@ -944,6 +1002,8 @@ class WorkflowTreeApp(App):
             self.bind("c", "copy_pod_name", description="Copy Pod Name")
         elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
             self.bind("a", "approve_step", description="Approve")
+        elif node.get('resource_path'):
+            self.bind("l", "view_resource_logs", description="View Logs")
         elif output_available:
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 
@@ -1085,7 +1145,7 @@ class WorkflowTreeApp(App):
 
     def _handle_workflow_submit_failed(self, error: Exception) -> None:
         self._submitting_workflow = False
-        self.notify(f"Workflow submit failed: {error}", severity="error")
+        self.notify(_format_workflow_submit_error(error), severity="error", markup=False)
         self.update_pod_status()
 
     def action_edit_config(self) -> None:
@@ -1116,7 +1176,7 @@ class WorkflowTreeApp(App):
         from ..services.config_edit_service import ConfigEditService
         return ConfigEditService(namespace=self._namespace)
 
-    def _load_config_edit_state_worker(self) -> None:
+    def _load_config_edit_state_worker(self, selected_id: Optional[str] = None) -> None:
         try:
             service = self._config_edit_service_or_default()
             if hasattr(service, "load_edit_session"):
@@ -1127,7 +1187,7 @@ class WorkflowTreeApp(App):
                     "edit_state": service.load_edit_state(),
                 }
             snapshots = self._load_config_edit_snapshots(service)
-            self.call_from_thread(self._handle_config_edit_session, session, snapshots)
+            self.call_from_thread(self._handle_config_edit_session, session, snapshots, selected_id)
         except Exception as e:
             logger.exception("Failed to load config edit state")
             self.call_from_thread(self._handle_config_edit_load_failed, e)
@@ -1156,7 +1216,12 @@ class WorkflowTreeApp(App):
         self._update_dynamic_bindings()
         self.notify(f"Config edit unavailable: {error}", severity="error")
 
-    def _handle_config_edit_session(self, session, snapshots: Optional[Dict[str, Any]] = None) -> None:
+    def _handle_config_edit_session(
+        self,
+        session,
+        snapshots: Optional[Dict[str, Any]] = None,
+        selected_id: Optional[str] = None,
+    ) -> None:
         raw_yaml = getattr(session, "raw_yaml", None)
         if raw_yaml is None:
             raw_yaml = session.get("raw_yaml", "")
@@ -1190,7 +1255,10 @@ class WorkflowTreeApp(App):
             self._edit_field_visibility,
             expansion_state=expansion_state,
         )
-        self._focus_config_edit_tree()
+        if selected_id:
+            self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
+        else:
+            self._focus_config_edit_tree()
         help_panel = self.query_one("#edit-help", Static)
         help_panel.display = True
         self._update_edit_help()
@@ -1608,6 +1676,47 @@ class WorkflowTreeApp(App):
             return
         self._discard_config_edit()
 
+    def action_reload_config_edit(self) -> None:
+        """Reload the edit draft from the saved config source."""
+        if not self._edit_mode:
+            self.action_manual_refresh()
+            return
+        if self._edit_dirty:
+            self.push_screen(
+                ConfigEditExitModal(
+                    "Reload saved workflow configuration?",
+                    "Unsaved edit changes will be discarded unless you save before reloading.",
+                    default_action="return",
+                    save_label="Save and reload",
+                    discard_label="Discard and reload",
+                ),
+                self._handle_config_edit_reload_choice,
+            )
+            return
+        self._reload_config_edit()
+
+    def _handle_config_edit_reload_choice(self, action: Optional[str]) -> None:
+        if action == "discard":
+            self._reload_config_edit()
+        elif action == "save":
+            self._after_config_edit_save = "reload"
+            self.action_save_config_edit()
+
+    def _reload_config_edit(self) -> None:
+        selected_id = None
+        node = self.tree_root_widget.cursor_node
+        if node and node.data:
+            selected_id = node.data.get("id")
+        self._last_resource_config_snapshots = None
+        self._cancel_config_edit_validation()
+        self._show_config_edit_loading()
+        logger.info("Reloading workflow config edit state")
+        self.run_worker(
+            lambda: self._load_config_edit_state_worker(selected_id),
+            thread=True,
+            name="reload_config_edit_state",
+        )
+
     def action_quit(self) -> None:
         """Quit the app, confirming first if a config edit draft is dirty."""
         if self._edit_mode and self._edit_dirty:
@@ -1831,6 +1940,8 @@ class WorkflowTreeApp(App):
         elif after_save == "submit":
             self._discard_config_edit()
             self._start_submit_workflow()
+        elif after_save == "reload":
+            self._reload_config_edit()
 
     def _handle_config_edit_save_failed(self, error: Exception) -> None:
         self._after_config_edit_save = None
@@ -2672,6 +2783,59 @@ class WorkflowTreeApp(App):
             return
         self._unset_config_node(target[1])
 
+    def action_rename_config_node(self) -> None:
+        node = self._nearest_config_rename_target()
+        if not node:
+            return
+        path = [str(part) for part in (node.get("path") or [])]
+        if not path:
+            return
+        current_name = path[-1]
+        label = strip_status_badge(str(node.get("label") or current_name)).strip()
+        self.push_screen(
+            TextInputModal(
+                f"Rename {label}",
+                current_name,
+                documentation=(
+                    "Rename this config entry and update any workflow references that point to it."
+                ),
+                validation=self._rename_config_validation(path),
+                required=True,
+            ),
+            lambda value: self._handle_rename_config_name(node, value),
+        )
+
+    def _handle_rename_config_name(self, node: Dict, value: Optional[str]) -> None:
+        if value is None:
+            return
+        new_name = str(value or "").strip()
+        path = [str(part) for part in (node.get("path") or [])]
+        if not new_name or not path or new_name == path[-1]:
+            return
+        self._cancel_config_edit_validation()
+        new_path = [*path[:-1], new_name]
+        self._apply_config_edit_operation({
+            "op": "renameConfig",
+            "path": path,
+            "newName": new_name,
+        }, selected_id=self._edit_id_for_path(new_path))
+
+    @staticmethod
+    def _rename_config_validation(path: list[str]) -> Optional[Dict[str, str]]:
+        if (
+            (len(path) == 2 and path[0] == "kafkaClusterConfiguration")
+            or (len(path) == 3 and path[:2] in (
+                ["traffic", "proxies"],
+                ["traffic", "s3Sources"],
+                ["traffic", "replayers"],
+            ))
+        ):
+            return {
+                "pattern": r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
+            }
+        return None
+
     @staticmethod
     def _is_removable_config_path(path: list[str]) -> bool:
         if len(path) >= 2:
@@ -2692,11 +2856,36 @@ class WorkflowTreeApp(App):
             ["traffic", "replayers"],
         )
 
+    @staticmethod
+    def _is_renameable_config_path(path: list[str]) -> bool:
+        if len(path) == 2 and path[0] in (
+            "sourceClusters",
+            "targetClusters",
+            "kafkaClusterConfiguration",
+        ):
+            return True
+        if len(path) == 3 and path[:2] in (
+            ["traffic", "proxies"],
+            ["traffic", "s3Sources"],
+            ["traffic", "replayers"],
+        ):
+            return True
+        return len(path) == 5 and path[0] == "sourceClusters" and path[2] == "snapshotInfo" and path[3] in (
+            "repos",
+            "snapshots",
+        )
+
     @classmethod
     def _is_removable_edit_node(cls, node: Optional[Dict]) -> bool:
         if not node or node.get("valueKind") == "command":
             return False
         return bool(node.get("removable")) or cls._is_removable_config_path(node.get("path") or [])
+
+    @classmethod
+    def _is_renameable_edit_node(cls, node: Optional[Dict]) -> bool:
+        if not node or node.get("valueKind") == "command":
+            return False
+        return cls._is_renameable_config_path(node.get("path") or [])
 
     @staticmethod
     def _edit_node_from_tree_node(tree_node) -> Optional[Dict]:
@@ -2717,6 +2906,18 @@ class WorkflowTreeApp(App):
                     return "clear", node
                 if self._is_removable_edit_node(node):
                     return "remove", node
+            tree_node = getattr(tree_node, "parent", None)
+        return None
+
+    def _nearest_config_rename_target(self) -> Optional[Dict]:
+        tree_node = self.tree_root_widget.cursor_node
+        selected = self._edit_node_from_tree_node(tree_node)
+        if selected and selected.get("valueKind") == "command":
+            return None
+        while tree_node:
+            node = self._edit_node_from_tree_node(tree_node)
+            if self._is_renameable_edit_node(node):
+                return node
             tree_node = getattr(tree_node, "parent", None)
         return None
 

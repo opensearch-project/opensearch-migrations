@@ -90,6 +90,7 @@ export type EditOperation =
     | { op: "set"; path: string[]; value: unknown }
     | { op: "unset"; path: string[] }
     | { op: "removeConfig"; path: string[] }
+    | { op: "renameConfig"; path: string[]; newName: string }
     | { op: "add"; path: string[]; value: unknown };
 
 export interface EditApplyResultV1 {

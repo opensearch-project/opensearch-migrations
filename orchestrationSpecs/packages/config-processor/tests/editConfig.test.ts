@@ -682,6 +682,126 @@ describe("editConfig state", () => {
         expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay-cap")).toBeUndefined();
     });
 
+    it("renames named config entries and updates graph references", () => {
+        const baseConfig = {
+            sourceClusters: {
+                legacy: {
+                    endpoint: "https://legacy.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo1: {awsRegion: "us-east-1", s3RepoPathUri: "s3://snapshots/repo1/"},
+                        },
+                        snapshots: {
+                            snap1: {repoName: "repo1", config: {externallyManagedSnapshotName: "snap1"}},
+                        },
+                    },
+                },
+            },
+            targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
+            kafkaClusterConfiguration: {default: {autoCreate: {}}},
+            snapshotMigrationConfigs: [{
+                fromSource: "legacy",
+                toTarget: "prod",
+                perSnapshotConfig: {
+                    snap1: [{metadataMigrationConfig: {}}],
+                },
+            }],
+            traffic: {
+                proxies: {
+                    cap: {source: "legacy"},
+                },
+                s3Sources: {
+                    archive: {sourceLabel: "legacy", s3Uri: "s3://bucket/path/export.proto.gz", awsRegion: "us-east-1"},
+                },
+                replayers: {
+                    replay: {
+                        fromCapturedTraffic: "cap",
+                        toTarget: "prod",
+                        dependsOnSnapshotMigrations: [{source: "legacy", snapshot: "snap1"}],
+                    },
+                },
+            },
+        };
+
+        const renamedSource = applyEditOperationToObject(baseConfig, {
+            op: "renameConfig",
+            path: ["sourceClusters", "legacy"],
+            newName: "renamed-source",
+        });
+        let config = parse(renamedSource.yaml);
+        expect(config.sourceClusters.legacy).toBeUndefined();
+        expect(config.sourceClusters["renamed-source"]).toBeDefined();
+        expect(config.snapshotMigrationConfigs[0].fromSource).toBe("renamed-source");
+        expect(config.traffic.proxies.cap.source).toBe("renamed-source");
+        expect(config.traffic.s3Sources.archive.sourceLabel).toBe("legacy");
+        expect(config.traffic.replayers.replay.dependsOnSnapshotMigrations[0].source).toBe("renamed-source");
+
+        const renamedSnapshot = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["sourceClusters", "renamed-source", "snapshotInfo", "snapshots", "snap1"],
+            newName: "snap2",
+        });
+        config = parse(renamedSnapshot.yaml);
+        expect(config.sourceClusters["renamed-source"].snapshotInfo.snapshots.snap1).toBeUndefined();
+        expect(config.sourceClusters["renamed-source"].snapshotInfo.snapshots.snap2).toBeDefined();
+        expect(config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1).toBeUndefined();
+        expect(config.snapshotMigrationConfigs[0].perSnapshotConfig.snap2).toBeDefined();
+        expect(config.traffic.replayers.replay.dependsOnSnapshotMigrations[0].snapshot).toBe("snap2");
+
+        const renamedRepo = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["sourceClusters", "renamed-source", "snapshotInfo", "repos", "repo1"],
+            newName: "repo2",
+        });
+        config = parse(renamedRepo.yaml);
+        expect(config.sourceClusters["renamed-source"].snapshotInfo.repos.repo1).toBeUndefined();
+        expect(config.sourceClusters["renamed-source"].snapshotInfo.repos.repo2).toBeDefined();
+        expect(config.sourceClusters["renamed-source"].snapshotInfo.snapshots.snap2.repoName).toBe("repo2");
+
+        const renamedKafka = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["kafkaClusterConfiguration", "default"],
+            newName: "kafka2",
+        });
+        config = parse(renamedKafka.yaml);
+        expect(config.kafkaClusterConfiguration.default).toBeUndefined();
+        expect(config.kafkaClusterConfiguration.kafka2).toBeDefined();
+        expect(config.traffic.proxies.cap.kafka).toBe("kafka2");
+        expect(config.traffic.s3Sources.archive.kafka).toBe("kafka2");
+
+        const renamedProxy = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["traffic", "proxies", "cap"],
+            newName: "cap2",
+        });
+        config = parse(renamedProxy.yaml);
+        expect(config.traffic.proxies.cap).toBeUndefined();
+        expect(config.traffic.proxies.cap2).toBeDefined();
+        expect(config.traffic.replayers.replay.fromCapturedTraffic).toBe("cap2");
+
+        const renamedTarget = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["targetClusters", "prod"],
+            newName: "prod2",
+        });
+        config = parse(renamedTarget.yaml);
+        expect(config.targetClusters.prod).toBeUndefined();
+        expect(config.targetClusters.prod2).toBeDefined();
+        expect(config.snapshotMigrationConfigs[0].toTarget).toBe("prod2");
+        expect(config.traffic.replayers.replay.toTarget).toBe("prod2");
+
+        const renamedReplayer = applyEditOperationToObject(config, {
+            op: "renameConfig",
+            path: ["traffic", "replayers", "replay"],
+            newName: "replay2",
+        });
+        config = parse(renamedReplayer.yaml);
+        expect(config.traffic.replayers.replay).toBeUndefined();
+        expect(config.traffic.replayers.replay2).toBeDefined();
+        expect(findNode(renamedReplayer.editState.nodes, "edit:traffic.replayers.replay2")).toBeDefined();
+    });
+
     it("renders and applies map-backed resource config groups", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {

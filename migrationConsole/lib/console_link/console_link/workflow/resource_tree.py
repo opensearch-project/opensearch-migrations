@@ -40,6 +40,24 @@ PHASE_SYMBOLS = {
     'Unknown': ('?', 'white'),
 }
 
+# Concise status fields used when a projected config/resource did not provide
+# schema-derived displayFields. Raw resources without config projections still
+# fall back to their full spec below.
+SPEC_DISPLAY_FIELDS = {
+    'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
+    'capturedtraffics': ['topicName', 'partitions', 'replicas'],
+    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
+    'datasnapshots': ['snapshotPrefix', 'indexAllowlist'],
+    'snapshotmigrations': [
+        'documentBackfillPodReplicas',
+        'sourceVersion',
+        'documentBackfillIndexAllowlist',
+        'metadataMigrationIndexAllowlist',
+        'metadataMigrationMultiTypeBehavior',
+    ],
+    'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
+}
+
 RESOURCE_KIND_TO_PLURAL = {
     'KafkaCluster': 'kafkaclusters',
     'CapturedTraffic': 'capturedtraffics',
@@ -647,6 +665,7 @@ def _build_config_diff(
 
     diagnostic_path_map = _diagnostic_parameter_path_map(plural, resource_name, submitted_resource, pending_resource)
     paths = _ordered_config_paths(
+        plural,
         _merged_display_fields(submitted_resource, pending_resource),
         deployed_parameters,
         submitted_parameters,
@@ -706,13 +725,16 @@ def _build_config_diff(
 
 
 def _ordered_config_paths(
+    plural: str,
     display_fields: List[str],
     deployed_parameters: Dict[str, Any],
     submitted_parameters: Optional[Dict[str, Any]],
     pending_parameters: Optional[Dict[str, Any]],
     extra_paths: Optional[List[List[str]]] = None,
 ) -> List[List[str]]:
-    configured = [field.split('.') for field in display_fields]
+    has_existing_resource = bool(deployed_parameters or submitted_parameters)
+    configured_fields = display_fields or (SPEC_DISPLAY_FIELDS.get(plural, []) if has_existing_resource else [])
+    configured = [field.split('.') for field in configured_fields]
     extra = {tuple(path) for path in extra_paths or []}
     discovered = set()
     for source in (deployed_parameters, submitted_parameters, pending_parameters):
@@ -729,8 +751,9 @@ def _ordered_config_paths(
     for key in sorted(extra - seen):
         ordered.append(list(key))
         seen.add(key)
-    for key in sorted(discovered - seen):
-        ordered.append(list(key))
+    if not configured:
+        for key in sorted(discovered - seen):
+            ordered.append(list(key))
     return ordered
 
 
@@ -1148,7 +1171,11 @@ def _node_phase(node: Dict[str, Any]) -> str:
 
 def format_spec_fields(resource: ResourceNode) -> List[str]:
     """Extract key spec fields for display. Returns list of 'field: value' strings."""
-    fields = resource.display_fields or ['.'.join(path) for path in sorted(_leaf_paths(resource.spec))]
+    fields = resource.display_fields or SPEC_DISPLAY_FIELDS.get(resource.plural, [])
+    if not fields:
+        if resource.config_presence or resource.config_diff:
+            return []
+        fields = ['.'.join(path) for path in sorted(_leaf_paths(resource.spec))]
     changed_paths = {
         str(field.get('path'))
         for field in (resource.config_diff or {}).get('fields', [])

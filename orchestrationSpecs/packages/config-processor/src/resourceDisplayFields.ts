@@ -19,6 +19,21 @@ export const KAFKA_CONFIG_DISPLAY_FIELDS = [
     "listenerName",
 ];
 
+export const PROJECTED_RESOURCE_DISPLAY_FIELDS: Record<string, string[]> = {
+    KafkaCluster: ["version", "auth.type", "nodePool.replicas"],
+    CapturedTraffic: ["topicName", "partitions", "replicas"],
+    CaptureProxy: ["podReplicas", "listenPort", "internetFacing", "serviceType"],
+    DataSnapshot: ["snapshotPrefix", "indexAllowlist"],
+    SnapshotMigration: [
+        "documentBackfillPodReplicas",
+        "sourceVersion",
+        "documentBackfillIndexAllowlist",
+        "metadataMigrationIndexAllowlist",
+        "metadataMigrationMultiTypeBehavior",
+    ],
+    TrafficReplay: ["podReplicas", "speedupFactor", "removeAuthHeader"],
+};
+
 function hasPath(source: Record<string, unknown>, path: string[]): boolean {
     let cursor: unknown = source;
     for (const key of path) {
@@ -31,6 +46,11 @@ function hasPath(source: Record<string, unknown>, path: string[]): boolean {
 }
 
 export function displayFieldsForProjectedKind(kind: string, parameters: Record<string, unknown>): string[] | undefined {
+    const curatedFields = PROJECTED_RESOURCE_DISPLAY_FIELDS[kind];
+    if (curatedFields) {
+        const fields = curatedFields.filter(field => hasPath(parameters, field.split(".")));
+        return fields.length > 0 ? fields : undefined;
+    }
     const fields = collectProjectedFields()
         .filter(field => field.resourceKind === kind && hasPath(parameters, field.specPath))
         .map(field => field.specPath.join("."))

@@ -283,3 +283,38 @@ class TestIncrementalUpdate:
         ])
         mgr.rebuild(make_sections({'Backfill': [resource]}))
         assert 'pod-1' in observed_pods
+
+    def test_workflow_progress_for_attention_resource_stays_expanded(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('bf-1', 'snapshotmigrations', phase='Pending', workflow_progress=[
+            {'id': 'pod-1', 'display_name': 'evaluateMetadata', 'phase': 'Failed', 'type': 'Pod',
+             'started_at': '2026-01-01T10:00:00Z', 'children': []},
+        ])
+        sections = make_sections({'Backfill': [resource]})
+        mgr.rebuild(sections)
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        workflow_node.collapse()
+        assert not workflow_node.is_expanded
+
+        mgr.update(sections)
+
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        assert workflow_node.is_expanded
+
+    def test_workflow_progress_nodes_inherit_resource_log_context(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('bf-1', 'snapshotmigrations', phase='Pending', workflow_progress=[
+            {'id': 'pod-1', 'display_name': 'evaluateMetadata', 'phase': 'Failed', 'type': 'Pod',
+             'started_at': '2026-01-01T10:00:00Z', 'children': []},
+        ])
+
+        mgr.rebuild(make_sections({'Backfill': [resource]}))
+
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}bf-1')
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        pod_node = find_node_by_id(tree.root, 'pod-1')
+        assert resource_node.data['resource_path'] == 'snapshotmigration.bf-1'
+        assert resource_node.data['resource_log_node_id'] == 'pod-1'
+        assert workflow_node.data['resource_path'] == 'snapshotmigration.bf-1'
+        assert workflow_node.data['resource_log_node_id'] == 'pod-1'
+        assert pod_node.data['resource_path'] == 'snapshotmigration.bf-1'

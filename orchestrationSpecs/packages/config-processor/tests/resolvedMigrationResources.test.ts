@@ -213,7 +213,6 @@ describe("resolved migration resources", () => {
         const topic = resolvedMigrationResources.resources.find(resource =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic");
         expect(topic?.displayFields).toEqual(expect.arrayContaining([
-            "kafkaClusterName",
             "topicName",
             "partitions",
             "replicas",

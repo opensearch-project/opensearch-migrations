@@ -428,7 +428,9 @@ class ResourceTreeStateManager:
         for child in parent.children:
             if child.data and isinstance(child.data, dict):
                 nid = child.data.get('id')
-                if nid and nid in collapsed_ids:
+                if child.data.get('force_expanded'):
+                    child.expand()
+                elif nid and nid in collapsed_ids:
                     child.collapse()
                 else:
                     child.expand()
@@ -456,7 +458,9 @@ class ResourceTreeStateManager:
             child = stack.pop()
             if child.data and isinstance(child.data, dict):
                 nid = child.data.get('id')
-                if nid and nid in collapsed_ids:
+                if child.data.get('force_expanded'):
+                    child.expand()
+                elif nid and nid in collapsed_ids:
                     child.collapse()
                 else:
                     child.expand()
@@ -520,11 +524,14 @@ class ResourceTreeStateManager:
         """Add a resource node with its details and workflow subtree."""
         label = self._resource_label(resource)
         resource_path = f"{DISPLAY_NAMES.get(resource.plural, resource.plural)}.{resource.name}"
+        latest_workflow_pod_id = self._latest_workflow_pod_id(resource)
         data = {
             'id': self._resource_id(resource),
             'resource_path': resource_path,
             'phase': resource.phase,
         }
+        if latest_workflow_pod_id:
+            data['resource_log_node_id'] = latest_workflow_pod_id
         if resource.tree_data:
             data.update(resource.tree_data)
         resource_node = parent.add(label, data=data)
@@ -542,7 +549,7 @@ class ResourceTreeStateManager:
             live_node.collapse()
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
-        self._add_workflow_progress(resource_node, resource)
+        self._add_workflow_progress(resource_node, resource, data)
 
         # Children (e.g., topics under kafka)
         for child in resource.children:
@@ -574,6 +581,34 @@ class ResourceTreeStateManager:
         return resource.tree_id or f'{RESOURCE_ID_PREFIX}{resource.name}'
 
     @staticmethod
+    def _latest_workflow_pod_id(resource: ResourceNode) -> Optional[str]:
+        notable = collect_notable_steps(resource.workflow_progress or [])
+        pods = [
+            step
+            for step in ResourceTreeStateManager._iter_workflow_steps(notable)
+            if step.get('type') == 'Pod' and step.get('id')
+        ]
+        if not pods:
+            return None
+        pods.sort(key=step_timestamp)
+        return pods[-1].get('id')
+
+    @staticmethod
+    def _iter_workflow_steps(steps: List[Dict]):
+        for step in steps:
+            yield step
+            yield from ResourceTreeStateManager._iter_workflow_steps(step.get('children', []))
+
+    @staticmethod
+    def _workflow_progress_forced_expanded(resource: ResourceNode, steps: List[Dict]) -> bool:
+        if str(resource.phase or '').lower() in ('failed', 'error', 'pending', 'pending config'):
+            return True
+        return any(
+            str(step.get('phase') or '').lower() in ('failed', 'error', 'pending')
+            for step in ResourceTreeStateManager._iter_workflow_steps(steps)
+        )
+
+    @staticmethod
     def _section_id(section: ResourceSection) -> str:
         return section.tree_id or f'section:{section.name}'
 
@@ -594,7 +629,12 @@ class ResourceTreeStateManager:
     def _resource_visible(self, resource: ResourceNode) -> bool:
         return resource_visible_in_config_mode(resource, self._config_value_mode)
 
-    def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
+    def _add_workflow_progress(
+        self,
+        resource_node: TreeNode,
+        resource: ResourceNode,
+        resource_data: Optional[Dict] = None,
+    ) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""
         if not resource.workflow_progress:
             return
@@ -607,23 +647,38 @@ class ResourceTreeStateManager:
         if last_succeeded and last_succeeded not in notable:
             notable.append(last_succeeded)
         notable.sort(key=step_timestamp)
+        workflow_data = {
+            'id': f'workflow:{resource.name}',
+            'force_expanded': self._workflow_progress_forced_expanded(resource, notable),
+        }
+        if resource_data:
+            for key in ('resource_path', 'resource_log_node_id'):
+                if key in resource_data:
+                    workflow_data[key] = resource_data[key]
         wf_node = resource_node.add(
             "Workflow progress:",
-            data={'id': f'workflow:{resource.name}'})
+            data=workflow_data)
         for step in notable:
-            self._add_workflow_step(wf_node, step)
+            self._add_workflow_step(wf_node, step, resource_data or {})
+        if workflow_data.get('force_expanded'):
+            wf_node.expand()
 
-    def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
+    def _add_workflow_step(self, parent: TreeNode, step: Dict, inherited_data: Optional[Dict] = None) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
         display_step = maybe_rewrite_wait_step(step)
         status_output = get_step_status_output(self._workflow_data, step.get('id', ''))
         label = get_step_rich_label(display_step, status_output=status_output, show_approval_name=False)
-        node = parent.add(label, data=step)
+        data = dict(step)
+        if inherited_data:
+            for key in ('resource_path', 'resource_log_node_id'):
+                if key in inherited_data:
+                    data.setdefault(key, inherited_data[key])
+        node = parent.add(label, data=data)
         if step.get('type') == 'Pod' and self._on_new_pod:
             self._on_new_pod(step['id'])
         self._add_live_check_lines(node, step)
         for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
-            self._add_workflow_step(node, child)
+            self._add_workflow_step(node, child, inherited_data)
 
     @staticmethod
     def _add_live_check_lines(node: TreeNode, step: Dict) -> None:

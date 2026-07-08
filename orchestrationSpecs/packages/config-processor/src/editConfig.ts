@@ -1178,6 +1178,10 @@ function configPathKey(path: string[]): string {
     return path.join("\0");
 }
 
+function startsWithConfigPath(path: string[], prefix: string[]): boolean {
+    return path.length >= prefix.length && prefix.every((part, index) => path[index] === part);
+}
+
 function addConfigReference(
     edges: ConfigReferenceEdge[],
     fromPath: string[],
@@ -1402,6 +1406,85 @@ function removeSourceClusterReferences(config: any, sourceName: string): void {
         .filter(edge => removedCapturedTrafficKeys.has(configPathKey(edge.toPath)))
         .map(edge => edge.fromPath);
     removeConfigReferencePaths(config, [...directRemovalPaths, ...replayersForDeletedTraffic]);
+}
+
+function renameableConfigPath(path: string[]): boolean {
+    if (path.length === 2 && ["sourceClusters", "targetClusters", "kafkaClusterConfiguration"].includes(path[0])) {
+        return true;
+    }
+    if (
+        path.length === 3
+        && path[0] === "traffic"
+        && ["proxies", "s3Sources", "replayers"].includes(path[1])
+    ) {
+        return true;
+    }
+    return (
+        path.length === 5
+        && path[0] === "sourceClusters"
+        && path[2] === "snapshotInfo"
+        && ["repos", "snapshots"].includes(path[3])
+    );
+}
+
+function renameConfigKeyAtPath(config: any, path: string[], newName: string): void {
+    const resolved = existingParentAtPath(config, path);
+    if (!resolved) {
+        throw new Error(`Config entry does not exist at path ${path.join(".")}`);
+    }
+    const {parent, key} = resolved;
+    if (!parent || typeof parent !== "object" || Array.isArray(parent)) {
+        throw new Error(`Config entry cannot be renamed at path ${path.join(".")}`);
+    }
+    if (!(key in parent)) {
+        throw new Error(`Config entry does not exist at path ${path.join(".")}`);
+    }
+    if (key === newName) {
+        return;
+    }
+    if (newName in parent) {
+        throw new Error(`Config entry already exists at ${[...path.slice(0, -1), newName].join(".")}`);
+    }
+    parent[newName] = parent[key];
+    delete parent[key];
+}
+
+function updateConfigReferenceForRename(config: any, edge: ConfigReferenceEdge, newName: string): void {
+    if (configPathKey(edge.fromFieldPath) === configPathKey(edge.fromPath)) {
+        renameConfigKeyAtPath(config, edge.fromPath, newName);
+        return;
+    }
+    setReferenceValueAtPath(config, edge.fromFieldPath, newName);
+}
+
+function setReferenceValueAtPath(config: any, path: string[], value: unknown): void {
+    const {parent, key} = parentAtPath(config, path);
+    parent[key] = value;
+}
+
+function renameAtPath(config: any, path: string[], newNameValue: unknown): void {
+    if (!renameableConfigPath(path)) {
+        throw new Error(`Rename is not supported at path ${path.join(".")}`);
+    }
+    const newName = String(newNameValue ?? "").trim();
+    if (!newName) {
+        throw new Error("Rename requires a non-empty name");
+    }
+    const oldName = path[path.length - 1];
+    if (newName === oldName) {
+        return;
+    }
+    const graph = buildConfigDependencyGraph(config);
+    renameConfigKeyAtPath(config, path, newName);
+    const oldPathKey = configPathKey(path);
+    for (const edge of graph) {
+        if (
+            configPathKey(edge.toPath) === oldPathKey
+            && !startsWithConfigPath(edge.fromPath, path)
+        ) {
+            updateConfigReferenceForRename(config, edge, newName);
+        }
+    }
 }
 
 function sourceSnapshotsRemovedByPath(config: any, path: string[]): {sourceName: string; snapshotNames: string[]} | undefined {
@@ -1684,6 +1767,8 @@ export function applyEditOperation(config: any, operation: EditOperation): any {
         unsetAtPath(nextConfig, operation.path);
     } else if (operation.op === "removeConfig") {
         removeAtPath(nextConfig, operation.path);
+    } else if (operation.op === "renameConfig") {
+        renameAtPath(nextConfig, operation.path, operation.newName);
     } else if (operation.op === "add") {
         addAtPath(nextConfig, operation.path, operation.value);
     } else {

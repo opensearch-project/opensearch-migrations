@@ -29,6 +29,7 @@ from console_link.workflow.tui.workflow_manage_app import (
     copy_to_clipboard,
     PHASE_SUCCEEDED,
     PHASE_RUNNING,
+    _format_workflow_submit_error,
     reset_terminal_mouse_reporting,
 )
 from console_link.workflow.tui.choice_select_modal import ChoiceSelectModal
@@ -755,6 +756,31 @@ async def test_error_notifications_start_timeout_after_key_press():
         assert len(app._deferred_error_notifications) == 0
 
 
+def test_workflow_submit_error_prefers_policy_denial_summary():
+    error = RuntimeError(
+        "Workflow submit script failed with exit code 1\n"
+        "The request is invalid: patch: Invalid value: {\"metadata\":{\"annotations\":{\"parameters\":\"{"
+        "\\\"documentBackfillDocTransformerConfig\\\":null,\\\"metadataMigrationTransformerConfig\\\":null}\"}}}\n"
+        "to:\n"
+        "Resource: \"migrations.opensearch.org/v1alpha1, Resource=snapshotmigrations\", "
+        "GroupVersionKind: \"migrations.opensearch.org/v1alpha1, Kind=SnapshotMigration\"\n"
+        "Name: \"source-target-s1-migration-0\", Namespace: \"ma\"\n"
+        "for: \"/tmp/resources/011-snapshotmigration-source-target-s1-migration-0.yaml\": "
+        "error when patching \"/tmp/resources/011-snapshotmigration-source-target-s1-migration-0.yaml\": "
+        "snapshotmigrations.migrations.opensearch.org \"source-target-s1-migration-0\" is forbidden: "
+        "ValidatingAdmissionPolicy 'migrations-snapshotmigration-policy' with binding "
+        "'migrations-snapshotmigration-binding' denied request: Impossible: "
+        "documentBackfillDocTransformerConfig cannot be changed. Delete and recreate.\n"
+        "stdout: Validating generated Kubernetes resources..."
+    )
+
+    assert _format_workflow_submit_error(error) == (
+        "Workflow submit failed: SnapshotMigration source-target-s1-migration-0 "
+        "denied by migrations-snapshotmigration-policy: Impossible: "
+        "documentBackfillDocTransformerConfig cannot be changed. Delete and recreate."
+    )
+
+
 def test_config_edit_does_not_open_dialog_for_blocked_add_commands():
     app = workflow_tree_app_for_unit_tests()
     app.notify = MagicMock()
@@ -1413,6 +1439,18 @@ def edit_state_with_new_required_source():
     return state
 
 
+def edit_state_with_renamed_source():
+    state = copy.deepcopy(edit_state_with_editable_source_fields())
+    source_node = state["nodes"][0]["children"][0]
+    source_node["id"] = "edit:sourceClusters.renamed-source"
+    source_node["path"] = ["sourceClusters", "renamed-source"]
+    source_node["label"] = "[CHG 1] renamed-source"
+    for child in source_node["children"]:
+        child["id"] = child["id"].replace("edit:sourceClusters.legacy", "edit:sourceClusters.renamed-source")
+        child["path"] = ["sourceClusters", "renamed-source", child["path"][-1]]
+    return state
+
+
 def edit_state_with_array_items(include_provisional_item=False):
     children = [
         {
@@ -1955,6 +1993,108 @@ def edit_state_with_capture_defaulted_kafka():
                 ],
             },
         ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+
+def edit_state_with_capture_and_replayer_for_rename():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "[CHG 2] Live Traffic Migration",
+                "valueKind": "object",
+                "status": "changed",
+                "statusCounts": {"changed": 2},
+                "children": [
+                    {
+                        "id": "edit:traffic.proxies",
+                        "path": ["traffic", "proxies"],
+                        "label": "[CHG 1] Capture",
+                        "valueKind": "record",
+                        "status": "changed",
+                        "statusCounts": {"changed": 1},
+                        "children": [
+                            {
+                                "id": "edit:traffic.proxies.cap",
+                                "path": ["traffic", "proxies", "cap"],
+                                "label": "[CHG 1] cap",
+                                "valueKind": "object",
+                                "status": "changed",
+                                "statusCounts": {"changed": 1},
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.proxies.cap.proxyConfig",
+                                        "path": ["traffic", "proxies", "cap", "proxyConfig"],
+                                        "label": "[CHG 1] proxyConfig",
+                                        "valueKind": "object",
+                                        "status": "changed",
+                                        "statusCounts": {"changed": 1},
+                                        "children": [
+                                            {
+                                                "id": "edit:traffic.proxies.cap.proxyConfig.listenPort",
+                                                "path": [
+                                                    "traffic",
+                                                    "proxies",
+                                                    "cap",
+                                                    "proxyConfig",
+                                                    "listenPort",
+                                                ],
+                                                "label": "[CHG 1] listenPort: 9201",
+                                                "value": 9201,
+                                                "valueKind": "scalar",
+                                                "status": "changed",
+                                                "statusCounts": {"changed": 1},
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "id": "edit:traffic.replayers",
+                        "path": ["traffic", "replayers"],
+                        "label": "[CHG 1] Replay",
+                        "valueKind": "record",
+                        "status": "changed",
+                        "statusCounts": {"changed": 1},
+                        "children": [
+                            {
+                                "id": "edit:traffic.replayers.sourceTarget",
+                                "path": ["traffic", "replayers", "sourceTarget"],
+                                "label": "[CHG 1] sourceTarget",
+                                "valueKind": "object",
+                                "status": "changed",
+                                "statusCounts": {"changed": 1},
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.replayers.sourceTarget.fromCapturedTraffic",
+                                        "path": [
+                                            "traffic",
+                                            "replayers",
+                                            "sourceTarget",
+                                            "fromCapturedTraffic",
+                                        ],
+                                        "label": "[CHG 1] fromCapturedTraffic: cap",
+                                        "value": "cap",
+                                        "valueKind": "scalar",
+                                        "status": "changed",
+                                        "statusCounts": {"changed": 1},
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
         "validation": {"valid": True, "errors": []},
     }
 
@@ -5593,6 +5733,78 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
 
 
 @pytest.mark.asyncio
+async def test_resource_view_resource_log_binding_uses_workflow_pod():
+    """Resource rows should open the latest notable workflow pod logs when available."""
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = [
+        {"metadata": {"name": "cap-workflow-pod", "annotations": {"workflows.argoproj.io/node-id": "pod-1"}}}
+    ]
+
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="captureproxies",
+                    display_name="Capture",
+                    resources=[
+                        ResourceNode(
+                            name="cap",
+                            plural="captureproxies",
+                            phase="Error",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                            workflow_progress=[
+                                {
+                                    "id": "pod-1",
+                                    "display_name": "captureProxy",
+                                    "phase": "Failed",
+                                    "type": "Pod",
+                                    "started_at": "2026-01-01T10:00:00Z",
+                                    "children": [],
+                                },
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:cap") is not None)
+            assert await wait_until(pilot, lambda: app._pods.get_name("pod-1") == "cap-workflow-pod")
+
+            tree.move_cursor(find_tree_node_by_id(tree.root, "resource:cap"))
+            await pilot.pause()
+            assert binding_descriptions(app, "l") == ["View Logs"]
+
+            with patch.object(app._logs, "show_in_pager") as pager, patch.object(app, "action_view_resource_logs") as fallback:
+                await pilot.press("l")
+                await pilot.pause()
+                fallback.assert_not_called()
+                pager.assert_called_once_with(app, "cap-workflow-pod", "captureproxy.cap")
+
+
+@pytest.mark.asyncio
 async def test_resource_view_collapses_submitted_projection_after_workflow_succeeds():
     """Submitted projections are rollout state only while the workflow is active."""
 
@@ -6004,6 +6216,284 @@ async def test_resource_view_edit_mode_add_row_bindings_do_not_offer_delete(mock
                     "value": {"name": "new-source"},
                 },
             )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_rename_config_node_updates_key(mock_workflow_with_two_pods):
+    """Rename is exposed for named config rows and sends a renameConfig operation."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "renamed-yaml",
+                "edit_state": edit_state_with_renamed_source(),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.endpoint")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "r") == ["Reload"]
+            assert binding_descriptions(app, "n") == ["Rename"]
+
+            await pilot.press("n")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#value").value == "legacy"
+            app.screen.query_one("#value").value = "renamed-source"
+            await pilot.press("enter")
+
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "renameConfig",
+                    "path": ["sourceClusters", "legacy"],
+                    "newName": "renamed-source",
+                },
+            )
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    (tree.cursor_node.data or {}).get("id") == "edit:sourceClusters.renamed-source"
+                    and find_tree_node_by_id(tree.root, "edit:sourceClusters.legacy") is None
+                ),
+                timeout=5.0,
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_rename_binding_climbs_to_traffic_entries(mock_workflow_with_two_pods):
+    """Rename is available from capture-proxy and replayer child fields."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_capture_and_replayer_for_rename(),
+            }
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:traffic.proxies.cap.proxyConfig.listenPort")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "n") == ["Rename"]
+            await pilot.press("n")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#value").value == "cap"
+            await pilot.press("escape")
+
+            app._select_tree_node_by_id("edit:traffic.replayers.sourceTarget.fromCapturedTraffic")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "n") == ["Rename"]
+            await pilot.press("n")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, TextInputModal))
+            assert app.screen.query_one("#value").value == "sourceTarget"
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_reload_clean_draft_refreshes_session(mock_workflow_with_two_pods):
+    """Reload in edit mode reloads saved YAML and keeps focus on the same row when possible."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.load_calls = 0
+
+        def load_edit_session(self):
+            self.load_calls += 1
+            return {
+                "raw_yaml": "initial-yaml" if self.load_calls == 1 else "reloaded-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.endpoint")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            assert binding_descriptions(app, "r") == ["Reload"]
+
+            await pilot.press("r")
+            assert await wait_until(
+                pilot,
+                lambda: service.load_calls == 2 and app._edit_draft_yaml == "reloaded-yaml",
+            )
+            assert app._edit_dirty is False
+            assert (tree.cursor_node.data or {}).get("id") == "edit:sourceClusters.legacy.endpoint"
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_reload_dirty_draft_can_save_then_reload(mock_workflow_with_two_pods):
+    """Reloading a dirty draft prompts, saves when requested, and then reloads from the saved source."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.load_calls = 0
+            self.apply_calls = []
+            self.saved_yaml = []
+
+        def load_edit_session(self):
+            self.load_calls += 1
+            return {
+                "raw_yaml": "initial-yaml" if self.load_calls == 1 else "reloaded-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def save_raw_yaml(self, raw_yaml):
+            self.saved_yaml.append(raw_yaml)
+            return "Configuration saved"
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.allowInsecure")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            app.screen.set_focus(app.screen.query_one("#choice-1", Button))
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: app._edit_dirty is True)
+
+            await pilot.press("r")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfigEditExitModal))
+            assert app.screen.query_one("#discard", Button).label.plain == "Discard and reload (d)"
+            assert app.screen.query_one("#save", Button).label.plain == "Save and reload (s)"
+            assert app.screen.query_one("#return", Button).label.plain == "Return (r)"
+
+            await pilot.press("s")
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
+            assert await wait_until(
+                pilot,
+                lambda: service.load_calls == 2 and app._edit_draft_yaml == "reloaded-yaml",
+            )
+            assert app._edit_dirty is False
+            assert get_clean_text_label(tree.root) == "Workflow Config Edit"
 
 
 @pytest.mark.asyncio
