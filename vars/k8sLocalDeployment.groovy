@@ -119,7 +119,7 @@ def call(Map config = [:]) {
                                 def targetVer = targetVersion ?: params.TARGET_VERSION
                                 currentBuild.description = "${sourceVer} → ${targetVer}"
                                 // --source-version accepts one or more space-separated values; convert commas for multi-source jobs
-                                def sourceVerArg = sourceVer.replace(',', ' ')
+                                def sourceVerArg = sourceVer ? sourceVer.replace(',', ' ') : 'all'
                                 def testIdsArg = ""
                                 def testIdsResolved = testIds ?: params.TEST_IDS
                                 if (testIdsResolved != "" && testIdsResolved != "all") {

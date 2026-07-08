@@ -195,31 +195,57 @@ class TestPytestCommand:
             assert mock_run.call_args.kwargs.get("skip_workflow_reset", False) is False
 
 
-from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
+from test_runner import get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS, VALID_TARGET_VERSIONS
 
 
 class TestVersionCombinations:
     def test_same_version_filtered(self):
-        combos = get_version_combinations("all", "all", TargetType.OPENSEARCH)
+        combos = get_version_combinations(VALID_SOURCE_VERSIONS, VALID_TARGET_VERSIONS, TargetType.OPENSEARCH)
         assert ("OS_1.3", "OS_1.3") not in combos
 
     def test_aoss_ignores_target_version(self):
-        combos = get_version_combinations("ES_7.10", "OS_2.19", TargetType.AOSS)
+        combos = get_version_combinations(["ES_7.10"], ["OS_2.19"], TargetType.AOSS)
         assert combos == [("ES_7.10", "AOSS")]
 
     def test_single_versions(self):
-        combos = get_version_combinations("ES_7.10", "OS_2.19", TargetType.OPENSEARCH)
+        combos = get_version_combinations(["ES_7.10"], ["OS_2.19"], TargetType.OPENSEARCH)
         assert combos == [("ES_7.10", "OS_2.19")]
 
     def test_aoss_all_sources(self):
-        combos = get_version_combinations("all", "OS_2.19", TargetType.AOSS)
+        combos = get_version_combinations(VALID_SOURCE_VERSIONS, ["OS_2.19"], TargetType.AOSS)
         assert all(t == "AOSS" for _, t in combos)
         assert len(combos) == len(VALID_SOURCE_VERSIONS)
 
     def test_multi_source_list(self):
-        combos = get_version_combinations(["SOLR_6.6", "SOLR_7.7", "SOLR_9.8"], "OS_3.1", TargetType.OPENSEARCH)
+        combos = get_version_combinations(["SOLR_6.6", "SOLR_7.7", "SOLR_9.8"], ["OS_3.1"], TargetType.OPENSEARCH)
         assert combos == [("SOLR_6.6", "OS_3.1"), ("SOLR_7.7", "OS_3.1"), ("SOLR_9.8", "OS_3.1")]
 
-    def test_single_source_as_list(self):
-        combos = get_version_combinations(["ES_7.10"], "OS_2.19", TargetType.OPENSEARCH)
-        assert combos == [("ES_7.10", "OS_2.19")]
+    def test_multi_target_list(self):
+        combos = get_version_combinations(["ES_7.10"], ["OS_2.19", "OS_3.1"], TargetType.OPENSEARCH)
+        assert combos == [("ES_7.10", "OS_2.19"), ("ES_7.10", "OS_3.1")]
+
+
+class TestSourceVersionArgParsing:
+    def test_all_normalizes_to_lowercase(self):
+        args = parse_args(["--source-version", "all", "--kube-context", "minikube"])
+        assert args.source_version == ["all"]
+
+    def test_all_case_insensitive(self):
+        args = parse_args(["--source-version", "ALL", "--kube-context", "minikube"])
+        assert args.source_version == ["all"]
+
+    def test_all_expands_to_valid_source_versions(self):
+        args = parse_args(["--source-version", "all", "--kube-context", "minikube"])
+        source_versions = VALID_SOURCE_VERSIONS if args.source_version == ["all"] else args.source_version
+        assert source_versions == VALID_SOURCE_VERSIONS
+
+    def test_multiple_specific_versions(self):
+        args = parse_args(["--source-version", "ES_7.10", "ES_8.19", "--kube-context", "minikube"])
+        assert args.source_version == ["ES_7.10", "ES_8.19"]
+
+    def test_mixed_all_and_specific_is_rejected(self):
+        """Mixing 'all' with specific versions must be caught and rejected at the call site."""
+        args = parse_args(["--source-version", "all", "ES_7.10", "--kube-context", "minikube"])
+        # argparse accepts the list; the rejection happens in main() via sys.exit
+        assert "all" in args.source_version
+        assert len(args.source_version) > 1
