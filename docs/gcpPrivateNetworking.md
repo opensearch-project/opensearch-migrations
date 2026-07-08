@@ -10,6 +10,12 @@ is unchanged from the standard GCP deployment.
 > **Scope:** these mechanisms are GCP-internal. A source or target hosted in AWS or
 > on-premises cannot be reached via Private Service Connect or VPC peering — that
 > requires HA VPN or Cloud Interconnect, which is not yet supported here.
+>
+> **Backfill migrations** (snapshot + reindex-from-snapshot) are covered end to end.
+> **Live capture-and-replay** adds a capture proxy in front of the source; making that
+> proxy's ingress private on GCP is not yet supported (its Service currently emits
+> AWS-only internal-load-balancer annotations). Keep live migration to a private network
+> path you control until GKE internal-LB support for the capture proxy lands.
 
 ## The data legs
 
