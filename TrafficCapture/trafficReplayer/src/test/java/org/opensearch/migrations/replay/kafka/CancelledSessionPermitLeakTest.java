@@ -145,20 +145,19 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
     }
 
     /**
-     * Exercises the isCancelled() check in scheduleWork (RequestSenderOrchestrator line 128).
-     * Marks the session cancelled BEFORE scheduling requests with past timestamps (timers fire
-     * immediately). The getDeferredFutureThroughHandle callback sees isCancelled()==true and
-     * returns a failed future without executing the task.
+     * Exercises the isCancelled() check in submitUnorderedWorkToEventLoop
+     * (RequestSenderOrchestrator line 290). Marks the session cancelled BEFORE scheduling
+     * requests with past timestamps. The sorter callback sees isCancelled()==true and returns
+     * a failed future without executing the task.
      */
     @Test
     @Timeout(10)
-    void cancelledSessionBeforeSchedule_failsFastOnTimerFire() throws Exception {
+    void cancelledSessionBeforeSchedule_failsFastOnSorterCallback() throws Exception {
         var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-pre-cancel", 0)
             .getChannelKeyContext();
         var session = pool.getCachedSession(channelKeyCtx, 0);
 
-        // Mark session cancelled BEFORE scheduling work — simulates a race where the Netty
-        // timer fires after setCancelled(true) but before drainWithCancellation runs.
+        // Mark session cancelled BEFORE scheduling work
         session.setCancelled(true);
 
         AtomicInteger completedExceptionally = new AtomicInteger(0);
@@ -169,7 +168,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             var future = orchestrator.scheduleRequest(
                 reqCtx.getReplayerRequestKey(),
                 reqCtx,
-                Instant.now().minusSeconds(1), // past timestamp — timer fires immediately
+                Instant.now().minusSeconds(1),
                 Duration.ZERO,
                 ByteBufListProducer.of(packets),
                 new NoRetryEvaluatorFactory.NoRetryVisitor()
@@ -184,11 +183,61 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             );
         }
 
-        // Wait for the event loop to process the immediate timers
         session.eventLoop.submit(() -> {}).sync();
         Thread.sleep(200);
 
         Assertions.assertEquals(3, completedExceptionally.get(),
-            "All requests should complete exceptionally via the isCancelled() fast-path in scheduleWork");
+            "All requests should complete exceptionally via the isCancelled() check in submitUnorderedWorkToEventLoop");
+    }
+
+    /**
+     * Exercises the isCancelled() check in scheduleWork (RequestSenderOrchestrator line 128).
+     * Schedules a request with a short delay, lets the sorter process it (not cancelled yet),
+     * then cancels the session BEFORE the Netty timer fires. When the timer fires naturally,
+     * scheduleFailure is null but isCancelled() is true — hitting the defensive guard.
+     */
+    @Test
+    @Timeout(10)
+    void cancelAfterSorterButBeforeTimerFire_failsFastInScheduleWork() throws Exception {
+        var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-race", 0)
+            .getChannelKeyContext();
+        var session = pool.getCachedSession(channelKeyCtx, 0);
+
+        AtomicInteger completedExceptionally = new AtomicInteger(0);
+
+        // Schedule at +500ms — long enough to cancel before the timer fires
+        var reqCtx = rootContext.getTestConnectionRequestContext("conn-race", 0);
+        var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[]{1}));
+        var future = orchestrator.scheduleRequest(
+            reqCtx.getReplayerRequestKey(),
+            reqCtx,
+            Instant.now().plusMillis(500),
+            Duration.ZERO,
+            ByteBufListProducer.of(packets),
+            new NoRetryEvaluatorFactory.NoRetryVisitor()
+        );
+        future.whenComplete(
+            (v, t) -> {
+                if (t != null) {
+                    completedExceptionally.incrementAndGet();
+                }
+            },
+            () -> "tracking exceptional completion"
+        );
+
+        // Wait for event loop to process the submission (sorter fires, timer queued)
+        session.eventLoop.submit(() -> {}).sync();
+
+        // Cancel the session WITHOUT calling drainWithCancellation — simulates the race
+        // window between setCancelled(true) and drain. The timer will fire naturally at +500ms
+        // and find isCancelled()==true.
+        session.setCancelled(true);
+
+        // Wait for the timer to fire (~500ms) plus margin
+        Thread.sleep(800);
+        session.eventLoop.submit(() -> {}).sync();
+
+        Assertions.assertEquals(1, completedExceptionally.get(),
+            "Request should complete exceptionally via the isCancelled() guard in scheduleWork");
     }
 }
