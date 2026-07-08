@@ -123,10 +123,17 @@ public class RequestSenderOrchestrator {
         return bindNettyScheduleToCompletableFuture(connectionSession.eventLoop, timestamp)
             .getDeferredFutureThroughHandle((nullValue, scheduleFailure) -> {
                 scheduledContext.close();
-                if (scheduleFailure == null) {
-                    return task.get();
-                } else {
+                if (scheduleFailure != null) {
                     return TextTrackedFuture.failedFuture(scheduleFailure, () -> "netty scheduling failure");
+                } else if (connectionSession.isCancelled()) {
+                    // Session was cancelled (partition reassignment) while the Netty timer was pending.
+                    // Fail fast rather than running the task — permits will be released via whenComplete.
+                    return TextTrackedFuture.failedFuture(
+                        new java.util.concurrent.CancellationException(
+                            "Session cancelled before transformation work could start"),
+                        () -> "session cancelled for " + ctx);
+                } else {
+                    return task.get();
                 }
             }, () -> "The scheduled callback is running work for " + ctx);
     }
@@ -279,7 +286,15 @@ public class RequestSenderOrchestrator {
                 return replaySession.scheduleSequencer.addFutureForWork(
                     channelInteractionNumber,
                     f -> f.thenCompose(
-                        voidValue -> onSessionCallback.apply(replaySession),
+                        voidValue -> {
+                            if (replaySession.isCancelled()) {
+                                return TextTrackedFuture.failedFuture(
+                                    new java.util.concurrent.CancellationException(
+                                        "Session cancelled — not scheduling work for slot " + channelInteractionNumber),
+                                    () -> "cancelled session for " + ctx);
+                            }
+                            return onSessionCallback.apply(replaySession);
+                        },
                         () -> "Work callback on replay session"
                     )
                 );

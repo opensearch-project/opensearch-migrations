@@ -48,6 +48,7 @@ public class ConnectionReplaySession {
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
      * preventing self-healing reconnects after a partition reassignment cancel.
      */
+    @Getter
     @Setter
     private volatile boolean cancelled = false;
 
