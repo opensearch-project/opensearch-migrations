@@ -968,7 +968,7 @@ public class RfsMigrateDocuments {
         // go to the default AWS endpoint while snapshot reads use the override.
         var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
             ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
-            : arguments.s3Endpoint;
+            : arguments.endpoint;
         if (endpoint != null && !endpoint.isBlank()) {
             s3ClientBuilder.endpointOverride(URI.create(endpoint));
         }
