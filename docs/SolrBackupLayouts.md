@@ -53,13 +53,17 @@ backup location:
 ## Setting the target index name
 
 Both the document migration and the metadata migration let you set the target index name for a
-bare backup:
+backup. Whether it is required depends on the layout:
 
-- **SolrCloud:** optional — the collection name is read from `backup.properties`. Set it only to
-  override that name.
-- **Standalone:** recommended — the core name is not in the backup, so without an override the
-  index name is derived from the `snapshot.<backupName>` directory.
-- **Wrapped multi-collection layouts:** ignored (each collection keeps its own directory name).
+| Layout | Required? | Behavior when omitted |
+| --- | --- | --- |
+| Standalone — wrapped (`<snapshotName>/snapshot.<name>/…`) | **Required** | Fails — no index name is recorded in the backup. |
+| Standalone — flat-root (`snapshot.<name>/` at the repo root) | Optional | Derived by stripping the `snapshot.` prefix from the directory name. |
+| SolrCloud (bare or incremental) | Optional | Recovered from `backup.properties` / the backup metadata. |
+| Wrapped multi-collection layouts | Ignored | Each collection keeps its own directory name. |
+
+For the optional cases the value acts purely as an override. If you are unsure which standalone
+sub-layout you have, setting it is always safe.
 
 **CLI:** pass `--solr-collection-name <index>`.
 
