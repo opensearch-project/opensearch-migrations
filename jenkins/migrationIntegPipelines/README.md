@@ -138,3 +138,43 @@ Rules:
 Jenkins' `H` token deterministically hashes the job name into a slot within the allowed range, so jobs sharing the same cron expression still fire at unique minutes. The explicit `H(0-5)/6` hour range forces Jenkins to also spread jobs across different starting hours — without the range, all `H/6` jobs collapse into hour slot 0.
 
 To change a cadence or add one for a new `main-*` / `release-*` job, edit the switch in `vars/periodicCron.groovy` and rebuild the shared library.
+
+### Path Filtering
+
+Not all PRs need to run Jenkins tests. The `jenkins_tests.yml` workflow has two layers of filtering:
+
+#### Layer 1: Skip-all (non-functional files)
+
+PRs that only touch these paths skip **all** Jenkins test jobs:
+
+- `**/*.md` — documentation
+- `AIAdvisor/**` — standalone Go tool (separate build system, not in Gradle)
+- Hidden files — `.claude/`, `.idea/`, `.vscode/`, `.whitesource`, `.codecov.yml`, `.flake8`, `.gitignore`
+
+#### Layer 2: Deployment-model filtering (ECS vs EKS)
+
+When a PR only touches infrastructure-specific paths, only the relevant test category runs:
+
+| Path | Tests triggered | Tests skipped |
+|------|----------------|---------------|
+| `deployment/cdk/**` only | ECS tests (`full-es68-e2e-aws-test`) | EKS, k8s-local, Docker |
+| `deployment/k8s/**` only | EKS + k8s-local tests | ECS, Docker |
+| `TrafficCapture/dockerSolution/**` only | Docker Compose test | ECS, EKS, k8s-local |
+| Any other path (shared code) | All tests | None |
+
+**Test category mapping:**
+
+| Category | Jobs |
+|----------|------|
+| ECS | `full-es68-e2e-aws-test` |
+| EKS | `eks-integ-test`, `eks-aoss-*`, `eks-byos-*`, `eks-cdc-*`, `eks-cfn-*`, `eks-full-e2e-isolated-vpc-test` |
+| k8s-local | `elasticsearch-5x-k8s-local-test`, `elasticsearch-8x-k8s-local-test`, `solr-8x-k8s-local-test` |
+| Docker | `docker-compose-e2e-test` |
+
+**How it works:** The `detect-changes` job outputs `run_ecs`, `run_eks`, `run_k8s_local`, and `run_docker` flags. Each test job checks its relevant flag in addition to `should_run`.
+
+**Safe defaults:** On push to `main` or on any error, all flags default to `true` (run everything).
+
+**For pushes to `main`:** The `paths-ignore` on the `push` trigger handles Layer 1 (skip-all). Layer 2 does not apply to pushes — all deployment models are tested on every push to `main`.
+
+**To modify the skip list:** See the comment block in `jenkins_tests.yml` above the `paths-ignore` section. Both `paths-ignore` and the `detect-changes` case statement must be updated together.
