@@ -383,6 +383,10 @@ public class RequestSenderOrchestrator {
 
         workFuture.map(f -> f.whenComplete((v, t) -> {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
+            if (itemStartTimeOfPopped == null) {
+                // Schedule was already drained by drainWithCancellation — nothing to pop or reschedule.
+                return;
+            }
             assert atTime.equals(itemStartTimeOfPopped)
                 : "Expected to have popped the item to match the start time for the responseFuture that finished";
             log.atDebug().setMessage("{} responseFuture completed - checking {} for the next item to schedule")
