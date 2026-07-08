@@ -36,8 +36,8 @@ A standalone backup is a single flat Lucene index inside a `snapshot.<name>/` di
     └── ...
 ```
 
-A standalone backup does **not** record the core name, so supply the target index name with
-`--solr-collection-name` (see below).
+A standalone backup does **not** record the core name, so supply the target index name (see
+[Setting the target index name](#setting-the-target-index-name)).
 
 ## Pointing the migration at a backup
 
@@ -50,13 +50,33 @@ backup location:
   `--snapshot-name <snapshotName>`. Upload the backup verbatim so its contents land directly under
   `s3://<bucket>[/<subpath>]/<snapshotName>/`.
 
-## `--solr-collection-name`
+## Setting the target index name
 
-Both the document migration and the metadata migration accept `--solr-collection-name`, which sets
-the target index name for a bare backup:
+Both the document migration and the metadata migration let you set the target index name for a
+bare backup:
 
-- **SolrCloud:** optional — the collection name is read from `backup.properties`. Use the flag only
-  to override that name.
+- **SolrCloud:** optional — the collection name is read from `backup.properties`. Set it only to
+  override that name.
 - **Standalone:** recommended — the core name is not in the backup, so without an override the
   index name is derived from the `snapshot.<backupName>` directory.
 - **Wrapped multi-collection layouts:** ignored (each collection keeps its own directory name).
+
+**CLI:** pass `--solr-collection-name <index>`.
+
+**Orchestration workflow:** set `solrCollectionName` in the snapshot's document-backfill options:
+
+```json
+{
+  "snapshotMigrationConfigs": [{
+    "fromSource": "solrSource",
+    "toTarget": "osTarget",
+    "perSnapshotConfig": {
+      "myBackup": [{
+        "documentBackfillConfig": {
+          "solrCollectionName": "my_target_index"
+        }
+      }]
+    }
+  }]
+}
+```
