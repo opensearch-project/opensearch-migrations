@@ -2,6 +2,8 @@ FROM amazoncorretto:8-alpine
 
 ARG SOLR_VERSION=6.6.0
 ARG SOLR_SHA1=ab74116e049cfb603b84226e13d0f7c51de9aa23
+ARG SOLR_SHA512=
+ARG SOLR_ARCHIVE_BASEPATH="https://artifacts.alfresco.com/nexus/content/repositories/public/org/apache/solr/solr"
 ENV SOLR_HOME=/var/solr/data
 ENV PATH=/opt/solr/bin:$PATH
 ENV LANG=C.UTF-8
@@ -27,8 +29,14 @@ RUN --mount=type=cache,target=/var/cache/downloads,sharing=locked \
   set -eux; \
   ZIPFILE=/var/cache/downloads/solr-${SOLR_VERSION}.zip; \
   [ -s "$ZIPFILE" ] || curl -fsSLo "$ZIPFILE" \
-    "https://artifacts.alfresco.com/nexus/content/repositories/public/org/apache/solr/solr/${SOLR_VERSION}/solr-${SOLR_VERSION}.zip"; \
-  echo "${SOLR_SHA1}  $ZIPFILE" | sha1sum -c -; \
+    "${SOLR_ARCHIVE_BASEPATH}/${SOLR_VERSION}/solr-${SOLR_VERSION}.zip"; \
+  if [ -n "${SOLR_SHA512}" ]; then \
+    echo "${SOLR_SHA512}  $ZIPFILE" | sha512sum -c -; \
+  elif [ -n "${SOLR_SHA1}" ]; then \
+    echo "${SOLR_SHA1}  $ZIPFILE" | sha1sum -c -; \
+  else \
+    echo "ERROR: one of SOLR_SHA1 or SOLR_SHA512 must be provided" >&2; exit 1; \
+  fi; \
   mkdir -p /var/solr; \
   groupadd -r -g 8983 solr; \
   useradd  -r -u 8983 -g solr -m -d "${SOLR_HOME}" -s /bin/bash solr; \

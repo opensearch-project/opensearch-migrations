@@ -124,8 +124,9 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--numThreads" },
             arity = 1,
-            description = "How many threads netty should create in its event loop group")
-        public int numThreads = 1;
+            description = "How many threads netty should create in its event loop group. "
+                + "A value of 0 will use the default number of threads (2 * number of available processors).")
+        public int numThreads = 0;
         @Parameter(required = false,
             names = { "--destinationConnectionPoolSize" },
             arity = 1,

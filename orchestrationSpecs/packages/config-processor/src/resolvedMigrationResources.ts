@@ -336,6 +336,7 @@ function capturedTrafficParameters(proxy: ProxyConfig): Record<string, unknown> 
         partitions: proxy.kafkaConfig.topicSpecOverrides?.partitions,
         replicas: proxy.kafkaConfig.topicSpecOverrides?.replicas,
         topicConfig: proxy.kafkaConfig.topicSpecOverrides?.config,
+        sourceKind: "proxy",
     };
 }
 

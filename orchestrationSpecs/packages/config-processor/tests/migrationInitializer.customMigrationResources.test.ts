@@ -18,10 +18,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -150,7 +148,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('dataSnapshots: {');
         expect(enrichScript).toContain('"source-snap1": $data_snapshot_source_snap1');
         expect(enrichScript).toContain(
-            '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + "-" + .label)]}))))'
+            '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[crdname($snapshot.sourceConfig.label + "-" + .label)]}))))'
         );
         expect(enrichScript).toContain(
             "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
@@ -158,7 +156,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 
@@ -254,7 +252,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -353,7 +351,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -408,10 +406,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: {
-                                awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path"
-                            }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -465,7 +461,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 });

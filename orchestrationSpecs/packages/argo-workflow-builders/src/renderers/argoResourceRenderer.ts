@@ -1,5 +1,6 @@
 import {InputParamDef, InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
 import {
+    isLiteralExpression,
     REMOVE_NEXT_QUOTE_SENTINEL,
     REMOVE_PREVIOUS_QUOTE_SENTINEL,
     toArgoExpressionString
@@ -10,14 +11,15 @@ import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {
     BaseExpression,
-    makeDirectTypeProxy,
+    expr,
     SimpleExpression,
     TemplateExpression,
-    UnquotedTypeWrapper
+    UnquotedTypeWrapper,
+    YamlPlainSafeStringExpression
 } from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
 import * as _ from 'lodash';
-import {toSafeYamlOutput} from "../utils";
+import {RawYaml, toSafeYamlOutput} from "../utils";
 import {SynchronizationConfig} from "../models/synchronization";
 
 function isDefault<T extends PlainObject>(
@@ -171,13 +173,34 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     return result;
 }
 
+// Argo expression placeholder that must render as an unquoted YAML scalar.
+const SENTINEL_WRAPPED = new RegExp(`^${REMOVE_PREVIOUS_QUOTE_SENTINEL}([\\s\\S]*)${REMOVE_NEXT_QUOTE_SENTINEL}$`);
+
+function markUnquotedNodes(node: any): any {
+    if (typeof node === "string") {
+        const m = SENTINEL_WRAPPED.exec(node);
+        return m ? new RawYaml(m[1]) : node;
+    }
+    if (Array.isArray(node)) {
+        let changed = false;
+        const out = node.map(v => { const nv = markUnquotedNodes(v); changed ||= nv !== v; return nv; });
+        return changed ? out : node;
+    }
+    if (node !== null && typeof node === "object") {
+        let changed = false;
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(node)) {
+            const nv = markUnquotedNodes(v);
+            changed ||= nv !== v;
+            out[k] = nv;
+        }
+        return changed ? out : node;
+    }
+    return node;
+}
+
 export function unwrapPlaceholdersAndStringify(obj: any): string {
-    const result = toSafeYamlOutput(obj);
-    // in this yaml output, the value won't need to be quoted when it starts with a string -
-    // as long as REMOVE_PREVIOUS_QUOTE_SENTINEL starts with a character, there won't actually be a quote
-    return result
-        .replace(new RegExp(`${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
-        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}`, 'g'), '');
+    return toSafeYamlOutput(markUnquotedNodes(obj));
 }
 
 function formatBody(body: GenericScope) {
@@ -194,7 +217,7 @@ function formatBody(body: GenericScope) {
             const {manifest, ...rest} = resource;
             return {
                 resource: {
-                    manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest)),
+                    manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest, true)),
                     ...transformExpressionsDeep(rest)
                 },
                 ...transformExpressionsDeep(restOfBody)
@@ -349,11 +372,18 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
 /**
  * Recursively transforms any Expression instances found within records and arrays.
  * Asserts when non-plain objects are found since they shouldn't exist in this model.
+ *
+ * In resource manifests, dynamic string scalars are wrapped in `expr.yamlSafeString`
+ * so Argo substitution cannot break the YAML that kubectl parses.
  */
-export function transformExpressionsDeep<T>(input: T) {
+export function transformExpressionsDeep<T>(input: T, escapeStringScalars = false) {
     function visit(node: any): any {
         if (node instanceof BaseExpression) {
-            return toArgoExpressionString(node);
+            const needsEscape = escapeStringScalars
+                && !(node instanceof UnquotedTypeWrapper)
+                && !(node instanceof YamlPlainSafeStringExpression)
+                && !isLiteralExpression(node);
+            return toArgoExpressionString(needsEscape ? expr.yamlSafeString(node) : node);
         }
 
         if (isPrimitiveLiteral(node)) {

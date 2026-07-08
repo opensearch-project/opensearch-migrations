@@ -352,33 +352,33 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "additionalProperties": {
                             "type": "object",
                             "properties": {
+                              "repoPathUri": {
+                                "type": "string",
+                                "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                              },
                               "awsRegion": {
                                 "type": "string",
-                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                                "default": "",
+                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
                               },
                               "endpoint": {
                                 "type": "string",
-                                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                 "default": "",
-                                "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                              },
-                              "s3RepoPathUri": {
-                                "type": "string",
-                                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                                "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                               },
                               "s3RoleArn": {
                                 "type": "string",
                                 "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                 "default": "",
-                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                               }
                             },
                             "required": [
-                              "awsRegion",
-                              "s3RepoPathUri"
+                              "repoPathUri"
                             ],
-                            "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                            "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                           },
                           "description": "S3 snapshot repositories registered with the source cluster.",
                           "x-ui-hint": {
@@ -635,7 +635,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -726,6 +727,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "proxyConfig": {
                   "type": "object",
                   "properties": {
+                    "podReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
+                    },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
@@ -741,10 +752,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "internetFacing": {
                       "type": "boolean",
                       "default": false
-                    },
-                    "podReplicas": {
-                      "type": "number",
-                      "default": 1
                     },
                     "resources": {
                       "type": "object",
@@ -1755,7 +1762,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -1951,19 +1959,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo": {
                         "type": "object",
                         "properties": {
+                          "repoPathUri": {
+                            "type": "string",
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          },
                           "awsRegion": {
                             "type": "string",
-                            "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                            "default": ""
                           },
                           "endpoint": {
                             "type": "string",
-                            "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                            "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                             "default": ""
-                          },
-                          "s3RepoPathUri": {
-                            "type": "string",
-                            "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                           },
                           "s3RoleArn": {
                             "type": "string",
@@ -1979,8 +1987,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           }
                         },
                         "required": [
-                          "awsRegion",
-                          "s3RepoPathUri",
+                          "repoPathUri",
                           "repoName"
                         ]
                       },
@@ -2515,8 +2522,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "object",
                   "properties": {
                     "podReplicas": {
-                      "type": "number",
+                      "type": "integer",
+                      "minimum": 0,
                       "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
                     },
                     "jvmArgs": {
                       "type": "string",
@@ -3054,19 +3067,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "repoConfig": {
                       "type": "object",
                       "properties": {
+                        "repoPathUri": {
+                          "type": "string",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
                         "awsRegion": {
                           "type": "string",
-                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                          "default": ""
                         },
                         "endpoint": {
                           "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": ""
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                         },
                         "s3RoleArn": {
                           "type": "string",
@@ -3082,8 +3095,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "required": [
-                        "awsRegion",
-                        "s3RepoPathUri",
+                        "repoPathUri",
                         "repoName"
                       ]
                     }
@@ -3120,6 +3132,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "resourceUid": {
                   "type": "string"
+                },
+                "resourceName": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -3134,7 +3149,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "configChecksum",
                 "checksumForReplayer",
                 "workloadIdentityChecksum",
-                "resourceUid"
+                "resourceUid",
+                "resourceName"
               ]
             },
             "default": []
@@ -3196,18 +3212,29 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "configChecksum": {
                         "type": "string"
+                      },
+                      "resourceName": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
                       "snapshot",
                       "migrationLabel",
-                      "configChecksum"
+                      "configChecksum",
+                      "resourceName"
                     ]
                   }
                 },
                 "fromCapturedTraffic": {
                   "type": "string"
+                },
+                "fromCapturedTrafficSourceKind": {
+                  "type": "string",
+                  "enum": [
+                    "proxy",
+                    "s3"
+                  ]
                 },
                 "fromCapturedTrafficConfigChecksum": {
                   "type": "string"
@@ -3224,7 +3251,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaConnection": {
                       "type": "string",
-                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                      "description": "Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). Required when using an externally managed Kafka cluster."
                     },
                     "kafkaTopic": {
                       "type": "string",
@@ -3315,6 +3343,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "replayerConfig": {
                   "type": "object",
                   "properties": {
+                    "podReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1
+                    },
+                    "minPodReplicas": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 0
+                    },
                     "jvmArgs": {
                       "type": "string",
                       "default": ""
@@ -3322,10 +3360,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
-                    },
-                    "podReplicas": {
-                      "type": "number",
-                      "default": 1
                     },
                     "useLocalStack": {
                       "type": "boolean",
@@ -3883,6 +3917,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "dependsOn",
                 "dependsOnSnapshotMigrations",
                 "fromCapturedTraffic",
+                "fromCapturedTrafficSourceKind",
                 "fromCapturedTrafficConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
@@ -3929,7 +3964,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "kafkaConnection": {
                     "type": "string",
-                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                    "description": "Sequence of <HOSTNAME:PORT> values delimited by ','."
                   },
                   "kafkaTopic": {
                     "type": "string",
@@ -4454,33 +4490,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "repoPathUri": {
+                      "type": "string",
+                      "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                      "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                    },
                     "awsRegion": {
                       "type": "string",
-                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                      "default": "",
+                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
                     },
                     "endpoint": {
                       "type": "string",
-                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                       "default": "",
-                      "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                    },
-                    "s3RepoPathUri": {
-                      "type": "string",
-                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                      "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
                     },
                     "s3RoleArn": {
                       "type": "string",
                       "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": "",
-                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                     }
                   },
                   "required": [
-                    "awsRegion",
-                    "s3RepoPathUri"
+                    "repoPathUri"
                   ],
-                  "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                  "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                 },
                 "description": "S3 snapshot repositories registered with the source cluster.",
                 "x-ui-hint": {
@@ -4702,7 +4738,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "required": [
           "version"
-        ]
+        ],
+        "description": "Connection and snapshot configuration for a source cluster."
       },
       "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
       "x-ui-hint": {
@@ -5918,10 +5955,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "podReplicas": {
-                        "type": "number",
+                        "type": "integer",
+                        "minimum": 0,
                         "default": 1,
                         "description": "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel — throughput scales linearly up to the total number of source shards.",
                         "x-essential": true
+                      },
+                      "minPodReplicas": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the RFS document backfill service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
                       },
                       "jvmArgs": {
                         "type": "string",
@@ -7046,7 +7090,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
                   }
-                }
+                },
+                "description": "Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided."
               },
               "minItems": 1,
               "description": "List of migrations to execute for a single snapshot.  Each migration must configure metadata migration, document backfill, or both. These migrations will execute concurrently as dependent snapshots finish.",
@@ -7069,7 +7114,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "fromSource",
           "toTarget",
           "perSnapshotConfig"
-        ]
+        ],
+        "description": "A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings."
       },
       "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings.",
       "x-ui-hint": {
@@ -7125,6 +7171,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "proxyConfig": {
                 "type": "object",
                 "properties": {
+                  "podReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
+                  },
+                  "minPodReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the capture proxy service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
+                  },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
@@ -7220,11 +7278,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
                     "changeRestriction": "impossible",
                     "x-change-restriction": "impossible"
-                  },
-                  "podReplicas": {
-                    "type": "number",
-                    "default": 1,
-                    "description": "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
                   },
                   "resources": {
                     "type": "object",
@@ -8224,7 +8277,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "endpoint": {
                 "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                 "default": "",
                 "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
               },
@@ -8355,6 +8408,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "replayerConfig": {
                 "type": "object",
                 "properties": {
+                  "podReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
+                  },
+                  "minPodReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the traffic replayer service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
+                  },
                   "jvmArgs": {
                     "type": "string",
                     "default": "",
@@ -8436,11 +8501,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         }
                       }
                     }
-                  },
-                  "podReplicas": {
-                    "type": "number",
-                    "default": 1,
-                    "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
                   },
                   "useLocalStack": {
                     "type": "boolean",

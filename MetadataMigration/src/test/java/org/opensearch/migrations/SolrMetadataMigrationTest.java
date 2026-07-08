@@ -125,7 +125,7 @@ class SolrMetadataMigrationTest {
 
             // Run MetadataMigration
             var args = new MigrateOrEvaluateArgs();
-            args.fileSystemRepoPath = backupRoot.toString();
+            args.repoUri = backupRoot.toString();
             args.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
             args.targetArgs.host = target.getUrl();
 

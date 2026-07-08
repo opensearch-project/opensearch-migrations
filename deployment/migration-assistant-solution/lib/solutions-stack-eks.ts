@@ -213,6 +213,15 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             addParameterLabel(parameterLabels, createEKSAuthEndpointParam, "Create EKS Auth VPC Endpoint")
             vpcEndpointParameters.push(createEKSAuthEndpointParam.logicalId)
 
+            const createCWMonitoringEndpointParam = new CfnParameter(this, 'CreateCloudWatchMonitoringEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create a CloudWatch Monitoring interface VPC endpoint (required for reading metrics in isolated subnets).'
+            });
+            addParameterLabel(parameterLabels, createCWMonitoringEndpointParam, "Create CloudWatch Monitoring VPC Endpoint")
+            vpcEndpointParameters.push(createCWMonitoringEndpointParam.logicalId)
+
             // Conditionally create endpoints
             // Security group for interface VPC endpoints — allows HTTPS from the VPC CIDR
             const vpceSecurityGroup = new cdk.CfnResource(this, 'VpcEndpointSecurityGroup', {
@@ -236,6 +245,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
                     Fn.conditionEquals(createECREndpointParam, 'true'),
                     Fn.conditionEquals(createECRDockerEndpointParam, 'true'),
                     Fn.conditionEquals(createCWLogsEndpointParam, 'true'),
+                    Fn.conditionEquals(createCWMonitoringEndpointParam, 'true'),
                     Fn.conditionEquals(createEFSEndpointParam, 'true'),
                     Fn.conditionEquals(createSTSEndpointParam, 'true'),
                     Fn.conditionEquals(createEKSAuthEndpointParam, 'true'),
@@ -271,6 +281,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
                 { param: createECREndpointParam, serviceSuffix: 'ecr.api', name: 'ECR' },
                 { param: createECRDockerEndpointParam, serviceSuffix: 'ecr.dkr', name: 'ECRDocker' },
                 { param: createCWLogsEndpointParam, serviceSuffix: 'logs', name: 'CloudWatchLogs' },
+                { param: createCWMonitoringEndpointParam, serviceSuffix: 'monitoring', name: 'CloudWatchMonitoring' },
                 { param: createEFSEndpointParam, serviceSuffix: 'elasticfilesystem', name: 'EFS' },
                 { param: createSTSEndpointParam, serviceSuffix: 'sts', name: 'STS' },
                 { param: createEKSAuthEndpointParam, serviceSuffix: 'eks-auth', name: 'EKSAuth' },

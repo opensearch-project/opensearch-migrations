@@ -32,6 +32,13 @@ import {
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 import {setupFileSourcesForContainer} from "./commonUtils/containerFragments";
+import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
+import {
+    MIN_POD_REPLICAS_INPUTS,
+    POD_REPLICAS_INPUTS,
+    SCALABLE_WORKLOAD_INPUTS,
+    workflowParameterAsNumber,
+} from "./commonUtils/scalableWorkload";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -45,8 +52,8 @@ function makeOwnerReferences(
     return [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "CaptureProxy",
-        name: makeDirectTypeProxy(ownerName),
-        uid: makeDirectTypeProxy(ownerUid),
+        name: makeStringTypeProxy(ownerName),
+        uid: makeStringTypeProxy(ownerUid),
         controller: true,
         blockOwnerDeletion: true,
     }];
@@ -313,7 +320,7 @@ function makeCertificateManifest(args: {
     issuerName: BaseExpression<string>,
     issuerKind: BaseExpression<string>,
     issuerGroup: BaseExpression<string>,
-    dnsNames: BaseExpression<string>,
+    dnsNames: BaseExpression<Serialized<string[]>>,
     duration: BaseExpression<string>,
     renewBefore: BaseExpression<string>,
     ownerName: BaseExpression<string>,
@@ -378,6 +385,29 @@ export const SetupCapture = WorkflowBuilder.create({
     )
 
 
+    .addTemplate("deployProxyPodDisruptionBudget", t => t
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addInputsFromRecord(MIN_POD_REPLICAS_INPUTS)
+        .addRequiredInput("ownerUid", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "captureProxy")
+        .addResourceTask(b => b
+            .setDefinition(makePodDisruptionBudgetDefinition({
+                name: b.inputs.proxyName,
+                minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
+                matchLabels: {"migrations/proxy": b.inputs.proxyName},
+                labels: {
+                    "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
+                    "migrations.opensearch.org/source": b.inputs.sourceK8sLabel,
+                    "migrations.opensearch.org/task": b.inputs.taskK8sLabel,
+                },
+                ownerReferences: makeOwnerReferences(b.inputs.proxyName, b.inputs.ownerUid),
+            }))
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .addTemplate("deployProxyDeployment", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
@@ -386,7 +416,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
@@ -409,7 +439,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     listenPort: b.inputs.listenPort,
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
-                    jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    jsonConfig: expr.toBase64YamlSafe(b.inputs.jsonConfig),
                     kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
@@ -435,7 +465,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
@@ -458,7 +488,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     listenPort: b.inputs.listenPort,
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
-                    jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    jsonConfig: expr.toBase64YamlSafe(b.inputs.jsonConfig),
                     kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
@@ -496,7 +526,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("issuerName", typeToken<string>())
         .addRequiredInput("issuerKind", typeToken<string>())
         .addRequiredInput("issuerGroup", typeToken<string>())
-        .addRequiredInput("dnsNames", typeToken<string>())
+        .addRequiredInput("dnsNames", typeToken<string[]>())
         .addRequiredInput("duration", typeToken<string>())
         .addRequiredInput("renewBefore", typeToken<string>())
         .addRequiredInput("ownerName", typeToken<string>())
@@ -568,7 +598,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
@@ -581,14 +611,11 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
-            // Use dig for ALL tls field accesses so expressions are null-safe.
-            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
-            // so expr.get() on a nil tls block crashes even when the step is guarded.
+            // Argo evaluates step parameters before `when` guards, so tls fields must be null-safe.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
             const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
             const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls);
-            // Secret name: for certManager mode, use <proxyName>-tls; for existingSecret, extract from config
             const certManagerSecretName = expr.concat(b.inputs.proxyName, expr.literal("-tls"));
             const existingSecretName = expr.dig(proxyOpts, ["tls", "secretName"], expr.literal(""));
             const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
@@ -603,7 +630,6 @@ export const SetupCapture = WorkflowBuilder.create({
             const kafkaCaSecretName = expr.dig(kafkaConfig, ["caSecretName"], expr.literal(""));
             const shouldUseKafkaCaSecret = expr.and(shouldUseScramAuth, expr.not(expr.isEmpty(kafkaCaSecretName)));
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
-            // Issuer fields for cert provisioning
             const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
             const issuerKind = expr.dig(proxyOpts, ["tls", "issuerRef", "kind"], expr.literal("ClusterIssuer"));
             const issuerGroup = expr.dig(proxyOpts, ["tls", "issuerRef", "group"], expr.literal("cert-manager.io"));
@@ -663,6 +689,14 @@ export const SetupCapture = WorkflowBuilder.create({
                     {when: {templateExp: shouldUseScramAuth}}
                 )
                 .addStepGroup(g => g
+                    .addStep("deployProxyPodDisruptionBudget", INTERNAL, "deployProxyPodDisruptionBudget", c =>
+                            c.register({
+                                proxyName: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
+                                minPodReplicas: b.inputs.minPodReplicas,
+                                ownerUid: b.inputs.ownerUid,
+                                sourceK8sLabel: b.inputs.sourceK8sLabel,
+                            })
+                    )
                     .addStep("deployProxyNoTls", INTERNAL, "deployProxyDeployment", c =>
                             c.register({
                                 ...selectInputsForRegister(b, c),
@@ -775,7 +809,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
@@ -791,7 +825,6 @@ export const SetupCapture = WorkflowBuilder.create({
             );
 
             return b
-            // ── Phase 1: Topic / CapturedTraffic flow ──────────────────
             .addStep("reconcileCapturedTrafficResource", ResourceManagement, "reconcileCapturedTrafficResource", c =>
                 c.register({
                     topicCrName: b.inputs.topicCrName,
@@ -847,15 +880,12 @@ export const SetupCapture = WorkflowBuilder.create({
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.topicConfigChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
-                    checksumForReplayer: b.inputs.checksumForReplayer,
                 }),
                 { when: c => ({templateExp: checksumNotDone(
                     c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum,
                     b.inputs.topicConfigChecksum
                 )}) }
             )
-
-            // ── Phase 2: Proxy / CaptureProxy flow ─────────────────────
             .addStep("reconcileCaptureProxyResource", ResourceManagement, "reconcileCaptureProxyResource", c =>
                 c.register({
                     proxyConfig: b.inputs.proxyConfig,
@@ -895,6 +925,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
                     checksumForReplayer: b.inputs.checksumForReplayer,
@@ -919,6 +950,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
                     checksumForReplayer: b.inputs.checksumForReplayer,

@@ -3,13 +3,16 @@ import json
 import logging
 import subprocess
 import time
+import boto3
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError
 import pytest
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Tuple
+from typing import Dict, Iterable, Iterator, List, Tuple
 from unittest import TestCase
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource
 from console_link.middleware.metrics import get_metric_data
-from console_link.models.utils import create_boto3_client, raise_for_aws_api_error
+from console_link.models.utils import raise_for_aws_api_error
 
 logger = logging.getLogger(__name__)
 CW_NAMESPACE = "OpenSearchMigrations"
@@ -101,18 +104,24 @@ def _load_aws_metadata(namespace: str = "ma"):
     return json.loads(result.stdout).get("data", {})
 
 
-def _find_metric_dimensions(client, metric_name: str, required_dimensions: Dict[str, str]):
-    response = client.list_metrics(
+def _iter_matching_metric_dimensions(
+        client,
+        metric_name: str,
+        required_dimensions: Dict[str, str]) -> Iterator[List[Dict[str, str]]]:
+    paginator = client.get_paginator("list_metrics")
+    pages = paginator.paginate(
         Namespace=CW_NAMESPACE,
         MetricName=metric_name,
+        Dimensions=[{"Name": name, "Value": value} for name, value in required_dimensions.items()],
         RecentlyActive="PT3H"
     )
-    raise_for_aws_api_error(response)
-    for metric in response.get("Metrics", []):
-        dimensions = {d["Name"]: d["Value"] for d in metric.get("Dimensions", [])}
-        if all(dimensions.get(k) == v for k, v in required_dimensions.items()):
-            return metric.get("Dimensions", [])
-    return None
+    for page in pages:
+        raise_for_aws_api_error(page)
+        for metric in page.get("Metrics", []):
+            dimensions = metric.get("Dimensions", [])
+            dimension_values = {d["Name"]: d["Value"] for d in dimensions}
+            if all(dimension_values.get(k) == v for k, v in required_dimensions.items()):
+                yield dimensions
 
 
 def _metric_has_recent_data(client, metric_name: str, dimensions, lookback_minutes: int) -> bool:
@@ -141,11 +150,35 @@ def _metric_has_recent_data(client, metric_name: str, dimensions, lookback_minut
     return bool(results and results[0].get("Timestamps"))
 
 
-def _any_candidate_has_recent_data(client, candidates, lookback_minutes: int) -> bool:
-    for metric_name, required_dimensions in candidates:
-        dimensions = _find_metric_dimensions(client, metric_name, required_dimensions)
-        if dimensions and _metric_has_recent_data(client, metric_name, dimensions, lookback_minutes):
+def _matching_metric_dimension_sets_have_recent_data(
+        client,
+        metric_name: str,
+        required_dimensions: Dict[str, str],
+        lookback_minutes: int) -> bool:
+    matching_dimension_sets = 0
+    for dimensions in _iter_matching_metric_dimensions(client, metric_name, required_dimensions):
+        matching_dimension_sets += 1
+        if _metric_has_recent_data(client, metric_name, dimensions, lookback_minutes):
             logger.info("Found CloudWatch metric data for %s with dimensions %s", metric_name, dimensions)
+            return True
+    logger.info(
+        "No recent CloudWatch metric data for %s after checking %s matching dimension sets",
+        metric_name,
+        matching_dimension_sets
+    )
+    return False
+
+
+def _any_candidate_has_recent_data(
+        client,
+        candidates: Iterable[Tuple[str, Dict[str, str]]],
+        lookback_minutes: int) -> bool:
+    for metric_name, required_dimensions in candidates:
+        if _matching_metric_dimension_sets_have_recent_data(
+                client,
+                metric_name,
+                required_dimensions,
+                lookback_minutes):
             return True
     return False
 
@@ -153,7 +186,7 @@ def _any_candidate_has_recent_data(client, candidates, lookback_minutes: int) ->
 def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
         namespace: str = "ma",
         lookback_minutes: int = 20,
-        attempts: int = 5,
+        attempts: int = 16,
         wait_seconds: int = 60):
     aws_metadata = _load_aws_metadata(namespace)
     if not aws_metadata:
@@ -164,19 +197,33 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
     if not region or not qualifier:
         raise AssertionError(f"aws-metadata ConfigMap is missing AWS_REGION or STAGE_NAME: {aws_metadata}")
 
-    client = create_boto3_client(aws_service_name="cloudwatch", region=region)
+    # Add a connect timeout to fail fast in case connection is not available
+    # (e.g. isolated VPC without proper VPC endpoint).
+    client = boto3.client(
+        "cloudwatch",
+        region_name=region,
+        config=BotoConfig(connect_timeout=10, read_timeout=10, retries={"max_attempts": 1})
+    )
     app_metric_candidates = [
+        ("pipelineDocsMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
+        ("pipelineBytesMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("bytesSent", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("kafkaCommitCount", {"qualifier": qualifier, "OTelLib": "replayer"}),
         ("bytesRead", {"qualifier": qualifier, "OTelLib": "captureProxy"}),
     ]
     for attempt in range(1, attempts + 1):
-        app_metric_found = _any_candidate_has_recent_data(client, app_metric_candidates, lookback_minutes)
+        try:
+            app_metric_found = _any_candidate_has_recent_data(client, app_metric_candidates, lookback_minutes)
+        except (ConnectTimeoutError, EndpointConnectionError, OSError) as e:
+            raise AssertionError(
+                "CloudWatch Metrics API unreachable. If running in an isolated VPC, ensure a "
+                "'monitoring' VPC endpoint (com.amazonaws.{region}.monitoring) is configured."
+            ) from e
         if app_metric_found:
             return
         if attempt < attempts:
             logger.info(
-                "CloudWatch capture/replay app metrics not visible yet (attempt %s/%s, app=%s); waiting %ss",
+                "CloudWatch workflow app metrics not visible yet (attempt %s/%s, app=%s); waiting %ss",
                 attempt,
                 attempts,
                 app_metric_found,
@@ -185,6 +232,7 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
             time.sleep(wait_seconds)
 
     raise AssertionError(
-        "Expected CloudWatch capture/replay app metrics were not found in namespace "
-        f"{CW_NAMESPACE} for qualifier {qualifier} within the last {lookback_minutes} minutes"
+        "Expected CloudWatch workflow app metrics were not found in namespace "
+        f"{CW_NAMESPACE} for qualifier {qualifier} within the last {lookback_minutes} minutes "
+        f"after polling for up to {(attempts - 1) * wait_seconds} seconds"
     )

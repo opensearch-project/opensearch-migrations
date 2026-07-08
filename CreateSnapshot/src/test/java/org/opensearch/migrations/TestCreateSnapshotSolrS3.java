@@ -4,11 +4,11 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
+import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
@@ -18,14 +18,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.utility.MountableFile;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
@@ -84,29 +81,8 @@ public class TestCreateSnapshotSolrS3 {
         .withNetworkAliases(LOCALSTACK_ALIAS);
 
     @Container
-    static final GenericContainer<?> SOLR_CLOUD = new GenericContainer<>(
-            DockerImageName.parse("solr:8.11.4"))
-        .withNetwork(NETWORK)
-        .withExposedPorts(8983)
-        .withCopyFileToContainer(
-            MountableFile.forClasspathResource("solr-s3-backup.xml"),
-            "/var/solr/data/solr.xml")
-        .withEnv("AWS_ACCESS_KEY_ID", "test")
-        .withEnv("AWS_SECRET_ACCESS_KEY", "test")
-        .withEnv("SOLR_OPTS",
-            "-DS3_BUCKET_NAME=" + BUCKET_NAME
-                + " -DS3_REGION=" + REGION
-                + " -DS3_ENDPOINT=http://" + LOCALSTACK_ALIAS + ":4566")
-        .withEnv("SOLR_SECURITY_MANAGER_ENABLED", "false")
-        .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
-        .withCommand("bash", "-c",
-            "cp /opt/solr/dist/solr-s3-repository-*.jar "
-                + "/opt/solr/contrib/s3-repository/lib/ && "
-                + "exec solr -c -f -force")
-        .waitingFor(Wait.forHttp("/solr/admin/collections?action=LIST&wt=json")
-            .forPort(8983)
-            .forStatusCode(200)
-            .withStartupTimeout(Duration.ofMinutes(3)));
+    static final SolrClusterContainer SOLR_CLOUD = SolrClusterContainer.cloudWithS3Backup(
+        SolrClusterContainer.SOLR_8, NETWORK, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
 
     @BeforeAll
     static void createBucket() throws Exception {
@@ -142,7 +118,7 @@ public class TestCreateSnapshotSolrS3 {
     }
 
     private static String solrUrl() {
-        return "http://" + SOLR_CLOUD.getHost() + ":" + SOLR_CLOUD.getMappedPort(8983);
+        return SOLR_CLOUD.getSolrUrl();
     }
 
     private static String localStackEndpoint() {
@@ -177,9 +153,9 @@ public class TestCreateSnapshotSolrS3 {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "s3";
-        args.s3RepoUri = s3RepoUri;
+        args.repoUri = s3RepoUri;
         args.s3Region = REGION;
-        args.s3Endpoint = localStackEndpoint();
+        args.endpoint = localStackEndpoint();
         args.noWait = false;
         return args;
     }
@@ -742,7 +718,7 @@ public class TestCreateSnapshotSolrS3 {
         String endpoint = localStackEndpoint();
         int schemeIdx = endpoint.indexOf("://");
         Assertions.assertTrue(schemeIdx > 0, "LocalStack endpoint should have a scheme");
-        args.s3Endpoint = endpoint.substring(schemeIdx + 3);
+        args.endpoint = endpoint.substring(schemeIdx + 3);
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();

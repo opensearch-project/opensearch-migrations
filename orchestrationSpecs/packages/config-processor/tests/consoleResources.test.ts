@@ -38,7 +38,7 @@ function multiResourceConfig() {
                     repos: {
                         repoA: {
                             awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket-a",
+                            repoPathUri: "s3://bucket-a",
                         },
                     },
                     snapshots: {

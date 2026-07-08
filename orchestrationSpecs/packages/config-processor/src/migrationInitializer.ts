@@ -10,6 +10,7 @@ import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import { crdName } from './crdNaming';
 import {
     buildResolvedMigrationResources,
     ResolvedMigrationResources,
@@ -367,7 +368,7 @@ export class MigrationInitializer {
     static readonly CRD_API_VERSION = `${MigrationInitializer.CRD_GROUP}/v1alpha1`;
 
     private makeCrdName(...labels: string[]): string {
-        return labels.join('-');
+        return crdName(...labels);
     }
 
     private sanitizeResourceName(value: string): string {
@@ -649,12 +650,9 @@ export class MigrationInitializer {
 
         // SnapshotMigration resources from snapshotMigrations
         for (const migration of (workflows.snapshotMigrations ?? []) as SnapshotMigrationConfig[]) {
-            const snapshotMigrationName = this.makeCrdName(
-                migration.sourceLabel,
-                migration.targetConfig.label,
-                migration.label,
-                migration.migrationLabel
-            );
+            // The transformer already computed and sanitized this name; reuse it so the
+            // CR name, the uid-map key, and the workflow's resourceName are guaranteed equal.
+            const snapshotMigrationName = migration.resourceName;
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
@@ -785,12 +783,7 @@ export class MigrationInitializer {
                 name: this.makeCrdName(snapshot.sourceConfig.label, item.label),
             })));
         const snapshotMigrationResources = snapshotMigrations.map(migration => ({
-            name: this.makeCrdName(
-                migration.sourceLabel,
-                migration.targetConfig.label,
-                migration.label,
-                migration.migrationLabel
-            )
+            name: migration.resourceName
         }));
         const shellVar = (prefix: string, name: string) =>
             `${prefix}_${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
@@ -895,11 +888,12 @@ export class MigrationInitializer {
             "trap 'rm -f \"$tmp_file\"' EXIT",
             "",
             "jq --argjson uids \"$uid_map_json\" '",
+            "  def crdname(s): s | ascii_downcase | gsub(\"[^a-z0-9.-]+\"; \"-\") | gsub(\"-+\"; \"-\") | sub(\"^[-.]+\"; \"\") | sub(\"[-.]+$\"; \"\");",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
             "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
-            "  | .snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + \"-\" + .label)]}))))",
+            "  | .snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[crdname($snapshot.sourceConfig.label + \"-\" + .label)]}))))",
             "  | .s3TrafficLoaders |= ((. // []) | map(. + {resourceUid: $uids.s3TrafficLoaders[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
-            "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
+            "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",
             "",
