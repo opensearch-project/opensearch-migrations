@@ -5,6 +5,7 @@ import {
 } from "@opensearch-migrations/schemas";
 import {createHash} from "crypto";
 import {z} from "zod";
+import {crdName} from "./crdNaming";
 import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -282,9 +283,30 @@ function captureProxyAnnotations(proxy: ProxyConfig) {
 }
 
 function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknown> {
-    const {mode: _mode, ...snapshotConfig} = item.config as Record<string, unknown>;
+    const snapshotConfig = item.config as Record<string, unknown>;
+    const sourceIdentity = item.sourceConnectionIdentity;
+    const repo = item.repo;
     return {
+        sourceLabel: sourceIdentity.label,
+        sourceVersion: sourceIdentity.version,
+        sourceEndpoint: sourceIdentity.endpoint,
+        sourceAllowInsecure: sourceIdentity.allowInsecure,
+        sourceAuthType: sourceIdentity.authType,
+        sourceAuthBasicSecretName: sourceIdentity.authBasicSecretName,
+        sourceAuthSigv4Region: sourceIdentity.authSigv4Region,
+        sourceAuthSigv4Service: sourceIdentity.authSigv4Service,
+        sourceAuthMtlsClientSecretName: sourceIdentity.authMtlsClientSecretName,
+        sourceAuthMtlsCaCertHash: sourceIdentity.authMtlsCaCertHash,
+        snapshotLabel: item.label,
+        repoName: repo.repoName,
+        repoPathUri: repo.repoPathUri,
+        repoAwsRegion: repo.awsRegion,
+        repoEndpoint: repo.endpoint,
+        repoS3RoleArn: repo.s3RoleArn,
+        repoUseLocalStack: repo.useLocalStack,
         snapshotPrefix: item.snapshotPrefix,
+        mode: snapshotConfig.mode ?? "create",
+        solrExternalBackupName: item.solrExternalBackupName ?? "",
         ...snapshotConfig,
         dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name),
     };
@@ -343,7 +365,7 @@ export function buildResolvedMigrationResourceList(
         for (const item of snapshot.createSnapshotConfig) {
             resources.push(resource(
                 "DataSnapshot",
-                `${snapshot.sourceConfig.label}-${item.label}`,
+                crdName(snapshot.sourceConfig.label, item.label),
                 dataSnapshotParameters(item),
                 options,
             ));

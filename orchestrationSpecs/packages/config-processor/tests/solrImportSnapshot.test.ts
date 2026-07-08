@@ -194,13 +194,25 @@ describe("Solr backup snapshotInfo paths", () => {
         expect(migration.documentBackfillConfig?.indexAllowlist).toEqual(["orders"]);
     });
 
-    it("keeps snapshot mode out of generated DataSnapshot CR specs", async () => {
+    it("includes material snapshot identity in generated DataSnapshot CR specs", async () => {
         for (const shape of ["solrExternalBackups", "solrCreateBackups"] as const) {
             const config = snapshotMigrationConfig({shape, collectionAllowlist: ["orders"]});
             const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
             const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
 
             expect(item.config.mode).toBe(shape === "solrExternalBackups" ? "import" : "create");
+            expect(item.sourceConnectionIdentity).toMatchObject({
+                label: "solrSource",
+                version: "SOLR 9.7.0",
+                endpoint: "https://solr.example.com:8983",
+                allowInsecure: true,
+                authType: "none",
+                authBasicSecretName: "",
+                authSigv4Region: "",
+                authSigv4Service: "",
+                authMtlsClientSecretName: "",
+                authMtlsCaCertHash: "",
+            });
 
             const bundle = await new MigrationInitializer()
                 .generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
@@ -208,7 +220,30 @@ describe("Solr backup snapshotInfo paths", () => {
                 .find((resource: any) => resource.kind === "DataSnapshot");
 
             expect(dataSnapshot).toBeDefined();
-            expect(dataSnapshot?.spec.mode).toBeUndefined();
+            expect(dataSnapshot?.spec).toMatchObject({
+                sourceLabel: "solrSource",
+                sourceVersion: "SOLR 9.7.0",
+                sourceEndpoint: "https://solr.example.com:8983",
+                sourceAllowInsecure: true,
+                sourceAuthType: "none",
+                sourceAuthBasicSecretName: "",
+                sourceAuthSigv4Region: "",
+                sourceAuthSigv4Service: "",
+                sourceAuthMtlsClientSecretName: "",
+                sourceAuthMtlsCaCertHash: "",
+                snapshotLabel: "solrBackup",
+                repoName: "default",
+                repoPathUri: "s3://bucket/solr-path",
+                repoAwsRegion: "us-east-2",
+                repoEndpoint: "",
+                repoS3RoleArn: "",
+                repoUseLocalStack: false,
+                mode: shape === "solrExternalBackups" ? "import" : "create",
+                solrCollections: ["orders"],
+                solrExternalBackupName: shape === "solrExternalBackups"
+                    ? "preexisting-solr-backup"
+                    : "",
+            });
         }
     });
 

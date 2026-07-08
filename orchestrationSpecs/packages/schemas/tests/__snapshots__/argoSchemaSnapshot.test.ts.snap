@@ -298,7 +298,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                               "snapshotPrefix": {
                                                 "type": "string",
                                                 "default": "",
-                                                "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
+                                                "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                                "changeRestriction": "impossible"
                                               },
                                               "jvmArgs": {
                                                 "type": "string",
@@ -345,7 +346,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                   "type": "string"
                                                 },
                                                 "default": [],
-                                                "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections."
+                                                "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.",
+                                                "changeRestriction": "impossible"
                                               },
                                               "indexAllowlist": {
                                                 "type": "array",
@@ -353,7 +355,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                   "type": "string"
                                                 },
                                                 "default": [],
-                                                "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                                "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                                "changeRestriction": "impossible"
                                               },
                                               "maxSnapshotRateMbPerNode": {
                                                 "type": "number",
@@ -363,12 +366,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                               "compressionEnabled": {
                                                 "type": "boolean",
                                                 "default": false,
-                                                "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
+                                                "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                                "changeRestriction": "impossible"
                                               },
                                               "includeGlobalState": {
                                                 "type": "boolean",
                                                 "default": true,
-                                                "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                                "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                                "changeRestriction": "impossible"
                                               }
                                             },
                                             "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
@@ -1503,6 +1508,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "snapshotPrefix": {
                         "type": "string"
                       },
+                      "sourceConnectionIdentity": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "endpoint": {
+                            "type": "string"
+                          },
+                          "allowInsecure": {
+                            "type": "boolean"
+                          },
+                          "authType": {
+                            "type": "string"
+                          },
+                          "authBasicSecretName": {
+                            "type": "string"
+                          },
+                          "authSigv4Region": {
+                            "type": "string"
+                          },
+                          "authSigv4Service": {
+                            "type": "string"
+                          },
+                          "authMtlsClientSecretName": {
+                            "type": "string"
+                          },
+                          "authMtlsCaCertHash": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "version",
+                          "endpoint",
+                          "allowInsecure",
+                          "authType",
+                          "authBasicSecretName",
+                          "authSigv4Region",
+                          "authSigv4Service",
+                          "authMtlsClientSecretName",
+                          "authMtlsCaCertHash"
+                        ]
+                      },
                       "config": {
                         "type": "object",
                         "properties": {
@@ -1651,6 +1703,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "required": [
                       "label",
                       "snapshotPrefix",
+                      "sourceConnectionIdentity",
                       "config",
                       "repo",
                       "semaphoreConfigMapName",
@@ -3530,7 +3583,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "snapshotPrefix": {
                                       "type": "string",
                                       "default": "",
-                                      "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
+                                      "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                      "changeRestriction": "impossible"
                                     },
                                     "jvmArgs": {
                                       "type": "string",
@@ -3577,7 +3631,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "type": "string"
                                       },
                                       "default": [],
-                                      "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections."
+                                      "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.",
+                                      "changeRestriction": "impossible"
                                     },
                                     "indexAllowlist": {
                                       "type": "array",
@@ -3585,7 +3640,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                         "type": "string"
                                       },
                                       "default": [],
-                                      "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                      "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                      "changeRestriction": "impossible"
                                     },
                                     "maxSnapshotRateMbPerNode": {
                                       "type": "number",
@@ -3595,12 +3651,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "compressionEnabled": {
                                       "type": "boolean",
                                       "default": false,
-                                      "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
+                                      "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                      "changeRestriction": "impossible"
                                     },
                                     "includeGlobalState": {
                                       "type": "boolean",
                                       "default": true,
-                                      "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                      "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                      "changeRestriction": "impossible"
                                     }
                                   },
                                   "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."

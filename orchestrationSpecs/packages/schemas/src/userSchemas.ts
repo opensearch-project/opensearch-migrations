@@ -796,7 +796,8 @@ const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional()
-        .describe("Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."),
+        .describe("Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.")
+        .changeRestriction('impossible'),
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -806,7 +807,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    solrCollections: SOLR_COLLECTIONS_OPTION,
+    solrCollections: SOLR_COLLECTIONS_OPTION
+        .changeRestriction('impossible'),
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -815,14 +817,17 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
             "Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. " +
             "To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, " +
             "which filter client-side on the snapshot contents. " +
-            "An empty list includes all indices."),
+            "An empty list includes all indices.")
+        .changeRestriction('impossible'),
     maxSnapshotRateMbPerNode: z.number().default(0).optional()
         .describe("Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."),
     compressionEnabled: z.boolean().default(false).optional()
-        .describe("[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."),
+        .describe("[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.")
+        .changeRestriction('impossible'),
     includeGlobalState: z.boolean().default(true).optional()
         .describe("[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. " +
-            "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."),
+            "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.")
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);

@@ -60,6 +60,7 @@ type NormalizedSnapshotInfo = {
 type NormalizedSourceCluster = Omit<z.infer<typeof SOURCE_CLUSTER_CONFIG>, "snapshotInfo"> & {
     snapshotInfo?: NormalizedSnapshotInfo;
 };
+type ClusterAuthConfig = z.infer<typeof SOURCE_CLUSTER_CONFIG>["authConfig"];
 export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration" | "sourceClusters"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
     sourceClusters: Record<string, NormalizedSourceCluster>;
@@ -863,6 +864,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 }));
                 const sourceConnectionIdentity =
                     MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
+                const repoIdentity = MigrationConfigTransformer.repoIdentity(item.repo as Record<string, unknown>);
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
@@ -870,7 +872,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         sourceConnectionIdentity,
                         item.config,
                         item.solrExternalBackupName ?? '',
-                        item.repo,
+                        repoIdentity,
                         ...enrichedDeps.map(d => d.configChecksum)
                     ),
                 };
@@ -1110,6 +1112,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
+                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                            ...sourceCluster,
+                            label: sourceName,
+                        }),
                         config: {
                             ...createSnapshotOpts,
                         },
@@ -1125,6 +1131,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,
+                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                            ...sourceCluster,
+                            label: sourceName,
+                        }),
                         config: {
                             ...solrBackupConfig,
                             mode: "import" as const,
@@ -1378,14 +1388,67 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
     }
 
+    static authIdentity(authConfig?: ClusterAuthConfig): Record<string, string> {
+        const emptyAuthIdentity = {
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
+        };
+        if (!authConfig) {
+            return emptyAuthIdentity;
+        }
+        if ("basic" in authConfig) {
+            return {
+                ...emptyAuthIdentity,
+                authType: "basic",
+                authBasicSecretName: authConfig.basic.secretName,
+            };
+        }
+        if ("sigv4" in authConfig) {
+            return {
+                ...emptyAuthIdentity,
+                authType: "sigv4",
+                authSigv4Region: authConfig.sigv4.region,
+                authSigv4Service: authConfig.sigv4.service ?? "es",
+            };
+        }
+        return {
+            ...emptyAuthIdentity,
+            authType: "mtls",
+            authMtlsClientSecretName: authConfig.mtls.clientSecretName,
+            authMtlsCaCertHash: MigrationConfigTransformer.identityHash(authConfig.mtls.caCert),
+        };
+    }
+
     static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        const authIdentity = MigrationConfigTransformer.authIdentity(clusterConfig.authConfig as ClusterAuthConfig);
         return {
             label: clusterConfig.label,
-            version: clusterConfig.version,
+            version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
-            authConfig: clusterConfig.authConfig ?? {},
+            ...authIdentity,
         };
+    }
+
+    static repoIdentity(repoConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            repoName: repoConfig.repoName ?? "",
+            repoPathUri: repoConfig.repoPathUri ?? "",
+            awsRegion: repoConfig.awsRegion ?? "",
+            endpoint: repoConfig.endpoint ?? "",
+            s3RoleArn: repoConfig.s3RoleArn ?? "",
+            useLocalStack: repoConfig.useLocalStack ?? false,
+        };
+    }
+
+    static identityHash(value: unknown): string {
+        return "sha256:" + createHash('sha256')
+            .update(JSON.stringify(value))
+            .digest('hex');
     }
 
     static configChecksum(...parts: unknown[]): string {

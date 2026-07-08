@@ -153,6 +153,19 @@ export const DENORMALIZED_REPO_CONFIG =
         repoName: z.string(),
     }));
 
+export const CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    version: z.string(),
+    endpoint: z.string(),
+    allowInsecure: z.boolean(),
+    authType: z.string(),
+    authBasicSecretName: z.string(),
+    authSigv4Region: z.string(),
+    authSigv4Service: z.string(),
+    authMtlsClientSecretName: z.string(),
+    authMtlsCaCertHash: z.string(),
+});
+
 export const COMPLETE_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.safeExtend({
         label: z.string(),
@@ -361,6 +374,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),

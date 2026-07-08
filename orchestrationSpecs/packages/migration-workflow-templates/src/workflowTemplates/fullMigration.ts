@@ -394,6 +394,7 @@ export const FullMigration = WorkflowBuilder.create({
                     snapshotItemConfig: expr.serialize(expr.makeDict({
                         label: expr.get(c.item, "label"),
                         snapshotPrefix: expr.get(c.item, "snapshotPrefix"),
+                        sourceConnectionIdentity: expr.deserializeRecord(expr.get(c.item, "sourceConnectionIdentity")),
                         config: expr.deserializeRecord(expr.get(c.item, "config")),
                         repo: expr.deserializeRecord(expr.get(c.item, "repo")),
                         semaphoreConfigMapName: expr.get(c.item, "semaphoreConfigMapName"),

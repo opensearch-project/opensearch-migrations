@@ -497,6 +497,8 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => {
             const snapshotItemConfig = expr.deserializeRecord(b.inputs.snapshotItemConfig);
             const snapshotOptions = expr.get(snapshotItemConfig, "config");
+            const sourceIdentity = expr.get(snapshotItemConfig, "sourceConnectionIdentity");
+            const repo = expr.get(snapshotItemConfig, "repo");
 
             return b.setDefinition({
                 action: "apply",
@@ -514,7 +516,47 @@ export const ResourceManagement = WorkflowBuilder.create({
                         }
                     },
                     spec: {
+                        sourceLabel: makeStringTypeProxy(expr.dig(sourceIdentity, ["label"], b.inputs.sourceLabel)),
+                        sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
+                        sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),
+                        sourceAllowInsecure: makeDirectTypeProxy(expr.dig(sourceIdentity, ["allowInsecure"], false)),
+                        sourceAuthType: makeStringTypeProxy(expr.dig(sourceIdentity, ["authType"], expr.literal("none"))),
+                        sourceAuthBasicSecretName: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["authBasicSecretName"], expr.literal(""))
+                        ),
+                        sourceAuthSigv4Region: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["authSigv4Region"], expr.literal(""))
+                        ),
+                        sourceAuthSigv4Service: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["authSigv4Service"], expr.literal(""))
+                        ),
+                        sourceAuthMtlsClientSecretName: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["authMtlsClientSecretName"], expr.literal(""))
+                        ),
+                        sourceAuthMtlsCaCertHash: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["authMtlsCaCertHash"], expr.literal(""))
+                        ),
+                        snapshotLabel: makeStringTypeProxy(expr.get(snapshotItemConfig, "label")),
+                        repoName: makeStringTypeProxy(expr.dig(repo, ["repoName"], expr.literal(""))),
+                        repoPathUri: makeStringTypeProxy(expr.dig(repo, ["repoPathUri"], expr.literal(""))),
+                        repoAwsRegion: makeStringTypeProxy(expr.dig(repo, ["awsRegion"], expr.literal(""))),
+                        repoEndpoint: makeStringTypeProxy(expr.dig(repo, ["endpoint"], expr.literal(""))),
+                        repoS3RoleArn: makeStringTypeProxy(expr.dig(repo, ["s3RoleArn"], expr.literal(""))),
+                        repoUseLocalStack: makeDirectTypeProxy(expr.dig(repo, ["useLocalStack"], false)),
                         snapshotPrefix: makeStringTypeProxy(expr.get(snapshotItemConfig, "snapshotPrefix")),
+                        mode: makeStringTypeProxy(expr.dig(snapshotOptions, ["mode"], expr.literal("create"))),
+                        solrExternalBackupName: makeStringTypeProxy(
+                            expr.dig(snapshotItemConfig, ["solrExternalBackupName"], expr.literal(""))
+                        ),
+                        otelTraceCollectorEndpoint: makeStringTypeProxy(
+                            expr.dig(snapshotOptions, ["otelTraceCollectorEndpoint"], expr.literal(""))
+                        ),
+                        otelMetricsCollectorEndpoint: makeStringTypeProxy(
+                            expr.dig(snapshotOptions, ["otelMetricsCollectorEndpoint"], expr.literal(""))
+                        ),
+                        solrCollections: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["solrCollections"], expr.literal([]))
+                        ),
                         indexAllowlist: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([]))
                         ),
@@ -524,6 +566,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                         jvmArgs: makeStringTypeProxy(expr.dig(snapshotOptions, ["jvmArgs"], expr.literal(""))),
                         loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
                             expr.dig(snapshotOptions, ["loggingConfigurationOverrideConfigMap"], expr.literal(""))
+                        ),
+                        compressionEnabled: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["compressionEnabled"], false)
+                        ),
+                        includeGlobalState: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["includeGlobalState"], true)
                         )
                     }
                 }
