@@ -25,7 +25,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -43,7 +43,7 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -55,7 +55,7 @@ jobs:
   gradle-build-macos:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: false
@@ -67,7 +67,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
@@ -94,7 +94,7 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
 
       # Set up Kind cluster for workflow integration tests (only for console_link project)
@@ -168,7 +168,7 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -256,7 +256,7 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
@@ -279,7 +279,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Set up kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -299,7 +299,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: lychee Link Checker
         id: lychee
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2
@@ -333,12 +333,12 @@ jobs:
         - language: javascript-typescript
         - language: python
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-    - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+    - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
       with:
         languages: ${{ matrix.language }}
         build-mode: none
-    - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+    - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
       with:
         category: "/language:${{matrix.language}}"
 
@@ -358,12 +358,12 @@ jobs:
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
     - uses: ./.github/actions/setup-env
       with:
         gradle-cache-enabled: true
     - name: Cache SonarQube Scanner
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
         path: ~/.sonar/cache
         key: sonar-cache
