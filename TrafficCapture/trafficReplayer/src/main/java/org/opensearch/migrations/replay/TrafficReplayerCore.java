@@ -344,15 +344,15 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             RequestResponsePacketPair.ReconstructionStatus status,
             List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
-            // Both CLOSED_PREMATURELY and TRAFFIC_SOURCE_READER_INTERRUPTED suppress the commit.
-            // CLOSED_PREMATURELY: the source ran out of data mid-transaction, so committing
-            //   would mark a partial replay as completed.
-            // TRAFFIC_SOURCE_READER_INTERRUPTED: the partition was reassigned and the broker
-            //   will re-deliver the records past the last commit on the next assignment;
-            //   committing here would advance past records we want re-delivered.
+            // TRAFFIC_SOURCE_READER_INTERRUPTED: partition was reassigned — suppress the commit
+            //   because cleanupRevokedPartitions() already destroys the OffsetLifecycleTracker
+            //   and we want Kafka to re-deliver these records to the new owner.
+            // CLOSED_PREMATURELY: packet timeout expired on incomplete data. We MUST still commit
+            //   because suppressing leaves the offset stuck in OffsetLifecycleTracker's PriorityQueue
+            //   forever, blocking all subsequent offsets on that partition from advancing (head-of-line
+            //   blocking). Retrying is pointless — the same incomplete fragments will time out again.
             boolean shouldCommit =
-                status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
-                && status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED;
+                status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED;
             commitTrafficStreams(shouldCommit, trafficStreamKeysBeingHeld);
         }
 

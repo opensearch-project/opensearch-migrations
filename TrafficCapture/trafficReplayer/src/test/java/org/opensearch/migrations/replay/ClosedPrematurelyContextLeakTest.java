@@ -28,11 +28,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Verifies that TrafficReplayerCore.commitTrafficStreams() with CLOSED_PREMATURELY status
- * properly closes traffic stream contexts (only skipping the commit).
- *
+ * properly closes traffic stream contexts.
  *
  * This test verifies that traffic stream contexts are always closed, even when
- * the status is CLOSED_PREMATURELY (only the commit is skipped).
+ * the status is CLOSED_PREMATURELY.
  */
 @Slf4j
 public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
