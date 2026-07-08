@@ -130,6 +130,61 @@ function prefixFields(prefix: string, value: Record<string, unknown> | undefined
     );
 }
 
+function prefixedKey(prefix: string, field: string): string {
+    return `${prefix}${field.charAt(0).toUpperCase()}${field.slice(1)}`;
+}
+
+function connectionIdentityParameters(
+    prefix: string,
+    identity: Record<string, unknown>,
+    options: {includeVersion?: boolean} = {},
+): Record<string, unknown> {
+    return {
+        [prefixedKey(prefix, "label")]: identity.label,
+        ...(options.includeVersion === false ? {} : {[prefixedKey(prefix, "version")]: identity.version}),
+        [prefixedKey(prefix, "endpoint")]: identity.endpoint,
+        [prefixedKey(prefix, "allowInsecure")]: identity.allowInsecure,
+        [prefixedKey(prefix, "authType")]: identity.authType,
+        [prefixedKey(prefix, "authBasicSecretName")]: identity.authBasicSecretName,
+        [prefixedKey(prefix, "authSigv4Region")]: identity.authSigv4Region,
+        [prefixedKey(prefix, "authSigv4Service")]: identity.authSigv4Service,
+        [prefixedKey(prefix, "authMtlsClientSecretName")]: identity.authMtlsClientSecretName,
+        [prefixedKey(prefix, "authMtlsCaCertHash")]: identity.authMtlsCaCertHash,
+    };
+}
+
+function kafkaClientIdentityParameters(kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+    return {
+        kafkaBrokers: kafkaConfig.kafkaConnection,
+        kafkaManagedByWorkflow: kafkaConfig.managedByWorkflow,
+        kafkaAuthType: kafkaConfig.authType,
+        kafkaEnableMSKAuth: kafkaConfig.enableMSKAuth,
+        kafkaSecretName: kafkaConfig.secretName,
+        kafkaCaSecretName: kafkaConfig.caSecretName,
+        kafkaUserName: kafkaConfig.kafkaUserName,
+    };
+}
+
+function repoIdentityParameters(prefix: string, repo: Record<string, unknown>): Record<string, unknown> {
+    return {
+        [prefixedKey(prefix, "repoName")]: repo.repoName,
+        [prefixedKey(prefix, "repoPathUri")]: repo.repoPathUri,
+        [prefixedKey(prefix, "repoAwsRegion")]: repo.awsRegion,
+        [prefixedKey(prefix, "repoEndpoint")]: repo.endpoint,
+        [prefixedKey(prefix, "repoS3RoleArn")]: repo.s3RoleArn,
+        [prefixedKey(prefix, "repoUseLocalStack")]: repo.useLocalStack,
+    };
+}
+
+function snapshotSourceType(snapshotNameResolution: Record<string, unknown>): string {
+    const hasDataSnapshot = "dataSnapshotResourceName" in snapshotNameResolution;
+    const hasExternalSnapshot = "externalSnapshotName" in snapshotNameResolution;
+    if (hasDataSnapshot && hasExternalSnapshot) {
+        return "externalPrepared";
+    }
+    return hasDataSnapshot ? "dataSnapshot" : "external";
+}
+
 const CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS = [
     // Workflow/deployment bridge fields. The CaptureProxy CRD does not own these
     // until the resource controller grows file-source-aware mTLS support.
@@ -232,6 +287,8 @@ function kafkaClusterParameters(kafkaCluster: KafkaClusterConfig): Record<string
     const storage = nodePool.storage ?? {};
     const parameters: Record<string, unknown> = {
         version: kafkaCluster.version,
+        clusterSpecOverrides: config.clusterSpecOverrides ?? {},
+        nodePoolSpecOverrides: nodePool,
     };
     setPath(parameters, ["auth", "type"], config.auth?.type);
     setPath(parameters, ["nodePool", "replicas"], nodePool.replicas);
@@ -245,11 +302,15 @@ function capturedTrafficParameters(proxy: ProxyConfig): Record<string, unknown> 
     return {
         dependsOn: [proxy.kafkaConfig.label],
         kafkaClusterName: proxy.kafkaConfig.label,
+        ...kafkaClientIdentityParameters(proxy.kafkaConfig as Record<string, unknown>),
         topicName: proxy.kafkaConfig.kafkaTopic,
         partitions: proxy.kafkaConfig.topicSpecOverrides?.partitions,
         replicas: proxy.kafkaConfig.topicSpecOverrides?.replicas,
         topicConfig: proxy.kafkaConfig.topicSpecOverrides?.config,
+        sourceLabel: proxy.sourceConfig.label,
         sourceKind: "proxy",
+        s3SourceUri: "",
+        loadStarted: true,
     };
 }
 
@@ -257,10 +318,12 @@ function s3CapturedTrafficParameters(loader: S3TrafficLoaderConfig): Record<stri
     return {
         dependsOn: [loader.kafkaConfig.label],
         kafkaClusterName: loader.kafkaConfig.label,
+        ...kafkaClientIdentityParameters(loader.kafkaConfig as Record<string, unknown>),
         topicName: loader.kafkaConfig.kafkaTopic,
         partitions: loader.kafkaConfig.topicSpecOverrides?.partitions,
         replicas: loader.kafkaConfig.topicSpecOverrides?.replicas,
         topicConfig: loader.kafkaConfig.topicSpecOverrides?.config,
+        sourceLabel: loader.sourceLabel,
         sourceKind: "s3",
         s3SourceUri: loader.s3Uri,
         loadStarted: true,
@@ -269,6 +332,12 @@ function s3CapturedTrafficParameters(loader: S3TrafficLoaderConfig): Record<stri
 
 function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
     return {
+        ...connectionIdentityParameters(
+            "source",
+            proxy.sourceConnectionIdentity as Record<string, unknown>,
+            {includeVersion: true}
+        ),
+        serviceType: proxy.proxyConfig.serviceType,
         ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
         dependsOn: [`${proxy.name}-topic`],
     };
@@ -284,19 +353,10 @@ function captureProxyAnnotations(proxy: ProxyConfig) {
 
 function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknown> {
     const snapshotConfig = item.config as Record<string, unknown>;
-    const sourceIdentity = item.sourceConnectionIdentity;
+    const sourceIdentity = item.sourceConnectionIdentity as Record<string, unknown>;
     const repo = item.repo;
     return {
-        sourceLabel: sourceIdentity.label,
-        sourceVersion: sourceIdentity.version,
-        sourceEndpoint: sourceIdentity.endpoint,
-        sourceAllowInsecure: sourceIdentity.allowInsecure,
-        sourceAuthType: sourceIdentity.authType,
-        sourceAuthBasicSecretName: sourceIdentity.authBasicSecretName,
-        sourceAuthSigv4Region: sourceIdentity.authSigv4Region,
-        sourceAuthSigv4Service: sourceIdentity.authSigv4Service,
-        sourceAuthMtlsClientSecretName: sourceIdentity.authMtlsClientSecretName,
-        sourceAuthMtlsCaCertHash: sourceIdentity.authMtlsCaCertHash,
+        ...connectionIdentityParameters("source", sourceIdentity, {includeVersion: true}),
         snapshotLabel: item.label,
         repoName: repo.repoName,
         repoPathUri: repo.repoPathUri,
@@ -313,19 +373,36 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
 }
 
 function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record<string, unknown> {
+    const snapshotNameResolution = migration.snapshotNameResolution as Record<string, unknown>;
     const dataSnapshotResourceName =
-        "dataSnapshotResourceName" in migration.snapshotNameResolution
-            ? migration.snapshotNameResolution.dataSnapshotResourceName
-            : undefined;
+        "dataSnapshotResourceName" in snapshotNameResolution
+            ? snapshotNameResolution.dataSnapshotResourceName
+            : "";
+    const externalSnapshotName =
+        "externalSnapshotName" in snapshotNameResolution
+            ? snapshotNameResolution.externalSnapshotName
+            : "";
+    const repo = migration.snapshotConfig.repoConfig as Record<string, unknown>;
     return {
         ...prefixFields("metadataMigration", migration.metadataMigrationConfig as Record<string, unknown>),
         ...prefixFields("documentBackfill", migration.documentBackfillConfig as Record<string, unknown>),
         dependsOn: dataSnapshotResourceName ? [dataSnapshotResourceName] : [],
         migrationLabel: migration.migrationLabel,
-        sourceVersion: migration.sourceVersion,
-        sourceLabel: migration.sourceLabel,
-        targetLabel: migration.targetConfig.label,
+        ...connectionIdentityParameters(
+            "source",
+            migration.sourceConnectionIdentity as Record<string, unknown>,
+            {includeVersion: true}
+        ),
+        ...connectionIdentityParameters(
+            "target",
+            migration.targetConnectionIdentity as Record<string, unknown>,
+            {includeVersion: false}
+        ),
         snapshotLabel: migration.label,
+        snapshotSourceType: snapshotSourceType(snapshotNameResolution),
+        dataSnapshotResourceName,
+        externalSnapshotName,
+        ...repoIdentityParameters("snapshot", repo),
     };
 }
 
@@ -333,6 +410,14 @@ function trafficReplayParameters(replay: ReplayConfig): Record<string, unknown> 
     return {
         ...replay.replayerConfig,
         dependsOn: replay.dependsOn,
+        fromCapturedTraffic: replay.fromCapturedTraffic,
+        fromCapturedTrafficSourceKind: replay.fromCapturedTrafficSourceKind,
+        sourceLabel: replay.sourceLabel,
+        ...connectionIdentityParameters(
+            "target",
+            replay.targetConnectionIdentity as Record<string, unknown>,
+            {includeVersion: false}
+        ),
     };
 }
 

@@ -332,6 +332,8 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     snapshotConfigChecksum: z.string(),
     metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
     documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
@@ -362,6 +364,7 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
 export const DENORMALIZED_PROXY_CONFIG = z.object({
     name: z.string(),
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
@@ -415,6 +418,7 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     configChecksum: z.string(),
     resourceUid: z.string(),
 });

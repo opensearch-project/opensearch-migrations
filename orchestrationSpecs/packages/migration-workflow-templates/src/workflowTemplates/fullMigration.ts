@@ -4,6 +4,7 @@ import {
     ARGO_MIGRATION_CONFIG,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
+    CLUSTER_CONNECTION_IDENTITY,
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
@@ -631,6 +632,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
         .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("useLocalStack", typeToken<boolean>())
         .addRequiredInput("name", typeToken<string>())
@@ -650,9 +652,12 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     name: b.inputs.name,
                     dependsOn: b.inputs.dependsOn,
+                    fromCapturedTraffic: b.inputs.fromCapturedTraffic,
+                    fromCapturedTrafficSourceKind: b.inputs.fromCapturedTrafficSourceKind,
                     replayerOptions: b.inputs.replayerOptions,
                     sourceLabel: b.inputs.sourceLabel,
                     targetLabel: expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["label"], ""),
+                    targetConnectionIdentity: b.inputs.targetConnectionIdentity,
                     configChecksum: b.inputs.configChecksum,
                     retryGateName: expr.concat(expr.literal("trafficreplay."), b.inputs.name, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
@@ -788,6 +793,7 @@ export const FullMigration = WorkflowBuilder.create({
                     proxyConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
                         sourceConfig: expr.deserializeRecord(expr.get(c.item, "sourceConfig")),
+                        sourceConnectionIdentity: expr.deserializeRecord(expr.get(c.item, "sourceConnectionIdentity")),
                         kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], ""),

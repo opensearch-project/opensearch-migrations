@@ -636,6 +636,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label"
                   ]
                 },
+                "sourceConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
                 "kafkaConfig": {
                   "type": "object",
                   "properties": {
@@ -1331,6 +1378,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "sourceConfig",
+                "sourceConnectionIdentity",
                 "kafkaConfig",
                 "proxyConfig",
                 "configChecksum",
@@ -2424,6 +2472,100 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   }
                 },
+                "sourceConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
+                "targetConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
                 "sourceVersion": {
                   "type": "string"
                 },
@@ -2615,6 +2757,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "migrationLabel",
                 "snapshotNameResolution",
                 "snapshotConfigChecksum",
+                "sourceConnectionIdentity",
+                "targetConnectionIdentity",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
@@ -3222,6 +3366,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label"
                   ]
                 },
+                "targetConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
                 "configChecksum": {
                   "type": "string"
                 },
@@ -3241,6 +3432,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "kafkaConfig",
                 "replayerConfig",
                 "toTarget",
+                "targetConnectionIdentity",
                 "configChecksum",
                 "resourceUid"
               ]

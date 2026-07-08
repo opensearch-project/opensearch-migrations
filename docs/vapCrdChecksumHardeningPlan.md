@@ -93,7 +93,7 @@ This plan closes that gap without treating labels as full cluster identity.
 
 | Area | Change |
 | --- | --- |
-| Identity helpers | Add canonical helpers for connection identity, auth identity hash, repo identity, and repo identity hash. Reuse them in checksum computation and resolved resource projection. |
+| Identity helpers | Add canonical helpers for connection identity, explicit auth identity fields, and repo identity. Reuse them in checksum computation and resolved resource projection. |
 | Projection metadata | Add internal projected fields for resource identity values that do not come directly from user option schemas. |
 | Resolved resources | Make `resolvedMigrationResources` emit the same fields that the workflow applies to CR specs. |
 | Workflow manifests | Update `resourceManagement.ts` apply manifests to write every projected field for the resource, or remove the projection if the field is not owned by the CR. |
@@ -194,7 +194,7 @@ Implementation changes:
 
 | Change | Reason |
 | --- | --- |
-| Add source connection identity fields or source connection identity hash to CaptureProxy spec. | Changing the source destination changes what traffic the proxy captures. |
+| Add source connection identity fields to CaptureProxy spec. | Changing the source destination changes what traffic the proxy captures. |
 | Include source connection identity in CaptureProxy `configChecksum`, `checksumForSnapshot`, and `checksumForReplayer` as appropriate. | Snapshots and replays must re-evaluate when captured traffic could come from a different source. |
 | Keep workflow-only file-source bridge fields as annotations, not spec fields. | This is already a reasonable explicit exception. |
 | Add tests for source endpoint/auth mutation. | Prevent the current hidden-source gap from returning. |
@@ -213,7 +213,7 @@ Implementation changes:
 
 | Change | Proposed restriction | Reason |
 | --- | --- | --- |
-| Add `sourceLabel`, `sourceVersion`, source endpoint, source `allowInsecure`, and source auth identity hash. | impossible | A completed snapshot/backup is tied to a specific source. |
+| Add `sourceLabel`, `sourceVersion`, source endpoint, source `allowInsecure`, and explicit source auth identity fields. | impossible | A completed snapshot/backup is tied to a specific source. |
 | Add `snapshotLabel`. | impossible | Makes the resource identity visible in spec, not only metadata/name. |
 | Add repository identity fields. | impossible | Bucket/path/repo changes produce a different artifact. |
 | Add `mode` with values `create` and `import`. | impossible | Create versus import is material behavior. |
@@ -241,8 +241,8 @@ Implementation changes:
 
 | Change | Proposed restriction | Reason |
 | --- | --- | --- |
-| Add source connection identity fields or hash. | impossible | Metadata migration and Solr paths can read source directly. |
-| Add target connection identity fields or hash. | impossible | Migration output is tied to a specific target. |
+| Add source connection identity fields. | impossible | Metadata migration and Solr paths can read source directly. |
+| Add target connection identity fields. | impossible | Migration output is tied to a specific target. |
 | Add explicit snapshot resolution fields: `snapshotSourceType`, `dataSnapshotResourceName`, and `externalSnapshotName` where present. | impossible | VAP should see whether this migration uses a generated DataSnapshot or an external snapshot. |
 | Add repo identity when no DataSnapshot dependency represents the snapshot material. | impossible | ES/OS external snapshots otherwise have no upstream CR carrying repo/source material. |
 | Keep `snapshotConfigChecksum` out of spec when represented by a DataSnapshot dependency wait. | dependency material | Avoid duplicating upstream status checksums as desired spec. |
@@ -264,7 +264,7 @@ Implementation changes:
 | Change | Proposed restriction | Reason |
 | --- | --- | --- |
 | Add `fromCapturedTraffic`, `fromCapturedTrafficSourceKind`, `sourceLabel`, and `targetLabel` to spec. | impossible | Makes replay identity inspectable and VAP-visible. |
-| Add target connection identity fields or target auth identity hash. | impossible | Changing target cluster changes replay semantics. |
+| Add target connection identity fields. | impossible | Changing target cluster changes replay semantics. |
 | Keep captured-traffic stream freshness represented by `dependsOn` plus upstream checksum waits. | dependency material | The captured stream belongs to CapturedTraffic/CaptureProxy. |
 | Ensure snapshot migration dependencies use resource names and checksums consistently. | dependency material | Replayer must wait for the exact migration pass it depends on. |
 
@@ -305,7 +305,7 @@ Initial mutation cases:
 | Mutation | Expected visible coverage |
 | --- | --- |
 | Source endpoint for CaptureProxy source | CaptureProxy source identity changes, proxy checksums change. |
-| Source auth for DataSnapshot source | DataSnapshot source auth identity hash changes, snapshot checksum changes. |
+| Source auth for DataSnapshot source | DataSnapshot source auth identity fields change, snapshot checksum changes. |
 | Target endpoint for SnapshotMigration | SnapshotMigration target identity changes, migration/workload checksums change. |
 | Target endpoint for TrafficReplay | TrafficReplay target identity changes, replay checksum changes. |
 | Solr external backup name | DataSnapshot `solrExternalBackupName` and SnapshotMigration external name change. |

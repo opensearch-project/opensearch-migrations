@@ -1756,6 +1756,9 @@
               "name": "targetConfig"
             },
             {
+              "name": "targetConnectionIdentity"
+            },
+            {
               "name": "replayerOptions"
             },
             {
@@ -1820,6 +1823,14 @@
                     "value": "{{inputs.parameters.dependsOn}}"
                   },
                   {
+                    "name": "fromCapturedTraffic",
+                    "value": "{{inputs.parameters.fromCapturedTraffic}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{inputs.parameters.fromCapturedTrafficSourceKind}}"
+                  },
+                  {
                     "name": "replayerOptions",
                     "value": "{{inputs.parameters.replayerOptions}}"
                   },
@@ -1830,6 +1841,10 @@
                   {
                     "name": "targetLabel",
                     "value": "{{=sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "targetConnectionIdentity",
+                    "value": "{{inputs.parameters.targetConnectionIdentity}}"
                   },
                   {
                     "name": "configChecksum",
@@ -2243,7 +2258,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"sourceConnectionIdentity\", fromJSON(item['sourceConnectionIdentity']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -2572,6 +2587,10 @@
                   {
                     "name": "toTarget",
                     "value": "{{=jsonpath(toJSON(item), '$.toTarget')}}"
+                  },
+                  {
+                    "name": "targetConnectionIdentity",
+                    "value": "{{=jsonpath(toJSON(item), '$.targetConnectionIdentity')}}"
                   },
                   {
                     "name": "configChecksum",

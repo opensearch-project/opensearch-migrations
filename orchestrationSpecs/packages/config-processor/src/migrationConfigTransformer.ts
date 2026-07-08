@@ -824,31 +824,64 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const csDep = MigrationConfigTransformer.checksumForDependency;
         const PROXY_SCHEMA = z.object({...USER_PROXY_WORKFLOW_OPTIONS.shape, ...USER_PROXY_PROCESS_OPTIONS.shape});
         const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
-        const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
+        const kafkaChecksums = new Map(kafkaClusters.map(k => [
+            k.name,
+            cs(MigrationConfigTransformer.kafkaClusterContract(k as Record<string, unknown>))
+        ]));
 
-        const proxiesWithChecksums = proxies.map(p => ({
-            ...p,
-            kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
-            configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
-            topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
-        }));
+        const proxiesWithChecksums = proxies.map(p => {
+            const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
+            const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const topicConfigChecksum = cs(
+                kafkaIdentity,
+                p.kafkaConfig.kafkaTopic,
+                p.kafkaConfig.topicSpecOverrides,
+                kafkaChecksum
+            );
+            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            return {
+                ...p,
+                kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
+                configChecksum: cs(p.sourceConnectionIdentity, p.proxyConfig, topicConfigChecksum),
+                topicConfigChecksum,
+                checksumForSnapshot: csDep(
+                    PROXY_SCHEMA,
+                    p.proxyConfig as Record<string, unknown>,
+                    'snapshot',
+                    sourceConnectionIdentityChecksum,
+                    topicConfigChecksum
+                ),
+                checksumForReplayer: csDep(
+                    PROXY_SCHEMA,
+                    p.proxyConfig as Record<string, unknown>,
+                    'replayer',
+                    sourceConnectionIdentityChecksum,
+                    topicConfigChecksum
+                ),
+            };
+        });
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
 
         const s3LoadersWithChecksums = s3TrafficLoaders.map(s => {
             const kafkaCs = kafkaChecksums.get(s.kafkaConfig.label) ?? '';
+            const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(s.kafkaConfig as Record<string, unknown>);
+            const topicConfigChecksum = cs(
+                kafkaIdentity,
+                s.kafkaConfig.kafkaTopic,
+                s.kafkaConfig.topicSpecOverrides,
+                kafkaCs
+            );
             // Replayer & topic checksums are derived from the loader's identity:
             // s3Uri + topic + kafka cluster. Editing the URI would force a reset
             // of the CapturedTraffic resource (VAP-protected); the resulting
             // checksum change is what flags the replayer to re-evaluate.
-            const checksum = cs(s.s3Uri, s.kafkaConfig.kafkaTopic, kafkaCs);
+            const checksum = cs(s.s3Uri, topicConfigChecksum);
             return {
                 ...s,
                 kafkaConfig: { ...s.kafkaConfig, configChecksum: kafkaCs },
-                topicConfigChecksum: cs(s.kafkaConfig.kafkaTopic, s.kafkaConfig.topicSpecOverrides, kafkaCs),
+                topicConfigChecksum,
                 checksumForReplayer: checksum,
                 configChecksum: checksum,
             };
@@ -887,15 +920,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
-                label: m.sourceLabel,
-                version: m.sourceVersion,
-                endpoint: m.sourceEndpoint,
-                allowInsecure: m.sourceAllowInsecure,
-                authConfig: m.sourceAuth,
-            });
-            const targetConnectionIdentity =
-                MigrationConfigTransformer.clusterConnectionIdentity(m.targetConfig as Record<string, unknown>);
+            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const targetConnectionIdentity = m.targetConnectionIdentity;
+            const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
+                (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
+            );
             const replayerMaterialPart = m.documentBackfillConfig
                 ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
                 : '';
@@ -914,17 +943,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
                     m.documentBackfillConfig ?? {},
-                    m.targetConfig,
+                    targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
-                    m.snapshotConfig
+                    snapshotRepoIdentity
                 ),
-                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+                checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
                     sourceConnectionIdentity,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
-                    m.snapshotConfig,
+                    snapshotRepoIdentity,
                     snapshotConfigChecksum,
                     m.migrationLabel,
                     workloadIdentityMaterialPart
@@ -955,7 +984,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ],
                 kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
                 fromCapturedTrafficConfigChecksum: fromCapturedTrafficChecksum,
-                configChecksum: cs(r.replayerConfig, r.toTarget, fromCapturedTrafficChecksum),
+                configChecksum: cs(r.replayerConfig, r.targetConnectionIdentity, fromCapturedTrafficChecksum),
                 dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
                     migrationsWithChecksums
                         .filter(m =>
@@ -1033,10 +1062,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
             const topic = proxy.kafkaTopic || proxyName;
+            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                ...sourceCluster,
+                label: proxy.source,
+            });
             return {
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
+                sourceConnectionIdentity,
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig)
             };
         });
@@ -1233,6 +1267,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
                         ? solrCollectionAllowlistForSnapshot(snapshotDef)
                         : [];
+                    const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                        ...sourceCluster,
+                        label: fromSource,
+                    });
+                    const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                        ...targetCluster,
+                        label: toTarget,
+                    });
                     const metadataMigrationConfig = prepareMetadataConfig(
                         applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist)
                     );
@@ -1246,6 +1288,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         snapshotConfigChecksum: '',
                         metadataMigrationConfig,
                         documentBackfillConfig,
+                        sourceConnectionIdentity,
+                        targetConnectionIdentity,
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
                         ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
@@ -1300,6 +1344,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
+            const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                ...targetCluster,
+                label: replayer.toTarget,
+            });
 
             return {
                 name: [sourceName, replayer.toTarget, name].join('-'),
@@ -1309,6 +1357,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 kafkaClusterName: kafkaCluster,
                 kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },
+                targetConnectionIdentity,
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
             };
@@ -1431,6 +1480,30 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
             ...authIdentity,
+        };
+    }
+
+    static kafkaClusterContract(kafkaCluster: Record<string, unknown>): Record<string, unknown> {
+        const config = (kafkaCluster.config ?? {}) as Record<string, unknown>;
+        return {
+            name: kafkaCluster.name ?? "",
+            version: kafkaCluster.version ?? "",
+            auth: config.auth ?? {},
+            clusterSpecOverrides: config.clusterSpecOverrides ?? {},
+            nodePoolSpecOverrides: config.nodePoolSpecOverrides ?? {},
+        };
+    }
+
+    static kafkaClientIdentity(kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            kafkaClusterName: kafkaConfig.label ?? "",
+            kafkaBrokers: kafkaConfig.kafkaConnection ?? "",
+            kafkaManagedByWorkflow: kafkaConfig.managedByWorkflow ?? false,
+            kafkaAuthType: kafkaConfig.authType ?? "none",
+            kafkaEnableMSKAuth: kafkaConfig.enableMSKAuth ?? false,
+            kafkaSecretName: kafkaConfig.secretName ?? "",
+            kafkaCaSecretName: kafkaConfig.caSecretName ?? "",
+            kafkaUserName: kafkaConfig.kafkaUserName ?? "",
         };
     }
 
