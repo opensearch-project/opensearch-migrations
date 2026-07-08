@@ -936,6 +936,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "An empty list includes all non-system indices from the snapshot.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    solrCollectionName: z.string().optional()
+        .describe("Target index name for a standalone (non-SolrCloud) Solr backup, which carries no recorded " +
+            "collection name. Required for wrapped standalone backups; optional for flat-root standalone " +
+            "(overrides the name derived by stripping the 'snapshot.' prefix). Ignored for SolrCloud backups, " +
+            "whose collection name is recovered from the backup metadata.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("[Expert] Allows document migration between clusters with non-exact version compatibility. " +
             "Only disable if snapshot parsing issues require strict version matching.")
