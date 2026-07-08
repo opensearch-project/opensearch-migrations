@@ -1452,6 +1452,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
     z.object({
         skipApprovals : z.boolean().default(false).optional()
             .describe("Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."),
+        requireBeginApproval: z.boolean().default(false).optional()
+            .describe("When true, requires a manual approval before the migration workflow begins."),
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),

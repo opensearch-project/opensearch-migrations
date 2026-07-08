@@ -415,6 +415,7 @@ function makeResourceUidOptional<
 }
 
 export const ARGO_MIGRATION_CONFIG = z.object({
+    requireBeginApproval: z.boolean().default(false),
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),

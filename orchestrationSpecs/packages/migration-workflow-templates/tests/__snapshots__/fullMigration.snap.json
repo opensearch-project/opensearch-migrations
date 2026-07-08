@@ -2182,6 +2182,24 @@
         "steps": [
           [
             {
+              "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('requireBeginApproval', false, fromJSON(inputs.parameters.config))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "begin"
+                  }
+                ]
+              },
+              "name": "approveBegin"
+            }
+          ],
+          [
+            {
               "template": "initializerunmetadata",
               "arguments": {
                 "parameters": []

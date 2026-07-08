@@ -808,6 +808,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }));
 
         const output = {
+            requireBeginApproval: userConfig.requireBeginApproval ?? false,
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
             ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),

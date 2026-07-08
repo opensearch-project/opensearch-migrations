@@ -9,6 +9,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
       "items": {
         "type": "object",
         "properties": {
+          "requireBeginApproval": {
+            "type": "boolean",
+            "default": false
+          },
           "kafkaClusters": {
             "type": "array",
             "items": {
@@ -2985,6 +2989,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "boolean",
       "default": false,
       "description": "Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."
+    },
+    "requireBeginApproval": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, requires a manual approval before the migration workflow begins."
     },
     "kafkaClusterConfiguration": {
       "type": "object",

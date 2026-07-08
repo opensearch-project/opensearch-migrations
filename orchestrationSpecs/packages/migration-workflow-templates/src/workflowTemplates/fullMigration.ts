@@ -757,7 +757,12 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
-        .addSteps(b => b.addStepGroup(g => g
+        .addSteps(b => b
+            .addStep("approveBegin", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({resourceName: expr.literal("begin")}),
+                {when: {templateExp: expr.dig(expr.deserializeRecord(b.inputs.config), ["requireBeginApproval"], false)}}
+            )
+            .addStepGroup(g => g
                 .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
                     c.register({})
                 )
