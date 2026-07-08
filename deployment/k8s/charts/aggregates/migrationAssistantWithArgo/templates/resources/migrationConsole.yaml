@@ -179,7 +179,6 @@ spec:
   template:
     metadata:
       annotations:
-        karpenter.sh/do-not-disrupt: "true"
         kubectl.kubernetes.io/default-container: console
       labels:
         app: migration-console
