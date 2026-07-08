@@ -332,11 +332,11 @@ class SolrS3MetadataMigrationTest {
     }
 
     /**
-     * Externally-managed-snapshot IMPORT path for a STANDALONE Solr source: CreateSnapshot (CREATE)
-     * → S3, then DELETE the schema config object to simulate a snapshot produced by some external
+     * Externally-managed-backup IMPORT path for a STANDALONE Solr source: CreateSnapshot (CREATE)
+     * → S3, then DELETE the schema config object to simulate a backup produced by some external
      * process that did NOT include the schema. Without the schema, MetadataMigration produces empty
      * mappings. We then run CreateSnapshot --mode import (the production import-prepare step, the same
-     * one orchestration now invokes for externally-managed Solr snapshots), which re-fetches the
+     * one orchestration now invokes for externally-managed Solr backups), which re-fetches the
      * schema from the live source and uploads it; after that, MetadataMigration must produce the
      * correct, schema-derived mappings.
      *
@@ -348,15 +348,15 @@ class SolrS3MetadataMigrationTest {
      * import must NOT pre-upload a shallow synthetic schema there — doing so shadows the real layout
      * from the downstream reader and stalls the migration (see
      * TestCreateSnapshotModeFlag#importMode_solrCloud_doesNotPreUploadShadowingConfig). The cloud
-     * import path is exercised end-to-end by the solr-8x k8s-local test (TestSolr0070).
+     * import path is exercised end-to-end by the solr-8x k8s-local test (Test0070SolrExternalBackupImport).
      *
      * <p>This is the end-to-end guard for the standalone import feature: it proves --mode import
-     * bridges "snapshot exists in S3 but lacks the Solr schema" → "metadata migration yields correct
+     * bridges "backup exists in S3 but lacks the Solr schema" → "metadata migration yields correct
      * mappings".
      */
     @Test
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
-    void externallyManagedSnapshotImportUploadsSchemaForMetadataMigration() throws Exception {
+    void externallyManagedBackupImportUploadsSchemaForMetadataMigration() throws Exception {
         var version = SolrClusterContainer.SOLR_8;
         try (
             var solr = SolrClusterContainer.withS3Backup(

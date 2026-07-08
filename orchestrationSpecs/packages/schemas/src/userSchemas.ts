@@ -785,8 +785,12 @@ export const USER_REPLAYER_OPTIONS = z.object({
 });
 
 const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional()
-    .describe("Solr collection/core names to snapshot or import. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. " +
-        "For externally-managed Solr snapshots with importConfig, set this when the snapshot contains only a subset of the live source collections.");
+    .describe("Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. " +
+        "When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. " +
+        "For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.");
+
+const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
+    .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
@@ -802,8 +806,6 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    mode: z.enum(["create", "import"]).default("create").optional()
-        .describe("Snapshot mode used by the workflow-generated CreateSnapshot step. User configs should leave this as 'create' (default). For Solr externally-managed snapshots, use externallyManagedSnapshotName with importConfig; the workflow will inject 'import' internally."),
     solrCollections: SOLR_COLLECTIONS_OPTION,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
@@ -1213,7 +1215,7 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
         .describe("Name of the source cluster. Must match a key in sourceClusters."),
     snapshot: z.string()
-        .describe("Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots.")
+        .describe("Name of the snapshot or backup. Must match a key in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups.")
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
@@ -1295,58 +1297,37 @@ export const TRAFFIC_CONFIG = z.object({
     }
 });
 
-export const USER_SOLR_IMPORT_OPTIONS = z.object({
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    solrCollections: SOLR_COLLECTIONS_OPTION,
-    jvmArgs: z.string().default("").optional()
-        .describe(JVM_ARGS_DESC),
-    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-}).describe("Options for the Solr import-prepare step that runs CreateSnapshot with '--mode import' " +
-    "against an externally-managed Solr snapshot. It performs no backup. For standalone Solr, the step " +
-    "retrieves each core's schema (managed-schema.xml) from the live source and writes the synthetic " +
-    "<snapshot>/<core>/zk_backup_0/configs/<core>/managed-schema.xml layout that downstream metadata " +
-    "migration needs for mapping generation. For SolrCloud, the step does not write a synthetic schema; " +
-    "SolrCloud backups are expected to include their ZooKeeper configs in the real backup layout, and a " +
-    "shallow synthetic schema would shadow that layout. Requires the live Solr source to be reachable.");
-
-export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
+export const ELASTICSEARCH_EXTERNALLY_MANAGED_SNAPSHOT = z.object({
     externallyManagedSnapshotName: z.string()
         .describe("Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."),
-    importConfig: USER_SOLR_IMPORT_OPTIONS.optional()
-        .describe("Solr-only: enables the import-prepare step that uploads the source schema into the " +
-            "externally-managed snapshot before metadata migration. Only valid when the source cluster " +
-            "version is a 'SOLR ...' version. Omit for Elasticsearch/OpenSearch sources, where an " +
-            "externally-managed snapshot already carries its own metadata.")
-}).describe("Reference to a snapshot that was created outside of this migration workflow.");
+}).describe("Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow.");
 
-export const GENERATE_SNAPSHOT = z.object({
+export const ELASTICSEARCH_GENERATE_SNAPSHOT = z.object({
     createSnapshotConfig: USER_CREATE_SNAPSHOT_OPTIONS
-        .describe("Configuration for creating a new snapshot of the source cluster."),
-}).describe("Configuration to create a new snapshot of the source cluster as part of the migration workflow.");
+        .describe("Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."),
+}).describe("Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow.");
 
-export const SNAPSHOT_NAME_CONFIG = z.union([
-    EXTERNALLY_MANAGED_SNAPSHOT, GENERATE_SNAPSHOT
-]).describe("Snapshot source: either reference an existing snapshot or configure creation of a new one.");
+export const ELASTICSEARCH_SNAPSHOT_NAME_CONFIG = z.union([
+    ELASTICSEARCH_EXTERNALLY_MANAGED_SNAPSHOT, ELASTICSEARCH_GENERATE_SNAPSHOT
+]).describe("Elasticsearch/OpenSearch snapshot source: either reference an existing snapshot or configure creation of a new one.");
 
-export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    config: SNAPSHOT_NAME_CONFIG
-        .describe("Snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."),
+export const ELASTICSEARCH_DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    config: ELASTICSEARCH_SNAPSHOT_NAME_CONFIG
+        .describe("Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."),
     repoName: z.string()
-        .describe("Name of the S3 snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.")
-}).describe("A snapshot configuration bound to a specific repository.");
+        .describe("Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.")
+}).describe("An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository.");
 
-export const SNAPSHOT_CONFIGS_MAP = z.record(
+export const ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP = z.record(
     z.string(),
-    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
-).describe("Map of snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
+    ELASTICSEARCH_DYNAMIC_SNAPSHOT_CONFIG
+).describe("Map of Elasticsearch/OpenSearch snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
 
-export const SNAPSHOT_INFO = z.object({
+export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
     repos: SOURCE_CLUSTER_REPOS_RECORD.optional()
-        .describe("S3 snapshot repositories registered with the source cluster."),
-    snapshots: SNAPSHOT_CONFIGS_MAP
-        .describe("Snapshots to use or create for this source cluster."),
+        .describe("Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."),
+    snapshots: ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP
+        .describe("Elasticsearch/OpenSearch snapshots to use or create for this source cluster."),
     serializeSnapshotCreation: z.boolean().optional()
         .describe("Controls whether snapshot creations for this source run one-at-a-time or in parallel. " +
             "When true, all snapshot creations share a single semaphore so only one runs at any given time; " +
@@ -1355,17 +1336,144 @@ export const SNAPSHOT_INFO = z.object({
             "Set explicitly to override the version-based default. " +
             "Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured " +
             "(for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently).")
-}).describe("Snapshot repository and snapshot configuration for a source cluster.");
+}).describe("Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster.");
+
+const SOLR_BACKUP_PROCESS_OPTIONS = {
+    collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    jvmArgs: z.string().default("").optional()
+        .describe(JVM_ARGS_DESC),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+} as const;
+
+export const SOLR_CREATE_BACKUP_OPTIONS = z.object({
+    snapshotPrefix: z.string().default("").optional()
+        .describe("Prefix for auto-generated Solr backup names. When set, the backup name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."),
+    ...SOLR_BACKUP_PROCESS_OPTIONS,
+}).describe("Configuration for creating a new Solr backup as part of the migration workflow.");
+
+export const SOLR_CREATE_BACKUP_CONFIG = z.object({
+    repoName: z.string()
+        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."),
+    createBackupConfig: SOLR_CREATE_BACKUP_OPTIONS
+        .describe("Configuration for creating a new Solr backup of the source cluster."),
+}).describe("Configuration to create a new Solr backup of the source cluster as part of the migration workflow.");
+
+export const SOLR_EXTERNAL_BACKUP_CONFIG = z.object({
+    externalBackupName: z.string()
+        .describe("Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."),
+    repoName: z.string()
+        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."),
+    ...SOLR_BACKUP_PROCESS_OPTIONS,
+}).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
+
+export const SOLR_BACKUP_CONFIG = z.union([
+    SOLR_EXTERNAL_BACKUP_CONFIG,
+    SOLR_CREATE_BACKUP_CONFIG,
+]).describe("Solr backup source: either reference an existing backup or configure creation of a new one.");
+
+export const SOLR_BACKUPS_MAP = z.record(
+    z.string(),
+    SOLR_BACKUP_CONFIG
+).describe("Map of Solr backup labels to their configurations. Keys are used as labels and in backup name generation.");
+
+export const SOLR_SNAPSHOT_INFO = z.object({
+    repos: SOURCE_CLUSTER_REPOS_RECORD.optional()
+        .describe("Solr backup repositories registered with the source cluster."),
+    backups: SOLR_BACKUPS_MAP
+        .describe("Solr backups to use or create for this source cluster."),
+    serializeSnapshotCreation: z.boolean().optional()
+        .describe("Controls whether Solr backup creation or prepare/validation steps for this source run one-at-a-time or in parallel. When omitted, defaults are version-based.")
+}).describe("Solr backup repository and backup configuration for a source cluster.");
+
+export const SNAPSHOT_INFO = z.union([
+    ELASTICSEARCH_SNAPSHOT_INFO,
+    SOLR_SNAPSHOT_INFO
+]).describe("Source-specific snapshot or backup configuration for a source cluster.");
+
+type SnapshotInfo = z.infer<typeof SNAPSHOT_INFO>;
+type SnapshotInfoEntry = {
+    repoName?: string;
+    config?: z.infer<typeof ELASTICSEARCH_SNAPSHOT_NAME_CONFIG>;
+};
+type SnapshotInfoVariant = {
+    kind: string;
+    itemKey: string;
+    allowedSourceDescription: string;
+    matchesSnapshotInfo: (snapshotInfo: SnapshotInfo) => boolean;
+    matchesSourceVersion: (version: unknown) => boolean;
+    entries: (snapshotInfo: SnapshotInfo) => Record<string, SnapshotInfoEntry>;
+};
+
+function isSolrVersion(version: unknown): boolean {
+    return typeof version === "string" && version.startsWith("SOLR ");
+}
+
+function isElasticsearchVersion(version: unknown): boolean {
+    return typeof version === "string" && (version.startsWith("ES ") || version.startsWith("OS "));
+}
+
+const SNAPSHOT_INFO_VARIANTS: readonly SnapshotInfoVariant[] = [
+    {
+        kind: "elasticsearch",
+        itemKey: "snapshots",
+        allowedSourceDescription: "Elasticsearch/OpenSearch-style snapshot sources",
+        matchesSnapshotInfo: (snapshotInfo) => "snapshots" in snapshotInfo,
+        matchesSourceVersion: isElasticsearchVersion,
+        entries: (snapshotInfo) => "snapshots" in snapshotInfo ? snapshotInfo.snapshots : {},
+    },
+    {
+        kind: "solr",
+        itemKey: "backups",
+        allowedSourceDescription: "Solr sources (version 'SOLR ...')",
+        matchesSnapshotInfo: (snapshotInfo) => "backups" in snapshotInfo,
+        matchesSourceVersion: isSolrVersion,
+        entries: (snapshotInfo) => "backups" in snapshotInfo
+            ? Object.fromEntries(
+                Object.entries(snapshotInfo.backups).map(([name, backup]) => [
+                    name,
+                    {repoName: backup.repoName}
+                ])
+            )
+            : {},
+    },
+];
+
+function snapshotInfoVariant(snapshotInfo: SnapshotInfo | undefined): SnapshotInfoVariant | undefined {
+    if (!snapshotInfo) return undefined;
+    return SNAPSHOT_INFO_VARIANTS.find(variant => variant.matchesSnapshotInfo(snapshotInfo));
+}
+
+function snapshotInfoRepoNames(snapshotInfo: SnapshotInfo | undefined): Record<string, z.infer<typeof REPO_CONFIG>> | undefined {
+    return snapshotInfo?.repos;
+}
+
+function snapshotInfoEntries(snapshotInfo: SnapshotInfo | undefined): Record<string, SnapshotInfoEntry> {
+    if (!snapshotInfo) return {};
+    return snapshotInfoVariant(snapshotInfo)?.entries(snapshotInfo) ?? {};
+}
 
 const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws)(?::\d+)?(?:\/)?$/i;
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
-        .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
+        .describe("Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
-    const repos = data.snapshotInfo?.repos;
-    const snapshots = data.snapshotInfo?.snapshots ?? {};
+    const snapshotVariant = snapshotInfoVariant(data.snapshotInfo);
+    const repos = snapshotInfoRepoNames(data.snapshotInfo);
+    const snapshots = snapshotInfoEntries(data.snapshotInfo);
+    const snapshotInfoItemKey = snapshotVariant?.itemKey ?? "snapshots";
+    if (data.snapshotInfo && snapshotVariant && !snapshotVariant.matchesSourceVersion(data.version)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `snapshotInfo.${snapshotVariant.itemKey} is only supported for ${snapshotVariant.allowedSourceDescription}, but source version is '${data.version ?? "<unset>"}'`,
+            path: ['snapshotInfo', snapshotVariant.itemKey]
+        });
+    }
+
     for (const [snapName, snapConfig] of Object.entries(snapshots)) {
         const repoName = snapConfig.repoName;
         if (repoName) {
@@ -1373,13 +1481,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,
                     message: `Snapshot '${snapName}' references repoName '${repoName}' but no repos are defined`,
-                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                    path: ['snapshotInfo', snapshotInfoItemKey, snapName, 'repoName']
                 });
             } else if (!(repoName in repos)) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,
                     message: `Snapshot '${snapName}' references unknown repoName '${repoName}'. Available: ${Object.keys(repos).join(', ')}`,
-                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                    path: ['snapshotInfo', snapshotInfoItemKey, snapName, 'repoName']
                 });
             }
         }
@@ -1387,7 +1495,8 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
     // AWS managed clusters require SigV4 auth when triggering snapshot creation
     if (data.endpoint && AWS_MANAGED_ENDPOINT_PATTERN.test(data.endpoint)) {
-        const hasCreateSnapshot = Object.values(snapshots).some(s => "createSnapshotConfig" in s.config);
+        const hasCreateSnapshot = Object.values(snapshots).some(s =>
+            s.config !== undefined && "createSnapshotConfig" in s.config);
         if (hasCreateSnapshot && (!data.authConfig || !HTTP_AUTH_SIGV4.safeParse(data.authConfig).success)) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
@@ -1401,7 +1510,7 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     // (GCS repos are not affected — they authenticate via the cluster's GCS keystore / Workload Identity.)
     if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
-            if ("createSnapshotConfig" in snapConfig.config) {
+            if (snapConfig.config !== undefined && "createSnapshotConfig" in snapConfig.config && snapConfig.repoName) {
                 const repo = repos?.[snapConfig.repoName];
                 if (repo && repo.repoPathUri.startsWith("s3://") && !repo.s3RoleArn) {
                     ctx.addIssue({
@@ -1414,27 +1523,6 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         }
     }
 
-    // importConfig on an externally-managed snapshot is Solr-only. The import-prepare step runs
-    // CreateSnapshot --mode import, which is a no-op for ES/OS sources (those snapshots already
-    // carry their own metadata). Reject it on non-Solr sources so the misconfiguration surfaces
-    // at config-validation time rather than silently doing nothing at runtime.
-    const isSolrSource = typeof data.version === "string" && data.version.startsWith("SOLR ");
-    for (const [snapName, snapConfig] of Object.entries(snapshots)) {
-        if ("createSnapshotConfig" in snapConfig.config && snapConfig.config.createSnapshotConfig.mode === "import") {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: `Snapshot '${snapName}' sets createSnapshotConfig.mode='import'. Use externallyManagedSnapshotName with importConfig for Solr externally-managed snapshots; createSnapshotConfig is only for snapshots this workflow creates.`,
-                path: ['snapshotInfo', 'snapshots', snapName, 'config', 'createSnapshotConfig', 'mode']
-            });
-        }
-        if ("importConfig" in snapConfig.config && snapConfig.config.importConfig !== undefined && !isSolrSource) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: `Snapshot '${snapName}' sets importConfig, which is only supported for Solr sources (version 'SOLR ...'), but source version is '${data.version ?? "<unset>"}'`,
-                path: ['snapshotInfo', 'snapshots', snapName, 'config', 'importConfig']
-            });
-        }
-    }
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
@@ -1463,7 +1551,7 @@ export const SNAPSHOT_MIGRATION_CONFIG_ARRAY =
 export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
     z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/),
         SNAPSHOT_MIGRATION_CONFIG_ARRAY.min(1))
-    .describe("Map of snapshot names to their migration configurations. Keys must match snapshot names defined in the source cluster's snapshotInfo.snapshots.");
+    .describe("Map of snapshot names to their migration configurations. Keys must match snapshot names defined in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups.");
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional()
@@ -1545,7 +1633,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 
             if (mc.perSnapshotConfig) {
                 const sourceCluster = data.sourceClusters[mc.fromSource];
-                const availableSnapshots = sourceCluster?.snapshotInfo?.snapshots ?? {};
+                const availableSnapshots = snapshotInfoEntries(sourceCluster?.snapshotInfo);
                 for (const snapName of Object.keys(mc.perSnapshotConfig)) {
                     if (!(snapName in availableSnapshots)) {
                         ctx.addIssue({

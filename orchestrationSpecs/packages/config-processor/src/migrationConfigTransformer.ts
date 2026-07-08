@@ -8,9 +8,10 @@ import {
     REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
-    SNAPSHOT_NAME_CONFIG,
+    PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    SOURCE_CLUSTER_CONFIG,
     FieldMeta, ChecksumDependency,
+    USER_CREATE_SNAPSHOT_OPTIONS,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
     ARGO_PROXY_OPTIONS,
@@ -28,8 +29,40 @@ import {FileSourceRegistry} from "./fileSourceUtils";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
-export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
+type SolrBackupNormalizedConfig = {
+    externalBackupName?: string;
+    collectionAllowlist: string[];
+    otelTraceCollectorEndpoint?: string;
+    otelMetricsCollectorEndpoint?: string;
+    jvmArgs?: string;
+    loggingConfigurationOverrideConfigMap?: string;
+};
+type SolrExternalBackupNormalizedConfig = SolrBackupNormalizedConfig & {
+    externalBackupName: string;
+};
+type WorkflowGeneratedSnapshotConfig = {
+    createSnapshotConfig: z.infer<typeof USER_CREATE_SNAPSHOT_OPTIONS>;
+};
+type WorkflowExternalSnapshotConfig = {
+    externallyManagedSnapshotName: string;
+};
+type WorkflowSnapshotNameConfig = WorkflowGeneratedSnapshotConfig | WorkflowExternalSnapshotConfig;
+type NormalizedSnapshotDefinition = {
+    repoName: string;
+    config: WorkflowSnapshotNameConfig;
+    solrBackupConfig?: SolrBackupNormalizedConfig;
+};
+type NormalizedSnapshotInfo = {
+    repos?: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>;
+    snapshots: Record<string, NormalizedSnapshotDefinition>;
+    serializeSnapshotCreation?: boolean;
+};
+type NormalizedSourceCluster = Omit<z.infer<typeof SOURCE_CLUSTER_CONFIG>, "snapshotInfo"> & {
+    snapshotInfo?: NormalizedSnapshotInfo;
+};
+export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration" | "sourceClusters"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+    sourceClusters: Record<string, NormalizedSourceCluster>;
 };
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
@@ -503,7 +536,88 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
     };
 }
 
-export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+function normalizeSnapshotInfo(
+    snapshotInfo: z.infer<typeof SOURCE_CLUSTER_CONFIG>["snapshotInfo"]
+): NormalizedSnapshotInfo | undefined {
+    if (!snapshotInfo) {
+        return undefined;
+    }
+    if ("snapshots" in snapshotInfo) {
+        return snapshotInfo;
+    }
+
+    return {
+        repos: snapshotInfo.repos,
+        serializeSnapshotCreation: snapshotInfo.serializeSnapshotCreation,
+        snapshots: Object.fromEntries(
+            Object.entries(snapshotInfo.backups).map(([label, backup]) => {
+                if ("createBackupConfig" in backup) {
+                    const {
+                        repoName,
+                        createBackupConfig,
+                    } = backup;
+                    const {
+                        collectionAllowlist,
+                        ...createBackupOptions
+                    } = createBackupConfig;
+                    const normalizedCollectionAllowlist = collectionAllowlist ?? [];
+                    return [
+                        label,
+                        {
+                            repoName,
+                            config: {
+                                createSnapshotConfig: {
+                                    ...createBackupOptions,
+                                    solrCollections: normalizedCollectionAllowlist,
+                                },
+                            },
+                            solrBackupConfig: {
+                                collectionAllowlist: normalizedCollectionAllowlist,
+                            },
+                        },
+                    ];
+                }
+
+                const {
+                    externalBackupName,
+                    repoName,
+                    collectionAllowlist,
+                    ...solrBackupOptions
+                } = backup;
+                return [
+                    label,
+                    {
+                        repoName,
+                        config: {
+                            externallyManagedSnapshotName: externalBackupName,
+                        },
+                        solrBackupConfig: {
+                            ...solrBackupOptions,
+                            externalBackupName,
+                            collectionAllowlist: collectionAllowlist ?? [],
+                        },
+                    },
+                ];
+            })
+        ),
+    };
+}
+
+function normalizeSourceClusters(
+    sourceClusters: InputConfig["sourceClusters"]
+): NormalizedUserConfig["sourceClusters"] {
+    return Object.fromEntries(
+        Object.entries(sourceClusters).map(([sourceName, sourceCluster]) => [
+            sourceName,
+            {
+                ...sourceCluster,
+                snapshotInfo: normalizeSnapshotInfo(sourceCluster.snapshotInfo),
+            },
+        ])
+    );
+}
+
+function normalizeUserConfigForValidation(userConfig: InputConfig): InputConfig {
     const namedConfig = setNamesInUserConfig(userConfig);
     return {
         ...namedConfig,
@@ -514,6 +628,15 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
                 normalizeKafkaClusterConfig(cluster)
             ])
         ),
+    } as InputConfig;
+}
+
+export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+    const validationNormalized = normalizeUserConfigForValidation(userConfig);
+    return {
+        ...validationNormalized,
+        kafkaClusterConfiguration: validationNormalized.kafkaClusterConfiguration ?? {},
+        sourceClusters: normalizeSourceClusters(validationNormalized.sourceClusters),
     };
 }
 
@@ -587,26 +710,58 @@ function buildKafkaClientConfig(
     };
 }
 
-type SnapshotNameConfig = z.infer<typeof SNAPSHOT_NAME_CONFIG>;
-type SolrImportSnapshotConfig = z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT> & {
-    importConfig: NonNullable<z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>["importConfig"]>;
-};
-
-function isGenerateSnapshot(config: SnapshotNameConfig): config is z.infer<typeof GENERATE_SNAPSHOT> {
+function isGenerateSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowGeneratedSnapshotConfig {
     return 'createSnapshotConfig' in config;
 }
 
-/**
- * Solr import-prepare: an externally-managed snapshot that additionally requests the
- * `--mode import` schema-upload step. Only Solr sources set importConfig (enforced by the
- * SOURCE_CLUSTER_CONFIG superRefine). Such a snapshot is routed through the snapshot-creation
- * path (so a DataSnapshot CR is created and the import step runs and patches it Completed),
- * even though it does not generate a brand-new backup.
- */
-function isSolrImportSnapshot(config: SnapshotNameConfig): config is SolrImportSnapshotConfig {
-    return 'externallyManagedSnapshotName' in config
-        && 'importConfig' in config
-        && config.importConfig !== undefined;
+function isExternalSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowExternalSnapshotConfig {
+    return 'externallyManagedSnapshotName' in config;
+}
+
+function isSolrSourceVersion(version: string | undefined): boolean {
+    return typeof version === "string" && version.startsWith("SOLR ");
+}
+
+function needsSolrExternalPrepare(
+    sourceCluster: Pick<NormalizedSourceCluster, "version">,
+    snapshotDef: NormalizedSnapshotDefinition
+): snapshotDef is NormalizedSnapshotDefinition & { solrBackupConfig: SolrExternalBackupNormalizedConfig } {
+    return isSolrSourceVersion(sourceCluster.version)
+        && snapshotDef.solrBackupConfig !== undefined
+        && snapshotDef.solrBackupConfig.externalBackupName !== undefined
+        && isExternalSnapshot(snapshotDef.config);
+}
+
+function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefinition & { solrBackupConfig: SolrBackupNormalizedConfig }) {
+    const {
+        externalBackupName: _externalBackupName,
+        collectionAllowlist,
+        ...runtimeOptions
+    } = snapshotDef.solrBackupConfig;
+    return {
+        ...runtimeOptions,
+        solrCollections: collectionAllowlist,
+    };
+}
+
+function solrCollectionAllowlistForSnapshot(snapshotDef: NormalizedSnapshotDefinition): string[] {
+    return snapshotDef.solrBackupConfig?.collectionAllowlist ?? [];
+}
+
+function applySolrCollectionAllowlist<T extends {indexAllowlist?: string[]} | undefined>(
+    config: T,
+    collectionAllowlist: string[]
+): T {
+    if (config === undefined || collectionAllowlist.length === 0) {
+        return config;
+    }
+    if ((config.indexAllowlist ?? []).length > 0) {
+        return config;
+    }
+    return {
+        ...config,
+        indexAllowlist: collectionAllowlist,
+    } as T;
 }
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
@@ -620,17 +775,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     validateInput(data: unknown): NormalizedUserConfig {
         // First pass: zod schema validation (including refinements)
         const parsed = super.validateInput(data);
-        const normalized = normalizeUserConfig(parsed);
+        const validationNormalized = normalizeUserConfigForValidation(parsed);
 
-        // Second pass: unified schema validation against the normalized user config.
-        // This stays in the user-config schema family and avoids mixing raw input
-        // with selectively patched normalized subtrees.
-        validateInputAgainstUnifiedSchema(normalized);
+        // Second pass: unified schema validation against the normalized user-config shape.
+        // Internal transformer normalization may add fields that are not user-facing.
+        validateInputAgainstUnifiedSchema(validationNormalized);
 
         // Third pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
-        
-        return normalized;
+
+        return normalizeUserConfig(parsed);
     }
 
     async transform(input: NormalizedUserConfig): Promise<OutputConfig> {
@@ -715,7 +869,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     configChecksum: cs(
                         sourceConnectionIdentity,
                         item.config,
-                        item.importExternalSnapshotName ?? '',
+                        item.solrExternalBackupName ?? '',
                         item.repo,
                         ...enrichedDeps.map(d => d.configChecksum)
                     ),
@@ -927,10 +1081,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
                 const snapshotConfig = snapshotDef.config;
-                // Only generate-snapshots and Solr import-prepare snapshots flow through the
-                // snapshot-creation path. A plain externally-managed snapshot (no importConfig)
-                // is handled entirely on the migration side and needs no DataSnapshot CR.
-                if (!isGenerateSnapshot(snapshotConfig) && !isSolrImportSnapshot(snapshotConfig)) continue;
+                // Only generated snapshots and Solr external-backup prepare/validation flow
+                // through the snapshot-creation path. ES/OS externally-managed snapshots are
+                // handled entirely on the migration side and need no DataSnapshot CR.
+                if (!isGenerateSnapshot(snapshotConfig) && !needsSolrExternalPrepare(sourceCluster, snapshotDef)) continue;
 
                 const repoConfig = snapshotInfo?.repos?.[snapshotDef.repoName];
                 if (!repoConfig) {
@@ -963,23 +1117,25 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         ...semaphore,
                         dependsOnProxySetups,
                     });
-                } else {
-                    // Solr import-prepare. Build a create-config whose `config` carries mode:"import"
-                    // plus the import options, and record the external snapshot name so the workflow
-                    // uses it (instead of a generated name) as the resolved snapshot. No backup runs.
-                    const importConfig = snapshotConfig.importConfig;
+                } else if (needsSolrExternalPrepare(sourceCluster, snapshotDef)) {
+                    // Solr external prepare. Build a create-config whose `config` carries
+                    // mode:"import" plus optional Solr collection scoping, and record the external
+                    // backup name so the workflow uses it verbatim. No backup runs.
+                    const solrBackupConfig = solrCreateSnapshotConfigForBackup(snapshotDef);
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,
                         config: {
-                            ...importConfig,
+                            ...solrBackupConfig,
                             mode: "import" as const,
                         },
                         repo: repoConfig,
-                        importExternalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
+                        solrExternalBackupName: snapshotDef.solrBackupConfig.externalBackupName,
                         ...semaphore,
                         dependsOnProxySetups,
                     });
+                } else {
+                    throw new Error(`Unexpected snapshot config for '${snapshotName}' in source '${sourceName}'`);
                 }
             }
 
@@ -1012,8 +1168,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            // When perSnapshotConfig is not provided, auto-generate it from snapshotInfo.snapshots
-            // so the workflow creates/waits for snapshots the same way for both ES and Solr sources.
+            // When perSnapshotConfig is not provided, auto-generate it from the normalized
+            // snapshotInfo.snapshots map so the workflow creates/waits for snapshots the same way
+            // for both ES and Solr sources.
             const effectivePerSnapshotConfig = perSnapshotConfig ?? (
                 sourceCluster.snapshotInfo?.snapshots
                     ? Object.fromEntries(
@@ -1046,28 +1203,31 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     | { externalSnapshotName: string }
                     | { dataSnapshotResourceName: string }
                     | { dataSnapshotResourceName: string; externalSnapshotName: string };
-                if (isSolrImportSnapshot(snapshotConfig)) {
-                    // Solr import-prepare creates a DataSnapshot CR (so the migration waits for the
-                    // import step to upload the schema), but the snapshot name used is the external,
-                    // pre-existing one — not a workflow-generated name.
+                if (needsSolrExternalPrepare(sourceCluster, snapshotDef)) {
+                    // Solr external prepare creates a DataSnapshot CR (so the migration waits for
+                    // validation/schema capture), but the snapshot name used is the external,
+                    // pre-existing one -- not a workflow-generated name.
                     snapshotNameResolution = {
                         dataSnapshotResourceName: globallyUniqueSnapshotName,
-                        externalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
+                        externalSnapshotName: snapshotDef.solrBackupConfig.externalBackupName,
                     };
-                } else if ('externallyManagedSnapshotName' in snapshotConfig) {
+                } else if (isExternalSnapshot(snapshotConfig)) {
                     snapshotNameResolution = {
-                        externalSnapshotName: (snapshotConfig as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName,
+                        externalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
                     };
                 } else {
                     snapshotNameResolution = { dataSnapshotResourceName: globallyUniqueSnapshotName };
                 }
 
                 for (const migration of autoLabelMigrations(migrations)) {
+                    const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
+                        ? solrCollectionAllowlistForSnapshot(snapshotDef)
+                        : [];
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        migration.metadataMigrationConfig
+                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist)
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        migration.documentBackfillConfig
+                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist)
                     );
                     results.push({
                         label: snapshotName,

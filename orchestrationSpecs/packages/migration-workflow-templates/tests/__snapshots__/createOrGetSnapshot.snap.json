@@ -109,7 +109,7 @@
               "name": "dataSnapshotUid"
             },
             {
-              "name": "importExternalSnapshotName",
+              "name": "solrExternalBackupName",
               "value": ""
             },
             {
@@ -157,7 +157,7 @@
                 "template": "snapshotworkflow",
                 "name": "create-snapshot"
               },
-              "when": "{{='createSnapshotConfig' in fromJSON(inputs.parameters.snapshotConfig)['config'] || !(0 == len(inputs.parameters.importExternalSnapshotName))}}",
+              "when": "{{='createSnapshotConfig' in fromJSON(inputs.parameters.snapshotConfig)['config'] || !(0 == len(inputs.parameters.solrExternalBackupName))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -166,7 +166,7 @@
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict(\"repoConfig\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), \"snapshotName\", ((!(0 == len(inputs.parameters.importExternalSnapshotName))) ? (inputs.parameters.importExternalSnapshotName) : (lower(steps.getSnapshotName.outputs.parameters.snapshotName))), \"label\", jsonpath(inputs.parameters.snapshotConfig, '$.label')))}}"
+                    "value": "{{=toJSON(sprig.dict(\"repoConfig\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), \"snapshotName\", ((!(0 == len(inputs.parameters.solrExternalBackupName))) ? (inputs.parameters.solrExternalBackupName) : (lower(steps.getSnapshotName.outputs.parameters.snapshotName))), \"label\", jsonpath(inputs.parameters.snapshotConfig, '$.label')))}}"
                   },
                   {
                     "name": "createSnapshotConfig",
@@ -194,7 +194,7 @@
                   },
                   {
                     "name": "sourceType",
-                    "value": "{{=((!(0 == len(inputs.parameters.importExternalSnapshotName))) ? ('solr') : (''))}}"
+                    "value": "{{=((!(0 == len(inputs.parameters.solrExternalBackupName))) ? ('solr') : (''))}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -215,7 +215,7 @@
             {
               "name": "snapshotConfig",
               "valueFrom": {
-                "expression": "toJSON(sprig.dict(\"snapshotName\", ((0 == len(inputs.parameters.importExternalSnapshotName)) ? (steps.getSnapshotName.outputs.parameters.snapshotName) : (inputs.parameters.importExternalSnapshotName)), \"repoConfig\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], \"label\", fromJSON(inputs.parameters.snapshotConfig)['label']))"
+                "expression": "toJSON(sprig.dict(\"snapshotName\", ((0 == len(inputs.parameters.solrExternalBackupName)) ? (steps.getSnapshotName.outputs.parameters.snapshotName) : (inputs.parameters.solrExternalBackupName)), \"repoConfig\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], \"label\", fromJSON(inputs.parameters.snapshotConfig)['label']))"
               }
             }
           ]

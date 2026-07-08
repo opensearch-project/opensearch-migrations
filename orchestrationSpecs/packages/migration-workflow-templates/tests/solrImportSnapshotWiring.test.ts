@@ -3,11 +3,11 @@ import {CreateSnapshot} from "../src/workflowTemplates/createSnapshot";
 import {CreateOrGetSnapshot} from "../src/workflowTemplates/createOrGetSnapshot";
 
 /**
- * Behavioral guards for the Solr externally-managed-snapshot IMPORT wiring in the workflow
+ * Behavioral guards for the Solr externally-managed-backup IMPORT wiring in the workflow
  * templates. These assert the rendered Argo YAML directly (rather than only via the large
  * full-template snapshots) so a regression in the import branch fails loudly and legibly.
  */
-describe("Solr import snapshot workflow wiring", () => {
+describe("Solr external backup import workflow wiring", () => {
     it("snapshotWorkflow gates the import branch (runImport + direct CR completion) on mode", () => {
         const rendered = JSON.stringify(renderWorkflowTemplate(CreateSnapshot));
 
@@ -32,8 +32,8 @@ describe("Solr import snapshot workflow wiring", () => {
     it("createOrGetSnapshot drives sourceType=solr and the verbatim external name on the import path", () => {
         const rendered = JSON.stringify(renderWorkflowTemplate(CreateOrGetSnapshot));
 
-        // The import-external-snapshot name input is threaded through.
-        expect(rendered).toContain("importExternalSnapshotName");
+        // The Solr external backup name input is threaded through.
+        expect(rendered).toContain("solrExternalBackupName");
         // sourceType is passed to the snapshotWorkflow step (ternary: "solr" when importing, else "").
         expect(rendered).toContain("sourceType");
         expect(rendered).toContain("solr");

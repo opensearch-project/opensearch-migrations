@@ -1028,8 +1028,8 @@
                     "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['resourceUid']}}"
                   },
                   {
-                    "name": "importExternalSnapshotName",
-                    "value": "{{=sprig.dig('importExternalSnapshotName', '', fromJSON(inputs.parameters.snapshotItemConfig))}}"
+                    "name": "solrExternalBackupName",
+                    "value": "{{=sprig.dig('solrExternalBackupName', '', fromJSON(inputs.parameters.snapshotItemConfig))}}"
                   }
                 ]
               },
@@ -1154,7 +1154,7 @@
                   },
                   {
                     "name": "snapshotItemConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotPrefix\", item['snapshotPrefix'], \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid'], \"importExternalSnapshotName\", sprig.dig('importExternalSnapshotName', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotPrefix\", item['snapshotPrefix'], \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid'], \"solrExternalBackupName\", sprig.dig('solrExternalBackupName', '', item)))}}"
                   },
                   {
                     "name": "sourceConfig",

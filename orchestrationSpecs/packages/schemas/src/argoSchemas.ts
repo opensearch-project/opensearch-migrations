@@ -7,7 +7,6 @@ import {
     KAFKA_CLUSTER_CREATION_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
-    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOURCE_CLUSTER_CONFIG,
@@ -160,12 +159,32 @@ export const COMPLETE_SNAPSHOT_CONFIG =
         repoConfig: DENORMALIZED_REPO_CONFIG  // Replace string reference with actual config
     }));
 
-export const DYNAMIC_SNAPSHOT_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
-        .omit({repoName: true})
-        .safeExtend({
-            repoConfig: DENORMALIZED_REPO_CONFIG,  // Replace string reference with actual config
-            label: z.string()
+export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
+    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).extend({
+        mode: z.enum(["create", "import"]).default("create").optional()
+    })
+);
+export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>)[];
+
+export const WORKFLOW_SNAPSHOT_NAME_CONFIG = z.union([
+    z.object({
+        externallyManagedSnapshotName: z.string()
+            .describe("Name of a pre-existing snapshot or backup in the configured repository."),
+    }),
+    z.object({
+        createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS
+            .describe("Workflow-internal configuration for creating a snapshot or Solr backup."),
+    }),
+]).describe("Workflow-internal snapshot or backup name source.");
+
+export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
+    makeOptionalDefaultedFieldsRequired(z.object({
+        config: WORKFLOW_SNAPSHOT_NAME_CONFIG,
+        repoConfig: DENORMALIZED_REPO_CONFIG,
+        label: z.string()
     }));
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -181,14 +200,6 @@ export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "fileSourceVolumes",
     "fileSourceVolumeMounts",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
-
-export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
-);
-export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
-    "jvmArgs",
-    "loggingConfigurationOverrideConfigMap",
-] as const satisfies readonly (keyof z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>)[];
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
@@ -283,12 +294,12 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const SNAPSHOT_NAME_RESOLUTION = z.union([
-    // Solr import-prepare: an externally-managed snapshot that still needs the schema uploaded by
+    // Solr import-prepare: an externally-managed backup that still needs the schema uploaded by
     // CreateSnapshot --mode import. A DataSnapshot CR (dataSnapshotResourceName) is created so the
-    // migration waits for the import step to finish, but the snapshot name used is the external one
-    // (externalSnapshotName), not a CR-resolved generated name.
+    // migration waits for the import step to finish, but the resolved name used downstream is the
+    // external backup name (externalSnapshotName), not a CR-resolved generated name.
     z.object({ dataSnapshotResourceName: z.string(), externalSnapshotName: z.string() }).strict(),
-    // External snapshot with no workflow-side preparation (ES/OS, or Solr without importConfig):
+    // External snapshot with no workflow-side preparation (ES/OS):
     // the migration uses the external name directly and waits on nothing.
     z.object({ externalSnapshotName: z.string() }).strict(),
     // Workflow-generated snapshot: the migration waits on the DataSnapshot CR named here, then
@@ -360,12 +371,11 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     })),
     configChecksum: z.string(),
     resourceUid: z.string(),
-    // Solr import-prepare only. When present, this snapshot item does NOT create a new backup;
-    // instead CreateSnapshot runs with `--mode import` against the externally-managed snapshot
-    // named here, uploading the source schema into the repo. `config` carries mode:"import" and
-    // the import options; `importExternalSnapshotName` is the pre-existing snapshot name used as
-    // the resolved snapshot name (instead of a workflow-generated one).
-    importExternalSnapshotName: z.string().optional(),
+    // Solr external-backup prepare only. When present, this item does NOT create
+    // a new backup; CreateSnapshot runs with `--mode import` against the
+    // externally-managed backup named here, uploading the source schema into the
+    // repo. `config` carries mode:"import" and the prepare options.
+    solrExternalBackupName: z.string().optional(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({

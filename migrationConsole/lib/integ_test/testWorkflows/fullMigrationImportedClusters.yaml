@@ -7,9 +7,10 @@
 # Supports both:
 # - Standard migrations: Creates snapshot from source cluster
 # - BYOS migrations: Uses externally managed snapshot (externallyManagedSnapshotName)
+# - Solr external-backup migrations: Uses externally managed backup (solrBackupConfig.externalBackupName)
 #
-# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName
-# instead of snapshotNamePrefix to skip snapshot creation.
+# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName.
+# For Solr external backups, pass snapshotConfig.solrBackupConfig.externalBackupName.
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -155,10 +156,27 @@ spec:
                   | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
                   # Remove unrecognized fields
                   | del(.no_auth) | del(.snapshotRepo)
-                  # Build snapshotInfo based on whether snapshot is externally managed (BYOS) or not
+                  # Build snapshotInfo based on whether snapshot/backup is externally managed or not
                   | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig // null) as $snapshotNameConfig |
+                    ($entry["snapshot-and-migration-configs"][0].snapshotConfig.solrBackupConfig // null) as $solrBackupConfig |
                     ($snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
-                    if $extSnap != null then
+                    ($solrBackupConfig.externalBackupName // null) as $extBackup |
+                    if $extBackup != null then
+                      (($entry.source.snapshotRepo // null) as $srcRepo |
+                      . + {"snapshotInfo": {
+                        "repos": {"default": (if $srcRepo != null then ($repo + {repoPathUri: $srcRepo.repoPathUri}) else $repo end)},
+                        "backups": {
+                          ($extBackup): ($solrBackupConfig + {"repoName": "default"})
+                        }
+                      }})
+                    elif $solrBackupConfig != null then
+                      . + {"snapshotInfo": {
+                        "repos": {"default": $repo},
+                        "backups": {
+                          "testsnapshot": ($solrBackupConfig + {"repoName": "default"})
+                        }
+                      }}
+                    elif $extSnap != null then
                       (($entry.source.snapshotRepo // null) as $srcRepo |
                       . + {"snapshotInfo": {
                         "repos": {"default": (if $srcRepo != null then ($repo + {repoPathUri: $srcRepo.repoPathUri}) else $repo end)},
@@ -170,15 +188,27 @@ spec:
                         }
                       }})
                     else
-                      . + {"snapshotInfo": {
-                        "repos": {"default": $repo},
-                        "snapshots": {
-                          "testsnapshot": {
-                            "repoName": "default",
-                            "config": {"createSnapshotConfig": {}}
+                      if ((.version // "") | startswith("SOLR ")) then
+                        . + {"snapshotInfo": {
+                          "repos": {"default": $repo},
+                          "backups": {
+                            "testsnapshot": {
+                              "repoName": "default",
+                              "createBackupConfig": {}
+                            }
                           }
-                        }
-                      }}
+                        }}
+                      else
+                        . + {"snapshotInfo": {
+                          "repos": {"default": $repo},
+                          "snapshots": {
+                            "testsnapshot": {
+                              "repoName": "default",
+                              "config": {"createSnapshotConfig": {}}
+                            }
+                          }
+                        }}
+                      end
                     end)
                 )
               )')
@@ -195,10 +225,14 @@ spec:
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
             ')
 
-            # Build perSnapshotConfig: snapshot name -> migrations array
+            # Build perSnapshotConfig: snapshot/backup label -> migrations array
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
               .[0]["snapshot-and-migration-configs"][0] as $smc |
-              if ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
+              if ($smc.snapshotConfig.solrBackupConfig.externalBackupName // null) != null then
+                {($smc.snapshotConfig.solrBackupConfig.externalBackupName): $smc.migrations}
+              elif ($smc.snapshotConfig.solrBackupConfig // null) != null then
+                {"testsnapshot": $smc.migrations}
+              elif ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
                 {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName): $smc.migrations}
               else
                 {"testsnapshot": $smc.migrations}

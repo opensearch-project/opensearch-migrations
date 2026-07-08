@@ -1,52 +1,83 @@
 import {describe, expect, it} from "@jest/globals";
-import {InputValidationError, MigrationConfigTransformer} from "../src";
+import {InputValidationError, MigrationConfigTransformer, MigrationInitializer} from "../src";
 
 /**
- * Tests for the Solr externally-managed-snapshot IMPORT path through the config transformer.
+ * Tests for the Solr externally-managed-backup IMPORT path through the config transformer.
  *
- * An externally-managed Solr snapshot with `importConfig` set must be routed through the
- * snapshot-creation path (so a DataSnapshot CR is created and CreateSnapshot --mode import runs to
- * upload the schema), while still using the pre-existing external snapshot name for the migration.
- * A plain externally-managed snapshot (no importConfig), and any ES/OS source, must keep the old
- * behavior (no DataSnapshot CR; pure external-name resolution).
+ * Any externally-managed Solr backup must be routed through the snapshot-creation path so
+ * a DataSnapshot CR gates metadata/backfill until CreateSnapshot --mode import prepares and
+ * validates the external backup. ES/OS external snapshots keep the old external-only behavior.
  */
 
-type TestExternalSnapshotConfig = {
-    externallyManagedSnapshotName: string;
-    importConfig?: Record<string, never>;
-};
-
-function solrImportConfig(opts: {
-    withImportConfig: boolean;
+function snapshotMigrationConfig(opts: {
+    shape?: "elasticsearchSnapshots" | "solrExternalBackups" | "solrCreateBackups";
     version?: string;
-    externalSnapshotName?: string;
+    externalSolrBackupName?: string;
+    externalElasticsearchSnapshotName?: string;
+    collectionAllowlist?: string[];
+    snapshotPrefix?: string;
+    withDocumentBackfill?: boolean;
 }): Record<string, unknown> {
-    const externalConfig: TestExternalSnapshotConfig = {
-        externallyManagedSnapshotName: opts.externalSnapshotName ?? "preexisting-solr-snap"
-    };
-    if (opts.withImportConfig) {
-        externalConfig.importConfig = {};
-    }
+    const snapshotInfo = opts.shape === "solrExternalBackups"
+        ? {
+            repos: {
+                default: {
+                    awsRegion: "us-east-2",
+                    repoPathUri: "s3://bucket/solr-path",
+                },
+            },
+            backups: {
+                solrBackup: {
+                    repoName: "default",
+                    externalBackupName: opts.externalSolrBackupName ?? "preexisting-solr-backup",
+                    collectionAllowlist: opts.collectionAllowlist ?? [],
+                },
+            },
+        }
+        : opts.shape === "solrCreateBackups"
+            ? {
+                repos: {
+                    default: {
+                        awsRegion: "us-east-2",
+                        repoPathUri: "s3://bucket/solr-path",
+                    },
+                },
+                backups: {
+                    solrBackup: {
+                        repoName: "default",
+                        createBackupConfig: {
+                            ...(opts.snapshotPrefix !== undefined ? {snapshotPrefix: opts.snapshotPrefix} : {}),
+                            collectionAllowlist: opts.collectionAllowlist ?? [],
+                        },
+                    },
+                },
+            }
+        : {
+            repos: {
+                default: {
+                    awsRegion: "us-east-2",
+                    repoPathUri: "s3://bucket/solr-path",
+                },
+            },
+            snapshots: {
+                esSnapshot: {
+                    repoName: "default",
+                    config: {
+                        externallyManagedSnapshotName: opts.externalElasticsearchSnapshotName ?? "preexisting-es-snapshot"
+                    },
+                },
+            },
+        };
+    const itemName = opts.shape === "solrExternalBackups" || opts.shape === "solrCreateBackups"
+        ? "solrBackup"
+        : "esSnapshot";
     return {
         sourceClusters: {
             solrSource: {
                 endpoint: "https://solr.example.com:8983",
                 allowInsecure: true,
                 version: opts.version ?? "SOLR 9.7.0",
-                snapshotInfo: {
-                    repos: {
-                        default: {
-                            awsRegion: "us-east-2",
-                            repoPathUri: "s3://bucket/solr-path",
-                        },
-                    },
-                    snapshots: {
-                        solrSnap: {
-                            repoName: "default",
-                            config: externalConfig,
-                        },
-                    },
-                },
+                snapshotInfo,
             },
         },
         targetClusters: {
@@ -59,23 +90,23 @@ function solrImportConfig(opts: {
             fromSource: "solrSource",
             toTarget: "target",
             perSnapshotConfig: {
-                solrSnap: [{
+                [itemName]: [{
                     metadataMigrationConfig: {},
+                    ...(opts.withDocumentBackfill ? {documentBackfillConfig: {}} : {}),
                 }],
             },
         }],
     };
 }
 
-describe("Solr externally-managed snapshot import path", () => {
-    it("routes a Solr importConfig snapshot through the create path with mode=import", async () => {
+describe("Solr backup snapshotInfo paths", () => {
+    it("routes a Solr backup through the create path with mode=import", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
-            .processFromObject(solrImportConfig({withImportConfig: true}));
+            .processFromObject(snapshotMigrationConfig({shape: "solrExternalBackups"}));
 
-        // A snapshot-creation group must be produced for the Solr source (a plain external snapshot
-        // would produce none).
+        // A snapshot-creation group must be produced for the Solr source.
         expect(workflowConfig.snapshots).toBeDefined();
-        const createGroups = workflowConfig.snapshots.filter(
+        const createGroups = (workflowConfig.snapshots ?? []).filter(
             s => s.sourceConfig.label === "solrSource");
         expect(createGroups).toHaveLength(1);
 
@@ -83,33 +114,52 @@ describe("Solr externally-managed snapshot import path", () => {
         // The create-config carries mode:"import" so runCreateSnapshot emits --mode import...
         expect(item.config.mode).toBe("import");
         expect(item.config.solrCollections).toEqual([]);
-        // ...and records the pre-existing external snapshot name for the workflow to use verbatim.
-        expect(item.importExternalSnapshotName).toBe("preexisting-solr-snap");
+        // ...and records the pre-existing external backup name for the workflow to use verbatim.
+        expect(item.solrExternalBackupName).toBe("preexisting-solr-backup");
     });
 
-    it("emits a combined snapshotNameResolution (CR wait + external name) for Solr import", async () => {
+    it("passes Solr collectionAllowlist to import prepare and default migration allowlists", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
-            .processFromObject(solrImportConfig({withImportConfig: true}));
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrExternalBackups",
+                collectionAllowlist: ["orders", "products"],
+                withDocumentBackfill: true,
+            }));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.config.mode).toBe("import");
+        expect(item.config.solrCollections).toEqual(["orders", "products"]);
+
+        const migration = workflowConfig.snapshotMigrations[0];
+        expect(migration.metadataMigrationConfig?.indexAllowlist)
+            .toEqual(["orders", "products"]);
+        expect(migration.documentBackfillConfig?.indexAllowlist)
+            .toEqual(["orders", "products"]);
+    });
+
+    it("emits a combined snapshotNameResolution (CR wait + external backup name) for Solr import", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({shape: "solrExternalBackups"}));
 
         expect(workflowConfig.snapshotMigrations).toHaveLength(1);
         const resolution = workflowConfig.snapshotMigrations[0].snapshotNameResolution;
         // Both keys present: the migration waits on the DataSnapshot CR (so it blocks until the
-        // import step finishes) AND uses the external name (not a generated one).
+        // import step finishes) AND uses the external backup name (not a generated one).
         expect(resolution).toEqual({
-            dataSnapshotResourceName: "solrSource-solrSnap",
-            externalSnapshotName: "preexisting-solr-snap",
+            dataSnapshotResourceName: "solrSource-solrBackup",
+            externalSnapshotName: "preexisting-solr-backup",
         });
     });
 
-    it("includes the external snapshot name in the import DataSnapshot checksum", async () => {
+    it("includes the external backup name in the import DataSnapshot checksum", async () => {
         const transformer = new MigrationConfigTransformer();
-        const first = await transformer.processFromObject(solrImportConfig({
-            withImportConfig: true,
-            externalSnapshotName: "preexisting-solr-snap"
+        const first = await transformer.processFromObject(snapshotMigrationConfig({
+            shape: "solrExternalBackups",
+            externalSolrBackupName: "preexisting-solr-backup"
         }));
-        const second = await transformer.processFromObject(solrImportConfig({
-            withImportConfig: true,
-            externalSnapshotName: "replacement-solr-snap"
+        const second = await transformer.processFromObject(snapshotMigrationConfig({
+            shape: "solrExternalBackups",
+            externalSolrBackupName: "replacement-solr-backup"
         }));
 
         const firstItem = first.snapshots[0].createSnapshotConfig[0];
@@ -117,41 +167,139 @@ describe("Solr externally-managed snapshot import path", () => {
         expect(firstItem.configChecksum).not.toBe(secondItem.configChecksum);
     });
 
-    it("keeps a plain externally-managed Solr snapshot (no importConfig) on the external-only path", async () => {
+    it("creates a Solr backup through the normal create path", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
-            .processFromObject(solrImportConfig({withImportConfig: false}));
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                snapshotPrefix: "orders-backup",
+                collectionAllowlist: ["orders"],
+                withDocumentBackfill: true,
+            }));
+
+        expect(workflowConfig.snapshots).toHaveLength(1);
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.label).toBe("solrBackup");
+        expect(item.snapshotPrefix).toBe("orders-backup");
+        expect(item.config.mode).toBe("create");
+        expect(item.config.solrCollections).toEqual(["orders"]);
+        expect(item.solrExternalBackupName).toBeUndefined();
+
+        const resolution = workflowConfig.snapshotMigrations[0].snapshotNameResolution;
+        expect(resolution).toEqual({
+            dataSnapshotResourceName: "solrSource-solrBackup",
+        });
+
+        const migration = workflowConfig.snapshotMigrations[0];
+        expect(migration.metadataMigrationConfig?.indexAllowlist).toEqual(["orders"]);
+        expect(migration.documentBackfillConfig?.indexAllowlist).toEqual(["orders"]);
+    });
+
+    it("keeps snapshot mode out of generated DataSnapshot CR specs", async () => {
+        for (const shape of ["solrExternalBackups", "solrCreateBackups"] as const) {
+            const config = snapshotMigrationConfig({shape, collectionAllowlist: ["orders"]});
+            const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+            const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+
+            expect(item.config.mode).toBe(shape === "solrExternalBackups" ? "import" : "create");
+
+            const bundle = await new MigrationInitializer()
+                .generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
+            const dataSnapshot = bundle.customMigrationResources.items
+                .find((resource: any) => resource.kind === "DataSnapshot");
+
+            expect(dataSnapshot).toBeDefined();
+            expect(dataSnapshot?.spec.mode).toBeUndefined();
+        }
+    });
+
+    it("includes Solr backup semaphore keys in generated concurrency ConfigMaps", async () => {
+        for (const shape of ["solrExternalBackups", "solrCreateBackups"] as const) {
+            const config = snapshotMigrationConfig({shape});
+            const bundle = await new MigrationInitializer()
+                .generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
+            const workflowSemaphoreKeys = new Set(
+                bundle.workflows.snapshots
+                    ?.flatMap(snapshot => snapshot.createSnapshotConfig.map(item => item.semaphoreKey))
+            );
+            const concurrencyConfigMapKeys = new Set(
+                Object.keys(bundle.concurrencyConfigMaps.items[0].data)
+            );
+
+            expect(workflowSemaphoreKeys).toEqual(concurrencyConfigMapKeys);
+            expect(bundle.concurrencyConfigMaps.items[0].data)
+                .toEqual({"snapshot-modern-solrSource-solrBackup": "1"});
+        }
+    });
+
+    it("uses the backup label as the generated Solr backup prefix when no prefix is configured", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({shape: "solrCreateBackups"}));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.snapshotPrefix).toBe("solrBackup");
+        expect(item.config.solrCollections).toEqual([]);
+    });
+
+    it("keeps an ES external snapshot on the external-only path", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "elasticsearchSnapshots",
+                version: "ES 7.10.2",
+            }));
 
         // No DataSnapshot create-config group for this source.
-        const createGroups = workflowConfig.snapshots.filter(
+        const createGroups = (workflowConfig.snapshots ?? []).filter(
             s => s.sourceConfig.label === "solrSource");
         expect(createGroups).toHaveLength(0);
 
         // Resolution is external-name-only (no CR to wait on).
         const resolution = workflowConfig.snapshotMigrations[0].snapshotNameResolution;
-        expect(resolution).toEqual({externalSnapshotName: "preexisting-solr-snap"});
+        expect(resolution).toEqual({externalSnapshotName: "preexisting-es-snapshot"});
         expect("dataSnapshotResourceName" in resolution).toBe(false);
     });
 
-    it("rejects importConfig on a non-Solr (ES) source", async () => {
+    it("rejects Elasticsearch snapshot shape on a Solr source", async () => {
         let threw: unknown;
         try {
             await new MigrationConfigTransformer()
-                .processFromObject(solrImportConfig({withImportConfig: true, version: "ES 7.10.2"}));
+                .processFromObject(snapshotMigrationConfig({
+                    shape: "elasticsearchSnapshots",
+                    version: "SOLR 9.7.0"
+                }));
         } catch (e) {
             threw = e;
         }
         expect(threw).toBeInstanceOf(InputValidationError);
         expect(String((threw as InputValidationError).message ?? threw))
-            .toMatch(/importConfig/);
+            .toMatch(/snapshotInfo\.snapshots.*Elasticsearch\/OpenSearch/);
+    });
+
+    it("rejects Solr backup shape on a non-Solr source", async () => {
+        let threw: unknown;
+        try {
+            await new MigrationConfigTransformer()
+                .processFromObject(snapshotMigrationConfig({
+                    shape: "solrExternalBackups",
+                    version: "ES 7.10.2"
+                }));
+        } catch (e) {
+            threw = e;
+        }
+        expect(threw).toBeInstanceOf(InputValidationError);
+        expect(String((threw as InputValidationError).message ?? threw))
+            .toMatch(/snapshotInfo\.backups.*Solr/);
     });
 
     it("rejects user-authored createSnapshotConfig mode=import", async () => {
-        const config = solrImportConfig({withImportConfig: false}) as {
+        const config = snapshotMigrationConfig({
+            shape: "elasticsearchSnapshots",
+            version: "ES 7.10.2"
+        }) as {
             sourceClusters: {
                 solrSource: {
                     snapshotInfo: {
                         snapshots: {
-                            solrSnap: {
+                            esSnapshot: {
                                 config: unknown;
                             };
                         };
@@ -159,7 +307,7 @@ describe("Solr externally-managed snapshot import path", () => {
                 };
             };
         };
-        config.sourceClusters.solrSource.snapshotInfo.snapshots.solrSnap.config = {
+        config.sourceClusters.solrSource.snapshotInfo.snapshots.esSnapshot.config = {
             createSnapshotConfig: {
                 mode: "import",
             },
@@ -171,8 +319,8 @@ describe("Solr externally-managed snapshot import path", () => {
         } catch (e) {
             threw = e;
         }
-        expect(threw).toBeInstanceOf(InputValidationError);
-        expect(String((threw as InputValidationError).message ?? threw))
-            .toMatch(/externallyManagedSnapshotName.*importConfig/);
+        expect(threw).toBeInstanceOf(Error);
+        expect(String((threw as Error).message ?? threw))
+            .toMatch(/Unrecognized keys.*mode/);
     });
 });

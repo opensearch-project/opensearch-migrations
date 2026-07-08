@@ -1,10 +1,11 @@
 import {z} from "zod";
 import {CreateSnapshot} from "./createSnapshot";
-import {ARGO_CREATE_SNAPSHOT_OPTIONS, SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
 import {
+    ARGO_CREATE_SNAPSHOT_OPTIONS,
     COMPLETE_SNAPSHOT_CONFIG,
-    USER_CREATE_SNAPSHOT_OPTIONS,
-    DYNAMIC_SNAPSHOT_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
+    DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
+    WORKFLOW_SNAPSHOT_NAME_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression,
@@ -30,7 +31,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
     .addTemplate("getSnapshotName", t => t
         .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
+        .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof WORKFLOW_SNAPSHOT_NAME_CONFIG>>())
         .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
 
@@ -55,7 +56,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
     .addTemplate("createOrGetSnapshot", t => t
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG>>())
         .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
@@ -63,11 +64,11 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("dataSnapshotName", typeToken<string>())
         .addRequiredInput("dataSnapshotUid", typeToken<string>())
-        // Solr import-prepare: when non-empty, this snapshot is an externally-managed Solr snapshot
+        // Solr external-backup prepare: when non-empty, this is an externally-managed Solr backup
         // that needs the schema uploaded via CreateSnapshot --mode import. The value is the
-        // pre-existing snapshot name; it is used verbatim (not generated, not lowercased) so it
-        // matches the snapshot already present in the repo. Empty for the normal create path.
-        .addOptionalInput("importExternalSnapshotName", c => "")
+        // pre-existing backup name; it is used verbatim (not generated, not lowercased) so it
+        // matches the backup already present in the repo. Empty for the normal create path.
+        .addOptionalInput("solrExternalBackupName", c => "")
         // CreateSnapshot --source-type forwarded to snapshotWorkflow. Set to "solr" on the import
         // path so Java does not rely on live engine detection; empty on the create path so Java
         // auto-detects the engine. Branching in snapshotWorkflow is controlled by mode.
@@ -76,12 +77,12 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
         .addSteps(b => {
             // The Solr import-prepare path and the normal create path share one snapshotWorkflow
-            // call. isImport selects the external snapshot name and sourceType:"solr" for the
+            // call. isImport selects the external backup name and sourceType:"solr" for the
             // import-prepare path. snapshotWorkflow then branches on createSnapshotConfig.mode, which
-            // configProcessor sets to "import" for Solr importConfig snapshots. The step is still
+            // configProcessor sets to "import" for Solr external backups. The step is still
             // gated on autoCreate-or-import so a plain externally-managed snapshot (which never reaches
             // this template) stays a no-op.
-            const isImport = expr.not(expr.isEmpty(b.inputs.importExternalSnapshotName));
+            const isImport = expr.not(expr.isEmpty(b.inputs.solrExternalBackupName));
             // Compute autoCreate as a real boolean from the config input (same check getSnapshotName
             // makes), NOT from getSnapshotName's string output parameter. The when-condition ORs it
             // with isImport, and govaluate's `||` requires boolean operands — applying `||` to the
@@ -104,11 +105,11 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     snapshotConfig: expr.serialize(
                         expr.makeDict({
                             repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
-                            // Import: use the external name verbatim (must match the existing snapshot).
+                            // Import: use the external Solr backup name verbatim.
                             // Create: use the generated, lowercased name.
                             snapshotName: expr.ternary(
                                 isImport,
-                                b.inputs.importExternalSnapshotName,
+                                b.inputs.solrExternalBackupName,
                                 expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName)),
                             label: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                         })
@@ -127,9 +128,9 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
             expr.serialize(expr.makeDict({
                 // Import uses the external name verbatim; create uses the generated name.
                 snapshotName: expr.ternary(
-                    expr.isEmpty(c.inputs.importExternalSnapshotName),
+                    expr.isEmpty(c.inputs.solrExternalBackupName),
                     c.steps.getSnapshotName.outputs.snapshotName,
-                    c.inputs.importExternalSnapshotName),
+                    c.inputs.solrExternalBackupName),
                 repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig"),
                 label: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "label")
             })))

@@ -21,10 +21,15 @@ from integ_test.test_cases.ma_argo_test_base import (
     ("OS_1.x", "opensearch-1-3-single-node"),
     ("OS_2.x", "opensearch-2-19-single-node"),
     ("OS_3.x", "opensearch-3-1-single-node"),
+    ("SOLR_6.x", "solr-6-6-single-node"),
+    ("SOLR_7.x", "solr-7-7-single-node"),
+    ("SOLR_8.x", "solr-8-11-single-node"),
+    ("SOLR_9.x", "solr-9-8-single-node"),
     # Concrete versions pass through directly
     ("ES_7.10", "elasticsearch-7-10-single-node"),
     ("ES_6.8", "elasticsearch-6-8-single-node"),
     ("OS_2.19", "opensearch-2-19-single-node"),
+    ("SOLR_9.8", "solr-9-8-single-node"),
 ])
 def test_get_template_name(version_str, expected_template):
     version = ClusterVersion(version_str)
@@ -32,44 +37,60 @@ def test_get_template_name(version_str, expected_template):
 
 
 def test_get_template_name_unknown_wildcard_raises():
-    version = ClusterVersion("SOLR_8.x")
+    version = ClusterVersion("SOLR_10.x")
     with pytest.raises(ValueError, match="No template mapping for wildcard version"):
         get_template_name(version)
 
 
 def test_combinations_resolve_to_templates():
-    """Guards against drift between RFS/CDC combinations and the wildcard template map.
+    """Guards against drift between integration combinations and the wildcard template map.
 
-    Every version used in RFS_MIGRATION_COMBINATIONS and CDC_MIGRATION_COMBINATIONS
-    must resolve via get_template_name(); otherwise integration tests against that
-    combination will fail at cluster-provisioning time with a confusing error.
+    Every version used in an integration-test combination must resolve via
+    get_template_name(); otherwise tests against that combination fail at
+    cluster-provisioning time with a confusing error.
     """
     from integ_test.cluster_version import (
         RFS_MIGRATION_COMBINATIONS, CDC_MIGRATION_COMBINATIONS
     )
-    all_versions = {v for combos in (RFS_MIGRATION_COMBINATIONS, CDC_MIGRATION_COMBINATIONS)
+    from integ_test.test_cases.solr_tests import (
+        SOLR_ALLOW_COMBINATIONS, SOLR_IMPORT_ALLOW_COMBINATIONS
+    )
+    all_versions = {v for combos in (
+        RFS_MIGRATION_COMBINATIONS,
+        CDC_MIGRATION_COMBINATIONS,
+        SOLR_ALLOW_COMBINATIONS,
+        SOLR_IMPORT_ALLOW_COMBINATIONS,
+    )
                     for pair in combos for v in pair}
     for v in all_versions:
         get_template_name(v)  # raises ValueError if unmapped
 
 
 def test_template_names_exist_in_cluster_workflows():
-    """Guards against drift between RFS/CDC combinations and clusterWorkflows.yaml.
+    """Guards against drift between integration combinations and clusterWorkflows.yaml.
 
-    Every template name produced by get_template_name() for a version used in
-    RFS/CDC combinations must be declared as an Argo template in
-    clusterWorkflows.yaml; otherwise integration tests will fail at cluster
-    provisioning with a 'no template named X' error.
+    Every template name produced by get_template_name() for a version used in an
+    integration-test combination must be declared as an Argo template in
+    clusterWorkflows.yaml; otherwise tests fail at cluster provisioning with a
+    'no template named X' error.
     """
     import pathlib
     import yaml
     from integ_test.cluster_version import (
         RFS_MIGRATION_COMBINATIONS, CDC_MIGRATION_COMBINATIONS
     )
+    from integ_test.test_cases.solr_tests import (
+        SOLR_ALLOW_COMBINATIONS, SOLR_IMPORT_ALLOW_COMBINATIONS
+    )
     yaml_path = pathlib.Path(__file__).parents[2] / "testWorkflows/clusterWorkflows.yaml"
     doc = yaml.safe_load(yaml_path.read_text())
     declared = {t["name"] for t in doc["spec"]["templates"]}
-    for combos in (RFS_MIGRATION_COMBINATIONS, CDC_MIGRATION_COMBINATIONS):
+    for combos in (
+        RFS_MIGRATION_COMBINATIONS,
+        CDC_MIGRATION_COMBINATIONS,
+        SOLR_ALLOW_COMBINATIONS,
+        SOLR_IMPORT_ALLOW_COMBINATIONS,
+    ):
         for src, tgt in combos:
             assert get_template_name(src) in declared, \
                 f"Source template {get_template_name(src)} not declared in clusterWorkflows.yaml"
@@ -89,4 +110,24 @@ def test_workflow_perform_migrations_uses_default_completion_timeout():
     test_case.argo_service.wait_for_suspend.assert_called_once_with(
         workflow_name="test-workflow",
         timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+    )
+
+
+def test_solr_external_import_uses_extended_completion_timeout():
+    from integ_test.test_cases.solr_tests import (
+        SOLR_EXTERNAL_IMPORT_TIMEOUT_SECONDS,
+        Test0070SolrExternalBackupImport,
+    )
+
+    test_case = Test0070SolrExternalBackupImport.__new__(Test0070SolrExternalBackupImport)
+    test_case.workflow_name = "test-workflow"
+    test_case.imported_clusters = False
+    test_case.argo_service = Mock()
+
+    test_case.workflow_perform_migrations()
+
+    test_case.argo_service.resume_workflow.assert_called_once_with(workflow_name="test-workflow")
+    test_case.argo_service.wait_for_suspend.assert_called_once_with(
+        workflow_name="test-workflow",
+        timeout_seconds=SOLR_EXTERNAL_IMPORT_TIMEOUT_SECONDS,
     )

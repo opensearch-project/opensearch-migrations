@@ -282,9 +282,10 @@ function captureProxyAnnotations(proxy: ProxyConfig) {
 }
 
 function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknown> {
+    const {mode: _mode, ...snapshotConfig} = item.config as Record<string, unknown>;
     return {
         snapshotPrefix: item.snapshotPrefix,
-        ...item.config,
+        ...snapshotConfig,
         dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name),
     };
 }

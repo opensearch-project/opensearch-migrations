@@ -909,7 +909,11 @@ export class MigrationInitializer {
                 sourceVersion,
                 sourceCluster.snapshotInfo?.serializeSnapshotCreation
             );
-            for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
+            const snapshotNames = [
+                ...Object.keys(sourceCluster.snapshotInfo?.snapshots || {}),
+                ...Object.keys(sourceCluster.snapshotInfo?.backups || {}),
+            ];
+            for (const snapshotName of snapshotNames) {
                 const key = generateSemaphoreKey(serialize, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
