@@ -91,7 +91,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         for (int i = 0; i < numRequests; i++) {
             var reqCtx = rootContext.getTestConnectionRequestContext("conn-leak", i);
 
-            // Acquire a permit (this is what TrafficReplayerCore.sendRequestAfterGoingThroughWorkQueue does)
+            // Acquire a permit (mirrors sendRequestAfterGoingThroughWorkQueue)
             limiter.liveTrafficStreamCostGate.acquire(1);
 
             var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[]{1}));
@@ -187,14 +187,15 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         Thread.sleep(200);
 
         Assertions.assertEquals(3, completedExceptionally.get(),
-            "All requests should complete exceptionally via the isCancelled() check in submitUnorderedWorkToEventLoop");
+            "All requests should complete exceptionally via the"
+                + " isCancelled() check in submitUnorderedWorkToEventLoop");
     }
 
     /**
-     * Exercises the isCancelled() check in scheduleWork (RequestSenderOrchestrator line 128).
      * Schedules a request with a short delay, lets the sorter process it (not cancelled yet),
-     * then cancels the session BEFORE the Netty timer fires. When the timer fires naturally,
-     * scheduleFailure is null but isCancelled() is true — hitting the defensive guard.
+     * then cancels the session BEFORE the Netty send-schedule timer fires. When the timer fires
+     * naturally and the trigger completes, the session is already cancelled so the request
+     * completes exceptionally rather than proceeding with send work.
      */
     @Test
     @Timeout(10)
@@ -259,11 +260,12 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
 
         AtomicInteger completedExceptionally = new AtomicInteger(0);
 
-        // Acquire a permit (simulates what TrafficReplayerCore does before scheduleTransformationWork)
+        // Acquire a permit (mirrors scheduleTransformationWork path)
         limiter.liveTrafficStreamCostGate.acquire(1);
 
         // Schedule transformation work at far-future — this is the path ReplayEngine uses.
-        // The timer is standalone (not in session.schedule), tracked in pendingTransformationTimers.
+        // Timer is standalone (not in session.schedule), tracked in
+        // pendingTransformationTimers.
         var reqCtx = rootContext.getTestConnectionRequestContext("conn-transform", 0);
         var workFuture = orchestrator.scheduleWork(
             reqCtx,
@@ -285,7 +287,8 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
 
         Assertions.assertFalse(session.pendingTransformationTimers.isEmpty(),
             "Transformation timer should be tracked before cancel");
-        Assertions.assertEquals(PERMIT_COUNT - 1, limiter.liveTrafficStreamCostGate.availablePermits(),
+        Assertions.assertEquals(PERMIT_COUNT - 1,
+            limiter.liveTrafficStreamCostGate.availablePermits(),
             "One permit should be held by the pending transformation");
 
         // cancelConnection drains both transformation timers and schedule timers

@@ -152,10 +152,15 @@ public class ClientConnectionPool {
             // Drain transformation-phase timers immediately (thread-safe, no event-loop needed).
             session.drainTransformationTimers(cancellationCause);
             // Drain send-schedule and sorter slots on the event loop thread.
-            session.eventLoop.submit(() -> {
+            if (session.eventLoop.isShuttingDown()) {
                 session.schedule.drainWithCancellation(cancellationCause);
                 session.scheduleSequencer.cancelAllWork();
-            });
+            } else {
+                session.eventLoop.submit(() -> {
+                    session.schedule.drainWithCancellation(cancellationCause);
+                    session.scheduleSequencer.cancelAllWork();
+                });
+            }
             closeConnection(ctx, sessionNumber);
         }
         return TextTrackedFuture.completedFuture(null, () -> "cancelled");

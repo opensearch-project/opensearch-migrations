@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -62,7 +63,7 @@ public class ConnectionReplaySession {
      * {@link TimeToResponseFulfillmentFutureMap#drainWithCancellation} does not reach them.
      * Entries are self-cleaning: each future removes itself on completion.
      */
-    public final ConcurrentLinkedQueue<CompletableFuture<Void>> pendingTransformationTimers =
+    public final Queue<CompletableFuture<Void>> pendingTransformationTimers =
         new ConcurrentLinkedQueue<>();
 
     public void drainTransformationTimers(CancellationException cause) {

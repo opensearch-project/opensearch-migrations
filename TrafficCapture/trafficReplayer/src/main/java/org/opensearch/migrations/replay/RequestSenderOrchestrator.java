@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -120,7 +121,8 @@ public class RequestSenderOrchestrator {
         //
         // Making them more independent means that the work item being enqueued is lighter-weight and
         // less likely to cause a connection timeout.
-        var timerFuture = bindNettyScheduleToCompletableFuture(connectionSession.eventLoop, timestamp);
+        var timerFuture = bindNettyScheduleToCompletableFuture(
+            connectionSession.eventLoop, timestamp);
         connectionSession.pendingTransformationTimers.add(timerFuture.future);
         timerFuture.future.whenComplete((v, t) ->
             connectionSession.pendingTransformationTimers.remove(timerFuture.future));
@@ -292,7 +294,8 @@ public class RequestSenderOrchestrator {
                             if (replaySession.isCancelled()) {
                                 return TextTrackedFuture.failedFuture(
                                     new java.util.concurrent.CancellationException(
-                                        "Session cancelled — not scheduling work for slot " + channelInteractionNumber),
+                                        "Session cancelled — not scheduling work"
+                                            + " for slot " + channelInteractionNumber),
                                     () -> "cancelled session for " + ctx);
                             }
                             return onSessionCallback.apply(replaySession);
@@ -319,11 +322,13 @@ public class RequestSenderOrchestrator {
             channelInterationNum
         );
         packetProducer.retain();
+        var scheduledContextClosed = new AtomicBoolean(false);
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
             startTime,
             new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
+                scheduledContextClosed.set(true);
                 scheduledContext.close();
                 final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
                     () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
@@ -332,7 +337,7 @@ public class RequestSenderOrchestrator {
             }, () -> "sending packets for request"))
         )
             .whenComplete((v,t) -> {
-                if (t != null) { scheduledContext.close(); }
+                if (t != null && !scheduledContextClosed.get()) { scheduledContext.close(); }
                 packetProducer.release();
             }, () -> "releasing resources after request completes or is cancelled");
     }
@@ -389,7 +394,7 @@ public class RequestSenderOrchestrator {
         workFuture.map(f -> f.whenComplete((v, t) -> {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
             if (itemStartTimeOfPopped == null) {
-                // Schedule was already drained by drainWithCancellation — nothing to pop or reschedule.
+                // Already drained by drainWithCancellation — nothing to reschedule.
                 return;
             }
             assert atTime.equals(itemStartTimeOfPopped)
