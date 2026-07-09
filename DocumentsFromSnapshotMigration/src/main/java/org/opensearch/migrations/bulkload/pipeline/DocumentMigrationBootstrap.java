@@ -26,6 +26,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -181,18 +182,18 @@ public class DocumentMigrationBootstrap {
                     workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
                 }
             })
+            // Flush this batch's failures to S3 before its cursor advances the watermark; concatMap
+            // keeps it ordered and serial. Reactive, not .block(): onNext may run on a reactor-netty
+            // event loop thread where blocking throws.
+            .concatMap(cursor ->
+                flushFailedDocumentStreamForBatch(targetClient.getFailedDocumentStreamSink())
+                    .thenReturn(cursor))
             .doFinally(s -> finishScheduler.dispose())
             .subscribe(
                 cursor -> {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    // Persist this batch's terminal failures to S3 BEFORE advancing the progress
-                    // watermark, so the coordinator checkpoint never moves past a failure that
-                    // isn't durably in the failed document stream (at-least-once for failed document stream drops). A flush failure
-                    // throws here; the LambdaSubscriber routes it to the error consumer below, so
-                    // the work item is not completed and a successor reprocesses and re-emits.
-                    flushFailedDocumentStreamForBatch(targetClient.getFailedDocumentStreamSink());
                     cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                 },
                 error -> {
@@ -245,17 +246,15 @@ public class DocumentMigrationBootstrap {
     }
 
     /**
-     * Flush the failed document stream buffer for a just-completed batch so its terminal failures are durable in S3
-     * before that batch's progress is committed to the work coordinator. Throwing (on flush
-     * failure or the 5-minute timeout) aborts the partition migration so the work item is not
-     * marked complete — a successor then reprocesses from the last durable cursor and re-emits,
-     * giving an at-least-once guarantee for failed document stream entries. No-op when the failed document stream is disabled.
+     * Flush a batch's terminal failures to S3 before its progress is committed. The Mono errors on
+     * flush failure or the 5-minute timeout, aborting the migration so the work item isn't completed
+     * and a successor reprocesses and re-emits (at-least-once). Empty Mono when the stream is disabled.
      */
-    static void flushFailedDocumentStreamForBatch(FailedDocumentStreamSink failedDocumentStreamSink) {
+    static Mono<Void> flushFailedDocumentStreamForBatch(FailedDocumentStreamSink failedDocumentStreamSink) {
         if (failedDocumentStreamSink == null) {
-            return;
+            return Mono.empty();
         }
-        failedDocumentStreamSink.flush().block(Duration.ofMinutes(5));
+        return failedDocumentStreamSink.flush().timeout(Duration.ofMinutes(5));
     }
 
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(

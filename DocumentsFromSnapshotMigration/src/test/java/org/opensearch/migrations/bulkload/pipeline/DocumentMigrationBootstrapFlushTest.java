@@ -16,27 +16,28 @@ class DocumentMigrationBootstrapFlushTest {
 
     @Test
     void flushFailedDocumentStreamForBatch_nullSinkIsANoOp() {
-        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(null));
+        // Empty Mono, completes without emitting.
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(null).block());
     }
 
     @Test
-    void flushFailedDocumentStreamForBatch_successReturnsNormally() {
+    void flushFailedDocumentStreamForBatch_successCompletesNormally() {
         var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.empty());
-        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink));
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink).block());
     }
 
     @Test
     void flushFailedDocumentStreamForBatch_failurePropagatesSoProgressIsNotCommitted() {
-        // The exception must propagate (not be swallowed): the pipeline onNext lets it reach
-        // the error consumer, so the progress cursor is NOT advanced for this batch and the
-        // work item is never marked complete — a successor reprocesses and re-emits.
+        // The Mono must error (not swallow): the pipeline routes it to onError, so the progress
+        // cursor is NOT advanced for this batch and the work item is never marked complete — a
+        // successor reprocesses and re-emits.
         var cause = new RuntimeException("S3 5xx");
         var sink = mock(FailedDocumentStreamSink.class);
         when(sink.flush()).thenReturn(Mono.error(cause));
 
         var thrown = assertThrows(RuntimeException.class,
-            () -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink));
+            () -> DocumentMigrationBootstrap.flushFailedDocumentStreamForBatch(sink).block());
         assertThat(thrown, is(cause));
     }
 }
