@@ -163,6 +163,8 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
+export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
+
 // Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
 export const REPO_CONFIG = z.object({
@@ -172,7 +174,7 @@ export const REPO_CONFIG = z.object({
             "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
     awsRegion: z.string().default("").optional()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
-    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+    endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
@@ -1206,7 +1208,7 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
         .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
     awsRegion: z.string()
         .describe("AWS region of the S3 bucket holding the export."),
-    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+    endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
