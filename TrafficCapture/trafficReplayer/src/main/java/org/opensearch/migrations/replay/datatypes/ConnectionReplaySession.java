@@ -1,5 +1,8 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
@@ -51,6 +54,23 @@ public class ConnectionReplaySession {
     @Getter
     @Setter
     private volatile boolean cancelled = false;
+
+    /**
+     * Tracks standalone transformation-phase timer futures created by
+     * {@code RequestSenderOrchestrator.scheduleWork}. These timers are NOT part of
+     * {@link #schedule} (intentionally, for out-of-order transformation), so
+     * {@link TimeToResponseFulfillmentFutureMap#drainWithCancellation} does not reach them.
+     * Entries are self-cleaning: each future removes itself on completion.
+     */
+    public final ConcurrentLinkedQueue<CompletableFuture<Void>> pendingTransformationTimers =
+        new ConcurrentLinkedQueue<>();
+
+    public void drainTransformationTimers(CancellationException cause) {
+        CompletableFuture<Void> f;
+        while ((f = pendingTransformationTimers.poll()) != null) {
+            f.completeExceptionally(cause);
+        }
+    }
 
     @SneakyThrows
     public ConnectionReplaySession(

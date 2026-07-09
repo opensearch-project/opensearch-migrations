@@ -120,14 +120,16 @@ public class RequestSenderOrchestrator {
         //
         // Making them more independent means that the work item being enqueued is lighter-weight and
         // less likely to cause a connection timeout.
-        return bindNettyScheduleToCompletableFuture(connectionSession.eventLoop, timestamp)
+        var timerFuture = bindNettyScheduleToCompletableFuture(connectionSession.eventLoop, timestamp);
+        connectionSession.pendingTransformationTimers.add(timerFuture.future);
+        timerFuture.future.whenComplete((v, t) ->
+            connectionSession.pendingTransformationTimers.remove(timerFuture.future));
+        return timerFuture
             .getDeferredFutureThroughHandle((nullValue, scheduleFailure) -> {
                 scheduledContext.close();
                 if (scheduleFailure != null) {
                     return TextTrackedFuture.failedFuture(scheduleFailure, () -> "netty scheduling failure");
                 } else if (connectionSession.isCancelled()) {
-                    // Session was cancelled (partition reassignment) while the Netty timer was pending.
-                    // Fail fast rather than running the task — permits will be released via whenComplete.
                     return TextTrackedFuture.failedFuture(
                         new java.util.concurrent.CancellationException(
                             "Session cancelled before transformation work could start"),
@@ -329,7 +331,10 @@ public class RequestSenderOrchestrator {
                     interval, visitor);
             }, () -> "sending packets for request"))
         )
-            .whenComplete((v,t) -> packetProducer.release(), () -> "waiting for request to be sent to release ByteBufListProducer");
+            .whenComplete((v,t) -> {
+                if (t != null) { scheduledContext.close(); }
+                packetProducer.release();
+            }, () -> "releasing resources after request completes or is cancelled");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(

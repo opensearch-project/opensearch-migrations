@@ -147,11 +147,11 @@ public class ClientConnectionPool {
         var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (session != null) {
             session.setCancelled(true);
-            // Drain all pending schedule and sorter slots on the event loop thread so they
-            // complete exceptionally immediately. This prevents orphaned scheduleFuture entries
-            // from leaving requestWorkTracker entries and TrafficStreamLimiter slots unreleased.
             var cancellationCause = new java.util.concurrent.CancellationException(
                 "Session cancelled due to partition reassignment for " + connId);
+            // Drain transformation-phase timers immediately (thread-safe, no event-loop needed).
+            session.drainTransformationTimers(cancellationCause);
+            // Drain send-schedule and sorter slots on the event loop thread.
             session.eventLoop.submit(() -> {
                 session.schedule.drainWithCancellation(cancellationCause);
                 session.scheduleSequencer.cancelAllWork();

@@ -240,4 +240,65 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         Assertions.assertEquals(1, completedExceptionally.get(),
             "Request should complete exceptionally via the isCancelled() guard in scheduleWork");
     }
+
+    /**
+     * Exercises the transformation-phase timer drain path. scheduleWork creates a standalone
+     * Netty timer NOT registered in session.schedule. Without drainTransformationTimers(),
+     * these far-future timers would hold permits indefinitely after cancelConnection().
+     *
+     * This test calls orchestrator.scheduleWork directly (the same path ReplayEngine uses for
+     * transformation scheduling) with a far-future timestamp, then cancels via cancelConnection.
+     * The transformation timer must be drained immediately, releasing the permit.
+     */
+    @Test
+    @Timeout(10)
+    void cancelConnection_drainsTransformationTimers() throws Exception {
+        var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-transform", 0)
+            .getChannelKeyContext();
+        var session = pool.getCachedSession(channelKeyCtx, 0);
+
+        AtomicInteger completedExceptionally = new AtomicInteger(0);
+
+        // Acquire a permit (simulates what TrafficReplayerCore does before scheduleTransformationWork)
+        limiter.liveTrafficStreamCostGate.acquire(1);
+
+        // Schedule transformation work at far-future — this is the path ReplayEngine uses.
+        // The timer is standalone (not in session.schedule), tracked in pendingTransformationTimers.
+        var reqCtx = rootContext.getTestConnectionRequestContext("conn-transform", 0);
+        var workFuture = orchestrator.scheduleWork(
+            reqCtx,
+            Instant.now().plusSeconds(60),
+            () -> TextTrackedFuture.completedFuture(null, () -> "transformation result")
+        );
+        workFuture.whenComplete(
+            (v, t) -> {
+                if (t != null) {
+                    completedExceptionally.incrementAndGet();
+                    limiter.liveTrafficStreamCostGate.release(1);
+                }
+            },
+            () -> "releasing permit on transformation cancel"
+        );
+
+        // Wait for event loop to process the timer scheduling
+        session.eventLoop.submit(() -> {}).sync();
+
+        Assertions.assertFalse(session.pendingTransformationTimers.isEmpty(),
+            "Transformation timer should be tracked before cancel");
+        Assertions.assertEquals(PERMIT_COUNT - 1, limiter.liveTrafficStreamCostGate.availablePermits(),
+            "One permit should be held by the pending transformation");
+
+        // cancelConnection drains both transformation timers and schedule timers
+        pool.cancelConnection(channelKeyCtx, 0);
+
+        // Wait for the event loop to process the cancel
+        session.eventLoop.submit(() -> {}).sync();
+        Thread.sleep(100);
+
+        Assertions.assertEquals(1, completedExceptionally.get(),
+            "Transformation work future should complete exceptionally after cancelConnection");
+        Assertions.assertEquals(PERMIT_COUNT, limiter.liveTrafficStreamCostGate.availablePermits(),
+            "Permit must be released after transformation timer drain — without the fix, " +
+            "far-future transformation timers hold permits indefinitely");
+    }
 }
