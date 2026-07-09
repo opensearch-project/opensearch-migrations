@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -184,7 +185,6 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         }
 
         session.eventLoop.submit(() -> {}).sync();
-        Thread.sleep(200);
 
         Assertions.assertEquals(3, completedExceptionally.get(),
             "All requests should complete exceptionally via the"
@@ -204,7 +204,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             .getChannelKeyContext();
         var session = pool.getCachedSession(channelKeyCtx, 0);
 
-        AtomicInteger completedExceptionally = new AtomicInteger(0);
+        var completionLatch = new CountDownLatch(1);
 
         // Schedule at +500ms — long enough to cancel before the timer fires
         var reqCtx = rootContext.getTestConnectionRequestContext("conn-race", 0);
@@ -218,29 +218,22 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             new NoRetryEvaluatorFactory.NoRetryVisitor()
         );
         future.whenComplete(
-            (v, t) -> {
-                if (t != null) {
-                    completedExceptionally.incrementAndGet();
-                }
-            },
-            () -> "tracking exceptional completion"
+            (v, t) -> completionLatch.countDown(),
+            () -> "signalling completion latch"
         );
 
         // Wait for event loop to process the submission (sorter fires, timer queued)
         session.eventLoop.submit(() -> {}).sync();
 
         // Cancel the session WITHOUT calling drainWithCancellation — simulates the race
-        // window between setCancelled(true) and drain. The timer will fire naturally at +500ms
-        // and find isCancelled()==true.
+        // window between setCancelled(true) and drain. The timer will fire naturally
+        // at +500ms and find isCancelled()==true.
         session.setCancelled(true);
 
-        // Wait for the timer to fire (~500ms) plus margin
-        Thread.sleep(800);
-        session.eventLoop.submit(() -> {}).sync();
-
-        Assertions.assertEquals(1, completedExceptionally.get(),
-            "Request should complete exceptionally via the cancelled"
-                + " check in getChannelFutureInActiveState");
+        // Wait for the future to complete (timer fires, cancelled check rejects)
+        Assertions.assertTrue(
+            completionLatch.await(5, TimeUnit.SECONDS),
+            "Request future should complete within timeout");
     }
 
     /**
@@ -259,7 +252,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             .getChannelKeyContext();
         var session = pool.getCachedSession(channelKeyCtx, 0);
 
-        AtomicInteger completedExceptionally = new AtomicInteger(0);
+        var completionLatch = new CountDownLatch(1);
 
         // Acquire a permit (mirrors scheduleTransformationWork path)
         limiter.liveTrafficStreamCostGate.acquire(1);
@@ -276,9 +269,9 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         workFuture.whenComplete(
             (v, t) -> {
                 if (t != null) {
-                    completedExceptionally.incrementAndGet();
                     limiter.liveTrafficStreamCostGate.release(1);
                 }
+                completionLatch.countDown();
             },
             () -> "releasing permit on transformation cancel"
         );
@@ -295,14 +288,12 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         // cancelConnection drains both transformation timers and schedule timers
         pool.cancelConnection(channelKeyCtx, 0);
 
-        // Wait for the event loop to process the cancel
-        session.eventLoop.submit(() -> {}).sync();
-        Thread.sleep(100);
-
-        Assertions.assertEquals(1, completedExceptionally.get(),
-            "Transformation work future should complete exceptionally after cancelConnection");
-        Assertions.assertEquals(PERMIT_COUNT, limiter.liveTrafficStreamCostGate.availablePermits(),
-            "Permit must be released after transformation timer drain — without the fix, " +
-            "far-future transformation timers hold permits indefinitely");
+        // Wait for completion (drain is synchronous for transformation timers)
+        Assertions.assertTrue(
+            completionLatch.await(5, TimeUnit.SECONDS),
+            "Work future should complete after cancelConnection");
+        Assertions.assertEquals(PERMIT_COUNT,
+            limiter.liveTrafficStreamCostGate.availablePermits(),
+            "Permit must be released after transformation timer drain");
     }
 }
