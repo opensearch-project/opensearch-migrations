@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {Buffer} from "node:buffer";
 import {
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, ARGO_REPLAYER_WORKFLOW_OPTION_KEYS, KAFKA_CLIENT_CONFIG,
@@ -46,6 +47,15 @@ const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.prop
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const REPLAYER_APP_LABEL = "replayer";
 const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
+
+function base64(value: string): string {
+    return Buffer.from(value, "utf8").toString("base64");
+}
+
+const KAFKA_CLIENT_PROPERTIES_WITH_CA_BASE64 = base64([
+    "ssl.truststore.type=PEM",
+    `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
+].join("\n"));
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -158,10 +168,8 @@ function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>, caSecr
         data: {
             "client.properties": makeStringTypeProxy(expr.ternary(
                 hasKafkaCaSecret(caSecretName),
-                expr.literal([
-                    "ssl.truststore.type=PEM",
-                    `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
-                ].join("\n")),
+                // Argo expr parsing rejects newline escapes inside quoted literals here.
+                expr.fromBase64(expr.literal(KAFKA_CLIENT_PROPERTIES_WITH_CA_BASE64)),
                 expr.literal(""),
             )),
         }

@@ -293,7 +293,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\ndata:\n  client.properties: {{=toJSON(((!(0 == len(inputs.parameters.caSecretName)) && !(inputs.parameters.caSecretName == 'empty')) ? ('ssl.truststore.type=PEM\\nssl.truststore.location=/config/kafka-ca/ca.crt') : ('')))}}\n",
+          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\ndata:\n  client.properties: {{=toJSON(((!(0 == len(inputs.parameters.caSecretName)) && !(inputs.parameters.caSecretName == 'empty')) ? (fromBase64('c3NsLnRydXN0c3RvcmUudHlwZT1QRU0Kc3NsLnRydXN0c3RvcmUubG9jYXRpb249L2NvbmZpZy9rYWZrYS1jYS9jYS5jcnQ=')) : ('')))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
