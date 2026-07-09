@@ -193,13 +193,13 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
 
     /**
      * Schedules a request with a short delay, lets the sorter process it (not cancelled yet),
-     * then cancels the session BEFORE the Netty send-schedule timer fires. When the timer fires
-     * naturally and the trigger completes, the session is already cancelled so the request
-     * completes exceptionally rather than proceeding with send work.
+     * then cancels the session BEFORE the Netty send-schedule timer fires. When the timer
+     * fires and the send path attempts to open a channel, getChannelFutureInActiveState sees
+     * cancelled==true and rejects the request with an exception.
      */
     @Test
     @Timeout(10)
-    void cancelAfterSorterButBeforeTimerFire_failsFastInScheduleWork() throws Exception {
+    void cancelAfterSorterButBeforeTimerFire_failsOnChannelAcquire() throws Exception {
         var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-race", 0)
             .getChannelKeyContext();
         var session = pool.getCachedSession(channelKeyCtx, 0);
@@ -239,7 +239,8 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         session.eventLoop.submit(() -> {}).sync();
 
         Assertions.assertEquals(1, completedExceptionally.get(),
-            "Request should complete exceptionally via the isCancelled() guard in scheduleWork");
+            "Request should complete exceptionally via the cancelled"
+                + " check in getChannelFutureInActiveState");
     }
 
     /**

@@ -124,8 +124,11 @@ public class RequestSenderOrchestrator {
         var timerFuture = bindNettyScheduleToCompletableFuture(
             connectionSession.eventLoop, timestamp);
         connectionSession.pendingTransformationTimers.add(timerFuture.future);
-        timerFuture.future.whenComplete((v, t) ->
-            connectionSession.pendingTransformationTimers.remove(timerFuture.future));
+        timerFuture.future.whenComplete((v, t) -> {
+            if (t == null) {
+                connectionSession.pendingTransformationTimers.remove(timerFuture.future);
+            }
+        });
         return timerFuture
             .getDeferredFutureThroughHandle((nullValue, scheduleFailure) -> {
                 scheduledContext.close();
