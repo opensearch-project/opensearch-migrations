@@ -248,21 +248,20 @@ class RfsMigrateDocumentsHelpersTest {
         args.snapshotName = "my-snap";
         args.luceneDir = "/tmp/lucene";
         args.sourceVersion = Version.fromString("ES_7.10");
-        args.snapshotLocalDir = "/tmp/snapshot";
+        args.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
         return args;
     }
 
     @Test
-    void validateArgs_acceptsLocalDirOnly() {
+    void validateArgs_acceptsFileRepoUriOnly() {
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(validEsArgs()));
     }
 
     @Test
-    void validateArgs_acceptsAllS3Args() {
+    void validateArgs_acceptsS3RepoWithLocalDirAndRegion() {
         var args = validEsArgs();
-        args.snapshotLocalDir = null;
-        args.s3LocalDir = "/tmp/s3";
-        args.s3RepoUri = "s3://bucket/key";
+        args.repoUri = "s3://bucket/key";
+        args.localDir = "/tmp/s3";
         args.s3Region = "us-east-1";
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
     }
@@ -295,33 +294,22 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void validateArgs_rejectsBothSnapshotLocalDirAndS3() {
+    void validateArgs_rejectsS3RepoWithoutLocalDirOrRegion() {
+        // An s3:// repo requires both --local-dir and --s3-region.
         var args = validEsArgs();
-        // snapshotLocalDir is already set, layering on an S3 arg should be rejected.
-        args.s3LocalDir = "/tmp/s3";
+        args.repoUri = "s3://bucket/key";  // neither --local-dir nor --s3-region set
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
-        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("not both"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--local-dir"));
     }
 
     @Test
-    void validateArgs_rejectsPartialS3Args() {
-        // s3RepoUri without s3Region or s3LocalDir — all-or-nothing.
+    void validateArgs_rejectsMissingRepoUri() {
         var args = validEsArgs();
-        args.snapshotLocalDir = null;
-        args.s3RepoUri = "s3://bucket/key";
+        args.repoUri = null;
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
-        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("all of them"));
-    }
-
-    @Test
-    void validateArgs_rejectsNoSourceAtAll() {
-        var args = validEsArgs();
-        args.snapshotLocalDir = null;
-        var thrown = assertThrows(ParameterException.class,
-            () -> RfsMigrateDocuments.validateArgs(args));
-        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--snapshot-local-dir"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--repo-uri"));
     }
 
     @Test
@@ -351,7 +339,7 @@ class RfsMigrateDocumentsHelpersTest {
         // the source itself isn't OpenSearch.
         var args = new RfsMigrateDocuments.Args();
         args.sourceVersion = Version.fromString("SOLR_8.11");
-        args.snapshotLocalDir = "/tmp/solr";
+        args.repoUri = "/tmp/solr";
         // coordinatorArgs.host left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
@@ -362,7 +350,7 @@ class RfsMigrateDocumentsHelpersTest {
     void validateArgs_solr_rejectsMissingBackupSource() {
         var args = new RfsMigrateDocuments.Args();
         args.sourceVersion = Version.fromString("SOLR_8.11");
-        // Neither snapshotLocalDir nor S3 args set.
+        // No --repo-uri set at all.
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("Solr"));
