@@ -546,24 +546,29 @@ def _generate_unique_id() -> str:
     return f"{random_part}-{timestamp}"
 
 
-def get_version_combinations(source_version, target_version, target_type):
-    source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
+def get_version_combinations(source_versions: List[str], target_versions: List[str], target_type: TargetType):
     if target_type == TargetType.AOSS:
-        return [(s, TargetType.AOSS.value) for s in source_list]
-    target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
-    return [(s, t) for s in source_list for t in target_list if s != t]
+        return [(s, TargetType.AOSS.value) for s in source_versions]
+    return [(s, t) for s in source_versions for t in target_versions if s != t]
 
 
-def parse_args() -> argparse.Namespace:
+def _normalize_all(value: str) -> str:
+    """Normalize 'all' case-insensitively; leave other values unchanged."""
+    return 'all' if value.lower() == 'all' else value
+
+
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
     )
     source_versions = VALID_SOURCE_VERSIONS + ['all']
     parser.add_argument(
         "--source-version",
+        nargs='+',
+        type=_normalize_all,
         choices=source_versions,
-        default="ES_5.6",
-        help=f"Source version to use. Must be one of: {', '.join(source_versions)}"
+        default=["ES_5.6"],
+        help=f"One or more source versions, or 'all' (case-insensitive). Must be from: {', '.join(source_versions)}"
     )
     parser.add_argument(
         "--target-type",
@@ -574,6 +579,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-version",
+        type=_normalize_all,
         choices=VALID_TARGET_VERSIONS + ['all'],
         default="OS_2.19",
         help=f"Target version (only used when --target-type={TargetType.OPENSEARCH.value}). "
@@ -721,7 +727,7 @@ def parse_args() -> argparse.Namespace:
         default="LoadBalancer",
         help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.trace_test_ids:
         if not args.trace_values_file:
             parser.error("--trace-values-file is required when --trace-test-ids is provided")
@@ -753,8 +759,12 @@ def main() -> None:
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
 
     target_type = TargetType(args.target_type)
-    combinations = get_version_combinations(source_version=args.source_version,
-                                            target_version=args.target_version,
+    if "all" in args.source_version and len(args.source_version) > 1:
+        sys.exit("error: 'all' cannot be combined with specific source versions")
+    source_versions = VALID_SOURCE_VERSIONS if args.source_version == ["all"] else args.source_version
+    target_versions = VALID_TARGET_VERSIONS if args.target_version == "all" else [args.target_version]
+    combinations = get_version_combinations(source_versions=source_versions,
+                                            target_versions=target_versions,
                                             target_type=target_type)
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))

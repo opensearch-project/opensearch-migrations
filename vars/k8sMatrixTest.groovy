@@ -1,12 +1,10 @@
 def call(Map config = [:]) {
     def jobName = config.jobName ?: "k8s-matrix-test"
-    def defaultChildJobName = "k8s-local-integ-test"
-    if (jobName.startsWith("main-")) {
-        defaultChildJobName = "main/main-k8s-local-integ-test"
-    } else if (jobName.startsWith("pr-")) {
-        defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
+    if (!config.childJobName) {
+        error("k8sMatrixTest requires childJobName to be specified explicitly — " +
+              "k8s-local-integ-test has been replaced by per-source jobs.")
     }
-    def childJobName = config.childJobName ?: defaultChildJobName
+    def childJobName = config.childJobName
 
     def versions = migrationVersions()
     def allSourceVersions = versions.sourceVersions

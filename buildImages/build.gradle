@@ -10,6 +10,10 @@ def localContainerRegistryEndpoint =
 
 def publishedRegistry = new Registry(publishedUrl.toString(), localContainerRegistryEndpoint)
 def intermediateRegistry = new Registry(intermediateUrl.toString(), localContainerRegistryEndpoint)
+def imageVersion = rootProject.findProperty('imageVersion')?.toString()
+def internalImageTag = { String defaultTag ->
+    imageVersion ?: defaultTag
+}
 
 // ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
 // Can be overridden with: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
@@ -103,7 +107,7 @@ def buildKitProjects = [
                 imageName:  "migration_console_base",
                 buildArgs: [
                         BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "migrations", "elasticsearch_test_console", "latest")
+                                intermediateRegistry, "migrations", "elasticsearch_test_console", internalImageTag("latest"))
                 ],
                 requiredDependencies: [
                         ":migrationConsole:syncDockerBuildContext",
@@ -117,7 +121,7 @@ def buildKitProjects = [
                 imageTag:   "latest",
                 buildArgs: [
                         BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "migrations", "migration_console_base", "latest")
+                                intermediateRegistry, "migrations", "migration_console_base", internalImageTag("latest"))
                 ],
                 requiredDependencies: [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
@@ -259,7 +263,7 @@ if (!rootProject.findProperty('skipTestImages')?.toString()?.toBoolean()) {
             imageName:  "elasticsearch_searchguard",
             buildArgs: [
                     BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                            intermediateRegistry, "migrations", "custom-elasticsearch", "7.10.2")
+                            intermediateRegistry, "migrations", "custom-elasticsearch", internalImageTag("7.10.2"))
             ],
             requiredDependencies: [
                     "buildKit_customElasticsearch710"
