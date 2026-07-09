@@ -168,6 +168,34 @@ class NettyScanningHttpProxyTest {
         }
     }
 
+    @Test
+    public void testTlsHandshakeFailureLogsAreDedupedWithinWindow() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var sslEngineSupplier = makeServerSslEngineSupplier();
+
+        try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
+             var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            Thread.sleep(250);
+
+            Assertions.assertEquals(1, countLogEventsContaining(
+                closeableLogSetup,
+                ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE
+            ));
+
+            var responseBody = makeTestRequestViaInsecureHttpsClient(servers.proxyEndpoint());
+            Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        }
+    }
+
     private static String normalizeMessage(String s) {
         return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
@@ -319,13 +347,19 @@ class NettyScanningHttpProxyTest {
         throws InterruptedException {
         var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
-            if (new ArrayList<>(logSetup.getLogEvents()).stream().anyMatch(e -> e.contains(expectedMessage))) {
+            if (countLogEventsContaining(logSetup, expectedMessage) > 0) {
                 return;
             }
             Thread.sleep(25);
         }
         Assertions.fail("Expected log message containing: " + expectedMessage
             + ". Actual log messages: " + logSetup.getLogEvents());
+    }
+
+    private static long countLogEventsContaining(CloseableLogSetup logSetup, String expectedMessage) {
+        return new ArrayList<>(logSetup.getLogEvents()).stream()
+            .filter(e -> e.contains(expectedMessage))
+            .count();
     }
 
     private static class RunningProxyServers implements AutoCloseable {

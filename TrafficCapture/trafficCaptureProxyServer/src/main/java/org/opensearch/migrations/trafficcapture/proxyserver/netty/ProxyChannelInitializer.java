@@ -4,12 +4,14 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.UnauthenticatedClientLogDeduper.KnownEvent;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
@@ -25,12 +27,14 @@ import lombok.extern.slf4j.Slf4j;
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
     protected static final String CAPTURE_HANDLER_NAME = "CaptureHandler";
     static final String TLS_HANDSHAKE_FAILURE_LOG_MESSAGE = "TLS handshake failed for frontside channel";
+    static final Duration UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW = Duration.ofMinutes(1);
 
     protected final IConnectionCaptureFactory<T> connectionCaptureFactory;
     protected final Supplier<SSLEngine> sslEngineProvider;
     protected final IRootWireLoggingContext rootContext;
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
+    private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
 
     public ProxyChannelInitializer(
         IRootWireLoggingContext rootContext,
@@ -44,6 +48,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
+        this.unauthenticatedClientLogDeduper =
+            new UnauthenticatedClientLogDeduper(UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW);
     }
 
     public boolean shouldGuaranteeMessageOffloading(HttpRequest httpRequest) {
@@ -59,7 +65,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         var sslEngine = sslEngineProvider != null ? sslEngineProvider.get() : null;
         if (sslEngine != null) {
             ch.pipeline().addLast(new SslHandler(sslEngine));
-            ch.pipeline().addLast(new FrontsideTlsExceptionHandler());
+            ch.pipeline().addLast(new FrontsideTlsExceptionHandler(unauthenticatedClientLogDeduper));
         }
 
         var connectionId = ch.id().asLongText();
@@ -78,6 +84,12 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     private static class FrontsideTlsExceptionHandler extends ChannelInboundHandlerAdapter {
+        private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
+
+        private FrontsideTlsExceptionHandler(UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper) {
+            this.unauthenticatedClientLogDeduper = unauthenticatedClientLogDeduper;
+        }
+
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
             if (!containsCause(cause, SSLException.class)) {
@@ -85,11 +97,27 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                 return;
             }
 
-            log.atWarn().setCause(cause)
-                .setMessage(TLS_HANDSHAKE_FAILURE_LOG_MESSAGE + ": {}")
-                .addArgument(() -> ctx.channel().id().asLongText())
-                .log();
+            var logDecision = unauthenticatedClientLogDeduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+            if (logDecision.shouldLog()) {
+                logTlsHandshakeFailure(ctx, cause, logDecision.getSuppressedCountSinceLastLog());
+            }
             ctx.close();
+        }
+
+        private void logTlsHandshakeFailure(ChannelHandlerContext ctx, Throwable cause, long suppressedCount) {
+            if (suppressedCount > 0) {
+                log.atWarn().setCause(cause)
+                    .setMessage(TLS_HANDSHAKE_FAILURE_LOG_MESSAGE
+                        + ": {} ({} similar events suppressed since the previous stack trace)")
+                    .addArgument(() -> ctx.channel().id().asLongText())
+                    .addArgument(suppressedCount)
+                    .log();
+            } else {
+                log.atWarn().setCause(cause)
+                    .setMessage(TLS_HANDSHAKE_FAILURE_LOG_MESSAGE + ": {}")
+                    .addArgument(() -> ctx.channel().id().asLongText())
+                    .log();
+            }
         }
 
         private static boolean containsCause(Throwable cause, Class<? extends Throwable> causeType) {
