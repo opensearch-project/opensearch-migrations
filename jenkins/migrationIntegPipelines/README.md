@@ -72,8 +72,7 @@ functionName(jobName: jobNameOverride ?: null)
 - Use `CHILD_JOB_NAME_OVERRIDE` parameter
 - Pass as `childJobName` to the vars function
 - Default child job path follows parent job name:
-  - `main-*` parent defaults to `main/main-k8s-local-integ-test`
-  - `pr-*` parent defaults to `pr-checks/pr-k8s-local-integ-test`
+  - `childJobName` must be specified explicitly; there is no longer a default child job
 - Periodic schedules are defined in `vars/periodicCron.groovy` (dispatch table keyed on job name). `pr-*` jobs never have a cadence; `main-*` and `release-*` jobs pick their cadence from the table
 
 ### Supported Cover Files
@@ -91,13 +90,18 @@ functionName(jobName: jobNameOverride ?: null)
 | eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
-| elasticsearch5xK8sLocalTestCover.groovy | elasticsearch5xK8sLocalTest | JOB_NAME_OVERRIDE |
-| elasticsearch8xK8sLocalTestCover.groovy | elasticsearch8xK8sLocalTest | JOB_NAME_OVERRIDE |
 | fullES68SourceE2ETestCover.groovy | fullES68SourceE2ETest | JOB_NAME_OVERRIDE |
-| k8sLocalIntegTestCover.groovy | k8sLocalDeployment | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch1xTestCover.groovy | k8sLocalElasticsearch1xTest | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch2xTestCover.groovy | k8sLocalElasticsearch2xTest | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch5xTestCover.groovy | k8sLocalElasticsearch5xTest | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch6xTestCover.groovy | k8sLocalElasticsearch6xTest | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch7xTestCover.groovy | k8sLocalElasticsearch7xTest | JOB_NAME_OVERRIDE |
+| k8sLocalElasticsearch8xTestCover.groovy | k8sLocalElasticsearch8xTest | JOB_NAME_OVERRIDE |
+| k8sLocalOpensearch1xTestCover.groovy | k8sLocalOpensearch1xTest | JOB_NAME_OVERRIDE |
+| k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
+| k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
 | k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE + CHILD_JOB_NAME_OVERRIDE |
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
-| solr8xK8sLocalTestCover.groovy | solr8xK8sLocalTest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 
 ### GitHub Actions Integration
@@ -107,8 +111,10 @@ The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merg
 Jobs triggered:
 
 - `full-es68source-e2e-test` (PR and main)
-- `elasticsearch-5x-k8s-local-test` (PR and main)
-- `solr-8x-k8s-local-test` (PR and main)
+- `k8s-local-elasticsearch1x-test` through `k8s-local-elasticsearch8x-test` (PR and main)
+- `k8s-local-opensearch1x-test` (PR and main)
+- `k8s-local-solr8x-test` (PR and main)
+- `k8s-local-solr-other-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main)
 - `eks-aoss-*` (PR with `run-aoss-tests` label, and main)
@@ -121,8 +127,8 @@ This ensures PR-triggered jobs don't conflict with post-merge jobs using the sam
 
 Jenkins jobs are organized into three folders:
 
-- `main/` - pipelines that run on a periodic cadence, via GenericTrigger on push to `main`, or both (e.g., `main/main-k8s-local-integ-test`)
-- `pr-checks/` - pipelines that run only via GenericTrigger from PRs. No periodic cadence, no action on PR push (e.g., `pr-checks/pr-k8s-local-integ-test`)
+- `main/` - pipelines that run on a periodic cadence, via GenericTrigger on push to `main`, or both (e.g., `main/main-k8s-local-elasticsearch5x-test`)
+- `pr-checks/` - pipelines that run only via GenericTrigger from PRs. No periodic cadence, no action on PR push (e.g., `pr-checks/pr-k8s-local-elasticsearch5x-test`)
 - `release-canaries/` - pipelines that exercise release-candidate artifacts on a canary cadence, independent of PR and post-merge triggers
 
 
