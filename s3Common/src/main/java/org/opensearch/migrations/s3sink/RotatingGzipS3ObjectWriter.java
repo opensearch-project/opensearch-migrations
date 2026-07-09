@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -86,6 +87,9 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
     private final Duration uploadRetryDelay;
     private final int maxUploadAttempts;
     private final String tempFilePrefix;
+    // Time source for rotation-age decisions; overridable so tests can drive aging deterministically
+    // instead of racing wall-clock sleeps against a tight max-age.
+    private final Clock clock;
 
     private final ScheduledExecutorService uploadScheduler;
     private final AtomicLong sequenceCounter = new AtomicLong();
@@ -116,6 +120,24 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         int maxUploadAttempts,
         String tempFilePrefix
     ) {
+        this(uploader, bucket, keyFactory, serializer, rotationPolicy, uploadRetryDelay,
+            maxUploadAttempts, tempFilePrefix, Clock.systemUTC());
+    }
+
+    // Package-private: lets tests supply a controllable Clock to exercise age-based rotation
+    // deterministically. Production always goes through the public constructor (system UTC clock).
+    RotatingGzipS3ObjectWriter(
+        ObjectUploader uploader,
+        String bucket,
+        KeyFactory keyFactory,
+        RecordSerializer<T> serializer,
+        RotationPolicy rotationPolicy,
+        Duration uploadRetryDelay,
+        int maxUploadAttempts,
+        String tempFilePrefix,
+        Clock clock
+    ) {
+        this.clock = clock;
         this.uploader = uploader;
         this.bucket = bucket;
         this.keyFactory = keyFactory;
@@ -158,7 +180,7 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         } catch (IOException e) {
             return CompletableFuture.failedFuture(e);
         }
-        if (rotationPolicy.shouldRotate(uncompressedBytes, recordCount, openedAt, Instant.now())) {
+        if (rotationPolicy.shouldRotate(uncompressedBytes, recordCount, openedAt, clock.instant())) {
             return rotate(true);
         }
         return objectFuture;
@@ -171,7 +193,7 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
 
     /** Whether the current object has buffered records and has reached its max age. */
     public boolean shouldFlushForAge() {
-        return recordCount > 0 && rotationPolicy.isAged(openedAt, Instant.now());
+        return recordCount > 0 && rotationPolicy.isAged(openedAt, clock.instant());
     }
 
     /**
@@ -339,7 +361,7 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
     }
 
     private void openNewStream() {
-        currentKey = keyFactory.nextKey(Instant.now(), sequenceCounter.getAndIncrement());
+        currentKey = keyFactory.nextKey(clock.instant(), sequenceCounter.getAndIncrement());
         try {
             currentFile = Files.createTempFile(tempFilePrefix, ".gz");
             fileOutputStream = Files.newOutputStream(currentFile);
@@ -349,7 +371,7 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         }
         uncompressedBytes = 0;
         recordCount = 0;
-        openedAt = Instant.now();
+        openedAt = clock.instant();
         currentObjectFuture = new CompletableFuture<>();
     }
 

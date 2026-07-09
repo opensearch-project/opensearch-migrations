@@ -4,13 +4,18 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 
 import org.junit.jupiter.api.Test;
@@ -59,6 +64,15 @@ class RotatingGzipS3ObjectWriterTest {
 
     private static byte[] rec(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** A {@link Clock} whose {@code instant()} tracks a mutable reference, so tests can advance time. */
+    private static Clock mutableClock(AtomicReference<Instant> now) {
+        return new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return now.get(); }
+        };
     }
 
     @Test
@@ -157,11 +171,23 @@ class RotatingGzipS3ObjectWriterTest {
     @Test
     void shouldFlushForAgeReflectsBufferedAgedRecords() throws Exception {
         var captured = new CopyOnWriteArrayList<Captured>();
-        try (var w = writer(capturing(captured), new RotationPolicy(0, Duration.ofMillis(1), 0), 1)) {
+        // Drive time explicitly rather than sleeping against a tight max-age: otherwise, on a loaded
+        // runner, more than the max-age can elapse between constructing the writer and the first
+        // write(), so write() age-rotates the record away before we can observe it as pending.
+        var now = new AtomicReference<>(Instant.parse("2024-01-01T00:00:00Z"));
+        var maxAge = Duration.ofMillis(1);
+        try (var w = new RotatingGzipS3ObjectWriter<byte[]>(
+                capturing(captured), "bucket",
+                (t, seq) -> "p/obj-" + seq + ".gz",
+                bytes -> bytes,
+                new RotationPolicy(0, maxAge, 0), Duration.ofMillis(10), 1, "writer-test-",
+                mutableClock(now))) {
             assertTrue(!w.hasPendingRecords());
-            w.write(rec("a"));
+            w.write(rec("a"));   // written at t0 -> not yet aged, so it stays buffered
             assertTrue(w.hasPendingRecords());
-            Thread.sleep(10);
+            assertTrue(!w.shouldFlushForAge(), "a fresh record must not be flushable for age yet");
+
+            now.set(now.get().plus(maxAge).plusMillis(1));   // advance past max-age
             assertTrue(w.shouldFlushForAge(), "a buffered record past max-age should be flushable");
             w.flushIfAged().get(2, TimeUnit.SECONDS);
             assertEquals(1, captured.size());
