@@ -14,7 +14,10 @@ WORKFLOW_CONFIGURATION_SECTION = "Workflow Configuration"
 SNAPSHOT_MIGRATION_SECTION = "Snapshot Migration"
 LIVE_TRAFFIC_MIGRATION_SECTION = "Live Traffic Migration"
 
-KAFKA_CLIENTS_GROUP = "Kafka Clusters"
+# This root is for Kafka connection profiles that do not have a first-class
+# migration resource. Workflow-managed Kafka clusters are rendered as
+# KafkaCluster resources under Live Traffic Migration > Buffer.
+KAFKA_CLIENTS_GROUP = "External Kafka Connections"
 SOURCES_GROUP = "Sources"
 TARGETS_GROUP = "Targets"
 SNAPSHOT_GROUP = "Snapshot"

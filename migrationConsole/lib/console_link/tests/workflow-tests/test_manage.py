@@ -2291,6 +2291,60 @@ def test_config_variant_choice_preserves_provisional_discard_path():
     )
 
 
+def test_config_delete_target_clears_required_union_before_removing_parent():
+    """Delete inside a required union branch should clear that branch, not remove the containing config."""
+
+    class FakeTreeNode:
+        def __init__(self, edit_node, parent=None):
+            self.data = {"type": "config-edit", "edit_node": edit_node}
+            self.parent = parent
+
+    snapshot_node = {
+        "id": "edit:sourceClusters.source.snapshotInfo.snapshots.s1",
+        "path": ["sourceClusters", "source", "snapshotInfo", "snapshots", "s1"],
+        "valueKind": "object",
+    }
+    config_node = {
+        "id": "edit:sourceClusters.source.snapshotInfo.snapshots.s1.config",
+        "path": ["sourceClusters", "source", "snapshotInfo", "snapshots", "s1", "config"],
+        "valueKind": "union",
+        "value": "externallyManagedSnapshotName",
+        "presence": "required",
+        "required": True,
+    }
+    external_snapshot_name_node = {
+        "id": "edit:sourceClusters.source.snapshotInfo.snapshots.s1.config.externallyManagedSnapshotName",
+        "path": [
+            "sourceClusters",
+            "source",
+            "snapshotInfo",
+            "snapshots",
+            "s1",
+            "config",
+            "externallyManagedSnapshotName",
+        ],
+        "valueKind": "scalar",
+        "presence": "required",
+        "required": True,
+    }
+
+    snapshot_tree_node = FakeTreeNode(snapshot_node)
+    config_tree_node = FakeTreeNode(config_node, snapshot_tree_node)
+    selected_tree_node = FakeTreeNode(external_snapshot_name_node, config_tree_node)
+
+    class TestWorkflowTreeApp(WorkflowTreeApp):
+        @property
+        def tree_root_widget(self):
+            return MagicMock(cursor_node=selected_tree_node)
+
+    app = object.__new__(TestWorkflowTreeApp)
+
+    target = app._nearest_config_delete_target()
+    assert target is not None
+    assert target[0] == "clear"
+    assert target[1] == config_node
+
+
 @pytest.mark.asyncio
 async def test_text_input_modal_test_regex_opens_regex101_url():
     class TestApp(App):
@@ -2432,7 +2486,7 @@ def test_manage_tree_schema_orders_roots_like_workflow_config():
         "Sources",
         "Targets",
         "Snapshot Migration",
-        "Kafka Clusters",
+        "External Kafka Connections",
         "Live Traffic Migration",
     ]
 
@@ -3564,6 +3618,70 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
 
 
 @pytest.mark.asyncio
+async def test_resource_view_edit_mode_external_secret_create_starts_empty_when_current_value_exists(
+        mock_workflow_with_two_pods):
+    """Create New should not inherit the currently selected Secret name."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_basic_auth_secret("source-creds"),
+            }
+
+        def list_external_resources(self, external_ref, current_value=None):
+            return [
+                {
+                    "name": "source-creds",
+                    "kind": "Secret",
+                    "type": "kubernetes.io/basic-auth",
+                    "keys": ["username", "password"],
+                    "status": "matching",
+                    "message": "",
+                    "current": True,
+                },
+            ]
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig.basic.secretName")
+            app._update_dynamic_bindings()
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourcePickerModal))
+            await pilot.press("c")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ExternalResourceFormModal))
+            assert app.screen.query_one("#field-0", Input).value == ""
+            assert app.screen.query_one("#field-1", Input).value == ""
+            assert app.screen.query_one("#field-2", Input).value == ""
+
+
+@pytest.mark.asyncio
 async def test_resource_view_edit_mode_left_from_external_ref_leaf_moves_to_parent_without_dialog(
         mock_workflow_with_two_pods):
     """Left arrow should navigate up from edit leaves without activating the parent."""
@@ -4551,11 +4669,11 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
     pod_scraper.fetch_pods_metadata.return_value = []
     sections = [
         ResourceSection(
-            name="Kafka Clusters",
+            name="External Kafka Connections",
             groups=[
                 ResourceGroup(
                     plural="kafkaconfigs",
-                    display_name="Kafka Clusters",
+                    display_name="External Kafka Connections",
                     resources=[
                         ResourceNode(
                             name="kafka",
@@ -5733,8 +5851,8 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
 
 
 @pytest.mark.asyncio
-async def test_resource_view_resource_log_binding_uses_workflow_pod():
-    """Resource rows should open the latest notable workflow pod logs when available."""
+async def test_resource_view_resource_log_binding_uses_resource_log_command():
+    """Resource rows should alias workflow log resource, even when workflow pods are attached."""
 
     argo_service = MagicMock(spec=ArgoService(None, None))
     argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
@@ -5797,11 +5915,215 @@ async def test_resource_view_resource_log_binding_uses_workflow_pod():
             await pilot.pause()
             assert binding_descriptions(app, "l") == ["View Logs"]
 
-            with patch.object(app._logs, "show_in_pager") as pager, patch.object(app, "action_view_resource_logs") as fallback:
+            with patch.object(app._logs, "show_in_pager") as pager, patch.object(app, "action_view_resource_logs") as resource_logs:
                 await pilot.press("l")
                 await pilot.pause()
-                fallback.assert_not_called()
-                pager.assert_called_once_with(app, "cap-workflow-pod", "captureproxy.cap")
+                resource_logs.assert_called_once_with()
+                pager.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resource_view_resource_row_can_approve_attached_gate():
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+    argo_service.approve_step.return_value = {"success": True}
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    approval = {
+        "id": "gate-1",
+        "display_name": "CaptureProxy: cap",
+        "phase": "Running",
+        "type": "Pod",
+        "is_approval": True,
+        "denial_reason": "Impossible: listenPort cannot be changed.",
+        "inputs": {"parameters": [{"name": "resourceName", "value": "captureproxy.cap.vapretry"}]},
+        "children": [],
+    }
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="captureproxies",
+                    display_name="Capture",
+                    resources=[
+                        ResourceNode(
+                            name="cap",
+                            plural="captureproxies",
+                            phase="Error",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                            workflow_progress=[approval],
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "resource:cap") is not None,
+            )
+
+            resource_node = find_tree_node_by_id(tree.root, "resource:cap")
+            tree.move_cursor(resource_node)
+            await pilot.pause()
+            assert "BLOCKED: Impossible: listenPort cannot be changed." in get_clean_text_label(resource_node)
+            assert any(
+                "BLOCKED: Impossible: listenPort cannot be changed." in get_clean_text_label(child)
+                for child in resource_node.children
+            )
+            assert binding_descriptions(app, "a") == ["Approve"]
+
+            await pilot.press("a")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("y")
+            await pilot.pause()
+
+            argo_service.approve_step.assert_called_once_with("default", "migration", approval)
+
+
+@pytest.mark.asyncio
+async def test_resource_view_delete_maps_to_workflow_reset_dry_run_and_exact_commit():
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="captureproxies",
+                    display_name="Capture",
+                    resources=[
+                        ResourceNode(
+                            name="cap",
+                            plural="captureproxies",
+                            phase="Error",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:cap") is not None)
+
+            tree.move_cursor(find_tree_node_by_id(tree.root, "resource:cap"))
+            await pilot.pause()
+
+            assert binding_descriptions(app, "delete") == ["Reset"]
+            target = app._nearest_resource_reset_target()
+            assert target == {
+                "resource_path": "captureproxy.cap",
+                "resource_plural": "captureproxies",
+                "resource_name": "cap",
+            }
+            assert app._resource_reset_dry_run_command_args(target) == [
+                "workflow",
+                "reset",
+                "--namespace",
+                "default",
+                "--cascade",
+                "--include-proxies",
+                "--dry-run",
+                "--output",
+                "json",
+                "captureproxy.cap",
+            ]
+            plan = {
+                "request": target,
+                "targets": [
+                    {
+                        "plural": "captureproxies",
+                        "path": "captureproxy.cap",
+                        "phase": "Error",
+                    },
+                    {
+                        "plural": "capturedtraffics",
+                        "path": "capturedtraffic.cap-topic",
+                        "phase": "Ready",
+                    },
+                ],
+                "messages": [],
+                "warnings": [],
+            }
+            assert app._resource_reset_commit_command_args(plan) == [
+                "workflow",
+                "reset",
+                "--namespace",
+                "default",
+                "--exact",
+                "--include-proxies",
+                "captureproxy.cap",
+                "capturedtraffic.cap-topic",
+            ]
+
+
+def test_resource_reset_target_ignores_virtual_config_rows():
+    target = WorkflowTreeApp._resource_reset_target_from_data({
+        "resource_path": "kafkaconfigs.default",
+        "resource_plural": "kafkaconfigs",
+        "resource_name": "default",
+    })
+
+    assert target is None
+
+
+def test_reset_success_does_not_auto_open_output_pager():
+    app = object.__new__(WorkflowTreeApp)
+    app._resetting_resource_path = "captureproxy.cap"
+    app._logs = MagicMock()
+    app.notify = MagicMock()
+    app.update_pod_status = MagicMock()
+    app.action_manual_refresh = MagicMock()
+
+    app._handle_reset_resource_succeeded(
+        {"request": {"resource_path": "captureproxy.cap"}},
+        "  Deleted captureproxy.cap\n",
+    )
+
+    app.notify.assert_called_once_with("Reset complete: captureproxy.cap")
+    app._logs.show_output_texts_in_pager.assert_not_called()
+    app.action_manual_refresh.assert_called_once()
 
 
 @pytest.mark.asyncio

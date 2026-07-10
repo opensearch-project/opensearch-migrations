@@ -4,10 +4,12 @@ interactive tree navigation for status viewing and approval.
 """
 import base64
 import copy
+import json
 import logging
 import os
 import platform
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -54,7 +56,7 @@ from .text_input_modal import TextInputModal
 from .tree_state_manager import TreeStateManager
 from .resource_tree_state_manager import RESOURCE_ID_PREFIX
 from ..commands.artifact_store import ArtifactStoreError
-from ..commands.crd_utils import resource_display_name
+from ..commands.crd_utils import RESETTABLE_PLURALS, parse_resource_path, resource_display_name
 from ..resource_tree import (
     CONFIG_MODE_LABELS,
     apply_config_overlays,
@@ -185,6 +187,7 @@ class WorkflowTreeApp(App):
         self._restore_resource_collapsed_ids_on_next_render: Optional[set[str]] = None
         self._expand_changed_resources_on_next_render = False
         self._submitting_workflow = False
+        self._resetting_resource_path: Optional[str] = None
         self._edit_validation_generation = 0
         self._edit_validation_timer: Optional[Any] = None
         self._edit_validation_delay = 0.4
@@ -487,7 +490,7 @@ class WorkflowTreeApp(App):
             return
 
         data = event.node.data or {}
-        if data and is_approval_node(data) and data.get('phase') == PHASE_RUNNING:
+        if self._approval_node_for_action(data):
             event.stop()
             self.action_approve_step()
             return
@@ -734,6 +737,158 @@ class WorkflowTreeApp(App):
             cmd = f"workflow log resource {resource_path} | less -R"
             os.system(cmd)
 
+    def action_reset_resource(self) -> None:
+        """Reset the selected migration resource via the workflow reset command."""
+        if self._edit_mode or not self._resource_view:
+            return
+        if self._resetting_resource_path:
+            self.notify(f"Reset already running: {self._resetting_resource_path}", severity="warning")
+            return
+        target = self._nearest_resource_reset_target()
+        if not target:
+            return
+        self._start_reset_resource_plan(target)
+
+    def _start_reset_resource_plan(self, target: Dict[str, str]) -> None:
+        self._resetting_resource_path = target["resource_path"]
+        self.update_pod_status()
+        self.run_worker(
+            lambda: self._reset_resource_dry_run_worker(target),
+            thread=True,
+            name="reset_resource_dry_run",
+        )
+
+    def _reset_resource_dry_run_worker(self, target: Dict[str, str]) -> None:
+        command = self._resource_reset_dry_run_command_args(target)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            plan = json.loads(result.stdout or "{}")
+            plan["request"] = target
+            self.call_from_thread(self._handle_reset_resource_plan_loaded, plan)
+        except subprocess.CalledProcessError as e:
+            output = self._combined_command_output(e)
+            self.call_from_thread(self._handle_reset_resource_plan_failed, target, output or str(e))
+        except Exception as e:
+            logger.exception("Failed to compute reset resource plan")
+            output = str(e)
+            if isinstance(e, json.JSONDecodeError):
+                output = f"Could not parse reset dry-run output: {e}"
+            self.call_from_thread(self._handle_reset_resource_plan_failed, target, output)
+
+    def _handle_reset_resource_plan_loaded(self, plan: Dict) -> None:
+        self._resetting_resource_path = None
+        targets = plan.get("targets") or []
+        if not targets:
+            request = plan.get("request") or {}
+            self.notify(f"Reset plan is empty: {request.get('resource_path', 'resource')}", severity="warning")
+            self.update_pod_status()
+            return
+        self.update_pod_status()
+        command = self._resource_reset_commit_command_args(plan)
+        self.push_screen(
+            ConfirmModal(
+                self._resource_reset_confirmation_message(plan, command),
+                confirm_label="Reset",
+                cancel_label="Cancel",
+                default_confirm=False,
+            ),
+            lambda confirmed: self._start_reset_resource(plan) if confirmed else None,
+        )
+
+    def _handle_reset_resource_plan_failed(self, target: Dict[str, str], output: str) -> None:
+        self._resetting_resource_path = None
+        resource_path = target.get("resource_path") or "resource"
+        self.notify(f"Reset dry-run failed: {resource_path}", severity="error")
+        self.update_pod_status()
+        if output.strip():
+            self._logs.show_output_texts_in_pager(
+                self,
+                [(f"workflow reset --dry-run {resource_path}", output)],
+                f"Reset dry-run failed: {resource_path}",
+            )
+
+    def _start_reset_resource(self, plan: Dict) -> None:
+        resource_path = ((plan.get("request") or {}).get("resource_path") or "resource")
+        self._resetting_resource_path = resource_path
+        self.update_pod_status()
+        self.run_worker(
+            lambda: self._reset_resource_worker(plan),
+            thread=True,
+            name="reset_resource",
+        )
+
+    def _reset_resource_worker(self, plan: Dict) -> None:
+        command = self._resource_reset_commit_command_args(plan)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            output = self._combined_command_output(result)
+            self.call_from_thread(self._handle_reset_resource_succeeded, plan, output)
+        except subprocess.CalledProcessError as e:
+            output = self._combined_command_output(e)
+            self.call_from_thread(self._handle_reset_resource_failed, plan, output or str(e))
+        except Exception as e:
+            logger.exception("Failed to reset resource")
+            self.call_from_thread(self._handle_reset_resource_failed, plan, str(e))
+
+    def _handle_reset_resource_succeeded(self, plan: Dict, output: str) -> None:
+        self._resetting_resource_path = None
+        resource_path = ((plan.get("request") or {}).get("resource_path") or "resource")
+        self.notify(f"Reset complete: {resource_path}")
+        self.update_pod_status()
+        self.action_manual_refresh()
+
+    def _handle_reset_resource_failed(self, plan: Dict, output: str) -> None:
+        self._resetting_resource_path = None
+        resource_path = ((plan.get("request") or {}).get("resource_path") or "resource")
+        self.notify(f"Reset failed: {resource_path}", severity="error")
+        self.update_pod_status()
+        if output.strip():
+            self._logs.show_output_texts_in_pager(
+                self,
+                [(f"workflow reset {resource_path}", output)],
+                f"Reset failed: {resource_path}",
+            )
+
+    @staticmethod
+    def _resource_reset_confirmation_message(plan: Dict, command: list[str]) -> str:
+        request = plan.get("request") or {}
+        targets = plan.get("targets") or []
+        lines = [
+            f"Reset {request.get('resource_path', 'resource')}?",
+            "",
+            f"This confirmed plan will delete {len(targets)} resource{'s' if len(targets) != 1 else ''}:",
+        ]
+        for target in targets:
+            phase = f" ({target.get('phase')})" if target.get("phase") else ""
+            lines.append(f"  - {target.get('path')}{phase}")
+        messages = [str(message) for message in (plan.get("messages") or []) if str(message).strip()]
+        warnings = [str(warning) for warning in (plan.get("warnings") or []) if str(warning).strip()]
+        if messages:
+            lines.extend(["", "Messages:"])
+            lines.extend(f"  {message}" for message in messages)
+        if warnings:
+            lines.extend(["", "Warnings:"])
+            lines.extend(f"  {warning}" for warning in warnings)
+        lines.extend([
+            "",
+            "Commit command:",
+            shlex.join(command),
+            "",
+            "The commit uses the exact resource set above. If a new dependent resource exists, reset will fail and you must dry-run again.",
+        ])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _combined_command_output(result) -> str:
+        parts = []
+        stdout = getattr(result, "stdout", None)
+        stderr = getattr(result, "stderr", None)
+        if stdout:
+            parts.append(str(stdout).rstrip("\n"))
+        if stderr:
+            parts.append(str(stderr).rstrip("\n"))
+        return "\n".join(part for part in parts if part)
+
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
             return
@@ -744,13 +899,14 @@ class WorkflowTreeApp(App):
 
     def action_approve_step(self) -> None:
         node = self.current_node_data
-        if node and is_approval_node(node):
-            msg = f"Approve '{node.get('display_name')}'?"
-            reason = node.get('denial_reason')
+        approval_node = self._approval_node_for_action(node)
+        if approval_node:
+            msg = f"Approve '{approval_node.get('display_name')}'?"
+            reason = approval_node.get('denial_reason')
             if reason:
                 msg += f"\n\n{reason}"
             self.push_screen(ConfirmModal(msg),
-                             lambda confirmed: self._execute_approval(node) if confirmed else None)
+                             lambda confirmed: self._execute_approval(approval_node) if confirmed else None)
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
@@ -770,6 +926,7 @@ class WorkflowTreeApp(App):
             "edit_selected_config_node",
             "reload_config_edit",
             "rename_config_node",
+            "reset_resource",
         } and isinstance(self.screen, ModalScreen):
             return False
         return super().check_action(action, parameters)
@@ -814,6 +971,9 @@ class WorkflowTreeApp(App):
         if self._resource_view:
             summary = self._resource_change_summary
             value_mode = CONFIG_MODE_LABELS.get(self._resource_value_mode, self._resource_value_mode)
+            if self._resetting_resource_path:
+                self._set_pod_status(f"Resetting {self._resetting_resource_path}...  Values: {value_mode}")
+                return
             if self._submitting_workflow:
                 self._set_pod_status(f"Submitting workflow...  Values: {value_mode}")
                 return
@@ -831,9 +991,10 @@ class WorkflowTreeApp(App):
             return
         
         node_type = node.get('type')
-        if is_approval_node(node):
+        approval_node = self._approval_node_for_action(node)
+        if approval_node:
             name_param = None
-            for p in node.get('inputs', {}).get('parameters', []):
+            for p in approval_node.get('inputs', {}).get('parameters', []):
                 if p.get('name') in ('resourceName', 'name'):
                     name_param = p.get('value')
                     break
@@ -917,8 +1078,9 @@ class WorkflowTreeApp(App):
                 self.bind("delete", "remove_config_node", description="Remove")
                 self.bind("backspace", "remove_config_node", show=False)
             elif delete_target and delete_target[0] == "clear":
-                self.bind("delete", "clear_config_node", description="Clear")
-                self.bind("backspace", "clear_config_node", description="Clear", show=False)
+                description = "Delete" if self._config_node_can_clear_required_union(delete_target[1]) else "Clear"
+                self.bind("delete", "clear_config_node", description=description)
+                self.bind("backspace", "clear_config_node", description=description, show=False)
             self.refresh_bindings()
             return
 
@@ -946,6 +1108,10 @@ class WorkflowTreeApp(App):
 
         if node:
             self._bind_node_actions(node, output_available)
+
+        if self._nearest_resource_reset_target() and not self._resetting_resource_path:
+            self.bind("delete", "reset_resource", description="Reset")
+            self.bind("backspace", "reset_resource", show=False)
 
         self.refresh_bindings()
 
@@ -975,9 +1141,12 @@ class WorkflowTreeApp(App):
             node_type,
             node.get('phase'),
             is_approval_node(node),
+            bool(self._approval_node_for_action(node)),
             bool(self._pods.get_name(node_id)) if node_type == NODE_TYPE_POD else False,
             bool(node.get('resource_path')),
             bool(self._pods.get_name(node.get('resource_log_node_id'))),
+            bool(self._nearest_resource_reset_target()),
+            bool(self._resetting_resource_path),
             output_available,
         )
 
@@ -987,10 +1156,9 @@ class WorkflowTreeApp(App):
         ntype = node.get('type')
 
         if node_id.startswith(RESOURCE_ID_PREFIX):
-            if self._pods.get_name(node.get('resource_log_node_id')):
-                self.bind("l", "view_resource_progress_logs", description="View Logs")
-            else:
-                self.bind("l", "view_resource_logs", description="View Logs")
+            self.bind("l", "view_resource_logs", description="View Logs")
+            if self._approval_node_for_action(node):
+                self.bind("a", "approve_step", description="Approve")
             if output_available:
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
         elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
@@ -1061,7 +1229,7 @@ class WorkflowTreeApp(App):
 
     def action_activate_selected_node(self) -> None:
         node = self.current_node_data
-        if node and is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+        if self._approval_node_for_action(node):
             self.action_approve_step()
             return
         tree = self.tree_root_widget
@@ -2367,10 +2535,6 @@ class WorkflowTreeApp(App):
             self.notify("Create/update is not available for this reference", severity="warning")
             return
         initial_values = values_for_form(external_ref, resource)
-        if mode == "create":
-            name_field = ((external_ref.get("create") or {}).get("apply") or {}).get("nameField")
-            if name_field and node.get("value"):
-                initial_values.setdefault(name_field, str(node.get("value") or ""))
         self.push_screen(
             ExternalResourceFormModal(
                 external_ref,
@@ -2531,6 +2695,14 @@ class WorkflowTreeApp(App):
             node.get("presence") == "optional"
             and not node.get("required")
             and node.get("valueKind") in {"scalar", "boolean", "object", "array", "union"}
+        )
+
+    @staticmethod
+    def _config_node_can_clear_required_union(node: Dict) -> bool:
+        return (
+            node.get("valueKind") == "union"
+            and node.get("presence") == "required"
+            and node.get("value") not in (None, "", "unset")
         )
 
     def _handle_config_variant_choice(
@@ -2904,6 +3076,10 @@ class WorkflowTreeApp(App):
             if node and node.get("valueKind") != "command":
                 if self._config_node_can_unset(node):
                     return "clear", node
+                if self._config_node_can_clear_required_union(node):
+                    return "clear", node
+                if node.get("valueKind") == "union":
+                    return None
                 if self._is_removable_edit_node(node):
                     return "remove", node
             tree_node = getattr(tree_node, "parent", None)
@@ -2920,6 +3096,66 @@ class WorkflowTreeApp(App):
                 return node
             tree_node = getattr(tree_node, "parent", None)
         return None
+
+    def _nearest_resource_reset_target(self) -> Optional[Dict[str, str]]:
+        if self._edit_mode or not self._resource_view:
+            return None
+        tree_node = self.tree_root_widget.cursor_node
+        while tree_node:
+            data = tree_node.data if tree_node else None
+            if isinstance(data, dict):
+                target = self._resource_reset_target_from_data(data)
+                if target:
+                    return target
+            tree_node = getattr(tree_node, "parent", None)
+        return None
+
+    @staticmethod
+    def _resource_reset_target_from_data(data: Dict) -> Optional[Dict[str, str]]:
+        resource_path = data.get("resource_path")
+        resource_plural = data.get("resource_plural")
+        resource_name = data.get("resource_name")
+        if not resource_plural or not resource_name:
+            parsed = parse_resource_path(str(resource_path or ""))
+            if parsed:
+                resource_plural, resource_name = parsed
+        if not resource_path and resource_plural and resource_name:
+            resource_path = resource_display_name(resource_plural, resource_name)
+        if not resource_path or resource_plural not in RESETTABLE_PLURALS or not resource_name:
+            return None
+        return {
+            "resource_path": str(resource_path),
+            "resource_plural": str(resource_plural),
+            "resource_name": str(resource_name),
+        }
+
+    def _resource_reset_dry_run_command_args(self, target: Dict[str, str]) -> list[str]:
+        return [
+            "workflow",
+            "reset",
+            "--namespace",
+            self._namespace,
+            "--cascade",
+            "--include-proxies",
+            "--dry-run",
+            "--output",
+            "json",
+            target["resource_path"],
+        ]
+
+    def _resource_reset_commit_command_args(self, plan: Dict) -> list[str]:
+        targets = plan.get("targets") or []
+        command = [
+            "workflow",
+            "reset",
+            "--namespace",
+            self._namespace,
+            "--exact",
+        ]
+        if any(target.get("plural") == "captureproxies" for target in targets):
+            command.append("--include-proxies")
+        command.extend(str(target.get("path")) for target in targets if target.get("path"))
+        return command
 
     @staticmethod
     def _edit_node_documentation(node: Dict, include_input_hint: bool = False) -> str:
@@ -2967,9 +3203,20 @@ class WorkflowTreeApp(App):
 
     @staticmethod
     def _node_enter_description(node: Optional[Dict]) -> str:
-        if node and is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+        if WorkflowTreeApp._approval_node_for_action(node):
             return "Approve"
         return "Expand"
+
+    @staticmethod
+    def _approval_node_for_action(node: Optional[Dict]) -> Optional[Dict]:
+        if not node:
+            return None
+        if is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            return node
+        approval_node = node.get('approval_node')
+        if isinstance(approval_node, dict) and is_approval_node(approval_node) and approval_node.get('phase') == PHASE_RUNNING:
+            return approval_node
+        return None
 
     def _remove_config_node(self, path: list[str]) -> None:
         operation = {

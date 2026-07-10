@@ -1,5 +1,6 @@
 """Reset command for workflow CLI - delete migration CRDs safely."""
 
+import json
 import logging
 import time
 
@@ -27,6 +28,10 @@ ARTIFACT_OUTPUT_ROOT = "migration-outputs"
 NONE_PLACEHOLDER = "<none>"
 CR_DELETION_TIMEOUT_SECONDS = 600
 OWNED_RESOURCE_DELETION_TIMEOUT_SECONDS = 120
+TARGET_INDEX_WARNING = (
+    "reset does not delete indexes on the target cluster. If the snapshot migration "
+    "created indexes on the target, remove them with: console clusters clear-indices --cluster target"
+)
 
 
 def _resettable_names(namespace):
@@ -788,6 +793,26 @@ def _delete_targets(targets, namespace, delete_output_artifacts=True):
     return not failed
 
 
+def _dedupe_resources(resources):
+    """Return resources in first-seen order, keyed by plural/name."""
+    seen = set()
+    result = []
+    for resource in resources:
+        key = (resource[0], resource[1])
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(resource)
+    return result
+
+
+def _emit_or_collect(message, messages=None):
+    if messages is None:
+        click.echo(message)
+    else:
+        messages.append(message)
+
+
 def _show_resource_list(resources):
     """Display migration resources and their dependencies."""
     click.echo("Migration resources:")
@@ -803,19 +828,19 @@ def _show_resource_list(resources):
         click.echo(f"  {aligned}  ({phase}){dep_str}")
 
 
-def _filter_proxy_targets(targets, include_proxies):
+def _filter_proxy_targets(targets, include_proxies, messages=None):
     """Block or remove proxy targets unless explicitly included."""
     proxy_targets = [target for target in targets if target[0] == 'captureproxies']
     if include_proxies or not proxy_targets:
         return targets
 
     names = ', '.join(resource_display_name(t[0], t[1]) for t in proxy_targets)
-    click.echo(f"Proxies are protected by default: {names}")
-    click.echo("Use --include-proxies to delete them.")
+    _emit_or_collect(f"Proxies are protected by default: {names}", messages)
+    _emit_or_collect("Use --include-proxies to delete them.", messages)
     return None
 
 
-def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
+def _resolve_cascade_targets(targets, namespace, cascade, include_proxies, messages=None):
     """Return expanded delete set or None when blocked.
 
     Protected proxies (captureproxies) are never included in the delete set
@@ -823,7 +848,7 @@ def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
     as a dependent, the proxy is silently skipped — it does not block deletion
     of the target.
     """
-    filtered = _filter_proxy_targets(targets, include_proxies)
+    filtered = _filter_proxy_targets(targets, include_proxies, messages)
     if filtered is None:
         return None
 
@@ -842,15 +867,15 @@ def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
     # Protected proxies don't block — they're just skipped
     if not include_proxies and blocking_proxy:
         proxy_names = ', '.join(r[1] for r in blocking_proxy)
-        click.echo(f"Keeping protected proxies alive: {proxy_names}")
+        _emit_or_collect(f"Keeping protected proxies alive: {proxy_names}", messages)
 
     # Non-proxy dependents still require --cascade
     if blocking_non_proxy and not cascade:
-        click.echo("Cannot delete because dependent resources still exist:")
+        _emit_or_collect("Cannot delete because dependent resources still exist:", messages)
         for plural, name, _, _ in blocking_non_proxy:
-            click.echo(f"  {DISPLAY_NAMES.get(plural, plural)}.{name}")
-        click.echo()
-        click.echo("Use --cascade to delete them too.")
+            _emit_or_collect(f"  {DISPLAY_NAMES.get(plural, plural)}.{name}", messages)
+        _emit_or_collect("", messages)
+        _emit_or_collect("Use --cascade to delete them too.", messages)
         return None
 
     # Build the final delete set: targets + non-proxy dependents (cascade)
@@ -860,6 +885,130 @@ def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
         expanded_names |= {r[1] for r in blocking_proxy}
     expanded = [resource for resource in all_resources if resource[1] in expanded_names]
     return expanded
+
+
+def _resolve_named_reset_targets(names, namespace, cascade, include_proxies, messages=None):
+    """Resolve user-supplied reset names into the resources reset would delete."""
+    targets = []
+    for path in names:
+        resolved = _resolve_targets(namespace, path)
+        if not resolved:
+            _emit_or_collect(f"No resources matching '{path}'.", messages)
+            continue
+        expanded = _resolve_cascade_targets(
+            resolved,
+            namespace,
+            cascade,
+            include_proxies,
+            messages,
+        )
+        if expanded is None:
+            return None
+        targets.extend(expanded)
+    return _dedupe_resources(targets)
+
+
+def _resolve_exact_reset_targets(names, namespace, include_proxies, messages=None):
+    """Resolve an already-confirmed resource set without cascade expansion."""
+    if not names:
+        _emit_or_collect("Exact reset requires at least one resource name.", messages)
+        return None
+    targets = []
+    failed = False
+    for path in names:
+        if has_glob(path):
+            _emit_or_collect(f"Exact reset does not accept glob patterns: {path}", messages)
+            failed = True
+            continue
+        resolved = _resolve_targets(namespace, path)
+        if not resolved:
+            _emit_or_collect(f"Confirmed resource is no longer present: {path}", messages)
+            failed = True
+            continue
+        targets.extend(resolved)
+    if failed:
+        return None
+
+    targets = _dedupe_resources(targets)
+    filtered = _filter_proxy_targets(targets, include_proxies, messages)
+    if filtered is None:
+        return None
+    target_names = {name for _, name, _, _ in filtered}
+    all_resources = list_migration_resources(namespace)
+    new_dependents = [
+        resource
+        for resource in all_resources
+        if resource[1] in set(_find_dependents(target_names, all_resources)) - target_names
+    ]
+    if new_dependents:
+        _emit_or_collect(
+            "Cannot reset the confirmed plan because additional dependent resources now exist:",
+            messages,
+        )
+        for plural, name, _, _ in new_dependents:
+            _emit_or_collect(f"  {resource_display_name(plural, name)}", messages)
+        _emit_or_collect("Re-run dry-run and confirm the updated reset plan.", messages)
+        return None
+    return filtered
+
+
+def _reset_plan_warnings(namespace, targets, delete_storage):
+    warnings = []
+    if any(plural == 'snapshotmigrations' for plural, _, _, _ in targets):
+        warnings.append(TARGET_INDEX_WARNING)
+    kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
+    if kafka_names and not delete_storage:
+        pvcs = _find_kafka_pvcs(namespace, kafka_names)
+        if pvcs and _pvcs_at_risk(namespace, pvcs):
+            pvc_names = ', '.join(p.metadata.name for p in pvcs[:5])
+            if len(pvcs) > 5:
+                pvc_names += f", ... ({len(pvcs)} total)"
+            warnings.append(
+                f"{len(pvcs)} Kafka PVC(s) will persist after reset: {pvc_names}. "
+                "These may cause cluster ID conflicts on redeployment. Use --delete-storage to remove them."
+            )
+    return warnings
+
+
+def _reset_plan(targets, namespace, messages=None, delete_storage=False):
+    return {
+        'targets': [
+            {
+                'plural': plural,
+                'type': DISPLAY_NAMES.get(plural, plural),
+                'name': name,
+                'path': resource_display_name(plural, name),
+                'phase': phase,
+                'dependsOn': deps,
+            }
+            for plural, name, phase, deps in targets
+        ],
+        'messages': list(messages or []),
+        'warnings': _reset_plan_warnings(namespace, targets, delete_storage),
+    }
+
+
+def _emit_reset_plan(plan, output):
+    if output == 'json':
+        click.echo(json.dumps(plan, indent=2))
+        return
+    click.echo("Reset dry-run plan:")
+    if plan['targets']:
+        for target in plan['targets']:
+            dep_str = f" (depends on: {', '.join(target['dependsOn'])})" if target['dependsOn'] else ""
+            click.echo(f"  {target['path']} ({target['phase']}){dep_str}")
+    else:
+        click.echo("  No resources would be deleted.")
+    if plan['messages']:
+        click.echo()
+        click.echo("Messages:")
+        for message in plan['messages']:
+            click.echo(f"  {message}" if message else "")
+    if plan['warnings']:
+        click.echo()
+        click.echo("Warnings:")
+        for warning in plan['warnings']:
+            click.echo(f"  {warning}")
 
 
 def _find_ancestors(target_names, all_resources):
@@ -994,9 +1143,7 @@ def _warn_target_indexes_remain(targets):
     if not any(plural == 'snapshotmigrations' for plural, _, _, _ in targets):
         return
     click.echo(
-        "\nNote: reset does not delete indexes on the target cluster. "
-        "If the snapshot migration created indexes on the target, remove them with:\n"
-        "  console clusters clear-indices --cluster target"
+        f"\nNote: {TARGET_INDEX_WARNING}"
     )
 
 
@@ -1026,14 +1173,19 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
 @click.option('--cascade', is_flag=True, default=False, help='Also delete dependent resources')
 @click.option('--include-proxies', is_flag=True, default=False,
               help='Also delete capture proxies (they are protected by default)')
+@click.option('--dry-run', is_flag=True, default=False, help='Show the resources that would be reset')
+@click.option('--exact', is_flag=True, default=False,
+              help='Delete exactly the named resources; fail if additional dependents exist')
+@click.option('--output', 'output_format', type=click.Choice(['text', 'json']), default='text',
+              show_default=True, help='Dry-run output format')
 @click.option('--delete-storage', is_flag=True, default=False,
               help='Delete Kafka PVCs and orphaned PVs during reset')
 @click.option('--keep-output-artifacts', is_flag=True, default=False,
               help='Keep retained workflow output artifacts and print their S3 prefix')
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.pass_context
-def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxies, delete_storage,
-                  keep_output_artifacts, namespace):
+def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxies, dry_run, exact,
+                  output_format, delete_storage, keep_output_artifacts, namespace):
     """Reset deletes named workflow resources but does not alter resources
     that are managed outside the migration system, such as the target clusters.
     To fully reset or reverse a previous step, actions will need to be made on
@@ -1050,6 +1202,19 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
     try:
         load_k8s_config()
 
+        if output_format != 'text' and not dry_run:
+            click.echo("--output is only supported with --dry-run.", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+        if exact and reset_all:
+            click.echo("--exact cannot be combined with --all.", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+        if exact and cascade:
+            click.echo("--exact cannot be combined with --cascade.", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+
         if list_resources:
             resources = list_migration_resources(namespace)
             if not resources:
@@ -1058,7 +1223,50 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
                 _show_resource_list(resources)
             return
 
+        if exact:
+            messages = []
+            targets = _resolve_exact_reset_targets(names, namespace, include_proxies, messages)
+            if targets is None:
+                for message in messages:
+                    click.echo(message)
+                ctx.exit(ExitCode.FAILURE.value)
+                return
+            if dry_run:
+                _emit_reset_plan(
+                    _reset_plan(targets, namespace, messages, delete_storage),
+                    output_format,
+                )
+                return
+            kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
+            _handle_kafka_storage(namespace, kafka_names, delete_storage)
+            if targets and not _delete_targets(targets, namespace, not keep_output_artifacts):
+                ctx.exit(ExitCode.FAILURE.value)
+                return
+            _warn_target_indexes_remain(targets)
+            return
+
         if names:
+            if dry_run:
+                messages = []
+                targets = _resolve_named_reset_targets(
+                    names,
+                    namespace,
+                    cascade,
+                    include_proxies,
+                    messages,
+                )
+                if targets is None:
+                    _emit_reset_plan(
+                        _reset_plan([], namespace, messages, delete_storage),
+                        output_format,
+                    )
+                    ctx.exit(ExitCode.FAILURE.value)
+                    return
+                _emit_reset_plan(
+                    _reset_plan(targets, namespace, messages, delete_storage),
+                    output_format,
+                )
+                return
             for n in names:
                 _reset_by_resource_name(
                     ctx,
@@ -1090,8 +1298,22 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
         )
         if not include_proxies and protected_proxy_names:
             proxy_names = ", ".join(sorted(f"captureproxy.{n}" for n in protected_proxy_names))
-            click.echo(f"Keeping protected proxies alive: {proxy_names}")
-            click.echo("Use --include-proxies to delete them.")
+            messages = [
+                f"Keeping protected proxies alive: {proxy_names}",
+                "Use --include-proxies to delete them.",
+            ]
+        else:
+            messages = []
+
+        if dry_run:
+            _emit_reset_plan(
+                _reset_plan(delete_targets, namespace, messages, delete_storage),
+                output_format,
+            )
+            return
+
+        for message in messages:
+            click.echo(message)
 
         kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
         _handle_kafka_storage(namespace, kafka_names, delete_storage)

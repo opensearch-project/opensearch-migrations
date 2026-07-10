@@ -11,6 +11,8 @@ from console_link.workflow.resource_tree import (
     _build_tree_from_raw, _nest_topics_under_kafka,
     apply_config_overlays,
     format_config_diff_fields,
+    format_approval_gate_line,
+    format_dependency_line,
     format_resource_diagnostics,
     format_rollout_status_suffix,
     resource_config_change_summary,
@@ -61,12 +63,24 @@ class TestBuildTreeFromRaw:
             'Sources',
             'Targets',
             'Snapshot Migration',
-            'Kafka Clusters',
+            'External Kafka Connections',
             'Live Traffic Migration',
         ]
         for s in sections:
             for g in s.groups:
                 assert g.resources == []
+
+    def test_dependency_states_are_attached_by_name(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [make_cr('captureproxies', 'cap', phase='Pending')],
+            'datasnapshots': [make_cr('datasnapshots', 'source-s1', phase='Pending', depends_on=['cap'])],
+        })
+
+        snapshot = group_by_plural(sections, 'datasnapshots').resources[0]
+
+        assert snapshot.dependency_states == [
+            {'name': 'cap', 'phase': 'Pending', 'plural': 'captureproxies'}
+        ]
 
     def test_snapshot_placed_in_correct_section(self):
         raw = {'datasnapshots': [make_cr('datasnapshots', 'my-snap', 'Completed')]}
@@ -476,7 +490,7 @@ class TestConfigOverlays:
             'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
         ]
 
-    def test_virtual_kafka_config_uses_resolved_pending_auth(self):
+    def test_managed_kafka_changes_stay_on_kafka_cluster_resource(self):
         sections = _build_tree_from_raw({})
         deployed_console = {'kafkas': [{
             'refName': 'default',
@@ -486,7 +500,6 @@ class TestConfigOverlays:
                 'authType': 'none',
                 'listenerName': 'plain',
             },
-            'displayFields': ['type', 'clusterName', 'authType', 'listenerName'],
         }]}
         pending = {'resources': [{
             'kind': 'KafkaCluster',
@@ -506,14 +519,41 @@ class TestConfigOverlays:
             pending_resolved_config=pending,
         )
 
-        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
+        assert group_by_plural(sections, 'kafkaconfigs').resources == []
+        resource = group_by_plural(sections, 'kafkaclusters').resources[0]
         assert format_config_diff_fields(resource) == [
-            'autoCreate.auth.type: deployed=none | pending=none | to-submit=scram-sha-512',
-            'listenerName: deployed=plain | pending=plain | to-submit=tls',
+            'type: deployed=<absent> | pending=<absent> | to-submit=scram-sha-512',
         ]
         assert format_config_diff_fields(resource, CONFIG_MODE_PENDING_SUBMIT) == [
-            'autoCreate.auth.type: to-submit=scram-sha-512',
-            'listenerName: to-submit=tls',
+            'type: to-submit=scram-sha-512',
+        ]
+
+    def test_external_kafka_config_remains_virtual_connection(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'kafkas': [{
+            'refName': 'external',
+            'runtime': {
+                'type': 'direct',
+                'clientConfig': {
+                    'broker_endpoints': 'broker.example.com:9093',
+                    'scram': {'username': 'migration-app'},
+                },
+                'secretName': 'external-user',
+                'caSecretName': 'external-ca',
+            },
+            'displayFields': ['type', 'clientConfig.broker_endpoints', 'secretName', 'caSecretName'],
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
+        assert resource.name == 'external'
+        assert resource.phase == 'Pending Config'
+        assert format_config_diff_fields(resource) == [
+            'type: deployed=<absent> | pending=<absent> | to-submit=direct',
+            'broker_endpoints: deployed=<absent> | pending=<absent> | to-submit=broker.example.com:9093',
+            'secretName: deployed=<absent> | pending=<absent> | to-submit=external-user',
+            'caSecretName: deployed=<absent> | pending=<absent> | to-submit=external-ca',
         ]
 
     def test_virtual_source_config_labels_use_authored_config_paths(self):
@@ -632,6 +672,72 @@ class TestConfigOverlays:
 
 
 # --- format_live_status ---
+
+class TestFormatDependencyLine:
+    def test_pending_dependency_renders_waiting_for(self):
+        resource = make_resource(
+            'datasnapshots',
+            phase='Pending',
+            depends_on=['cap'],
+        )
+        resource.dependency_states = [
+            {'name': 'cap', 'phase': 'Pending', 'plural': 'captureproxies'}
+        ]
+
+        assert format_dependency_line(resource) == 'Waiting for: cap (Pending)'
+
+    def test_ready_dependency_is_not_rendered_as_blocking(self):
+        resource = make_resource(
+            'captureproxies',
+            phase='Pending',
+            depends_on=['cap-topic'],
+        )
+        resource.dependency_states = [
+            {'name': 'cap-topic', 'phase': 'Ready', 'plural': 'capturedtraffics'}
+        ]
+
+        assert format_dependency_line(resource) is None
+
+    def test_unknown_dependency_keeps_depends_on_label(self):
+        resource = make_resource(
+            'datasnapshots',
+            phase='Pending',
+            depends_on=['cap'],
+        )
+
+        assert format_dependency_line(resource) == 'Depends on: cap'
+
+
+class TestFormatApprovalGateLine:
+    def test_running_approval_renders_blocked_reason(self):
+        resource = make_resource('captureproxies', name='cap', phase='Error')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CaptureProxy: cap',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'denial_reason': 'Impossible: listenPort cannot be changed.',
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'captureproxy.cap.vapretry'}]},
+            'children': [],
+        }]
+
+        assert format_approval_gate_line(resource) == 'BLOCKED: Impossible: listenPort cannot be changed.'
+
+    def test_running_approval_without_reason_renders_required(self):
+        resource = make_resource('captureproxies', name='cap', phase='Pending')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CaptureProxy: cap',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'captureproxy.cap.vapretry'}]},
+            'children': [],
+        }]
+
+        assert format_approval_gate_line(resource) == 'BLOCKED: approval required'
+
 
 class TestFormatLiveStatus:
     def test_backfill_running_shows_progress(self):

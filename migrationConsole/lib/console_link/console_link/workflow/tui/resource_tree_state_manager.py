@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional
 
+from rich.markup import escape
 from textual.widgets._tree import TreeNode, Tree
 
 from console_link.workflow.resource_tree import (
@@ -10,7 +11,8 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step, resource_visible_in_config_mode,
-    format_resource_diagnostics, format_rollout_status_suffix,
+    format_dependency_line, format_resource_diagnostics, format_rollout_status_suffix,
+    active_approval_node, format_approval_gate_line, format_approval_gate_label,
 )
 from console_link.workflow.manage_tree_schema import group_plurals_for
 from console_link.workflow.manage_tree_status import (
@@ -255,6 +257,7 @@ class ResourceTreeStateManager:
                 resource_node.set_label(self._resource_label(resource))
                 if resource_node.data and isinstance(resource_node.data, dict):
                     resource_node.data['phase'] = resource.phase
+                    self._update_resource_approval_data(resource_node.data, resource)
                 # Always rebuild the subtree below the resource (details + workflow steps)
                 self._rebuild_resource_children(resource_node, resource)
 
@@ -264,8 +267,13 @@ class ResourceTreeStateManager:
         self._remove_children(resource_node)
 
         self._add_resource_details(resource_node, resource)
-        if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
-            resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
+        dependency_line = format_dependency_line(resource)
+        if dependency_line:
+            style = "yellow" if dependency_line.startswith("Waiting for:") else "dim"
+            resource_node.add(f"[{style}]{dependency_line}[/{style}]", data=None)
+        approval_line = format_approval_gate_line(resource)
+        if approval_line:
+            resource_node.add(f"[bold red]{escape(approval_line)}[/bold red]", data=None)
         live = format_live_status(resource)
         if live:
             summary_line, detail_lines = live
@@ -317,6 +325,9 @@ class ResourceTreeStateManager:
 
     @staticmethod
     def _resource_change_label(resource: ResourceNode) -> str:
+        approval_label = format_approval_gate_label(resource, rich_markup=True)
+        if approval_label:
+            return approval_label
         diagnostic = ResourceTreeStateManager._highest_priority_diagnostic(resource)
         if diagnostic:
             severity = diagnostic.get('severity') or 'error'
@@ -528,18 +539,26 @@ class ResourceTreeStateManager:
         data = {
             'id': self._resource_id(resource),
             'resource_path': resource_path,
+            'resource_plural': resource.plural,
+            'resource_name': resource.name,
             'phase': resource.phase,
         }
         if latest_workflow_pod_id:
             data['resource_log_node_id'] = latest_workflow_pod_id
+        self._update_resource_approval_data(data, resource)
         if resource.tree_data:
             data.update(resource.tree_data)
         resource_node = parent.add(label, data=data)
 
         # Spec details
         self._add_resource_details(resource_node, resource)
-        if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
-            resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
+        dependency_line = format_dependency_line(resource)
+        if dependency_line:
+            style = "yellow" if dependency_line.startswith("Waiting for:") else "dim"
+            resource_node.add(f"[{style}]{dependency_line}[/{style}]", data=None)
+        approval_line = format_approval_gate_line(resource)
+        if approval_line:
+            resource_node.add(f"[bold red]{escape(approval_line)}[/bold red]", data=None)
         live = format_live_status(resource)
         if live:
             summary_line, detail_lines = live
@@ -560,6 +579,14 @@ class ResourceTreeStateManager:
             resource_node.collapse()
         elif resource.tree_default_expanded is True and resource_node.children:
             resource_node.expand()
+
+    @staticmethod
+    def _update_resource_approval_data(data: Dict, resource: ResourceNode) -> None:
+        approval = active_approval_node(resource)
+        if approval:
+            data['approval_node'] = approval
+        else:
+            data.pop('approval_node', None)
 
     def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         for field in format_spec_fields(resource):
@@ -652,7 +679,7 @@ class ResourceTreeStateManager:
             'force_expanded': self._workflow_progress_forced_expanded(resource, notable),
         }
         if resource_data:
-            for key in ('resource_path', 'resource_log_node_id'):
+            for key in ('resource_path', 'resource_plural', 'resource_name', 'resource_log_node_id'):
                 if key in resource_data:
                     workflow_data[key] = resource_data[key]
         wf_node = resource_node.add(
@@ -670,7 +697,7 @@ class ResourceTreeStateManager:
         label = get_step_rich_label(display_step, status_output=status_output, show_approval_name=False)
         data = dict(step)
         if inherited_data:
-            for key in ('resource_path', 'resource_log_node_id'):
+            for key in ('resource_path', 'resource_plural', 'resource_name', 'resource_log_node_id'):
                 if key in inherited_data:
                     data.setdefault(key, inherited_data[key])
         node = parent.add(label, data=data)

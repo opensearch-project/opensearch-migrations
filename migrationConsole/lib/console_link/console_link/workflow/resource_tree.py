@@ -40,6 +40,8 @@ PHASE_SYMBOLS = {
     'Unknown': ('?', 'white'),
 }
 
+TERMINAL_DEPENDENCY_PHASES = {'Ready', 'Completed', 'Succeeded'}
+
 # Concise status fields used when a projected config/resource did not provide
 # schema-derived displayFields. Raw resources without config projections still
 # fall back to their full spec below.
@@ -113,6 +115,7 @@ class ResourceNode:
     status: Dict[str, Any]
     created_at: Optional[str] = None
     children: List['ResourceNode'] = field(default_factory=list)
+    dependency_states: List[Dict[str, str]] = field(default_factory=list)
 
     workflow_progress: Optional[List[Dict[str, Any]]] = None
     config_diff: Optional[Dict[str, Any]] = None
@@ -178,8 +181,6 @@ def apply_config_overlays(
     pending = _resolved_resource_map(pending_resolved_config)
     submitted.update(_console_resource_map(submitted_console_config))
     pending.update(_console_resource_map(pending_console_config))
-    _merge_resolved_kafka_configs(submitted, submitted_resolved_config)
-    _merge_resolved_kafka_configs(pending, pending_resolved_config)
     deployed_config_available = deployed_console_config is not None
     submitted_available = submitted_resolved_config is not None or submitted_console_config is not None
     pending_available = pending_resolved_config is not None or pending_console_config is not None
@@ -322,6 +323,57 @@ def format_rollout_status_suffix(status: Optional[str], rich_markup: bool = Fals
     return f" [{style}]({escape(text)})[/{style}]"
 
 
+def format_dependency_line(resource: ResourceNode) -> Optional[str]:
+    if not resource.depends_on or resource.phase in ('Ready', 'Completed'):
+        return None
+    states_by_name = {
+        item.get('name'): item
+        for item in resource.dependency_states
+        if item.get('name')
+    }
+    blockers = [
+        f"{name} ({states_by_name[name].get('phase') or 'Unknown'})"
+        for name in resource.depends_on
+        if (
+            name in states_by_name and
+            states_by_name[name].get('phase') not in TERMINAL_DEPENDENCY_PHASES
+        )
+    ]
+    if blockers:
+        return f"Waiting for: {', '.join(blockers)}"
+    unknown = [name for name in resource.depends_on if name not in states_by_name]
+    if unknown:
+        return f"Depends on: {', '.join(unknown)}"
+    return None
+
+
+def active_approval_node(resource: ResourceNode) -> Optional[Dict[str, Any]]:
+    """Return the first running approval gate node attached to a resource."""
+    for step in _iter_nodes(resource.workflow_progress or []):
+        if is_approval_node(step) and get_node_phase(step) == 'Running':
+            return step
+    return None
+
+
+def format_approval_gate_line(resource: ResourceNode) -> Optional[str]:
+    approval = active_approval_node(resource)
+    if not approval:
+        return None
+    reason = str(approval.get('denial_reason') or '').strip()
+    if reason:
+        return f"BLOCKED: {reason}"
+    return "BLOCKED: approval required"
+
+
+def format_approval_gate_label(resource: ResourceNode, rich_markup: bool = False) -> str:
+    approval_line = format_approval_gate_line(resource)
+    if not approval_line:
+        return ''
+    if not rich_markup:
+        return f" ({approval_line})"
+    return f" [bold red]({escape(approval_line)})[/bold red]"
+
+
 def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceSection]:
     """Build resource tree from raw CR data (testable without K8s)."""
     sections = []
@@ -344,7 +396,24 @@ def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceS
             _nest_topics_under_kafka(resources)
             groups.append(ResourceGroup(plural=plurals[0], display_name=display_name, resources=resources))
         sections.append(ResourceSection(name=section_name, groups=groups))
+    _attach_dependency_states(sections)
     return sections
+
+
+def _attach_dependency_states(sections: List[ResourceSection]) -> None:
+    by_name = {}
+    for resource in _iter_resource_nodes(sections):
+        by_name.setdefault(resource.name, resource)
+    for resource in _iter_resource_nodes(sections):
+        resource.dependency_states = [
+            {
+                'name': dep,
+                'phase': by_name[dep].phase,
+                'plural': by_name[dep].plural,
+            }
+            for dep in resource.depends_on
+            if dep in by_name
+        ]
 
 
 def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
@@ -432,6 +501,8 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
                 'consumers': target.get('consumers') or [],
             }
     for kafka in console_config.get('kafkas') or []:
+        if not _is_external_kafka_config(kafka):
+            continue
         name = kafka.get('refName')
         if name:
             result[('kafkaconfigs', name)] = {
@@ -446,57 +517,8 @@ def _console_resource_map(console_config: Optional[Dict[str, Any]]) -> Dict[tupl
     return result
 
 
-def _merge_resolved_kafka_configs(
-    target: Dict[tuple[str, str], Dict[str, Any]],
-    resolved_config: Optional[Dict[str, Any]],
-) -> None:
-    """Derive virtual Kafka config rows from canonical resolved KafkaCluster CRs."""
-    if not resolved_config:
-        return
-    for resource in resolved_config.get('resources') or []:
-        if resource.get('kind') != 'KafkaCluster' or not resource.get('name'):
-            continue
-        name = str(resource['name'])
-        parameters = resource.get('parameters') or {}
-        auth_type = _get_nested(parameters, 'auth.type') if _has_nested(parameters, ['auth', 'type']) else None
-        runtime = {
-            'type': 'strimzi',
-            'clusterName': name,
-        }
-        if auth_type:
-            runtime['authType'] = auth_type
-            runtime['listenerName'] = 'tls' if auth_type == 'scram-sha-512' else 'plain'
-
-        key = ('kafkaconfigs', name)
-        existing = target.get(key) or {}
-        target[key] = {
-            **existing,
-            'kind': 'KafkaConfig',
-            'name': name,
-            'parameters': {
-                **(existing.get('parameters') or {}),
-                **runtime,
-            },
-            'displayFields': existing.get('displayFields') or ['type', 'clusterName', 'authType', 'listenerName'],
-            'parameterProvenance': _resolved_kafka_config_provenance(
-                resource.get('parameterProvenance') or {},
-                existing.get('parameterProvenance') or {},
-            ),
-        }
-
-
-def _resolved_kafka_config_provenance(
-    resource_provenance: Dict[str, Any],
-    existing_provenance: Dict[str, Any],
-) -> Dict[str, Any]:
-    result = dict(existing_provenance)
-    auth = resource_provenance.get('auth.type')
-    if auth:
-        result['authType'] = {
-            **auth,
-            'path': ['authType'],
-        }
-    return result
+def _is_external_kafka_config(kafka: Dict[str, Any]) -> bool:
+    return ((kafka.get('runtime') or {}).get('type') == 'direct')
 
 
 def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNode) -> None:
@@ -1021,9 +1043,13 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
     for diagnostic in format_resource_diagnostics(resource):
         style = diagnostic_style(diagnostic.get('severity', 'error'))
         node.add(f"[{style}]{diagnostic['label']}[/{style}]")
-    if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
-        deps = ", ".join(resource.depends_on)
-        node.add(f"[dim]Depends on: {deps}[/dim]")
+    dependency_line = format_dependency_line(resource)
+    if dependency_line:
+        style = "yellow" if dependency_line.startswith("Waiting for:") else "dim"
+        node.add(f"[{style}]{dependency_line}[/{style}]")
+    approval_line = format_approval_gate_line(resource)
+    if approval_line:
+        node.add(f"[bold red]{escape(approval_line)}[/bold red]")
     if show_live_status:
         live = format_live_status(resource)
         if live:
@@ -1037,6 +1063,9 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
 
 
 def _resource_change_label(resource: ResourceNode) -> str:
+    approval_label = format_approval_gate_label(resource, rich_markup=True)
+    if approval_label:
+        return approval_label
     diagnostic = _highest_priority_diagnostic(resource)
     if diagnostic:
         severity = diagnostic.get('severity') or 'error'
