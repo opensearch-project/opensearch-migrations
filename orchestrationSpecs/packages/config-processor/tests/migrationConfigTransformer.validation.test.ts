@@ -140,6 +140,36 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized key 'rogueInNested' at: sourceClusters\.source1\.snapshotInfo\.rogueInNested/);
     });
 
+    it('should reject rogue keys inside piped document backfill options', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            documentBackfillConfig: {
+                podReplicas: 1,
+                documentBackfillPodReplicas: 2,
+            },
+        };
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'documentBackfillPodReplicas' at: snapshotMigrationConfigs\.0\.perSnapshotConfig\.snap1\.0\.documentBackfillConfig\.documentBackfillPodReplicas/);
+    });
+
+    it('should reject stale pod replica keys outside proxy and replayer config blocks', () => {
+        const config = cloneBaseConfig() as any;
+        config.traffic.proxies.proxy1.podReplicas = 2;
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'podReplicas' at: traffic\.proxies\.proxy1\.podReplicas/);
+
+        delete config.traffic.proxies.proxy1.podReplicas;
+        config.traffic.replayers.replay1.podReplicas = 2;
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'podReplicas' at: traffic\.replayers\.replay1\.podReplicas/);
+    });
+
     it('should validate refinements (bad repoName reference)', () => {
         // This is now a schema-level validation since repoName is inside snapshotInfo.snapshots
         // The refinement would need to be re-enabled in the schema

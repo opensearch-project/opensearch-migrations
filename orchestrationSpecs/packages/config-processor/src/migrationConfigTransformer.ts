@@ -15,6 +15,7 @@ import {
     ARGO_PROXY_OPTIONS,
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
+    unwrapSchema as unwrapSchemaWithPipes,
 } from '@opensearch-migrations/schemas';
 import {InputValidationElement, InputValidationError, StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -143,10 +144,40 @@ function isKafkaClusterConfigPath(path: string[]): boolean {
     return path.length === 2 && path[0] === "kafkaClusterConfiguration";
 }
 
+function schemaDef(schema: z.ZodTypeAny): any {
+    return (schema as any)._def ?? {};
+}
+
+function schemaType(schema: z.ZodTypeAny): string {
+    return schemaDef(schema).type ?? schema.constructor.name;
+}
+
+function unwrapTransparentSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
+    let current: z.ZodTypeAny = unwrapSchemaWithPipes(schema);
+    while (true) {
+        const currentType = schemaType(current);
+        const def = schemaDef(current);
+        if (currentType === "catch" || currentType === "readonly") {
+            current = typeof (current as any).unwrap === "function"
+                ? (current as any).unwrap()
+                : def.innerType;
+            current = unwrapSchemaWithPipes(current);
+            continue;
+        }
+        if (currentType === "lazy" && typeof def.getter === "function") {
+            current = unwrapSchemaWithPipes(def.getter());
+            continue;
+        }
+        return current;
+    }
+}
+
 function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = []): void {
-    const schemaType = schema.constructor.name;
+    schema = unwrapTransparentSchema(schema);
+    const schemaTypeName = schema.constructor.name;
+    const schemaTypeDef = schemaType(schema);
     
-    if (schemaType === 'ZodObject') {
+    if (schemaTypeName === 'ZodObject' || schemaTypeDef === "object") {
         if (typeof data !== 'object' || data === null) return;
         
         const allowedKeys = Object.keys((schema as z.ZodObject<any>).shape);
@@ -163,11 +194,11 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
                 validateNoExtraKeys(data[key], (schema as z.ZodObject<any>).shape[key], [...path, key]);
             }
         }
-    } else if (schemaType === 'ZodArray' && Array.isArray(data)) {
+    } else if ((schemaTypeName === 'ZodArray' || schemaTypeDef === "array") && Array.isArray(data)) {
         data.forEach((item, index) => {
             validateNoExtraKeys(item, (schema as z.ZodArray<any>).element, [...path, index.toString()]);
         });
-    } else if (schemaType === 'ZodUnion' && data !== null && data !== undefined) {
+    } else if ((schemaTypeName === 'ZodUnion' || schemaTypeDef === "union") && data !== null && data !== undefined) {
         // For unions, we need to manually check which option matches AND validate extra keys
         let foundValidMatch = false;
         let extraKeyError: InputValidationError | null = null;
@@ -204,13 +235,10 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
             // Prioritize extra key errors over parse errors
             throw extraKeyError || parseError || new Error('No valid union option found');
         }
-    } else if (schemaType === 'ZodOptional' || schemaType === 'ZodDefault') {
-        if (data !== undefined) {
-            validateNoExtraKeys(data, (schema as z.ZodOptional<any> | z.ZodDefault<any>).unwrap(), path);
-        }
-    } else if (schemaType === 'ZodRecord' && typeof data === 'object' && data !== null) {
+    } else if ((schemaTypeName === 'ZodRecord' || schemaTypeDef === "record") && typeof data === 'object' && data !== null) {
+        const valueType = (schema as any).valueType ?? schemaDef(schema).valueType;
         Object.entries(data).forEach(([key, value]) => {
-            validateNoExtraKeys(value, (schema as z.ZodRecord<any, any>).valueType, [...path, key]);
+            validateNoExtraKeys(value, valueType, [...path, key]);
         });
     }
 }
@@ -898,10 +926,13 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
         if (matchingProxies.length > 1) {
             const proxyNames = matchingProxies.map(([proxyName]) => proxyName).join(", ");
-            throw new Error(
-                `Source '${sourceName}' maps to multiple proxies (${proxyNames}). ` +
-                `Console test routing requires exactly zero or one proxy per source.`
-            );
+            throw new InputValidationError([
+                new InputValidationElement(
+                    ["traffic", "proxies"],
+                    `Source '${sourceName}' maps to multiple proxies (${proxyNames}). ` +
+                    `Console test routing requires exactly zero or one proxy per source.`
+                )
+            ]);
         }
 
         const [proxyName, proxy] = matchingProxies[0];

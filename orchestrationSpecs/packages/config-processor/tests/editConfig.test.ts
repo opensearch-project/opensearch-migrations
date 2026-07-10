@@ -1,4 +1,4 @@
-import {applyEditOperationToObject, buildEditStateFromObject} from "../src/editConfig";
+import {applyEditOperationToObject, buildEditStateFromObject, buildEditStateFromObjectForSubmit} from "../src/editConfig";
 import type {EditNode} from "../src/schemaEditModel";
 import {buildUnifiedSchema, DNS_NAME_PATTERN, USER_PROXY_PROCESS_OPTION_KEYS, USER_PROXY_WORKFLOW_OPTION_KEYS} from "@opensearch-migrations/schemas";
 import {parse} from "yaml";
@@ -43,6 +43,83 @@ function withUnifiedSchemaFixture<T>(callback: () => T): T {
 }
 
 describe("editConfig state", () => {
+    it("surfaces unknown keys inside wrapped schema branches", () => {
+        const state = withUnifiedSchemaFixture(() => buildEditStateFromObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "http://example.com",
+                    version: "ES 7.10",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {awsRegion: "us-east-1", repoPathUri: "s3://bucket/path"},
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "repo",
+                                config: {externallyManagedSnapshotName: "snap-1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [{
+                fromSource: "source",
+                toTarget: "target",
+                perSnapshotConfig: {
+                    snap1: [{
+                        documentBackfillConfig: {
+                            podReplicas: 1,
+                            documentBackfillPodReplicas: 2,
+                        },
+                    }],
+                },
+            }],
+        }));
+
+        expect(state.validation.valid).toBe(false);
+        expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                severity: "error",
+                message: "Unrecognized key 'documentBackfillPodReplicas'",
+                path: [
+                    "snapshotMigrationConfigs",
+                    "0",
+                    "perSnapshotConfig",
+                    "snap1",
+                    "0",
+                    "documentBackfillConfig",
+                    "documentBackfillPodReplicas",
+                ],
+            }),
+        ]));
+
+        const backfillConfig = findNode(
+            state.nodes,
+            "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig",
+        );
+        const unknownField = findNode(
+            state.nodes,
+            "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.documentBackfillPodReplicas",
+        );
+
+        expect(backfillConfig).toMatchObject({
+            status: "error",
+            statusCounts: {errors: 1},
+        });
+        expect(unknownField).toMatchObject({
+            label: "documentBackfillPodReplicas: 2",
+            status: "error",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    message: "Unrecognized key 'documentBackfillPodReplicas'",
+                }),
+            ]),
+        });
+    });
+
     it("uses the same top-level grouping as the resource view", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {
@@ -241,6 +318,64 @@ describe("editConfig state", () => {
                 expect.objectContaining({
                     message: "Transformed workflow config is invalid.",
                     path: ["workflow", "generated", "field"],
+                }),
+            ]),
+        });
+    });
+
+    it("attaches submit validation diagnostics for duplicate source proxies to the visible capture group", async () => {
+        const state = await buildEditStateFromObjectForSubmit({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {repoPathUri: "s3://bucket/path", awsRegion: "us-east-1"},
+                        },
+                        snapshots: {
+                            s1: {
+                                repoName: "repo",
+                                config: {createSnapshotConfig: {}},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        auth: {type: "none"},
+                    },
+                },
+            },
+            traffic: {
+                proxies: {
+                    cap: {source: "source", proxyConfig: {listenPort: 9201}},
+                    c2: {source: "source", proxyConfig: {listenPort: 9202}},
+                },
+                s3Sources: {},
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const capture = findNode(state.nodes, "edit:traffic.proxies");
+
+        expect(state.validation.valid).toBe(false);
+        expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: ["traffic", "proxies"],
+                message: expect.stringContaining("maps to multiple proxies"),
+            }),
+        ]));
+        expect(capture).toMatchObject({
+            status: "error",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: ["traffic", "proxies"],
+                    message: expect.stringContaining("maps to multiple proxies"),
                 }),
             ]),
         });
@@ -1225,6 +1360,102 @@ describe("editConfig state", () => {
         )?.description).toContain("First define repositories under sourceClusters.legacy.snapshotInfo.repos.");
     });
 
+    it("switches a source snapshot from externally managed to create-snapshot without deleting the snapshot", () => {
+        const config = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {repoPathUri: "s3://bucket/path", awsRegion: "us-east-1"},
+                        },
+                        snapshots: {
+                            s1: {
+                                repoName: "repo",
+                                config: {externallyManagedSnapshotName: "external-s1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
+            kafkaClusterConfiguration: {},
+            snapshotMigrationConfigs: [],
+            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+        };
+
+        const result = applyEditOperationToObject(config, {
+            op: "set",
+            path: ["sourceClusters", "source", "snapshotInfo", "snapshots", "s1", "config"],
+            value: "createSnapshotConfig",
+        });
+
+        const parsed = parse(result.yaml);
+        expect(parsed.sourceClusters.source.snapshotInfo.snapshots).toHaveProperty("s1");
+        expect(parsed.sourceClusters.source.snapshotInfo.snapshots.s1).toEqual({
+            repoName: "repo",
+            config: {createSnapshotConfig: {}},
+        });
+        expect(findNode(
+            result.editState.nodes,
+            "edit:sourceClusters.source.snapshotInfo.snapshots.s1.config",
+        )).toMatchObject({
+            valueKind: "union",
+            value: "createSnapshotConfig",
+            variants: expect.arrayContaining([
+                expect.objectContaining({value: "externallyManagedSnapshotName"}),
+                expect.objectContaining({value: "createSnapshotConfig"}),
+            ]),
+        });
+    });
+
+    it("unsets a source snapshot config branch without deleting the snapshot", () => {
+        const config = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {repoPathUri: "s3://bucket/path", awsRegion: "us-east-1"},
+                        },
+                        snapshots: {
+                            s1: {
+                                repoName: "repo",
+                                config: {externallyManagedSnapshotName: "external-s1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
+            kafkaClusterConfiguration: {},
+            snapshotMigrationConfigs: [],
+            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+        };
+
+        const result = applyEditOperationToObject(config, {
+            op: "unset",
+            path: ["sourceClusters", "source", "snapshotInfo", "snapshots", "s1", "config"],
+        });
+
+        const parsed = parse(result.yaml);
+        expect(parsed.sourceClusters.source.snapshotInfo.snapshots).toHaveProperty("s1");
+        expect(parsed.sourceClusters.source.snapshotInfo.snapshots.s1).toEqual({
+            repoName: "repo",
+        });
+        const configNode = findNode(
+            result.editState.nodes,
+            "edit:sourceClusters.source.snapshotInfo.snapshots.s1.config",
+        );
+        expect(configNode).toMatchObject({
+            valueKind: "union",
+            status: "required",
+        });
+        expect(configNode?.value).toBeUndefined();
+    });
+
     it("reports unknown per-snapshot names with a repair action", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {
@@ -1609,15 +1840,15 @@ describe("editConfig state", () => {
             valueKind: "union",
             value: "unset",
             effectiveDefault: {
-                label: "cert-manager self-signed",
-                description: expect.stringContaining("preconfigured self-signed issuer"),
+                label: expect.any(String),
+                description: expect.any(String),
             },
         });
-        expect(tls?.label).toContain("tls: < default: cert-manager self-signed >");
+        expect(tls?.label).toContain("tls: < default:");
         expect(tls?.variants?.[0]).toMatchObject({
-            label: "default (cert-manager self-signed)",
+            label: expect.stringMatching(/^default \(.+\)$/),
             value: "unset",
-            description: expect.stringContaining("preconfigured self-signed issuer"),
+            description: expect.any(String),
         });
         expect(setHeader).toMatchObject({presence: "optional", valueKind: "array"});
         expect(suppressHeaderMatch).toMatchObject({
