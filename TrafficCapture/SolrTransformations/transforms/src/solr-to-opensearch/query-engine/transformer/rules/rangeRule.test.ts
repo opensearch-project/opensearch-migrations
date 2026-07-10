@@ -140,4 +140,110 @@ describe('rangeRule', () => {
 
     expect(rangeMap.has('created_at')).toBe(true);
   });
+
+  // ─── Solr date-math translation (Fix 2) ────────────────────────────────────
+
+  it('translates Solr date-math NOW-365DAYS to OpenSearch now-365d', () => {
+    const node: RangeNode = {
+      type: 'range',
+      field: 'review_date',
+      lower: 'NOW-365DAYS',
+      upper: 'NOW',
+      lowerInclusive: true,
+      upperInclusive: true,
+    };
+
+    const result = rangeRule(node, stubTransformChild);
+
+    expect(result).toEqual(
+      new Map([
+        [
+          'range',
+          new Map([['review_date', new Map([['gte', 'now-365d'], ['lte', 'now']])]]),
+        ],
+      ]),
+    );
+  });
+
+  it('translates rounded date-math NOW/MONTH-6MONTHS to now/M-6M', () => {
+    const node: RangeNode = {
+      type: 'range',
+      field: 'd',
+      lower: 'NOW/MONTH-6MONTHS',
+      upper: 'NOW/MONTH',
+      lowerInclusive: true,
+      upperInclusive: false,
+    };
+
+    const result = rangeRule(node, stubTransformChild);
+
+    expect(result).toEqual(
+      new Map([
+        [
+          'range',
+          new Map([['d', new Map([['gte', 'now/M-6M'], ['lt', 'now/M']])]]),
+        ],
+      ]),
+    );
+  });
+
+  it('passes ISO-8601 timestamps through unchanged', () => {
+    const node: RangeNode = {
+      type: 'range',
+      field: 'd',
+      lower: '2020-01-01T00:00:00Z',
+      upper: '2022-12-31T23:59:59Z',
+      lowerInclusive: true,
+      upperInclusive: true,
+    };
+
+    const result = rangeRule(node, stubTransformChild);
+
+    expect(result).toEqual(
+      new Map([
+        [
+          'range',
+          new Map([
+            [
+              'd',
+              new Map([
+                ['gte', '2020-01-01T00:00:00Z'],
+                ['lte', '2022-12-31T23:59:59Z'],
+              ]),
+            ],
+          ]),
+        ],
+      ]),
+    );
+  });
+
+  it('combines date-math lower with ISO upper', () => {
+    const node: RangeNode = {
+      type: 'range',
+      field: 'd',
+      lower: 'NOW-7DAYS',
+      upper: '2025-01-01T00:00:00Z',
+      lowerInclusive: true,
+      upperInclusive: false,
+    };
+
+    const result = rangeRule(node, stubTransformChild);
+
+    expect(result).toEqual(
+      new Map([
+        [
+          'range',
+          new Map([
+            [
+              'd',
+              new Map([
+                ['gte', 'now-7d'],
+                ['lt', '2025-01-01T00:00:00Z'],
+              ]),
+            ],
+          ]),
+        ],
+      ]),
+    );
+  });
 });

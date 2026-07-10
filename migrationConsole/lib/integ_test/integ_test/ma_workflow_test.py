@@ -3,15 +3,23 @@ import subprocess
 
 import pytest
 
+from console_link.workflow.commands.crd_utils import list_migration_resources, resource_display_name
+from console_link.workflow.models.utils import load_k8s_config
+
 from .test_cases.ma_argo_test_base import MATestBase
+from .metric_operations import assert_cloudwatch_capture_replay_metrics_for_workflow_run
 
 
 logger = logging.getLogger(__name__)
 
 
 def _run_workflow_reset(namespace: str = "ma"):
-    """Run 'workflow reset --all --include-proxies' to delete all migration CRDs."""
-    cmd = ["workflow", "reset", "--all", "--include-proxies", "--namespace", namespace]
+    """Run 'workflow reset --all --include-proxies --delete-storage' to delete all migration CRDs.
+
+    The --delete-storage flag ensures Kafka PVCs are cleaned up between consecutive
+    test runs (e.g. --test-ids=0031,0040), preventing cluster ID conflicts.
+    """
+    cmd = ["workflow", "reset", "--all", "--include-proxies", "--delete-storage", "--namespace", namespace]
     logger.info("Running workflow reset: %s", " ".join(cmd))
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -20,17 +28,43 @@ def _run_workflow_reset(namespace: str = "ma"):
         if result.stderr:
             logger.warning("workflow reset stderr:\n%s", result.stderr)
         if result.returncode != 0:
-            logger.warning("workflow reset exited with code %d", result.returncode)
+            pytest.fail(f"workflow reset exited with code {result.returncode}")
     except subprocess.TimeoutExpired:
-        logger.warning("workflow reset timed out after 300s")
+        pytest.fail("workflow reset timed out after 300s")
     except FileNotFoundError:
-        logger.warning("'workflow' CLI not found on PATH, skipping CRD reset")
+        pytest.fail("'workflow' CLI not found on PATH; cannot reset migration CRDs")
+
+
+def _fail_if_migration_resources_exist(namespace: str = "ma"):
+    """Fail before a test starts if a previous case left migration resources behind."""
+    try:
+        load_k8s_config()
+        resources = list_migration_resources(namespace)
+    except Exception as e:
+        pytest.fail(f"Unable to verify clean migration-resource state before test: {e}")
+
+    if not resources:
+        return
+
+    formatted = [resource_display_name(plural, name) for plural, name, _, _ in resources]
+    remaining_resources = ", ".join(formatted)
+    pytest.fail(
+        "Migration resources already exist before test starts; a previous workflow reset likely failed. "
+        f"Remaining resources in namespace {namespace}: {remaining_resources}"
+    )
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
+def setup_and_teardown(
+    request,
+    keep_workflows,
+    skip_workflow_reset,
+    dump_all_workflow_output_artifacts,
+    test_case: MATestBase,
+):
     #-----Setup-----
     logger.info("Performing setup...")
+    _fail_if_migration_resources_exist()
 
     #-----Execute test-----
     yield
@@ -38,19 +72,31 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
     #-----Teardown-----
     logger.info("Performing teardown...")
     if test_case.workflow_name:
-        phase_result = test_case.argo_service.is_workflow_completed(workflow_name=test_case.workflow_name)
-        if not phase_result.success:
+        status_result = test_case.argo_service.get_workflow_status(workflow_name=test_case.workflow_name)
+        if status_result.value.get("phase", "") not in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
             test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
             test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
-        # Print workflow details and save diagnostics if test failed
+        # On success the full workflow-status JSON and migration-resource YAML are just noise.
+        # Only dump them (along with the heavier details/diagnostics) when the test failed.
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
+            test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
+            test_case.argo_service.print_migration_resource_status()
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
-            test_case.argo_service.save_namespace_diagnostics("./logs")
+            test_case.argo_service.print_namespace_diagnostics(
+                workflow_name=test_case.workflow_name,
+                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+            )
+            test_case.argo_service.save_namespace_diagnostics(
+                "./logs",
+                workflow_name=test_case.workflow_name,
+                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+            )
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
-    # Reset all migration CRDs before test-specific cleanup
-    _run_workflow_reset()
+    # Reset all migration CRDs before test-specific cleanup unless the outer runner is preserving the run.
+    if not skip_workflow_reset:
+        _run_workflow_reset()
     test_case.cleanup()
 
 
@@ -92,3 +138,5 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     test_case.verify_clusters()
     test_case.workflow_finish()
     test_case.test_after()
+    test_case.assert_observability()
+    assert_cloudwatch_capture_replay_metrics_for_workflow_run(namespace=test_case.argo_service.namespace)

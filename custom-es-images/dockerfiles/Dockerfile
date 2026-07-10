@@ -32,7 +32,13 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
       fi; \
     fi && \
     mkdir -p /opt/elasticsearch && \
-    curl -fSL --retry 5 --retry-delay 5 --retry-max-time 300 --retry-all-errors \
+    # --http1.1 avoids intermittent "HTTP/2 stream was not closed cleanly: INTERNAL_ERROR"
+    # responses from artifacts.elastic.co that left half-written tarballs behind.
+    # --retry-delay 0 selects curl's exponential backoff (1s, 2s, 4s, ...) capped by
+    # --retry-max-time, so flaky upstreams aren't hammered every 5s.
+    curl -fSL --http1.1 \
+         --retry 10 --retry-delay 0 --retry-max-time 600 \
+         --retry-all-errors --retry-connrefused \
          -o /tmp/es.tar.gz "${RESOLVED_URL}" && \
     tar -xzf /tmp/es.tar.gz --strip-components=1 -C /opt/elasticsearch && \
     rm /tmp/es.tar.gz && \
@@ -56,7 +62,15 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
     # Remove Sigar native libs (ES 1.x-2.x)
     rm -rf lib/sigar 2>/dev/null; \
     # Remove x86-only UseAVX JVM option (breaks on ARM64/aarch64)
-    sed -i '/UseAVX/d' config/jvm.options 2>/dev/null; true
+    sed -i '/UseAVX/d' config/jvm.options 2>/dev/null; true; \
+    # Verify the tarball actually contained a runnable ES binary. Without this,
+    # a silently-truncated download (e.g. curl HTTP/2 INTERNAL_ERROR mid-stream)
+    # produces a tagged image whose entrypoint dies with exit 127 at runtime.
+    test -x /opt/elasticsearch/bin/elasticsearch || { \
+      echo "FATAL: /opt/elasticsearch/bin/elasticsearch missing or not executable after extracting ${TARBALL_URL}" >&2; \
+      ls -la /opt/elasticsearch /opt/elasticsearch/bin >&2 2>&1 || true; \
+      exit 1; \
+    }
 
 # --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 ---
 FROM ${BASE_IMAGE} AS cgroup-fixer
@@ -150,8 +164,18 @@ ENV JAVA_HOME=${JAVA_HOME_PATH}
 ENV ES_JAVA_HOME=${JAVA_HOME_PATH}
 ENV PATH="${JAVA_HOME_PATH}/bin:${JAVA_HOME_PATH}/jre/bin:${PATH}"
 
-RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs && \
-    chown -R 1000:1000 ${ES_HOME}
+RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs
+
+# Install repository-gcs plugin (ES 5.0+; not available for 1.x/2.x)
+# --batch suppresses the security warning prompt (available from ES 5.6+; earlier
+# versions ignore the flag so it is safe to pass unconditionally for 5.x+).
+# Run before the final chown so all plugin files are owned by the elasticsearch user.
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    if [ "$MAJOR" -ge 5 ]; then \
+      ${ES_HOME}/bin/elasticsearch-plugin install --batch repository-gcs; \
+    fi
+
+RUN chown -R 1000:1000 ${ES_HOME}
 
 WORKDIR ${ES_HOME}
 USER 1000

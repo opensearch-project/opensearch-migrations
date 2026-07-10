@@ -18,6 +18,7 @@ module.exports = {
     // ignore workspace deps (absolute-path friendly)
     testPathIgnorePatterns: [
         "/node_modules/",
+        "/tests/integ/",
         ignoreDep
     ],
     modulePathIgnorePatterns: [

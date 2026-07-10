@@ -77,16 +77,27 @@ metadata:
 spec:
   ttlSecondsAfterFinished: 300
   backoffLimit: 10
+  activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: apply-policy
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       annotations:
         karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
-      restartPolicy: OnFailure
+      restartPolicy: Never
       containers:
         - name: apply-policy
-          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh

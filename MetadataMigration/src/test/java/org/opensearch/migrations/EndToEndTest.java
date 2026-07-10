@@ -1,9 +1,11 @@
 package org.opensearch.migrations;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -12,13 +14,13 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -112,6 +114,394 @@ class EndToEndTest extends BaseMigrationTest {
                     TransferMedium.SnapshotImage,
                     MetadataCommands.MIGRATE,
                     List.of(TemplateType.Legacy));
+        }
+    }
+
+    /**
+     * E2E regression test: an ES 6 index that uses the legacy "standard" token filter (removed in ES 7+/OpenSearch)
+     * must still migrate successfully. The metadata migration retries after stripping the offending filter
+     * from analyzer filter arrays — see InvalidResponse#getRemovedTokenFilters and ObjectNodeUtils#removeAnalyzerFilters.
+     * Mirrors the production failure where ES 6 templates declared analyzers like:
+     *   "filter": ["standard", "custom_pattern_capture", "lowercase", "asciifolding", "my_stopwords"]
+     */
+    @Test
+    void deprecatedStandardTokenFilter_isStrippedAndIndexCreated() {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var indexName = "deprecated-standard-filter-index";
+            var templateName = "deprecated-standard-filter-template";
+            var templatePattern = "deprecated-standard-filter-tmpl-*";
+            var templatedIndexName = "deprecated-standard-filter-tmpl-2023";
+
+            // Index with an analyzer that includes the deprecated "standard" token filter.
+            var indexBody = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 1," +
+                "      \"number_of_replicas\": 0," +
+                "      \"analysis\": {" +
+                "        \"analyzer\": {" +
+                "          \"legacy_with_standard_filter\": {" +
+                "            \"type\": \"custom\"," +
+                "            \"tokenizer\": \"standard\"," +
+                "            \"filter\": [\"standard\", \"lowercase\", \"asciifolding\"]" +
+                "          }" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": {" +
+                "    \"" + sourceOperations.defaultDocType() + "\": {" +
+                "      \"properties\": {" +
+                "        \"body\": {" +
+                "          \"type\": \"text\"," +
+                "          \"analyzer\": \"legacy_with_standard_filter\"" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }" +
+                "}";
+            sourceOperations.createIndex(indexName, indexBody);
+            sourceOperations.createDocument(indexName, "1", "{ \"body\": \"hello world\" }");
+
+            // Legacy template using the same deprecated filter — exercises the template retry path.
+            var templateBody = "{" +
+                "  \"index_patterns\": [\"" + templatePattern + "\"]," +
+                "  \"order\": 0," +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 1," +
+                "      \"analysis\": {" +
+                "        \"analyzer\": {" +
+                "          \"legacy_with_standard_filter\": {" +
+                "            \"type\": \"custom\"," +
+                "            \"tokenizer\": \"standard\"," +
+                "            \"filter\": [\"standard\", \"lowercase\"]" +
+                "          }" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": {}" +
+                "}";
+            var tmplResp = sourceOperations.put("/_template/" + templateName + "?include_type_name=true", templateBody);
+            assertThat(tmplResp.getValue(), tmplResp.getKey(), equalTo(200));
+            sourceOperations.createDocument(templatedIndexName, "1", "{ \"f\": \"v\" }");
+
+            var snapshotName = "deprecated_standard_filter_snap";
+            var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
+
+            MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info(result.asCliOutput());
+            assertThat("Migration should succeed despite removed 'standard' token filter on source",
+                result.getExitCode(), equalTo(0));
+
+            // Both items should be in successful results
+            assertThat(getNames(getSuccessfulResults(result.getItems().getIndexes())), hasItems(indexName));
+            assertThat(getNames(getSuccessfulResults(result.getItems().getIndexTemplates())), hasItems(templateName));
+
+            // Verify the index made it to the target with the offending filter stripped
+            var indexRes = targetOperations.get("/" + indexName);
+            assertThat(indexRes.getValue(), indexRes.getKey(), equalTo(200));
+            assertThat("Removed token filter should not be present on target index",
+                indexRes.getValue(), not(containsString("\"standard\",\"lowercase\"")));
+            assertThat("Other filters should still be present", indexRes.getValue(), containsString("lowercase"));
+            assertThat("Other filters should still be present", indexRes.getValue(), containsString("asciifolding"));
+            assertThat("'standard' tokenizer (separate from filter) should still be present",
+                indexRes.getValue(), containsString("\"tokenizer\":\"standard\""));
+
+            // Verify the legacy template made it to the target with the offending filter stripped
+            var tmpl = targetOperations.get("/_template/" + templateName);
+            assertThat(tmpl.getValue(), tmpl.getKey(), equalTo(200));
+            assertThat("Template should have 'standard' filter removed",
+                tmpl.getValue(), not(containsString("\"standard\",\"lowercase\"")));
+            assertThat("Template should retain other filters", tmpl.getValue(), containsString("lowercase"));
+        }
+    }
+
+    /**
+     * Customer-reported scenario: ES 6 index with _source DISABLED and a custom analyzer
+     * that uses the deprecated "standard" token filter (removed in ES 7+/OS), referenced
+     * by a "text" field with norms:false. Without the preemptive transform, document
+     * indexing on the OS 2 target fails with:
+     *   "The [standard] token filter has been removed."
+     *
+     * The exact analyzer shape from the customer report:
+     *   "custom_tokenized_string": {
+     *     "filter": ["standard", "custom_pattern_capture", "lowercase", "asciifolding", "my_stopwords"],
+     *     "type": "custom",
+     *     "tokenizer": "standard"
+     *   }
+     * with a field:
+     *   "subj": { "type": "text", "norms": false, "analyzer": "custom_tokenized_string" }
+     *
+     * This test confirms metadata migrate succeeds (the preemptive analysis-component
+     * compatibility transform strips the offending "standard" filter from the analyzer's
+     * filter array) AND that the resulting target index actually accepts indexing the
+     * "subj" field — which is what failed for the customer.
+     */
+    @Test
+    void deprecatedStandardTokenFilter_withSourceDisabledAndSubjField_migratesAndIndexes() {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var indexName = "custom-source-disabled-subj";
+
+            // Customer-shaped index: _source disabled, custom analyzer with the deprecated
+            // "standard" token filter, field "subj" with norms:false referencing it.
+            // Define custom_pattern_capture and my_stopwords inline so the analyzer is
+            // self-contained on the source side. (We omit stopwords_path — that points at
+            // a config-dir file that wouldn't exist on the source container either.)
+            var indexBody = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 1," +
+                "      \"number_of_replicas\": 0," +
+                "      \"analysis\": {" +
+                "        \"analyzer\": {" +
+                "          \"custom_tokenized_string\": {" +
+                "            \"type\": \"custom\"," +
+                "            \"tokenizer\": \"standard\"," +
+                "            \"filter\": [\"standard\", \"custom_pattern_capture\", \"lowercase\", \"asciifolding\", \"my_stopwords\"]" +
+                "          }" +
+                "        }," +
+                "        \"filter\": {" +
+                "          \"custom_pattern_capture\": {" +
+                "            \"type\": \"pattern_capture\"," +
+                "            \"preserve_original\": true," +
+                "            \"patterns\": [\"([A-Za-z0-9._%+-]+)@\"]" +
+                "          }," +
+                "          \"my_stopwords\": {" +
+                "            \"type\": \"stop\"," +
+                "            \"stopwords\": [\"the\", \"a\", \"an\"]" +
+                "          }" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": {" +
+                "    \"" + sourceOperations.defaultDocType() + "\": {" +
+                "      \"_source\": { \"enabled\": false }," +
+                "      \"properties\": {" +
+                "        \"subj\": {" +
+                "          \"type\": \"text\"," +
+                "          \"norms\": false," +
+                "          \"analyzer\": \"custom_tokenized_string\"" +
+                "        }," +
+                "        \"from_addr\": {" +
+                "          \"type\": \"keyword\"," +
+                "          \"store\": true" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }" +
+                "}";
+            sourceOperations.createIndex(indexName, indexBody);
+            sourceOperations.createDocument(indexName, "1",
+                "{ \"subj\": \"Quarterly review meeting tomorrow\", \"from_addr\": \"alice@example.com\" }");
+            sourceOperations.createDocument(indexName, "2",
+                "{ \"subj\": \"Re: invoice attached\", \"from_addr\": \"bob@example.com\" }");
+
+            var snapshotName = "custom_source_disabled_snap";
+            createSnapshot(sourceCluster, snapshotName, SnapshotTestContext.factory().noOtelTracking());
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
+            // The customer's index has _source disabled, so we need this flag.
+            arguments.enableSourcelessMigrations = true;
+
+            // ── Step 1: metadata migrate (this is where the analyzer setup gets pushed) ──
+            MigrationItemResult metaResult = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info(metaResult.asCliOutput());
+            assertThat("Metadata migration should succeed despite removed 'standard' token filter on source",
+                metaResult.getExitCode(), equalTo(0));
+            assertThat(getNames(getSuccessfulResults(metaResult.getItems().getIndexes())), hasItems(indexName));
+
+            // ── Step 2: target index should be present with analyzer fixed ──
+            var indexRes = targetOperations.get("/" + indexName);
+            assertThat(indexRes.getValue(), indexRes.getKey(), equalTo(200));
+
+            var settingsRes = targetOperations.get("/" + indexName + "/_settings");
+            assertThat(settingsRes.getValue(), settingsRes.getKey(), equalTo(200));
+            var settingsBody = settingsRes.getValue();
+            // Must NOT contain the legacy "standard" filter token in the analyzer's filter array.
+            // We do a coarse-grained check that "custom_tokenized_string" no longer references
+            // "standard" as a filter — verifying the custom filters survive.
+            assertThat("Custom custom_pattern_capture filter must survive",
+                settingsBody, containsString("custom_pattern_capture"));
+            assertThat("lowercase must survive", settingsBody, containsString("lowercase"));
+            assertThat("asciifolding must survive", settingsBody, containsString("asciifolding"));
+            assertThat("my_stopwords must survive", settingsBody, containsString("my_stopwords"));
+
+            // ── Step 3: actually use the analyzer to index a document on the target. This
+            //    is what failed for the customer with "The [standard] token filter has been removed."
+            //    On OS 2 with _source disabled, we still write the doc; if the analyzer is broken
+            //    the index write will return 4xx with the standard-token-filter error.
+            var indexDocRes = targetOperations.put(
+                "/" + indexName + "/_doc/test-after-migrate?refresh=true",
+                "{ \"subj\": \"Post-migration ingest test\", \"from_addr\": \"new@example.com\" }"
+            );
+            assertThat("Indexing into the migrated target index must succeed (analyzer chain valid). " +
+                    "Response was: " + indexDocRes.getValue(),
+                indexDocRes.getKey(), equalTo(201));
+
+            // Confirm we can analyze the field via the cluster's _analyze API — this also uses
+            // the analyzer end-to-end and would surface a [standard] filter error.
+            var analyzeRes = targetOperations.post(
+                "/" + indexName + "/_analyze",
+                "{ \"analyzer\": \"custom_tokenized_string\", \"text\": \"Hello World\" }"
+            );
+            assertThat("Analyzer must be usable on target. Response: " + analyzeRes.getValue(),
+                analyzeRes.getKey(), equalTo(200));
+            assertThat("_analyze response must NOT mention the removed standard filter",
+                analyzeRes.getValue(), not(containsString("standard] token filter has been removed")));
+        }
+    }
+
+    /**
+     * Regression test for ES 6 index with legacy analysis names, restored into ES 7, then migrated to OS.
+     *
+     * ES 6 accepts nGram/edgeNGram as direct built-in references in analyzer definitions and
+     * the legacy "standard" token filter. These names are rejected by OS on new index creation.
+     * When such an index is restored into ES 7 (snapshot restore), ES 7 holds the index with
+     * the legacy names intact — and the migration source cluster is ES 7.
+     *
+     * Before the fix (isBelowES_7_X -> isBelowES_8_X in source predicates), the preemptive
+     * analysis-compat transform was silently skipped for ES 7 sources, so migration to OS
+     * would fail with "Unknown tokenizer/filter" or "removed token filter" errors.
+     */
+    @Test
+    @SneakyThrows
+    void es6IndexRestoredIntoEs7_migratesLegacyAnalyzersToOs() {
+        var legacyRepo = "legacy_repo";
+        var legacySnapshot = "legacy_snap";
+        var indexName = "es6-ngram-standard-analysis";
+        // Two separate local dirs: one for the ES 6 snapshot, one for the ES 7 snapshot.
+        var es6SnapshotDir = Files.createTempDirectory("es6-snap-").toFile();
+        var es7SnapshotDir = Files.createTempDirectory("es7-snap-").toFile();
+
+        // Phase 1: Create the index on ES 6 where legacy names are still valid.
+        try (final var es6Cluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23)) {
+            es6Cluster.start();
+            var es6Ops = new org.opensearch.migrations.bulkload.http.ClusterOperations(es6Cluster);
+
+            // Index uses nGram/edgeNGram as direct built-in references and the legacy "standard"
+            // token filter — all accepted by ES 6, all rejected by OS on new index creation.
+            var indexBody = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 1," +
+                "      \"number_of_replicas\": 0," +
+                "      \"analysis\": {" +
+                "        \"analyzer\": {" +
+                "          \"legacy_analyzer\": {" +
+                "            \"type\": \"custom\"," +
+                "            \"tokenizer\": \"nGram\"," +
+                "            \"filter\": [\"standard\", \"lowercase\", \"edgeNGram\"]" +
+                "          }" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": {" +
+                "    \"" + es6Ops.defaultDocType() + "\": {" +
+                "      \"properties\": {" +
+                "        \"body\": { \"type\": \"text\", \"analyzer\": \"legacy_analyzer\" }" +
+                "      }" +
+                "    }" +
+                "  }" +
+                "}";
+            es6Ops.createIndex(indexName, indexBody);
+            es6Ops.createDocument(indexName, "1", "{ \"body\": \"hello world\" }");
+            es6Ops.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacyRepo);
+            es6Ops.takeSnapshot(legacyRepo, legacySnapshot, indexName);
+            es6Cluster.copySnapshotData(es6SnapshotDir.toString());
+        }
+
+        // Phase 2: Restore the ES 6 snapshot into ES 7 (the upgrade scenario),
+        // then take a new snapshot from ES 7 to use as the migration source.
+        //
+        // We use a sub-path /tmp/snapshots/restore_repo for the ES 6 restore so that the
+        // createSnapshot utility (which writes to /tmp/snapshots directly) doesn't collide
+        // with the ES 6 snapshot files.
+        var restoreRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "/restore_repo";
+        try (
+            final var es7Cluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(es7Cluster::start),
+                CompletableFuture.runAsync(targetCluster::start)
+            ).join();
+
+            // Copy ES 6 snapshot data into the restore sub-directory with proper ownership.
+            es7Cluster.putSnapshotData(es6SnapshotDir.toString(), restoreRepoPath);
+
+            var es7Ops = new org.opensearch.migrations.bulkload.http.ClusterOperations(es7Cluster);
+            es7Ops.createSnapshotRepository(restoreRepoPath, legacyRepo);
+            es7Ops.restoreSnapshot(legacyRepo, legacySnapshot);
+
+            // ES 7 now holds the index with the legacy ES 6 analysis names.
+            // createSnapshot creates its repo at CLUSTER_SNAPSHOT_DIR (not the sub-path),
+            // so there is no file-format collision.
+            var migrateSnapshotName = "es7_migrate_snap";
+            createSnapshot(es7Cluster, migrateSnapshotName, SnapshotTestContext.factory().noOtelTracking());
+            es7Cluster.copySnapshotData(es7SnapshotDir.toString());
+
+            this.sourceCluster = es7Cluster;
+            this.targetCluster = targetCluster;
+            // Initialize targetOperations for the assertions below (sourceOperations not needed).
+            this.targetOperations = new org.opensearch.migrations.bulkload.http.ClusterOperations(targetCluster);
+
+            var arguments = prepareSnapshotMigrationArgs(migrateSnapshotName, es7SnapshotDir.toString());
+
+            MigrationItemResult metaResult = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info(metaResult.asCliOutput());
+            assertThat("Metadata migration must succeed when ES 7 source holds ES 6 legacy analysis names",
+                metaResult.getExitCode(), equalTo(0));
+            assertThat(getNames(getSuccessfulResults(metaResult.getItems().getIndexes())), hasItems(indexName));
+
+            // Verify the analyzer references on the target are rewritten to snake_case
+            var settingsRes = targetOperations.get("/" + indexName + "/_settings");
+            assertThat(settingsRes.getValue(), settingsRes.getKey(), equalTo(200));
+            var settings = settingsRes.getValue();
+            assertThat("nGram tokenizer reference must be rewritten to ngram on OS target",
+                settings, containsString("ngram"));
+            assertThat("edgeNGram filter reference must be rewritten to edge_ngram on OS target",
+                settings, containsString("edge_ngram"));
+            assertThat("lowercase must survive", settings, containsString("lowercase"));
+
+            // Confirm the target index actually accepts document indexing
+            var indexDocRes = targetOperations.put(
+                "/" + indexName + "/_doc/test-post-migrate?refresh=true",
+                "{ \"body\": \"Post-migration ingest test\" }"
+            );
+            assertThat("Indexing must succeed — analyzer chain must be valid on OS target. Response: "
+                    + indexDocRes.getValue(),
+                indexDocRes.getKey(), equalTo(201));
+
+            // Confirm the analyzer is usable end-to-end via _analyze
+            var analyzeRes = targetOperations.post(
+                "/" + indexName + "/_analyze",
+                "{ \"analyzer\": \"legacy_analyzer\", \"text\": \"Hello\" }"
+            );
+            assertThat("_analyze must succeed on OS target. Response: " + analyzeRes.getValue(),
+                analyzeRes.getKey(), equalTo(200));
         }
     }
 
@@ -232,7 +622,6 @@ class EndToEndTest extends BaseMigrationTest {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 

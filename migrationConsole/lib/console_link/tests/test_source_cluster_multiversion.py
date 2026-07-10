@@ -111,14 +111,14 @@ def test_cluster_cat_indices(env_with_source_container: Environment, json: bool)
     # First, test with refresh enabled.
     result = clusters_.cat_indices(env.source_cluster, refresh=True, as_json=json)
     if not json:
-        result_lines = result.decode('utf-8').split('\n')
+        result_lines = result.split('\n')
         assert any(TEST_INDEX_NAME in line and str(DOC_COUNT) in line for line in result_lines)
     else:
         assert any(item['index'] == TEST_INDEX_NAME and int(item['docs.count']) == DOC_COUNT for item in result)
     # And then test again with refresh disabled. Doing both checks in one test halves the number of container starts
     # and eliminates the need to `sleep` before testing.
     result = clusters_.cat_indices(env.source_cluster, refresh=False, as_json=False)
-    result_lines = result.decode('utf-8').split('\n')
+    result_lines = result.split('\n')
     assert any(TEST_INDEX_NAME in line and str(DOC_COUNT) in line for line in result_lines)
 
 

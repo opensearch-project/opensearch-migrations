@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
+MIGRATIONS_REPO_ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)
 
 KUBE_CONTEXT="${KUBE_CONTEXT:-kind-release-schema-verification}"
 NAMESPACE="${NAMESPACE:-ma}"
@@ -40,11 +40,12 @@ conditionalPackageInstalls:
   kube-prometheus-stack: false
   strimzi-kafka-operator: true
   aws-mountpoint-s3-csi-driver: false
-  otel-collector-daemonset: false
   opentelemetry-operator: false
   migration-console: true
   localstack: false
   jaeger: false
+metrics:
+  enabled: false
 defaultBucketConfiguration:
   create: false
   useLocalStack: false

@@ -8,7 +8,6 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -118,7 +117,6 @@ class SnapshotConfigurationTest extends BaseMigrationTest {
 
         sourceCluster.copySnapshotData(localDirectory.toString());
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
 
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, command);

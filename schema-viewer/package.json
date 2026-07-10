@@ -1,0 +1,16 @@
+{
+  "name": "schema-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "fetch-schemas": "bash fetch-schemas.sh",
+    "dev": "npx serve .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsondiffpatch": "^0.7.2",
+    "vitest": "^4.1.9"
+  }
+}

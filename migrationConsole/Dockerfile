@@ -38,7 +38,7 @@ RUN ARCH=$(cat /arch.env) && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" | tar -xz && \
     mv linux-${ARCH}/helm /k8s/bin/
 
-# Install stern - used by 'workflow output -f' for multi-pod log tailing
+# Install stern - used by 'workflow log -f' for multi-pod log tailing
 RUN ARCH=$(cat /arch.env) && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
         "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${ARCH}.tar.gz" | tar -xz && \
@@ -90,6 +90,19 @@ RUN MOUNT_S3_VERSION="1.22.2" && \
     dnf install -y /tmp/mount-s3.rpm && \
     rm -f /tmp/mount-s3.rpm
 
+# Install gcsfuse for direct GCS bucket mounting (requires SYS_ADMIN capability at runtime)
+RUN GCSFUSE_VERSION="3.9.2" && \
+    ARCH=$(uname -m) && \
+    dnf install -y \
+        --setopt=install_weak_deps=False \
+        --setopt=tsflags=nodocs \
+        fuse && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://github.com/GoogleCloudPlatform/gcsfuse/releases/download/v${GCSFUSE_VERSION}/gcsfuse-${GCSFUSE_VERSION}-1.${ARCH}.rpm" \
+        -o /tmp/gcsfuse.rpm && \
+    dnf install -y /tmp/gcsfuse.rpm && \
+    rm -f /tmp/gcsfuse.rpm
+
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
     /tmp/setupVimSchemaChecker.sh && \
@@ -99,7 +112,8 @@ RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
-RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
+COPY kafkaImport.sh /root/kafka-tools
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh /root/kafka-tools/kafkaImport.sh
 
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
@@ -123,13 +137,22 @@ WORKDIR /root/cluster_tools
 RUN pipenv install
 WORKDIR /root
 
+RUN mkdir -p /usr/share/bash-completion/completions && \
+    _CONSOLE_COMPLETE=bash_source console > /usr/share/bash-completion/completions/console && \
+    test -s /usr/share/bash-completion/completions/console
+
+
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 ENV NODEJS=node-22
 
+COPY nodeStaging/migrationResources /root/migrationResources
+ENV MIGRATION_RESOURCES_DIR=/root/migrationResources
+
 COPY nodeStaging/workflowTemplates /root/workflows
+RUN chmod +x /root/workflows/.workflowScripts/*.sh
 COPY workflowConfigToServicesConfig.jq /root/
 ENV WORKFLOW_CONFIG_JQ_SCRIPT=/root/workflowConfigToServicesConfig.jq
 
@@ -139,8 +162,9 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo '. /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
+    echo '. /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
 
 # Set ENV to control startup script in /bin/sh mode

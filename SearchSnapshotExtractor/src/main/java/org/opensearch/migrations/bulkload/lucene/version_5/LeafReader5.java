@@ -4,16 +4,21 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingMultiTermPostings;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene5.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene5.org.apache.lucene.index.FieldInfo;
+import shadow.lucene5.org.apache.lucene.index.IndexOptions;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene5.org.apache.lucene.index.PostingsEnum;
@@ -26,6 +31,7 @@ import shadow.lucene5.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene5.org.apache.lucene.util.Bits;
 import shadow.lucene5.org.apache.lucene.util.BytesRef;
 import shadow.lucene5.org.apache.lucene.util.FixedBitSet;
+import shadow.lucene5.org.apache.lucene.util.NumericUtils;
 import shadow.lucene5.org.apache.lucene.util.SparseFixedBitSet;
 
 @Slf4j
@@ -38,6 +44,11 @@ public class LeafReader5 implements LuceneLeafReader {
     public LeafReader5(LeafReader wrapped) {
         this.wrapped = wrapped;
         this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
+    }
+
+    @Override
+    public LuceneLeafReader newView() {
+        return new LeafReader5(wrapped);
     }
 
     private static BitSetConverter.FixedLengthBitSet convertLiveDocs(Bits bits) {
@@ -98,18 +109,23 @@ public class LeafReader5 implements LuceneLeafReader {
                 .toString();
     }
 
+    private volatile List<DocValueFieldInfo> cachedDocValueFields;
+
     @Override
     public Iterable<DocValueFieldInfo> getDocValueFields() {
+        List<DocValueFieldInfo> cached = cachedDocValueFields;
+        if (cached != null) return cached;
         List<DocValueFieldInfo> fields = new ArrayList<>();
         for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
             DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
             if (dvType != DocValueFieldInfo.DocValueType.NONE) {
-                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
+                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC
                     && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
                 fields.add(new DocValueFieldInfo.Simple(fieldInfo.name, dvType, isBoolean));
             }
         }
-        return fields;
+        cachedDocValueFields = Collections.unmodifiableList(fields);
+        return cachedDocValueFields;
     }
 
     private List<String> getFieldTermsInternal(String fieldName) {
@@ -258,6 +274,113 @@ public class LeafReader5 implements LuceneLeafReader {
         log.debug("[Terms] No value found for field {} docId {} after scanning {} terms, {} total postings", 
             fieldName, docId, termCount, totalPostingsScanned);
         return null;
+    }
+
+    /**
+     * Single-pass walk of the terms dictionary for a trie-encoded numeric {@code fieldName}.
+     * Harvests only shift==0 terms (fully-precise values) and decodes via
+     * {@link NumericUtils#prefixCodedToLong} / {@link NumericUtils#prefixCodedToInt}.
+     *
+     * Terms at higher shift levels are range-query prefix terms that exist alongside every
+     * value for efficient range scans — they are skipped here because the shift==0 term for
+     * a value is posted against exactly the same docs.
+     *
+     * Byte-length discriminates int-coded (6 bytes at shift=0) vs long-coded (11 bytes at
+     * shift=0) terms. ES 1.x IP fields use long-coded terms even though the value is 32-bit.
+     *
+     * Returns {@code docId -> decoded Long} (first value wins when multi-valued; multi-valued
+     * numeric fields are extremely rare in practice and the reconstructed JSON would need
+     * array support at a higher layer to benefit anyway).
+     */
+    @Override
+    public Map<Integer, Long> buildNumericTermIndex(String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return Collections.emptyMap();
+        Map<Integer, Long> result = new HashMap<>();
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            Long decoded = decodeShiftZeroTerm(term);
+            if (decoded == null) continue;
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                result.putIfAbsent(doc, decoded);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Returns the decoded numeric value for a term if it is a shift==0 prefix-coded long/int,
+     * else null. Lucene 4/5 encodes the first byte as {@code SHIFT_START_LONG + shift} (0x20)
+     * for long-indexed fields and {@code SHIFT_START_INT + shift} (0x60) for int-indexed
+     * fields, so the header byte uniquely identifies both the encoding family and the shift.
+     * Only shift==0 terms are fully-precise; higher-shift range terms are skipped since the
+     * shift==0 term covers the same docs at full precision.
+     */
+    private static Long decodeShiftZeroTerm(BytesRef term) {
+        if (term.length == 0) return null;
+        byte header = term.bytes[term.offset];
+        if (header == NumericUtils.SHIFT_START_LONG && term.length == NumericUtils.BUF_SIZE_LONG) {
+            return NumericUtils.prefixCodedToLong(term);
+        }
+        if (header == NumericUtils.SHIFT_START_INT && term.length == NumericUtils.BUF_SIZE_INT) {
+            return (long) NumericUtils.prefixCodedToInt(term);
+        }
+        return null;
+    }
+
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings openStreamingFieldPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null || !terms.hasPositions()) {
+            return null;
+        }
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
+
+        ArrayList<GenericStreamingFieldPostings.TermPostings> built = new ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, postingsFlags);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            built.add(new GenericStreamingFieldPostings.TermPostings(
+                termStr, LuceneStreamingAdapters.wrap(postings), firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingFieldPostings.build(built, fieldHasOffsets);
+    }
+
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingMultiTermPostings openStreamingMultiTermPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) {
+            return null;
+        }
+        // Eager-String dictionary: decode each term once at build time and cache it on
+        // the cursor. Per-doc emission reuses the cached reference (zero String alloc on
+        // repeats); on close() each cursor is nulled, releasing the entire dictionary.
+        ArrayList<GenericStreamingMultiTermPostings.TermPostings> built = new ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, PostingsEnum.FREQS);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            built.add(new GenericStreamingMultiTermPostings.TermPostings(
+                termStr, LuceneStreamingAdapters.wrap(postings), firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingMultiTermPostings.build(built);
     }
 
     public String toString() {

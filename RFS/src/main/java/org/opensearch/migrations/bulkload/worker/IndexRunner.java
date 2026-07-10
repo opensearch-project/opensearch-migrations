@@ -32,7 +32,7 @@ public class IndexRunner {
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
         var results = IndexMetadataResults.builder();
-        var skipCreation = FilterScheme.filterByAllowList(indexAllowlist).negate();
+        var skipCreation = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX).negate();
 
         for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
             List<CreationResult> creationResults;

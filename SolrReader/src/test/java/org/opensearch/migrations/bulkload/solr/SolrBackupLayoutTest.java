@@ -58,6 +58,46 @@ class SolrBackupLayoutTest {
     }
 
     @Test
+    void findLatestZkBackup_bareZkBackupFallback_solr6Or7Layout() throws IOException {
+        // Solr 6/7 non-incremental SolrCloud BACKUP writes a bare zk_backup/ directory
+        // (no numeric suffix). findLatestZkBackup must fall back to it.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("zk_backup/configs/myconfig"));
+        Files.createFile(collectionDir.resolve("backup.properties"));
+
+        var latest = SolrBackupLayout.findLatestZkBackup(collectionDir);
+        assertThat(latest, org.hamcrest.CoreMatchers.notNullValue());
+        assertThat(latest.getFileName().toString(), equalTo("zk_backup"));
+    }
+
+    @Test
+    void containsBackupDataMarkers_solr6SnapshotShardDir() throws IOException {
+        // Solr 6 SolrCloud backup contains snapshot.shardN directories — these should
+        // be recognised as backup data markers so resolveCollectionDataDir returns the
+        // correct collection directory without descending an extra level.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("snapshot.shard1"));
+        Files.createDirectories(collectionDir.resolve("snapshot.shard2"));
+        Files.createFile(collectionDir.resolve("backup.properties"));
+
+        // resolveCollectionDataDir should return collectionDir itself (not descend further)
+        var resolved = SolrBackupLayout.resolveCollectionDataDir(collectionDir);
+        assertThat(resolved, equalTo(collectionDir));
+    }
+
+    @Test
+    void findLatestZkBackup_numberedRevisionWinsOverBare() throws IOException {
+        // If both numbered and unnumbered zk_backups exist (highly unusual), the
+        // numbered one takes precedence — newer Solr versions are authoritative.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("zk_backup/configs/legacy"));
+        Files.createDirectories(collectionDir.resolve("zk_backup_0/configs/modern"));
+
+        var latest = SolrBackupLayout.findLatestZkBackup(collectionDir);
+        assertThat(latest.getFileName().toString(), equalTo("zk_backup_0"));
+    }
+
+    @Test
     void findLatestZkBackup_ignoresNonMatching() throws IOException {
         var collectionDir = tempDir.resolve("myCollection");
         Files.createDirectories(collectionDir.resolve("zk_backup_0/configs/cfg"));
@@ -141,5 +181,97 @@ class SolrBackupLayoutTest {
     void findLatestShardMetadataFiles_nonExistentDir() {
         var latest = SolrBackupLayout.findLatestShardMetadataFiles(tempDir.resolve("nonexistent"));
         assertThat(latest, hasSize(0));
+    }
+
+    @Test
+    void countShards_nullPath() {
+        assertThat(SolrBackupLayout.countShards(null), equalTo(1));
+    }
+
+    @Test
+    void countShards_nonExistentPath() {
+        assertThat(SolrBackupLayout.countShards(tempDir.resolve("nonexistent")), equalTo(1));
+    }
+
+    @Test
+    void countShards_emptyDirectory() throws IOException {
+        var collectionDir = tempDir.resolve("emptyCollection");
+        Files.createDirectories(collectionDir);
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_shardBackupMetadata_fourLatestFiles() throws IOException {
+        var collectionDir = tempDir.resolve("incrementalCollection");
+        var metadataDir = collectionDir.resolve("shard_backup_metadata");
+        Files.createDirectories(metadataDir);
+        // Four shards, each with a superseded older revision (_0) and a newer one (_1)
+        for (int i = 1; i <= 4; i++) {
+            Files.writeString(metadataDir.resolve("md_shard" + i + "_0.json"), "{\"old\":{}}");
+            Files.writeString(metadataDir.resolve("md_shard" + i + "_1.json"), "{\"new\":{}}");
+        }
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(4));
+    }
+
+    @Test
+    void countShards_emptyShardBackupMetadata_fallsThroughToShardDirs() throws IOException {
+        var collectionDir = tempDir.resolve("fallthroughCollection");
+        Files.createDirectories(collectionDir.resolve("shard_backup_metadata"));
+        // Provide shard subdirectories so the fallthrough strategy yields a known value
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        Files.createDirectories(collectionDir.resolve("shard2"));
+        Files.createFile(collectionDir.resolve("shard2").resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(2));
+    }
+
+    @Test
+    void countShards_directShardSubdirsWithSegments() throws IOException {
+        var collectionDir = tempDir.resolve("directShardsCollection");
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        Files.createDirectories(collectionDir.resolve("shard2"));
+        Files.createFile(collectionDir.resolve("shard2").resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(2));
+    }
+
+    @Test
+    void countShards_nestedDataIndexLayout() throws IOException {
+        var collectionDir = tempDir.resolve("nestedCollection");
+        var index = collectionDir.resolve("shard1").resolve("data").resolve("index");
+        Files.createDirectories(index);
+        Files.createFile(index.resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_mixedShardAndNonShardDirs() throws IOException {
+        var collectionDir = tempDir.resolve("mixedCollection");
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        // "stats/" looks like a directory but lacks a segments_ file -> must NOT be counted
+        Files.createDirectories(collectionDir.resolve("stats"));
+        Files.writeString(collectionDir.resolve("stats").resolve("info.txt"), "not a shard");
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_unreadableDirectory_fallsBackToOne() throws IOException {
+        var collectionDir = tempDir.resolve("unreadableCollection");
+        Files.createDirectories(collectionDir);
+        var perms = collectionDir.toFile().setReadable(false, false);
+        if (!perms) {
+            // Skip if the platform refuses to remove read permission (e.g. running as root)
+            return;
+        }
+        try {
+            assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+        } finally {
+            collectionDir.toFile().setReadable(true, false);
+        }
     }
 }

@@ -396,7 +396,6 @@ public class JsonCommandLineParser {
                     map.put(cleanName, new FieldInfo(field, obj));
                     map.put(toCamelCase(cleanName), new FieldInfo(field, obj));
                 }
-                map.put(field.getName(), new FieldInfo(field, obj));
             }
 
             ParametersDelegate delegate = field.getAnnotation(ParametersDelegate.class);

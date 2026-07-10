@@ -21,11 +21,8 @@
     - [Unit Tests](#unit-tests)
     - [Workflow Test Cluster](#workflow-test-cluster)
     - [Coverage](#coverage)
-    - [Backend APIs](#backend-apis)
-      - [Locally testing](#locally-testing)
-      - [Deployment](#deployment)
 
-The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
+The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app, for instance.
 
 ![Console_link Library Diagram](console_library_diagram.svg)
 
@@ -353,16 +350,4 @@ or generated as HTML:
 
 ```shell
 pipenv run coverage html
-```
-
-### Backend APIs
-
-As part of the Migration console many console commands are available for use by workflow management tools.  This is a sub-set of the console_link library, ensuring the command line and backend functionality is passing through the same systems. 
-
-#### Locally testing
-
-For local development, you can use the API development script:
-
-```shell
-pipenv run api-dev
 ```

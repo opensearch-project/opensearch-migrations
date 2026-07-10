@@ -3,6 +3,7 @@ package org.opensearch.migrations.transform;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +20,34 @@ public class JsonJSTransformerProviderTest {
             "function main(context) {\n" + //
             "  return (document) => {\n" + //
             "    document.set(\"modified\", true);\n" + //
+            "    return document;\n" + //
+            "  };\n" + //
+            "}\n" + //
+            "(() => main)();";
+    private static final String CONTEXT_JS_TRANSFORM = "\n" + //
+            "function main(context) {\n" + //
+            "  return (document) => {\n" + //
+            "    document.set(\"configured\", context.get(\"configured\"));\n" + //
+            "    return document;\n" + //
+            "  };\n" + //
+            "}\n" + //
+            "(() => main)();";
+    private static final String FILE_BACKED_CONTEXT_JS_TRANSFORM = "\n" + //
+            "function main(context) {\n" + //
+            "  return (document) => {\n" + //
+            "    document.set(\"fromFile\", context.get(\"fromFile\"));\n" + //
+            "    document.set(\"fromDir\", context.get(\"fromDir\"));\n" + //
+            "    document.set(\"configured\", context.get(\"configured\"));\n" + //
+            "    return document;\n" + //
+            "  };\n" + //
+            "}\n" + //
+            "(() => main)();";
+    private static final String FILE_BACKED_CONTEXT_MERGE_ORDER_JS_TRANSFORM = "\n" + //
+            "function main(context) {\n" + //
+            "  return (document) => {\n" + //
+            "    document.set(\"fromFile\", context.get(\"fromFile\"));\n" + //
+            "    document.set(\"fromDir\", context.get(\"fromDir\"));\n" + //
+            "    document.set(\"overrideValue\", context.get(\"override\"));\n" + //
             "    return document;\n" + //
             "  };\n" + //
             "}\n" + //
@@ -79,15 +108,84 @@ public class JsonJSTransformerProviderTest {
     @Test
     public void testCreateTransformer_missingBindings() throws Exception {
         var config = Map.of(
-                "initializationScript", "");
-        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
-        assertThat(exception.getMessage(), containsString("Configuration missing required key: bindingsObject."));
+                "initializationScript", SIMPLE_JS_TRANSFORM);
+        var transformer = provider.createTransformer(config);
+        var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("modified", null), equalTo(true));
+    }
+
+    @Test
+    public void testCreateTransformer_objectBindings() throws Exception {
+        var config = Map.of(
+                "bindingsObject", Map.of("configured", "from-object"),
+                "initializationScript", CONTEXT_JS_TRANSFORM);
+        var transformer = provider.createTransformer(config);
+        var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("configured", null), equalTo("from-object"));
+    }
+
+    @Test
+    public void testCreateTransformer_fileBackedBindings() throws Exception {
+        var tempDir = Files.createTempDirectory("json-js-context-dir");
+        var contextFile = Files.createTempFile("json-js-context-file", ".txt");
+        try {
+            Files.writeString(contextFile, "from-file");
+            Files.writeString(tempDir.resolve("fromDir"), "from-dir");
+
+            var config = Map.of(
+                    "bindingsObject", Map.of("configured", "from-object"),
+                    "bindingsObjectFiles", Map.of(
+                            "fromFile", Map.of("path", contextFile.toString())),
+                    "bindingsObjectDirs", List.of(Map.of("path", tempDir.toString())),
+                    "initializationScript", FILE_BACKED_CONTEXT_JS_TRANSFORM);
+            var transformer = provider.createTransformer(config);
+            var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+            assertThat(result.getOrDefault("fromFile", null), equalTo("from-file"));
+            assertThat(result.getOrDefault("fromDir", null), equalTo("from-dir"));
+            assertThat(result.getOrDefault("configured", null), equalTo("from-object"));
+        } finally {
+            Files.deleteIfExists(tempDir.resolve("fromDir"));
+            Files.deleteIfExists(tempDir);
+            Files.deleteIfExists(contextFile);
+        }
+    }
+
+    @Test
+    public void testCreateTransformer_fileBackedBindingsTextAndMergeOrder() throws Exception {
+        var tempDir = Files.createTempDirectory("json-js-context-dir");
+        var contextFile = Files.createTempFile("json-js-context-file", ".txt");
+        try {
+            Files.writeString(contextFile, "from-file");
+            Files.writeString(tempDir.resolve("fromDir"), "from-dir");
+            Files.writeString(tempDir.resolve("override"), "from-dir");
+
+            var config = Map.of(
+                    "bindingsObject", Map.of("override", "from-object"),
+                    "bindingsObjectFiles", Map.of(
+                            "fromFile", Map.of("path", contextFile.toString())),
+                    "bindingsObjectDirs", List.of(Map.of("path", tempDir.toString())),
+                    "initializationScript", FILE_BACKED_CONTEXT_MERGE_ORDER_JS_TRANSFORM);
+            var transformer = provider.createTransformer(config);
+            var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+            assertThat(result.getOrDefault("fromFile", null), equalTo("from-file"));
+            assertThat(result.getOrDefault("fromDir", null), equalTo("from-dir"));
+            assertThat(result.getOrDefault("overrideValue", null), equalTo("from-object"));
+        } finally {
+            Files.deleteIfExists(tempDir.resolve("fromDir"));
+            Files.deleteIfExists(tempDir.resolve("override"));
+            Files.deleteIfExists(tempDir);
+            Files.deleteIfExists(contextFile);
+        }
     }
 
     @Test
     public void testCreateTransformer_invalidBindings() throws Exception {
         var config = Map.of(
-                "bindingsObject", Map.of(),
+                "bindingsObject", "{",
                 "initializationScript", "");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(), containsString("Failed to parse the bindingsObject."));

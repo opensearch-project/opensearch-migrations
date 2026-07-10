@@ -19,6 +19,7 @@ import {
     TaskOutputSource
 } from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
+import {assertNoBareTemplateString} from "./templateLiteralGuard";
 
 type DefaultSpec<T extends PlainObject> =
     | {
@@ -61,6 +62,7 @@ export function defineParam<T extends PlainObject>(opts: {
     if (opts.expression === undefined && opts.from === undefined) {
         throw new Error("Invalid DefaultSpec: neither expression nor from provided");
     }
+    assertNoBareTemplateString(opts.expression, "defineParam expression");
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
@@ -96,6 +98,8 @@ export function configMapKey(
     key: AllowLiteralOrExpression<string>,
     optional?: boolean
 ): ConfigMapKeySelector {
+    assertNoBareTemplateString(name, "configMapKey name");
+    assertNoBareTemplateString(key, "configMapKey key");
     return {'name': name, 'key': key, 'optional': optional};
 }
 
@@ -138,6 +142,11 @@ export type OutputArtifactDef = {
     path: string;
     /** Archive settings. `{ none: {} }` disables compression. */
     archive?: { none: {} };
+    /** Optional artifact repository placement settings. */
+    s3?: {
+        /** S3 object key where Argo should store the artifact. */
+        key: AllowLiteralOrExpression<string>;
+    };
 };
 
 export type OutputArtifactsRecord = Record<string, OutputArtifactDef>;
@@ -145,4 +154,3 @@ export type OutputArtifactsRecord = Record<string, OutputArtifactDef>;
 /** Canonical maps for inputs/outputs (values are type-only descriptors). */
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
 export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
-

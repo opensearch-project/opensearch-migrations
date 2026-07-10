@@ -43,6 +43,20 @@ public class Items implements JsonOutput {
     @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
     @Builder.Default
     private final boolean succeedOnEmpty = true;
+    @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
+    @Builder.Default
+    private final boolean allowExistingIndexes = false;
+
+    private boolean isFatal(CreationResult result) {
+        var failureType = result.getFailureType();
+        if (failureType == null) {
+            return false;
+        }
+        if (allowExistingIndexes && failureType == CreationFailureType.INDEX_ALREADY_EXISTS) {
+            return false;
+        }
+        return failureType.isFatal();
+    }
 
     public boolean isEmpty() {
         return indexTemplates.isEmpty() && componentTemplates.isEmpty()
@@ -62,7 +76,7 @@ public class Items implements JsonOutput {
         Stream.of(indexTemplates, componentTemplates, indexes, aliases)
             .filter(Objects::nonNull)
             .flatMap(Collection::stream)
-            .filter(result -> result.getFailureType() != null && result.getFailureType().isFatal())
+            .filter(this::isFatal)
             .map(this::failureMessage)
             .forEach(errors::add);
 
@@ -135,22 +149,23 @@ public class Items implements JsonOutput {
         if (result.getFailureType() == null) {
             return "";
         }
+        var fatal = isFatal(result);
         var sb = new StringBuilder()
-            .append(result.getFailureType().isFatal() ? "ERROR" : "WARN")
+            .append(fatal ? "ERROR" : "WARN")
             .append(" - ")
             .append(result.getName())
             .append(" ")
             .append(result.getFailureType().getMessage());
 
-        if (result.getFailureType().isFatal() && result.getException() != null) {
-            // There might not be an message in the exception, if so fallback to the toString of the exception.  
+        if (fatal && result.getException() != null) {
+            // There might not be an message in the exception, if so fallback to the toString of the exception.
             var exceptionDetail = result.getException().getMessage() != null
                 ? result.getException().getMessage()
                 : result.getException().toString();
             sb.append(": " + exceptionDetail);
         }
 
-        if (result.getFailureType() == CreationFailureType.INDEX_ALREADY_EXISTS) {
+        if (fatal && result.getFailureType() == CreationFailureType.INDEX_ALREADY_EXISTS) {
             sb.append(System.lineSeparator())
               .append(Format.indentToLevel(3))
               .append("To resolve, you can either:")
@@ -161,7 +176,11 @@ public class Items implements JsonOutput {
               .append(System.lineSeparator())
               .append(Format.indentToLevel(3))
               .append("  2. Migrate only specific indices with: ")
-              .append("--index-allowlist <index1,index2,...>");
+              .append("--index-allowlist <index1,index2,...>")
+              .append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("  3. If existing target indexes are expected (e.g. resuming a previous run), ")
+              .append("re-run with --allow-existing-indexes true to treat existing indexes as non-fatal warnings.");
         }
 
         return sb.toString();
@@ -203,11 +222,12 @@ public class Items implements JsonOutput {
             if (!item.wasSuccessful() && item.getFailureType() != null) {
                 var failure = obj.putObject("failure");
                 var ft = item.getFailureType();
+                var fatal = isFatal(item);
                 failure.put("type",    ft.name());
                 failure.put("message", ft.getMessage());
-                failure.put("fatal",   ft.isFatal());
+                failure.put("fatal",   fatal);
 
-                if (ft.isFatal() && item.getException() != null) {
+                if (fatal && item.getException() != null) {
                     var exMsg = item.getException().getMessage();
                     failure.put("exception", exMsg != null ? exMsg : item.getException().toString());
                 }

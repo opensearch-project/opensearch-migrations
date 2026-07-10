@@ -59,8 +59,6 @@ class AOSSTestBase(MATestBase):
 
     def display_final_cluster_state(self):
         target_response = cat_indices(cluster=self.target_cluster, refresh=True)
-        if isinstance(target_response, bytes):
-            target_response = target_response.decode("utf-8")
         logger.info(f"TARGET CLUSTER (AOSS)\n{target_response}")
 
     def import_existing_clusters(self):
@@ -116,7 +114,7 @@ class AOSSTestBase(MATestBase):
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
             "snapshotRepo": {
                 "awsRegion": self.s3_region,
-                "s3RepoPathUri": self.s3_repo_uri
+                "repoPathUri": self.s3_repo_uri
             }
         }
 

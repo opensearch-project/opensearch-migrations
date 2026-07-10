@@ -300,7 +300,7 @@ def argo_workflows(k8s_cluster):
     if not waiter.wait_for_ready(logger):
         raise TimeoutError("Argo Workflows pods did not become ready in time")
 
-    # Set up port-forwarding to argo-server so output command can access it
+    # Set up port-forwarding to argo-server so log command can access it
     logger.info("\nSetting up port-forward to argo-server...")
     port_forward_process = None
 
@@ -324,11 +324,11 @@ def argo_workflows(k8s_cluster):
         if _wait_for_port_forward(port_forward_process, 2746):
             logger.info("✓ Port-forward to argo-server established on localhost:2746")
         else:
-            logger.warning("Port-forward not ready - output command tests may fail")
+            logger.warning("Port-forward not ready - log command tests may fail")
 
     except Exception as e:
         logger.warning(f"Failed to set up port-forward: {e}")
-        logger.warning("Output command tests may fail without port-forward")
+        logger.warning("Log command tests may fail without port-forward")
 
     yield {
         "namespace": argo_namespace,
@@ -532,7 +532,7 @@ class TestWorkflowCLICommands:
 
         # Mock validation so the test focuses on the CLI/k8s save flow
         from unittest.mock import patch
-        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+        with patch('console_link.workflow.commands.configure.validate_and_find_secrets',
                    return_value={'valid': True}):
             result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
                                    obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
@@ -572,7 +572,7 @@ class TestWorkflowCLICommands:
 
         # Mock validation so the test focuses on the CLI/k8s save flow
         from unittest.mock import patch
-        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+        with patch('console_link.workflow.commands.configure.validate_and_find_secrets',
                    return_value={'valid': True}):
             result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
                                    obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
@@ -862,10 +862,10 @@ class TestArgoWorkflows:
             logger.info(f"✓ Container output verified: {output_message}")
             logger.info("✓ Output verification successful - container executed correctly!")
 
-            # Test output command with the completed workflow
-            logger.info("\nTesting output command for completed workflow...")
+            # Test log command with the completed workflow
+            logger.info("\nTesting log command for completed workflow...")
             runner = CliRunner()
-            _test_output_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
+            _test_log_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
@@ -1067,7 +1067,7 @@ class TestArgoWorkflows:
             runner = CliRunner()
             status_result = runner.invoke(
                 workflow_cli,
-                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
                  '--argo-server', 'https://localhost:2746', '--insecure']
             )
             assert status_result.exit_code == 0, (
@@ -1202,7 +1202,7 @@ class TestArgoWorkflows:
             runner = CliRunner()
             status_result = runner.invoke(
                 workflow_cli,
-                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
                  '--argo-server', 'https://localhost:2746', '--insecure']
             )
             assert status_result.exit_code == 0, (
@@ -1234,34 +1234,34 @@ def test_workflow_test_context_is_configured(required_workflow_test_kube_context
         required_workflow_test_kube_context["expected_context"]
 
 
-def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):
+def _test_log_command_for_workflow(runner, workflow_name, namespace, expected_message):
     """
-    Helper function to test output command for a given workflow.
+    Helper function to test log command for a given workflow.
 
-    Tests that the output command can retrieve output from a completed workflow.
+    Tests that the log command can retrieve output from a completed workflow.
 
     Args:
         runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
-        expected_message: The message that should appear in the workflow output
+        expected_message: The message that should appear in the workflow log output
 
     Raises:
-        AssertionError: If output command fails or output is not retrieved
+        AssertionError: If log command fails or output is not retrieved
     """
     result = runner.invoke(
         workflow_cli,
-        ['output', '--workflow-name', workflow_name, '--namespace', namespace,
+        ['log', 'filter', '--workflow-name', workflow_name, '--namespace', namespace,
          '--argo-server', 'https://localhost:2746', '--insecure',
-         '--prefix', '', '-l', 'test-workflow=hello-world'],
+         '--prefix', '', '--label', 'test-workflow=hello-world'],
     )
 
-    assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
+    assert result.exit_code == 0, f"Log command failed with exit code {result.exit_code}. Output: {result.output}"
 
     assert expected_message in result.output, \
         f"Expected message '{expected_message}' not found in output: {result.output}"
 
-    logger.info(f"✓ Output command successfully executed for workflow {workflow_name}")
+    logger.info(f"✓ Log command successfully executed for workflow {workflow_name}")
     logger.info(f"✓ Verified output contains expected message: {expected_message}")
 
 
@@ -1283,7 +1283,7 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', '--workflow-name', workflow_name, '--namespace', namespace,
+        ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', namespace,
          '--argo-server', 'https://localhost:2746', '--insecure']
     )
 

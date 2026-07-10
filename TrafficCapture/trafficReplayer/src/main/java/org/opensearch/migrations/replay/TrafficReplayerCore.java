@@ -5,6 +5,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -57,6 +58,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
     protected final IWorkTracker<Void> requestWorkTracker;
+    protected IJsonTransformer responsePostProcessor;
 
 
     protected final AtomicBoolean stopReadingRef;
@@ -184,6 +186,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             return httpSentRequestFuture;
         }
 
+        /**
+         * Fatal boundary: record the shutdown reason before rethrowing serious VM/runtime errors.
+         */
+        @SuppressWarnings("java:S1181")
         Void handleCompletedTransaction(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext context,
             RequestResponsePacketPair rrPair,
@@ -194,47 +200,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 // if this comes in with a serious Throwable (not an Exception), don't bother
                 // packaging it up and calling the callback.
                 // Escalate it up out handling stack and shutdown.
-                if (t == null || t instanceof Exception) {
-                    try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                        if (tupleWriter != null) {
-                            var writeFuture = packageAndWriteTuple(
-                                tupleHandlingContext,
-                                tupleWriter,
-                                rrPair,
-                                summary,
-                                (Exception) t
-                            );
-                            writeFuture.whenComplete((v, writeErr) -> {
-                                if (writeErr != null) {
-                                    log.atError().setCause(writeErr)
-                                        .setMessage("Tuple write failed for {} (streams={})")
-                                        .addArgument(context)
-                                        .addArgument(rrPair.trafficStreamKeysBeingHeld).log();
-                                }
-                                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
-                            });
-                        } else {
-                            packageAndWriteResponse(
-                                tupleHandlingContext,
-                                resultTupleConsumer,
-                                rrPair,
-                                summary,
-                                (Exception) t
-                            );
-                        }
-                    }
-                    // Count the final outcome once per request (not per retry)
-                    countFinalOutcome(summary, t);
-                    recordTargetResponseCodes(summary);
-                    if (tupleWriter == null) {
-                        commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
-                    }
-                    return null;
-                } else {
-                    log.atError().setCause(t)
-                        .setMessage("Throwable passed to handle() for {}.  Rethrowing.").addArgument(context).log();
-                    throw Lombok.sneakyThrow(t);
+                if (t != null && !(t instanceof Exception)) {
+                    rethrowUnexpectedThrowable(context, t);
                 }
+                processCompletedTransaction(httpContext, rrPair, summary, (Exception) t);
+                return null;
             } catch (Error error) {
                 log.atError().setCause(error)
                     .setMessage("Caught error and initiating TrafficReplayer shutdown").log();
@@ -253,6 +223,95 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 requestWorkTracker.remove(requestKey);
                 log.atTrace().setMessage("removed rrPair.requestData from targetTransactionInProgressMap for {}").addArgument(requestKey).log();
             }
+        }
+
+        private void rethrowUnexpectedThrowable(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            Throwable t
+        ) {
+            log.atError().setCause(t)
+                .setMessage("Throwable passed to handle() for {}.  Rethrowing.")
+                .addArgument(context)
+                .log();
+            throw Lombok.sneakyThrow(t);
+        }
+
+        private void processCompletedTransaction(
+            IReplayContexts.IReplayerHttpTransactionContext httpContext,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception requestFailure
+        ) {
+            try (var tupleHandlingContext = httpContext.createTupleContext()) {
+                if (!writeTupleOutput(httpContext, tupleHandlingContext, rrPair, summary, requestFailure)) {
+                    return;
+                }
+            }
+            // Count the final outcome once per request (not per retry)
+            countFinalOutcome(summary, requestFailure);
+            recordTargetResponseCodes(summary);
+            if (tupleWriter == null) {
+                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+            }
+        }
+
+        private boolean writeTupleOutput(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            IReplayContexts.ITupleHandlingContext tupleHandlingContext,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception requestFailure
+        ) {
+            if (tupleWriter == null) {
+                packageAndWriteResponse(
+                    tupleHandlingContext,
+                    resultTupleConsumer,
+                    rrPair,
+                    summary,
+                    requestFailure
+                );
+                return true;
+            }
+
+            var writeFuture = tryPackageAndWriteTuple(context, tupleHandlingContext, rrPair, summary, requestFailure);
+            writeFuture.ifPresent(f -> f.whenComplete((v, writeErr) -> handleTupleWriteCompletion(context, rrPair, writeErr)));
+            return writeFuture.isPresent();
+        }
+
+        private Optional<CompletableFuture<Void>> tryPackageAndWriteTuple(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            IReplayContexts.ITupleHandlingContext tupleHandlingContext,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception requestFailure
+        ) {
+            try {
+                return Optional.of(packageAndWriteTuple(
+                    tupleHandlingContext,
+                    tupleWriter,
+                    rrPair,
+                    summary,
+                    requestFailure
+                ));
+            } catch (Exception e) {
+                if (requestFailure != null) {
+                    throw e;
+                }
+                failReplayForTupleWrite(context, rrPair.trafficStreamKeysBeingHeld, e);
+                return Optional.empty();
+            }
+        }
+
+        private void handleTupleWriteCompletion(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            RequestResponsePacketPair rrPair,
+            Throwable writeErr
+        ) {
+            if (writeErr != null) {
+                failReplayForTupleWrite(context, rrPair.trafficStreamKeysBeingHeld, writeErr);
+                return;
+            }
+            commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
         }
 
         private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
@@ -285,10 +344,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             RequestResponsePacketPair.ReconstructionStatus status,
             List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
-            commitTrafficStreams(
-                status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
-                trafficStreamKeysBeingHeld
-            );
+            // Both CLOSED_PREMATURELY and TRAFFIC_SOURCE_READER_INTERRUPTED suppress the commit.
+            // CLOSED_PREMATURELY: the source ran out of data mid-transaction, so committing
+            //   would mark a partial replay as completed.
+            // TRAFFIC_SOURCE_READER_INTERRUPTED: the partition was reassigned and the broker
+            //   will re-deliver the records past the last commit on the next assignment;
+            //   committing here would advance past records we want re-delivered.
+            boolean shouldCommit =
+                status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
+                && status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED;
+            commitTrafficStreams(shouldCommit, trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
@@ -323,12 +388,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 return;
             }
             notifyConnectionDone(trafficStreamKeysBeingHeld);
+            // Commit eagerly to match the other commitTrafficStreams call sites
+            // (processCompletedTransaction, handleTupleWriteCompletion, onTrafficStreamsExpired,
+            // onTrafficStreamIgnored). Deferring the commit to the closeConnection() future left
+            // the offset pinned at the head of OffsetLifecycleTracker's priority queue when the
+            // channel close stalled — every subsequent commit returned BLOCKED_BY_OTHER_COMMITS
+            // and CDC E2E runs observed 30m+ TIME-LAG. Channel close is independent network
+            // cleanup, not a migration-semantics gate.
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
             replayEngine.setFirstTimestamp(timestamp);
-            var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
-            cf.map(
-                f -> f.whenComplete((v, t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
-                () -> "closing the channel in the ReplayEngine"
-            );
+            replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
         }
 
         @Override
@@ -345,6 +414,28 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             if (keys != null && !keys.isEmpty()) {
                 trafficCaptureSource.onConnectionAccumulationComplete(keys.get(0));
             }
+        }
+
+        private void failReplayForTupleWrite(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            List<ITrafficStreamKey> trafficStreamKeysBeingHeld,
+            Throwable failure
+        ) {
+            var unwrappedFailure = TrackedFuture.unwindPossibleCompletionException(failure);
+            var fatalError = new Error(
+                "Fatal tuple write failure for " + context + ". The replayer is stopping without "
+                    + "committing the held traffic stream offsets because tuple output was not durably written. "
+                    + "Fix the tuple sink failure before restarting; otherwise replay will remain blocked at "
+                    + "these offsets.",
+                unwrappedFailure
+            );
+            log.atError().setCause(unwrappedFailure)
+                .setMessage("Fatal tuple write failure for {} (streams={}); shutting down without committing offsets")
+                .addArgument(context)
+                .addArgument(trafficStreamKeysBeingHeld)
+                .log();
+            commitTrafficStreams(false, trafficStreamKeysBeingHeld);
+            shutdown(fatalError);
         }
 
         @Override
@@ -375,6 +466,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     tupleObserver.accept(requestResponseTuple);
                 }
                 var parsedMsgs = new ParsedHttpMessagesAsDicts(requestResponseTuple);
+                if (responsePostProcessor != null) {
+                    applyResponsePostProcessor(parsedMsgs);
+                }
                 writeFuture = tupleWriter.writeTuple(requestResponseTuple, parsedMsgs);
             }
 
@@ -382,6 +476,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 throw new CompletionException(t);
             }
             return writeFuture;
+        }
+
+        @SuppressWarnings("unchecked")
+        private void applyResponsePostProcessor(ParsedHttpMessagesAsDicts parsedMsgs) {
+            TrafficReplayerCore.applyResponsePostProcessor(responsePostProcessor, parsedMsgs);
         }
 
         private void packageAndWriteResponse(
@@ -402,6 +501,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
+                assert tupleConsumer != null : "expected non-null tuple consumer";
                 tupleConsumer.accept(requestResponseTuple);
             }
 
@@ -509,6 +609,29 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .addArgument(batchDurationMs)
                     .addArgument(trafficStreams::size)
                     .log();
+            }
+        }
+    }
+
+    /**
+     * Apply a response post-processor to all target responses in the parsed messages.
+     * Package-private static for testability.
+     */
+    @SuppressWarnings("unchecked")
+    static void applyResponsePostProcessor(IJsonTransformer postProcessor, ParsedHttpMessagesAsDicts parsedMsgs) {
+        var responses = parsedMsgs.targetResponseList;
+        if (responses == null) return;
+        for (int i = 0; i < responses.size(); i++) {
+            var original = responses.get(i);
+            if (original == null) continue;
+            try {
+                var transformed = (Map<String, Object>) postProcessor.transformJson(original);
+                responses.set(i, transformed);
+            } catch (Exception e) {
+                log.atWarn().setCause(e)
+                    .setMessage("Response post-processor failed for response {}, leaving empty")
+                    .addArgument(i).log();
+                responses.set(i, null);
             }
         }
     }

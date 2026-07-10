@@ -7,7 +7,7 @@ setup(
     packages=find_packages(exclude=("tests")),
     install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus",
                       "kubernetes", "rich>=14.0.0", "ruamel.yaml", "pydantic", "awscli",
-                      "tinydb", "fastapi", "ijson", "psutil", "textual"],
+                      "ijson", "psutil", "textual"],
     entry_points={
         "console_scripts": [
             "console = console_link.cli:main",

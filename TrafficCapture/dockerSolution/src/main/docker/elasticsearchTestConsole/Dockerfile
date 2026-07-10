@@ -57,7 +57,7 @@ RUN dnf install -y \
         git \
         gzip \
         hostname \
-        java-17-amazon-corretto-headless \
+        java-21-amazon-corretto-headless \
         jq \
         less \
         make \

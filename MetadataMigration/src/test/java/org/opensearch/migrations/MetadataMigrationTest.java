@@ -1,11 +1,14 @@
 package org.opensearch.migrations;
 
+import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -20,6 +23,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 public class MetadataMigrationTest {
+
+    @TempDir
+    java.nio.file.Path tempDir;
 
     @Test
     void testMain_expectNoPasswordLogged() {
@@ -102,6 +108,51 @@ public class MetadataMigrationTest {
             assertThat(root.has("errorMessage"), equalTo(true));
             assertThat(root.get("errorMessage").asText(), startsWith("Unexpected failure:"));
             verify(mm).exitWithCode(888);
+        }
+    }
+
+    @Test
+    void outputFileReceivesCommandOutput() throws Exception {
+        var outputFile = tempDir.resolve("metadata-output.log");
+        try (var closeableLogSetup = new CloseableLogSetup(MetadataMigration.class.getName())) {
+            var mm = spy(new MetadataMigration());
+            doNothing().when(mm).exitWithCode(anyInt());
+            mm.run(new String[] {
+                "evaluate",
+                "--source-host", "http://foo",
+                "--target-host", "http://bar",
+                "--outputFile", outputFile.toString()
+            });
+
+            var output = Files.readString(outputFile);
+            assertThat(output, containsString("Starting Metadata Evaluation"));
+            assertThat(output, containsString("Unexpected failure:"));
+            assertThat(closeableLogSetup.getLogEvents().stream().anyMatch(
+                event -> event.contains("Starting Metadata Evaluation")), equalTo(true));
+        }
+    }
+
+    @Test
+    void jsonModeOutputFileReceivesCommandOutput() throws Exception {
+        var outputFile = tempDir.resolve("metadata-output-from-json.log");
+        try (var closeableLogSetup = new CloseableLogSetup(MetadataMigration.class.getName())) {
+            var mm = spy(new MetadataMigration());
+            doNothing().when(mm).exitWithCode(anyInt());
+            mm.run(new String[] {
+                "evaluate",
+                "---INLINE-JSON",
+                new ObjectMapper().writeValueAsString(Map.of(
+                    "sourceHost", "http://foo",
+                    "targetHost", "http://bar",
+                    "outputFile", outputFile.toString()
+                ))
+            });
+
+            var output = Files.readString(outputFile);
+            assertThat(output, containsString("Starting Metadata Evaluation"));
+            assertThat(output, containsString("Unexpected failure:"));
+            assertThat(closeableLogSetup.getLogEvents().stream().anyMatch(
+                event -> event.contains("Starting Metadata Evaluation")), equalTo(true));
         }
     }
 }

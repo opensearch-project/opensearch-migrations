@@ -2,177 +2,108 @@
 
 set -xeuo pipefail
 
-MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
+MIGRATIONS_REPO_ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)
+source "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/localTestingCommon.sh"
+source "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/backends/dockerHostedBuildkit.sh"
 
 wait_for_cluster_dns() {
-  echo "Waiting for CoreDNS to become ready..."
-  kubectl wait --namespace kube-system \
-    --for=condition=ready pod \
-    --selector k8s-app=kube-dns \
-    --timeout=180s
-
-  echo "Verifying external DNS resolution through the cluster DNS service..."
+  local kube_context
   local attempt
-  for attempt in $(seq 1 30); do
-    if minikube ssh -- nslookup registry-1.docker.io 10.96.0.10 >/dev/null 2>&1; then
-      echo "Cluster DNS can resolve registry-1.docker.io"
-      return 0
+  kube_context="${KUBE_CONTEXT:-minikube}"
+  print_step "Waiting for cluster DNS"
+  echo "Waiting for CoreDNS pod to be created..."
+  for attempt in $(seq 1 60); do
+    if kubectl --context "${kube_context}" get pod -n kube-system -l k8s-app=kube-dns -o name | grep -q .; then
+      break
+    fi
+    if [[ "${attempt}" -eq 60 ]]; then
+      echo "CoreDNS pod was not created within the timeout" >&2
+      return 1
     fi
     sleep 2
   done
 
-  echo "Cluster DNS did not resolve registry-1.docker.io within the timeout" >&2
-  return 1
-}
-
-print_step() {
-  echo
-  echo "==> $1"
-}
-
-wait_for_ma_runtime() {
-  print_step "Waiting for core Migration Assistant workloads"
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/migration-console --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma wait --for=condition=ready pod -l app.kubernetes.io/name=argo-workflows-server --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma wait --for=condition=ready pod -l app.kubernetes.io/name=strimzi-cluster-operator --timeout=10m
-}
-
-wait_for_test_clusters() {
-  print_step "Waiting for local source and target test clusters"
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/elasticsearch-master --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/opensearch-cluster-master --timeout=10m
-}
-
-print_next_steps() {
-  print_step "Local environment is ready"
-  echo "Migration console:"
-  echo "  kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash"
-  echo
-  echo "Current pods:"
-  kubectl --context "${KUBE_CONTEXT}" -n ma get pods
-  echo
-  echo "Helm releases:"
-  helm --kube-context "${KUBE_CONTEXT}" -n ma list
+  echo "Waiting for CoreDNS to become ready..."
+  kubectl --context "${kube_context}" wait --namespace kube-system \
+    --for=condition=ready pod \
+    --selector k8s-app=kube-dns \
+    --timeout=180s
+  echo "CoreDNS is ready."
 }
 
 ## One time things - will require a restart to minikube if it was already running
+MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 MINIKUBE_CPU_COUNT="${MINIKUBE_CPU_COUNT:-8}"
 MINIKUBE_MEMORY_SIZE="${MINIKUBE_MEMORY_SIZE:-18000}"
 print_step "Configuring minikube resources"
 echo "Setting minikube config to use ${MINIKUBE_CPU_COUNT} CPUs and ${MINIKUBE_MEMORY_SIZE} MB memory."
-minikube config set cpus $MINIKUBE_CPU_COUNT
-minikube config set memory $MINIKUBE_MEMORY_SIZE
+minikube -p "${MINIKUBE_PROFILE}" config set cpus $MINIKUBE_CPU_COUNT
+minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 
-INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
-if minikube status --format='{{.Host}}' 2>/dev/null | grep -q Running; then
-  echo "minikube is already running, skipping start"
-else
-  print_step "Starting minikube"
-  minikube start \
-    --extra-config=kubelet.authentication-token-webhook=true \
-    --extra-config=kubelet.authorization-mode=Webhook \
-    --extra-config=scheduler.bind-address=0.0.0.0 \
-    --extra-config=controller-manager.bind-address=0.0.0.0 \
-    --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+# Always recreate the cluster. The shared docker-hosted registry/buildkit
+# containers and their volumes live on host Docker, so they survive
+# `minikube delete` and the buildkit cache + registry images are reused.
+# Use minikube's default cri-dockerd runtime + bridge CNI: the alternative
+# (containerd) makes minikube install kindnet, which pulls a docker.io image
+# at every cluster start and breaks under Docker Hub rate limits in CI.
+# `--insecure-registry=docker-registry:5000` lets dockerd accept plain HTTP
+# from our in-cluster registry name.
+print_step "Recreating minikube"
+# Tear down the registry before minikube/network so docker network rm
+# isn't blocked by a connected container.
+set_docker_hosted_defaults
+teardown_registry_container
+minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
+# `minikube delete` sometimes leaves the docker network behind with its
+# 192.168.49.0/24 subnet, which makes the next `minikube start` fail with
+# "address already in use". Drop it; minikube recreates it on start.
+docker network rm "${MINIKUBE_PROFILE}" >/dev/null 2>&1 || true
+minikube -p "${MINIKUBE_PROFILE}" start \
+  --driver=docker \
+  --insecure-registry="${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}" \
+  --extra-config=kubelet.authentication-token-webhook=true \
+  --extra-config=kubelet.authorization-mode=Webhook \
+  --extra-config=scheduler.bind-address=0.0.0.0 \
+  --extra-config=controller-manager.bind-address=0.0.0.0
+
+# The shared docker-hosted backend configures each node to resolve
+# docker-registry to the host gateway IP and pull from the host-bound port,
+# so the docker driver is required (other minikube drivers use VMs where the
+# host gateway IP is different and the node containers are not accessible via
+# docker exec).
+ACTUAL_DRIVER="$(minikube -p "${MINIKUBE_PROFILE}" profile list -o json 2>/dev/null \
+  | python3 -c "import json,sys; data=json.load(sys.stdin); valid=data.get('valid',[]); \
+print(next((p['Config']['Driver'] for p in valid if p.get('Name')=='${MINIKUBE_PROFILE}'), ''))" 2>/dev/null || true)"
+if [[ -n "${ACTUAL_DRIVER}" && "${ACTUAL_DRIVER}" != "docker" ]]; then
+  echo "ERROR: localTesting.sh requires the minikube docker driver, profile '${MINIKUBE_PROFILE}' uses '${ACTUAL_DRIVER}'." >&2
+  exit 1
 fi
 
+export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 wait_for_cluster_dns
 
-cd "${MIGRATIONS_REPO_ROOT_DIR}"
-gradlew() {
-    "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
-}
-
-export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
-
+# In-cluster pulls use the host-gateway-resolved name at the host-bound port;
+# host-side `docker buildx` pushes to the same port via localhost.
+LOCAL_REGISTRY="${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
+BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
-export BUILDKIT_HELM_ARGS="--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"
-print_step "Preparing BuildKit and local registry services"
-"${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
+POST_MA_INSTALL_HOOK="${POST_MA_INSTALL_HOOK:-wait_for_ma_runtime}"
+POST_TC_INSTALL_HOOK="${POST_TC_INSTALL_HOOK:-wait_for_test_clusters}"
 
-BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+# Bring the registry/buildkit containers up, then configure each minikube node
+# to resolve docker-registry to the host gateway and pull from the host-bound port.
+setup_build_backend
+mk_nodes=()
+while IFS= read -r node; do
+  [[ -n "${node}" ]] && mk_nodes+=("${node}")
+done < <(minikube -p "${MINIKUBE_PROFILE}" node list 2>/dev/null | awk '{print $1}')
+connect_cluster_to_registry_network "${MINIKUBE_PROFILE}" "${mk_nodes[@]}"
 
-LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
-MINIKUBE_IP="$(minikube ip)"
-LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
-export LOCAL_REGISTRY
-echo "Using local registry at: ${LOCAL_REGISTRY}"
-
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64)
-    PLATFORM="amd64"
-    ;;
-  arm64|aarch64)
-    PLATFORM="arm64"
-    ;;
-  *)
-    echo "Unsupported architecture: $ARCH"
-    exit 1
-    ;;
-esac
-
-print_step "Building container images for ${PLATFORM}"
-gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
-
-kubectl config set-context "${KUBE_CONTEXT}" --namespace=ma
+run_local_test_deploy
 
 # Nice to have additions to minikube
 print_step "Enabling metrics-server addon"
-minikube addons enable metrics-server
-
-cd "${MIGRATIONS_REPO_ROOT_DIR}"/deployment/k8s/
-
-# Helm installs
-print_step "Updating Helm dependencies"
-helm dependency update charts/aggregates/testClusters
-helm dependency update charts/aggregates/migrationAssistantWithArgo
-
-if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
-  echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  print_step "Installing Migration Assistant chart"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
-    --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
-    --set "images.captureProxy.tag=latest" \
-    --set "images.captureProxy.pullPolicy=Always" \
-    --set "images.installer.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-    --set "images.installer.tag=latest" \
-    --set "images.installer.pullPolicy=Always" \
-    --set "images.migrationConsole.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-    --set "images.migrationConsole.tag=latest" \
-    --set "images.migrationConsole.pullPolicy=Always" \
-    --set "images.trafficReplayer.repository=${LOCAL_REGISTRY}/migrations/traffic_replayer" \
-    --set "images.trafficReplayer.tag=latest" \
-    --set "images.trafficReplayer.pullPolicy=Always" \
-    --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
-    --set "images.reindexFromSnapshot.tag=latest" \
-    --set "images.reindexFromSnapshot.pullPolicy=Always"
-
-  wait_for_ma_runtime
-
-  print_step "Installing local source and target test clusters"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
-else
-  echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  print_step "Installing Migration Assistant chart"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
-
-  wait_for_ma_runtime
-
-  print_step "Installing local source and target test clusters"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-    --wait --timeout 10m
-fi
-
-wait_for_test_clusters
-print_next_steps
-
+minikube -p "${MINIKUBE_PROFILE}" addons enable metrics-server
 
 # Other useful stuff...
 

@@ -49,7 +49,8 @@ def call(Map config = [:]) {
             "migrationAssistanceEnabled": true,
             "replayerOutputEFSRemovalPolicy": "DESTROY",
             "migrationConsoleServiceEnabled": true,
-            "otelCollectorEnabled": true
+            "otelMetricsCollectorEnabled": true,
+            "otelTraceCollectorEnabled": false
           }
         }
     """
@@ -60,8 +61,8 @@ def call(Map config = [:]) {
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
             defaultStageId: 'rfs-integ',
-            skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'rfs-default-e2e-test',
-            integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py'
+            integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py',
+            defaultGitBranch: config.defaultGitBranch ?: 'main'
     )
 }

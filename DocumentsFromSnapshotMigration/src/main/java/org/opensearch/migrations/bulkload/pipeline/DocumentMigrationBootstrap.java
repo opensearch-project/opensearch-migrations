@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
@@ -11,16 +10,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.bulkload.SnapshotExtractor;
-import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
-import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
-import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -56,16 +50,13 @@ import reactor.core.scheduler.Schedulers;
 @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
 public class DocumentMigrationBootstrap {
 
-    private final SnapshotExtractor extractor;
+    private final DocumentSource documentSource;
     private final OpenSearchClient targetClient;
-    private final String snapshotName;
-    private final Path workDir;
 
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
     private final int batchConcurrency;
 
-    // Optional: document transformation
     @Builder.Default
     private final Supplier<IJsonTransformer> transformerSupplier = null;
     @Builder.Default
@@ -73,23 +64,6 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
 
-    // Optional: shard size limit (0 = no limit)
-    @Builder.Default
-    private final long maxShardSizeBytes = 0;
-
-    // Optional: delta snapshot support
-    @Builder.Default
-    private final String previousSnapshotName = null;
-    @Builder.Default
-    private final DeltaMode deltaMode = null;
-    @Builder.Default
-    private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory = null;
-
-    // Optional: external document source (e.g. Solr). When set, bypasses LuceneSnapshotSource.
-    @Builder.Default
-    private final DocumentSource externalDocumentSource = null;
-
-    // Optional: work coordination
     @Builder.Default
     private final ScopedWorkCoordinator workCoordinator = null;
     @Builder.Default
@@ -114,7 +88,7 @@ public class DocumentMigrationBootstrap {
         if (workCoordinator == null) {
             throw new IllegalStateException("workCoordinator must be set for coordinated migration");
         }
-        var source = createDocumentSource();
+        var source = documentSource;
         var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
         var sink = new OpenSearchDocumentSink(
             targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
@@ -227,7 +201,7 @@ public class DocumentMigrationBootstrap {
 
         try {
             long start = System.currentTimeMillis();
-            latch.await();
+            latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
             log.atInfo()
                 .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
@@ -256,35 +230,15 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    /**
-     * Maps a work item to the appropriate Partition. For external sources (e.g. Solr),
-     * looks up the partition from the source's listPartitions by shard index.
-     */
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(
             IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
-        if (externalDocumentSource != null) {
-            var partitions = externalDocumentSource.listPartitions(wi.getIndexName());
-            int shardIdx = wi.getShardNumber();
-            if (shardIdx < partitions.size()) {
-                return partitions.get(shardIdx);
-            }
-            throw new IllegalStateException("Shard index " + shardIdx + " out of range for " +
-                wi.getIndexName() + " (has " + partitions.size() + " partitions)");
+        var partitions = documentSource.listPartitions(wi.getIndexName());
+        int shardIdx = wi.getShardNumber();
+        if (shardIdx < partitions.size()) {
+            return partitions.get(shardIdx);
         }
-        return new EsShardPartition(snapshotName, wi.getIndexName(), wi.getShardNumber());
-    }
-
-    private DocumentSource createDocumentSource() {
-        if (externalDocumentSource != null) {
-            return externalDocumentSource;
-        }
-        var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
-            .maxShardSizeBytes(maxShardSizeBytes);
-        if (previousSnapshotName != null && deltaMode != null) {
-            log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
-            builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);
-        }
-        return builder.build();
+        throw new IllegalStateException("Shard index " + shardIdx + " out of range for " +
+            wi.getIndexName() + " (has " + partitions.size() + " partitions)");
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

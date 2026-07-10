@@ -14,8 +14,7 @@
             "allowLooseVersionMatching": true,
             "clusterAwarenessAttributes": 1,
             "loggingConfigurationOverrideConfigMap": "",
-            "multiTypeBehavior": "NONE",
-            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "output": "HUMAN_READABLE",
             "transformerConfigBase64": ""
           },
@@ -29,7 +28,7 @@
             "initialLeaseDuration": "PT10M",
             "maxConnections": 10,
             "maxShardSizeBytes": 85899345920,
-            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "resources": {
               "limits": {
                 "cpu": "2000m",
@@ -62,10 +61,10 @@
         "repoConfig": {
           "awsRegion": "us-east-2",
           "endpoint": "http://localhost:4566",
-          "s3RepoPathUri": "s3://migration-bucket",
           "s3RoleArn": "",
           "useLocalStack": false,
-          "repoName": "default"
+          "repoName": "default",
+          "repoPathUri": "s3://migration-bucket"
         }
       }
     }

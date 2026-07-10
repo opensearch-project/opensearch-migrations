@@ -82,7 +82,7 @@ public class TestCreateSnapshotSolr {
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
         args.snapshotName = "test_standalone_backup";
-        args.fileSystemRepoPath = "/var/solr/data";
+        args.repoUri = "/var/solr/data";
         args.noWait = false;
 
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
@@ -112,7 +112,7 @@ public class TestCreateSnapshotSolr {
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
         args.snapshotName = "test_cloud_backup";
-        args.fileSystemRepoPath = "/var/solr/data/backups";
+        args.repoUri = "/var/solr/data/backups";
         args.noWait = false;
 
         // With the per-snapshot location layout (<base>/<snapshotName>), Solr validates that the

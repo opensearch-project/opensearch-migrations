@@ -5,7 +5,7 @@ import requests
 import subprocess
 import threading
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from console_link.workflow.commands.approve import approve_gate
@@ -111,6 +111,9 @@ class ArgoWorkflowInterface:
     # This must return an immutable copy of the dictionary
     get_workflow: Callable[[str, str], tuple[str, dict]]
     approve_step: Callable[[str, str, dict], WorkflowApproveResult]
+    get_artifact_content: Callable[[str, str, str, str], Optional[str]] = field(
+        default=lambda *_: None
+    )
 
 
 def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflowInterface:
@@ -145,12 +148,13 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     # Only keep inputs/outputs if they contain specific UI keys
                     "inputs": {"parameters": [
                         p for p in node.get("inputs", {}).get("parameters", [])
-                        if p['name'] in ('groupName_view', 'configContents', 'name', 'resourceName')
+                        if p['name'] in ('groupName_view', 'sortOrder_view', 'configContents', 'name', 'resourceName')
                     ]},
                     "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
                                                p['name'] in ('statusOutput', 'overriddenPhase')],
                                 "artifacts": [a for a in node.get("outputs", {}).get("artifacts", []) if
-                                              a['name'] in ('statusOutput',)]}
+                                              a['name'] == 'statusOutput' or
+                                              a['name'] == 'metadataOutput']}
                 }
         except Exception as e:
             logger.error(f"Streaming parse failed: {e}")
@@ -204,7 +208,17 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
 
     return ArgoWorkflowInterface(
         get_workflow=lambda name, namespace: _get_workflow_data_internal(WorkflowService(), name, namespace),
-        approve_step=approve
+        approve_step=approve,
+        get_artifact_content=lambda workflow_name, node_id, artifact_name, namespace: WorkflowService()
+        .get_artifact_content(
+            workflow_name=workflow_name,
+            node_id=node_id,
+            artifact_name=artifact_name,
+            namespace=namespace,
+            argo_server=argo_url,
+            token=token,
+            insecure=insecure,
+        )
     )
 
 

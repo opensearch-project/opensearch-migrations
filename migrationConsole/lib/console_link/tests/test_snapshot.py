@@ -11,8 +11,8 @@ from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
-from console_link.models.snapshot import (FailedToCreateSnapshot, FileSystemSnapshot, S3Snapshot,
-                                          Snapshot)
+from console_link.models.snapshot import (FailedToCreateSnapshot, FileSystemSnapshot, GcsSnapshot,
+                                          S3Snapshot, Snapshot)
 from tests.utils import create_valid_cluster
 
 mock_snapshot_api_response = {
@@ -75,6 +75,17 @@ def fs_snapshot(mock_cluster):
         }
     }
     return FileSystemSnapshot(config, mock_cluster)
+
+
+@pytest.fixture
+def gcs_snapshot(mock_cluster):
+    config = {
+        "snapshot_name": "test_snapshot",
+        "gcs": {
+            "repo_uri": "gs://test-bucket/test-path",
+        }
+    }
+    return GcsSnapshot(config, mock_cluster)
 
 
 def snapshot_404_response():
@@ -140,7 +151,7 @@ def snapshot_delete_response():
     return mock_response
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_status(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -158,7 +169,7 @@ def test_snapshot_status(request, snapshot_fixture):
     )
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_status_full(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -302,10 +313,91 @@ def test_get_snpashot_fails_for_config_with_fs_and_s3():
     assert "Invalid config file for snapshot" in str(excinfo.value.args[0])
 
 
+def test_gcs_snapshot_init_succeeds():
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket",
+            },
+        }
+    }
+    snapshot = GcsSnapshot(config['snapshot'], create_valid_cluster())
+    assert isinstance(snapshot, Snapshot)
+
+
+def test_get_snapshot_for_gcs_config():
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket",
+            },
+        }
+    }
+    snapshot = get_snapshot(config["snapshot"], create_valid_cluster())
+    assert isinstance(snapshot, GcsSnapshot)
+
+
+def test_gcs_snapshot_create_calls_subprocess_run(mocker):
+    config = {
+        "snapshot": {
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket",
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    snapshot = GcsSnapshot(config["snapshot"], source)
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock_run = mocker.patch("subprocess.run")
+    snapshot.create()
+    mock_run.assert_called_once()
+
+
+def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
+    config = {
+        "snapshot": {
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "snapshot_name": "reindex_from_snapshot",
+            "gcs": {
+                "repo_uri": "gs://my-bucket",
+            },
+        }
+    }
+    max_snapshot_rate = 100
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    snapshot = GcsSnapshot(config["snapshot"], source)
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
+
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  '--snapshot-repo-name', snapshot.snapshot_repo_name,
+                                  "--source-host", source.endpoint,
+                                  "--source-insecure",
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
+                                  "--repo-uri", config["snapshot"]["gcs"]["repo_uri"],
+                                  "--no-wait",
+                                  "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
 def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "fs": {
                 "repo_path": "/path/for/snapshot/repo"
@@ -325,15 +417,17 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "s3": {
                 "repo_uri": "s3://my-bucket",
@@ -355,8 +449,9 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -367,7 +462,8 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
     custom_repo_name = "my-repo"
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "snapshot_repo_name": custom_repo_name,
             "s3": {
@@ -390,8 +486,9 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
                                   '--snapshot-repo-name', custom_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -424,7 +521,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -455,7 +552,7 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait"
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -484,7 +581,7 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
@@ -515,11 +612,11 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   "--source-aws-service-signing-name", service_name,
                                   "--source-aws-region", signing_region,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -537,7 +634,7 @@ def test_snapshot_delete(request, snapshot_fixture):
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -557,7 +654,7 @@ def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_delete_all_snapshots_multiple_snapshots(request, snapshot_fixture, caplog):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -586,7 +683,7 @@ def test_snapshot_delete_all_snapshots_multiple_snapshots(request, snapshot_fixt
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_delete_repo(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -597,7 +694,7 @@ def test_snapshot_delete_repo(request, snapshot_fixture):
                                                raise_error=True)
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     fake_command = ["/root/createSnapshot/bin/CreateSnapshot", "--snapshot_name=reindex_from_snapshot"]
@@ -610,7 +707,7 @@ def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     mock.assert_called_once()
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_handling_extra_args(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     mocker.patch("sys.stdout.write")
@@ -625,7 +722,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     assert all([arg in mock.call_args.args[0] for arg in extra_args])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
 def test_delete_all_snapshots_repository_missing(request, snapshot_fixture, caplog):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -640,3 +737,114 @@ def test_delete_all_snapshots_repository_missing(request, snapshot_fixture, capl
     source_cluster.call_api.assert_has_calls([
         mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True)
     ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Solr snapshot finish detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _accum_initial():
+    return {
+        "total_shards": 0, "completed_shards": 0, "index_size_bytes": 0,
+        "started_dt": None, "all_completed": True, "any_failed": False, "any_found": False,
+    }
+
+
+def test_accumulate_collection_completed_state_marks_completed():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "completed", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 30},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 30
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is True
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_running_state_with_all_shards_succeeded_marks_completed():
+    """Solr's REQUESTSTATUS lags behind shard completions: state can stay 'running'
+    after every shard reports success. The accumulator must treat success_count
+    >= num_shards as completion so the workflow's SUCCESS poll can terminate."""
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "running", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 30},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 30
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is True, \
+        "all shards successful must imply completed regardless of async-task state"
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_submitted_state_with_partial_progress_stays_running():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "submitted", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 5},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 5
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is False
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_failed_state_marks_failed():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "failed", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 12},
+        accum,
+    )
+
+    assert accum["any_failed"] is True
+    assert accum["all_completed"] is False
+
+
+def test_solr_snapshot_status_returns_success_when_all_shards_completed_with_lagging_state(monkeypatch):
+    """Reproduces the workflow regression: every collection reports all shards successful
+    but Solr's async-task state field is still 'running'. Status must still surface SUCCESS
+    so checkScript's `[ "$status" = "SUCCESS" ]` poll completes."""
+    from console_link.models import snapshot as snapshot_module
+
+    cluster = mock.Mock()
+
+    def fake_call_api(path, *args, **kwargs):
+        resp = mock.Mock()
+        if path == snapshot_module.SOLR_LIST_COLLECTIONS_API:
+            resp.status_code = 200
+            resp.json.return_value = {"collections": ["col-a", "col-b", "col-c"]}
+            return resp
+        # REQUESTSTATUS — simulate the lagging-state case: 30 shards each, all 30 succeeded,
+        # but the top-level state is still "running" because the overseer hasn't published
+        # the terminal state yet.
+        resp.status_code = 200
+        resp.json.return_value = {
+            "status": {"state": "running"},
+            "response": {"numShards": 30, "indexSizeMB": 0.0, "startTime": "2026-05-12T21:42:31Z"},
+            "success": {f"shard{i}": "ok" for i in range(30)},
+        }
+        return resp
+
+    cluster.call_api.side_effect = fake_call_api
+
+    result = snapshot_module._solr_backup_status(cluster, "snap-1", deep_check=False)
+
+    assert result.success
+    assert result.value == "SUCCESS", \
+        f"expected SUCCESS so the workflow poll terminates, got {result.value!r}"

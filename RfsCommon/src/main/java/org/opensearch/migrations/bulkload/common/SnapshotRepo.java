@@ -53,7 +53,7 @@ public class SnapshotRepo {
         String getId();
     }
 
-    public static class CannotParseRepoFile extends RfsException {
+    public static class CannotParseRepoFile extends RfsException implements SnapshotReadFailure {
         public CannotParseRepoFile(SourceRepo repo) {
             super("Unable to locate valid snapshot repository files in repo: " + repo);
         }

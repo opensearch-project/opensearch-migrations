@@ -4,10 +4,12 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -48,6 +50,15 @@ public class LuceneSnapshotSource implements DocumentSource {
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
 
+    // When non-null, provides FieldMappingContext for indices with _source disabled
+    private final Function<String, FieldMappingContext> sourcelessMappingContextProvider;
+
+    // When true, treat _recovery_source as _source if present
+    private final boolean useRecoverySource;
+
+    private final LuceneAdapter luceneAdapter;
+
+
     private LuceneSnapshotSource(Builder builder) {
         this.extractor = builder.extractor;
         this.snapshotName = builder.snapshotName;
@@ -56,6 +67,9 @@ public class LuceneSnapshotSource implements DocumentSource {
         this.previousSnapshotName = builder.previousSnapshotName;
         this.deltaMode = builder.deltaMode;
         this.deltaContextFactory = builder.deltaContextFactory;
+        this.sourcelessMappingContextProvider = builder.sourcelessMappingContextProvider;
+        this.useRecoverySource = builder.useRecoverySource;
+        this.luceneAdapter = new LuceneAdapter(builder.emitDocType);
     }
 
     public static Builder builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
@@ -70,6 +84,9 @@ public class LuceneSnapshotSource implements DocumentSource {
         private String previousSnapshotName;
         private DeltaMode deltaMode;
         private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
+        private Function<String, FieldMappingContext> sourcelessMappingContextProvider;
+        private boolean useRecoverySource;
+        private boolean emitDocType;
 
         private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
             this.extractor = extractor;
@@ -89,6 +106,27 @@ public class LuceneSnapshotSource implements DocumentSource {
             this.deltaContextFactory = deltaContextFactory;
             return this;
         }
+
+        /**
+         * When set, enables sourceless document reconstruction. The function receives
+         * an index name and returns a FieldMappingContext for that index (or null if
+         * the index has _source enabled and doesn't need reconstruction).
+         */
+        public Builder sourcelessMappingContextProvider(Function<String, FieldMappingContext> provider) {
+            this.sourcelessMappingContextProvider = provider;
+            return this;
+        }
+
+        public Builder useRecoverySource(boolean useRecoverySource) {
+            this.useRecoverySource = useRecoverySource;
+            return this;
+        }
+
+        public Builder emitDocType(boolean emitDocType) {
+            this.emitDocType = emitDocType;
+            return this;
+        }
+
 
         public LuceneSnapshotSource build() {
             return new LuceneSnapshotSource(this);
@@ -172,7 +210,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
                 .skip(startingDocOffset)
-                .map(LuceneAdapter::fromLucene);
+                .map(luceneAdapter::fromLucene);
         }
 
         return readRegularDocuments(entry, partition, startingDocOffset);
@@ -182,8 +220,12 @@ public class LuceneSnapshotSource implements DocumentSource {
         SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
     ) {
         log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset))
-            .map(LuceneAdapter::fromLucene);
+        var esPartition = (EsShardPartition) partition;
+        FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
+            ? sourcelessMappingContextProvider.apply(esPartition.indexName())
+            : null;
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
+            .map(luceneAdapter::fromLucene);
     }
 
     private SnapshotExtractor.ShardEntry resolveShardEntry(

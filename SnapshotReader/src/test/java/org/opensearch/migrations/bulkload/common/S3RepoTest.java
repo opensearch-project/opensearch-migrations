@@ -19,6 +19,7 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.*;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -328,6 +329,30 @@ public class S3RepoTest {
 
         // Only files under that prefix returned, others excluded
         assertEquals(List.of("file1.txt", "file2.txt"), files);
+    }
+
+    @Test
+    void downloadFile_whenS3GetFails_throwsClassifiedSnapshotReadFailure() {
+        // Simulate a failed object download (e.g. the snapshot file is missing on S3, or S3 errors
+        // after the client's retries are exhausted): getObject's future completes exceptionally, so
+        // .join() throws CompletionException.
+        var failed = new CompletableFuture<GetObjectResponse>();
+        failed.completeExceptionally(NoSuchKeyException.builder()
+            .message("The specified key does not exist.").build());
+        when(mockS3Client.getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class)))
+            .thenReturn(failed);
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(any());
+
+        var thrown = assertThrows(
+            S3Repo.CouldNotReadFromS3.class,
+            () -> testRepo.downloadFile("indices/123abc/0/blob1")
+        );
+
+        // It must be classified as a (non-retriable) snapshot read failure so the worker surfaces it
+        // with the snapshot path and exits with the dedicated code.
+        assertThat(thrown, instanceOf(SnapshotReadFailure.class));
+        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
+        assertThat(thrown.getMessage(), containsString("blob1"));
     }
 
     @Test

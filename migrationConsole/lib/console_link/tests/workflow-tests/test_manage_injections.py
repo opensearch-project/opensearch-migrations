@@ -217,7 +217,7 @@ class TestArgoServiceFiltering:
                                 {"name": "result", "value": "should-be-filtered"},
                                 {"name": "exitCode", "value": "0"}
                             ],
-                            "artifacts": [{"name": "main-logs", "s3": {"key": "logs/node-1"}}]
+                            "artifacts": [{"name": "metadataOutput", "s3": {"key": "logs/node-1"}}]
                         }
                     },
                     "node-2": {
@@ -338,10 +338,10 @@ class TestArgoServiceFiltering:
 
     @patch('console_link.workflow.tui.manage_injections.WorkflowService')
     @patch('console_link.workflow.tui.manage_injections.requests.get')
-    def test_preserves_status_output_artifact_and_filters_others(self, mock_get, mock_service_class):
-        """Verify statusOutput artifacts are kept but other artifacts are filtered out."""
+    def test_preserves_status_and_managed_output_artifacts(self, mock_get, mock_service_class):
+        """Verify statusOutput and managed stdout artifacts are kept."""
         bloated = self._make_bloated_workflow_response()
-        # Add a statusOutput artifact alongside the existing main-logs artifact
+        # Add a statusOutput artifact alongside the existing managed output artifact
         bloated["status"]["nodes"]["node-1"]["outputs"]["artifacts"].append(
             {"name": "statusOutput", "path": "/tmp/status-output.txt",
              "s3": {"key": "argo-artifacts/wf/node-1/statusOutput"},
@@ -367,8 +367,8 @@ class TestArgoServiceFiltering:
         artifact_names = {a["name"] for a in node1_artifacts}
 
         assert "statusOutput" in artifact_names, "statusOutput artifact should be preserved"
-        assert "main-logs" not in artifact_names, "non-statusOutput artifacts should be filtered"
-        assert len(node1_artifacts) == 1
+        assert "metadataOutput" in artifact_names, "managed stdout artifact should be preserved"
+        assert len(node1_artifacts) == 2
 
         mock_service = MagicMock()
         mock_service.get_workflow_status.return_value = {

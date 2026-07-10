@@ -1,5 +1,9 @@
 package org.opensearch.migrations;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -14,6 +18,7 @@ import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
@@ -34,6 +39,7 @@ public class MetadataMigration {
     }
 
     private AtomicReference<OutputFormat> outputFormat = new AtomicReference<>();
+    private AtomicReference<Path> outputFile = new AtomicReference<>();
 
     protected void run(String[] args) {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(
@@ -55,6 +61,12 @@ public class MetadataMigration {
         } else {
             outputFormat.set(OutputFormat.HUMAN_READABLE);
         }
+        outputFile.set(selectedCommandArgs(argsParser.getJCommander(), migrateArgs, evaluateArgs)
+            .map(commandArgs -> commandArgs.outputFile)
+            .filter(path -> !path.isBlank())
+            .map(Path::of)
+            .orElse(null));
+        initializeOutputFile();
 
         if (metadataArgs.help || argsParser.getParsedCommand() == null) {
             printTopLevelHelp(argsParser.getJCommander());
@@ -74,12 +86,24 @@ public class MetadataMigration {
         reportLogPath();
         reportTransformationPath();
 
+        if (result.getExitCode() == MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE) {
+            // Surface the snapshot read failure on stderr so it stays visible in the workflow log /
+            // CloudWatch before exit. The detailed cause is already in the run log (classifyFailure)
+            // and the message is in the JSON result; stderr avoids corrupting --output json on stdout.
+            System.err.println(result.getErrorMessage());
+        }
+
         exitWithCode(result.getExitCode());
     }
 
     private Result runCommand(JCommander jCommander, MetadataArgs metadataArgs, MigrateArgs migrateArgs, EvaluateArgs evaluateArgs) {
         var context = new RootMetadataMigrationContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(
+                    metadataArgs.otelTraceCollectorEndpoint,
+                    metadataArgs.otelMetricsCollectorEndpoint
+                ),
+                "metadata",
                 ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
@@ -109,6 +133,16 @@ public class MetadataMigration {
         }
     }
 
+    private Optional<MigrateOrEvaluateArgs> selectedCommandArgs(
+        JCommander jCommander,
+        MigrateArgs migrateArgs,
+        EvaluateArgs evaluateArgs
+    ) {
+        var command = Optional.ofNullable(jCommander.getParsedCommand())
+            .map(MetadataCommands::fromString);
+        return command.map(c -> c == MetadataCommands.EVALUATE ? evaluateArgs : migrateArgs);
+    }
+
     protected void exitWithCode(int code) {
         System.exit(code);
     }
@@ -128,12 +162,44 @@ public class MetadataMigration {
     protected void writeOutput(String humanReadableOutput) {
         if (outputFormat.get() == OutputFormat.HUMAN_READABLE) {
             log.atInfo().setMessage("{}").addArgument(humanReadableOutput).log();
+            writeOutputFile(humanReadableOutput);
         }
     }
 
     protected void writeOutput(JsonNode output) {
         if (outputFormat.get() == OutputFormat.JSON) {
-            log.atInfo().setMessage("{}").addArgument(output::toPrettyString).log();
+            var outputString = output.toPrettyString();
+            log.atInfo().setMessage("{}").addArgument(outputString).log();
+            writeOutputFile(outputString);
+        }
+    }
+
+    private void initializeOutputFile() {
+        var path = outputFile.get();
+        if (path == null) {
+            return;
+        }
+        try {
+            var parent = path.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(path, "", StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to initialize output file " + path, e);
+        }
+    }
+
+    private void writeOutputFile(String output) {
+        var path = outputFile.get();
+        if (path == null) {
+            return;
+        }
+        try {
+            Files.writeString(path, output + System.lineSeparator(), StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to write output file " + path, e);
         }
     }
 

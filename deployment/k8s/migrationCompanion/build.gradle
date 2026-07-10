@@ -1,0 +1,132 @@
+plugins {
+    id 'base'
+}
+
+import org.gradle.api.tasks.*
+import org.opensearch.migrations.image.RegistryImageBuildUtils
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
+import org.opensearch.migrations.image.PullThroughCacheHelper
+
+def migrationAssistantVersionProvider = providers.environmentVariable('MIGRATION_ASSISTANT_VERSION')
+        .orElse(providers.gradleProperty('migrationAssistantVersion'))
+        .orElse(providers.environmentVariable('IMAGE_VERSION'))
+        .orElse(providers.gradleProperty('imageVersion'))
+        .orElse(providers.environmentVariable('HELM_CHART_VERSION'))
+        .orElse(providers.gradleProperty('helmChartVersion'))
+        .orElse(provider { project.version.toString() })
+
+def publishedRegistryProvider = providers.environmentVariable('REGISTRY_ENDPOINT')
+        .orElse(providers.gradleProperty('registryEndpoint'))
+        .orElse('localhost:5001')
+def intermediateRegistryProvider = providers.gradleProperty('intermediateRegistry')
+        .orElse(publishedRegistryProvider)
+def localContainerRegistryEndpointProvider = providers.gradleProperty('localContainerRegistryEndpoint')
+        .orElse('docker-registry:5000')
+
+def publishStyleProvider = providers.gradleProperty('publishStyle')
+        .orElse('paths')
+
+def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
+def ptc = new PullThroughCacheHelper(ptcEndpoint)
+def baseImageProvider = providers.environmentVariable('MIGRATION_COMPANION_BASE_IMAGE')
+        .orElse(providers.gradleProperty('migrationCompanionBaseImage'))
+        .orElse(ptc.rewrite('docker.io/library/amazonlinux:2023'))
+
+def dockerContextDirProvider = layout.buildDirectory.dir('docker-context')
+def helmPackageDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/build/helm-package')
+
+def helmChartTarballProvider = migrationAssistantVersionProvider.map { ver ->
+    helmPackageDirProvider.file("migration-assistant-${ver}.tgz")
+}
+
+def imageName = 'migration_companion'
+def separateRepoName = 'opensearch-migrations-migration-companion'
+
+tasks.register('stageMigrationCompanionDockerContext', Sync) {
+    description = 'Stage Docker context for the Migration Companion image'
+    group = 'migration-companion'
+    dependsOn ':deployment:k8s:packageMigrationAssistantHelmChart'
+
+    into dockerContextDirProvider
+
+    from(layout.projectDirectory.file('Dockerfile'))
+    from(helmChartTarballProvider) {
+        into 'artifacts/helm'
+        rename { 'migration-assistant.tgz' }
+    }
+
+    doLast {
+        def ctx = dockerContextDirProvider.get().asFile
+        [
+                'Dockerfile',
+                'artifacts/helm/migration-assistant.tgz',
+        ].each { rel ->
+            def f = new File(ctx, rel)
+            if (!f.isFile()) {
+                throw new GradleException("missing staged companion image artifact: ${f}")
+            }
+        }
+    }
+}
+
+def companionBuildKitConfig = [
+        serviceName         : 'migrationCompanion',
+        contextDir          : dockerContextDirProvider.get().asFile.absolutePath,
+        imageName           : imageName,
+        imageTag            : 'latest',
+        repoName            : publishStyleProvider.get() == 'separateRepos' ? separateRepoName : null,
+        buildArgs           : [
+                BASE_IMAGE       : baseImageProvider.get(),
+                MIGRATION_ASSISTANT_VERSION: migrationAssistantVersionProvider.get()
+        ],
+        requiredDependencies: [
+                ':deployment:k8s:migrationCompanion:stageMigrationCompanionDockerContext'
+        ]
+]
+
+gradle.projectsEvaluated {
+    def publishedRegistry = new Registry(
+            publishedRegistryProvider.get().toString(),
+            localContainerRegistryEndpointProvider.get().toString())
+    def intermediateRegistry = new Registry(
+            intermediateRegistryProvider.get().toString(),
+            localContainerRegistryEndpointProvider.get().toString())
+    def imageHelper = new RegistryImageBuildUtils()
+    if (!publishedRegistry.isEcr() || !rootProject.tasks.findByName('loginToECR')) {
+        imageHelper.registerLoginTask(rootProject, publishedRegistry)
+    }
+    imageHelper.applyBuildKitConfigurations(rootProject, [companionBuildKitConfig], publishedRegistry, intermediateRegistry)
+}
+
+tasks.register('buildMigrationCompanionImage') {
+    description = 'Build and push the Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry') {
+    description = 'Build and push the Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry_amd64') {
+    description = 'Build and push the amd64 Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion_amd64'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry_arm64') {
+    description = 'Build and push the arm64 Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion_arm64'
+}
+
+tasks.register('pushMigrationCompanionImage') {
+    description = 'Alias for buildMigrationCompanionImageToRegistry'
+    group = 'migration-companion'
+    dependsOn 'buildMigrationCompanionImageToRegistry'
+}
+
+// Keep Docker/cross-backed companion staging on the explicit image tasks. The
+// root `build` lifecycle also runs on macOS CI workers where Docker is absent.

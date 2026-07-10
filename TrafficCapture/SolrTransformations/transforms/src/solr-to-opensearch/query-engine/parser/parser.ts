@@ -138,6 +138,15 @@ export function toParseError(err: unknown): ParseError {
 }
 
 /**
+ * Parse a Solr function query string (e.g., "avg(price)") into a FuncNode.
+ *
+ * Uses the `funcQuery` start rule. Throws on parse failure.
+ */
+export function parseFuncQuery(input: string): import('../ast/nodes').FuncNode {
+  return getParser().parse(input, { startRule: 'funcQuery' }) as import('../ast/nodes').FuncNode;
+}
+
+/**
  * Query parser types whose body uses Lucene/Solr query syntax.
  * For these types, the raw body is re-parsed using the Solr grammar.
  * Other types (e.g., func, terms) need their own parsers.

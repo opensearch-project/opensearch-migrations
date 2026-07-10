@@ -87,7 +87,8 @@ def call(Map config = [:]) {
             "migrationAssistanceEnabled": true,
             "replayerOutputEFSRemovalPolicy": "DESTROY",
             "migrationConsoleServiceEnabled": true,
-            "otelCollectorEnabled": true
+            "otelMetricsCollectorEnabled": true,
+            "otelTraceCollectorEnabled": false
           }
         }
     """
@@ -98,36 +99,50 @@ def call(Map config = [:]) {
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
             defaultStageId: 'full-es68',
-            skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
+            defaultGitBranch: config.defaultGitBranch ?: 'main',
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
             preDeployStep: { Map args ->
-                // Destroy any prior stacks in strict order before redeploying: migration CDK
-                // app first, BLOCK until all of its CloudFormation stacks reach DELETE_COMPLETE,
-                // then destroy the source (E2E solution) CDK app. Running these as two
-                // separate shell invocations makes the ordering explicit in the Jenkins log
-                // and guarantees the second call cannot start until the first has fully
-                // returned. `npx cdk destroy` already polls CFN synchronously, and
-                // --clean-up-migration-only additionally waits on `aws cloudformation wait
-                // stack-delete-complete` for any leftover "OSMigrations-<stage>" stacks.
+                // Pre-deploy stack deletion is intentionally disabled by default.
                 //
-                // Note on why a context file is passed here even though we may be cleaning
-                // up an old deploy whose context differed: CloudFormation stacks are named
-                // purely by `--stage` (e.g. OSMigrations-<stage>, opensearch-infra-stack-
-                // ec2-source-<stage>), so cleanup is already stage-scoped regardless of
-                // context content. The context file is only required for `cdk destroy` to
-                // synth successfully so it can enumerate its own stack list; the
-                // awsE2ESolutionSetup.sh short-circuits also substitute placeholder
-                // <VPC_ID>/<SOURCE_CLUSTER_ENDPOINT> values when the real source side is
+                // Tearing down the migration CDK app and then the source (E2E solution)
+                // CDK app, and redeploying both from scratch each run, adds ~30-60+
+                // minutes per pipeline invocation. Since `cdk deploy` on an already-
+                // deployed stack is a no-op for unchanged resources, we reuse the
+                // stacks across runs and rely on `preIntegTestStep` to reset
+                // run-scoped state (snapshots, S3 objects) between tests.
+                //
+                // ENABLE THIS BLOCK when making a breaking change to the source or
+                // migration CDK stacks (e.g. incompatible context changes, resource
+                // replacements that cdk deploy can't perform in-place, IAM/security
+                // refactors, or anything that otherwise requires a clean redeploy).
+                // To re-enable, uncomment the two `sh` lines below. The destroy order
+                // (migration first, then source) must be preserved: `npx cdk destroy`
+                // polls CFN synchronously, and --clean-up-migration-only additionally
+                // waits on `aws cloudformation wait stack-delete-complete` for any
+                // leftover "OSMigrations-<stage>" stacks, so the second call cannot
+                // start until the first has fully returned.
+                //
+                // CloudFormation stacks are named purely by `--stage` (e.g.
+                // OSMigrations-<stage>, opensearch-infra-stack-ec2-source-<stage>),
+                // so cleanup is already stage-scoped regardless of context content.
+                // The context file is only required for `cdk destroy` to synth
+                // successfully so it can enumerate its own stack list;
+                // awsE2ESolutionSetup.sh substitutes placeholder <VPC_ID> /
+                // <SOURCE_CLUSTER_ENDPOINT> values when the real source side is
                 // already gone, so a stale or default context is still safe.
-                def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
-                        "--migration-context-file './${args.migrationContextFileName}' " +
-                        "--source-context-id ${args.sourceContextId} " +
-                        "--migration-context-id ${args.migrationContextId} " +
-                        "--stage ${args.stage}"
-                sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-migration-only"
-                sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-source-only"
+                //
+                // def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
+                //         "--migration-context-file './${args.migrationContextFileName}' " +
+                //         "--source-context-id ${args.sourceContextId} " +
+                //         "--migration-context-id ${args.migrationContextId} " +
+                //         "--stage ${args.stage}"
+                // sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-migration-only"
+                // sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-source-only"
+                echo "Skipping pre-deploy stack cleanup (reusing existing stacks). " +
+                        "Uncomment the destroy block in vars/fullES68SourceE2ETest.groovy " +
+                        "when making a breaking change to the CDK stacks."
             },
             preIntegTestStep: { deployStage ->
                 def sourceEndpoint = "https://alb.migration.${deployStage}.local:9201"

@@ -7,6 +7,18 @@ from kubernetes import config
 logger = logging.getLogger(__name__)
 
 
+SA_NAMESPACE_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
+
+
+def get_current_namespace(fallback='ma'):
+    """Return the namespace of the current pod, or fallback if not in-cluster."""
+    try:
+        with open(SA_NAMESPACE_PATH) as f:
+            return f.read().strip()
+    except OSError:
+        return fallback
+
+
 class ExitCode(Enum):
     """Exit codes for command operations."""
     SUCCESS = 0

@@ -53,6 +53,16 @@ if (!project.hasProperty('skipBundleTransforms')) {
 
         inputs.dir("${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist")
         outputs.dir(transformStagingDir)
+
+        doLast {
+            def staged = transformStagingDir.get().asFile.listFiles()?.findAll { it.name.endsWith('.js') } ?: []
+            if (staged.isEmpty()) {
+                throw new GradleException(
+                    "stageTransformsForImage produced no .js files. " +
+                    "Expected built transforms in ${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist/")
+            }
+            logger.lifecycle("Staged ${staged.size()} transform(s) for Docker image: ${staged*.name}")
+        }
     }
 
     tasks.named('jib').configure { dependsOn 'stageTransformsForImage' }

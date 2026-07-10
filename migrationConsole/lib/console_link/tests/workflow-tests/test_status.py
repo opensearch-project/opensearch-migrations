@@ -128,6 +128,126 @@ class TestStatusCommand:
         assert 'test-wf' in output
         assert 'Succeeded' in output
 
+    def test_snapshot_migration_wait_node_reads_backfill_status(self, monkeypatch):
+        def fake_snapshot_migration_reader(name: str, namespace: str):
+            assert name == 'source-target-snap1-migration-0'
+            assert namespace == 'ma'
+            return {
+                'status': {
+                    'documentBackfill': {
+                        'phase': 'Running',
+                        'updatedAt': '2026-05-14T10:05:00Z',
+                        'summary': {
+                            'percentageCompleted': 50.0,
+                            'shardsTotal': 4,
+                            'shardsMigrated': 2,
+                            'shardsInProgress': 1,
+                            'shardsWaiting': 1,
+                        }
+                    }
+                }
+            }
+
+        monkeypatch.setattr(
+            'console_link.workflow.tree_utils._default_snapshot_migration_reader',
+            fake_snapshot_migration_reader
+        )
+        workflows = {
+            'test-wf': {
+                'metadata': {'name': 'test-wf'},
+                'status': {
+                    'phase': 'Running',
+                    'startedAt': '2026-05-14T10:00:00Z',
+                    'nodes': {
+                        'root': {'id': 'root', 'displayName': 'root', 'type': 'Steps',
+                                 'phase': 'Running', 'children': ['wait']},
+                        'wait': {
+                            'id': 'wait',
+                            'displayName': 'waitForSnapshotMigration',
+                            'type': 'Suspend',
+                            'phase': 'Running',
+                            'boundaryID': 'root',
+                            'inputs': {'parameters': [
+                                {'name': 'resourceName', 'value': 'source-target-snap1-migration-0'}
+                            ]}
+                        }
+                    }
+                }
+            }
+        }
+
+        service = FakeWorkflowService(workflows)
+        handler = StatusCommandHandler(service)
+        handler.data_fetcher = FakeDataFetcher(workflows, service)
+
+        output = capture_output(lambda: handler.handle_status_command(
+            'test-wf', 'https://argo', 'ma', False, False, False))
+
+        assert 'RFS: Running (50%, shards 2/4' in output
+        assert 'progress 1, waiting 1)' in output
+        assert 'updated 2026-05-14T10:05:00Z' in output
+
+    def test_data_snapshot_wait_node_reads_snapshot_creation_status(self, monkeypatch):
+        def fake_data_snapshot_reader(name: str, namespace: str):
+            assert name == 'source-snap1'
+            assert namespace == 'ma'
+            return {
+                'status': {
+                    'snapshotCreation': {
+                        'phase': 'Running',
+                        'updatedAt': '2026-05-14T10:05:00Z',
+                        'summary': {
+                            'shardsTotal': 4,
+                            'shardsSuccessful': 2,
+                            'shardsFailed': 0,
+                            'dataProcessed': '12.3',
+                            'dataProcessedUnit': 'mb',
+                            'eta': '0h 1m 0s',
+                        }
+                    }
+                }
+            }
+
+        monkeypatch.setattr(
+            'console_link.workflow.tree_utils._default_data_snapshot_reader',
+            fake_data_snapshot_reader
+        )
+        workflows = {
+            'test-wf': {
+                'metadata': {'name': 'test-wf'},
+                'status': {
+                    'phase': 'Running',
+                    'startedAt': '2026-05-14T10:00:00Z',
+                    'nodes': {
+                        'root': {'id': 'root', 'displayName': 'root', 'type': 'Steps',
+                                 'phase': 'Running', 'children': ['wait']},
+                        'wait': {
+                            'id': 'wait',
+                            'displayName': 'waitForDataSnapshot',
+                            'type': 'Suspend',
+                            'phase': 'Running',
+                            'boundaryID': 'root',
+                            'inputs': {'parameters': [
+                                {'name': 'resourceName', 'value': 'source-snap1'}
+                            ]}
+                        }
+                    }
+                }
+            }
+        }
+
+        service = FakeWorkflowService(workflows)
+        handler = StatusCommandHandler(service)
+        handler.data_fetcher = FakeDataFetcher(workflows, service)
+
+        output = capture_output(lambda: handler.handle_status_command(
+            'test-wf', 'https://argo', 'ma', False, False, False))
+        compact_output = ' '.join(output.split())
+
+        assert 'Snapshot: Running (shards 2/4' in compact_output
+        assert 'failed 0, data 12.3 mb, ETA 0h 1m 0s)' in compact_output
+        assert 'updated 2026-05-14T10:05:00Z' in compact_output
+
     def test_workflow_not_found(self):
         service = FakeWorkflowService({})
         handler = StatusCommandHandler(service)
@@ -542,3 +662,55 @@ target_cluster:
             'test-wf', 'https://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output
+
+
+class TestAssignWorkflowProgress:
+    """Tests for _assign_workflow_progress in the resource view path."""
+
+    def test_assigns_steps_to_matching_resources(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        resource = ResourceNode(
+            name='my-backfill', plural='snapshotmigrations', phase='Running',
+            depends_on=[], spec={}, status={})
+        group = ResourceGroup(plural='snapshotmigrations', display_name='Backfill', resources=[resource])
+        sections = [ResourceSection(name='Snapshot Migration', groups=[group])]
+
+        steps = {'my-backfill': [{'id': 'step1', 'display_name': 'waitForSnapshot', 'phase': 'Running'}]}
+        _assign_workflow_progress(sections, steps)
+
+        assert resource.workflow_progress == steps['my-backfill']
+
+    def test_assigns_steps_to_child_resources(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        child = ResourceNode(
+            name='my-topic', plural='capturedtraffics', phase='Ready',
+            depends_on=[], spec={}, status={})
+        parent = ResourceNode(
+            name='default', plural='kafkaclusters', phase='Ready',
+            depends_on=[], spec={}, status={}, children=[child])
+        group = ResourceGroup(plural='kafkaclusters', display_name='Buffer', resources=[parent])
+        sections = [ResourceSection(name='Live Traffic', groups=[group])]
+
+        steps = {'my-topic': [{'id': 'step2', 'display_name': 'createTopic', 'phase': 'Succeeded'}]}
+        _assign_workflow_progress(sections, steps)
+
+        assert child.workflow_progress == steps['my-topic']
+        assert parent.workflow_progress is None
+
+    def test_no_match_leaves_progress_none(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        resource = ResourceNode(
+            name='my-backfill', plural='snapshotmigrations', phase='Running',
+            depends_on=[], spec={}, status={})
+        group = ResourceGroup(plural='snapshotmigrations', display_name='Backfill', resources=[resource])
+        sections = [ResourceSection(name='Snapshot Migration', groups=[group])]
+
+        _assign_workflow_progress(sections, {'other-resource': [{'id': 'x'}]})
+
+        assert resource.workflow_progress is None

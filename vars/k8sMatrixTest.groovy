@@ -1,19 +1,14 @@
 def call(Map config = [:]) {
     def jobName = config.jobName ?: "k8s-matrix-test"
-    def defaultChildJobName = "k8s-local-integ-test"
-    if (jobName.startsWith("main-")) {
-        defaultChildJobName = "main/main-k8s-local-integ-test"
-    } else if (jobName.startsWith("pr-")) {
-        defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
+    if (!config.childJobName) {
+        error("k8sMatrixTest requires childJobName to be specified explicitly — " +
+              "k8s-local-integ-test has been replaced by per-source jobs.")
     }
-    def childJobName = config.childJobName ?: defaultChildJobName
-    // Default behavior: keep periodic cadence for non-PR jobs, disable for pr-* jobs.
-    def enablePeriodicSchedule = config.containsKey('enablePeriodicSchedule') ?
-            config.enablePeriodicSchedule :
-            !jobName.startsWith("pr-")
+    def childJobName = config.childJobName
 
-    def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'SOLR_8.11']
-    def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
+    def versions = migrationVersions()
+    def allSourceVersions = versions.sourceVersions
+    def allTargetVersions = versions.targetVersions
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -31,7 +26,7 @@ def call(Map config = [:]) {
                 regexpFilterExpression: "^${jobName}\$",
                 regexpFilterText: '$job_name'
             )
-            cron(enablePeriodicSchedule ? 'H 22 * * *' : '')
+            cron(periodicCron(jobName))
         }
         
         parameters {
@@ -51,7 +46,7 @@ def call(Map config = [:]) {
         }
 
         options {
-            timeout(time: 5, unit: 'HOURS')
+            timeout(time: 6, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -212,25 +207,28 @@ def call(Map config = [:]) {
                     }
                 }
             }
-            stage('Print Complete Results') {
-                steps {
-                    timeout(time: 15, unit: 'MINUTES') {
-                        dir('libraries/testAutomation') {
-                            script {
-                                sh "pipenv install --deploy"
-                                sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only"
-                            }
-                        }
-                    }
-                }
-            }
         }
         
         post {
             always {
+                // Render the aggregated matrix summary even when the pipeline
+                // was aborted or timed out mid-run, so triagers see what ran,
+                // what was still pending, and which child job to open. This
+                // aggregates junit XML from all parallel children, so it must
+                // live at the pipeline level (not inside pytest).
+                catchError(buildResult: null, stageResult: 'UNSTABLE', message: 'Failed to render matrix summary') {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('libraries/testAutomation') {
+                            sh '''
+                                pipenv install --deploy
+                                pipenv run app --test-reports-dir='./reports' --output-reports-summary-only
+                            '''
+                        }
+                    }
+                }
                 script {
                     echo "🏁 Migration test matrix completed"
-                    echo "📊 Final Results: ${env.PASSED_TESTS}/${env.TOTAL_TESTS} tests passed"
+                    echo "📊 Final Results: ${env.PASSED_TESTS ?: 'N/A'}/${env.TOTAL_TESTS ?: 'N/A'} tests passed"
                 }
             }
             success {

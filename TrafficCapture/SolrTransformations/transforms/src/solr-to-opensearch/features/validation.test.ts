@@ -4,7 +4,7 @@ import type { RequestContext, JavaMap } from '../context';
 
 beforeAll(() => {
   initValidation(
-    new Set(['q', 'rows', 'start', 'sort', 'fl', 'cursorMark', 'hl', 'json.facet', 'wt', 'indent', 'echoParams', 'df']),
+    new Set(['q', 'rows', 'start', 'sort', 'fl', 'cursorMark', 'hl', 'json.facet', 'wt', 'indent', 'echoParams', 'df', 'bq', 'defType', 'qf']),
     ['hl.', 'json.facet.'],
     [
       { name: 'rows', type: 'integer' },
@@ -18,6 +18,7 @@ beforeAll(() => {
       { name: 'q', type: 'rejectPattern', pattern: String.raw`^\{!`, reason: 'Local params ({!...}) syntax in q is not supported' },
       { name: 'sort', type: 'rejectPattern', pattern: String.raw`\{!`, reason: 'Local params ({!...}) syntax in sort is not supported' },
       { name: 'fl', type: 'rejectPattern', pattern: String.raw`\{!`, reason: 'Local params ({!...}) syntax in fl is not supported' },
+      { name: 'bq', type: 'rejectPattern', pattern: String.raw`^\{!`, reason: 'Local params ({!...}) syntax in bq is not supported' },
     ],
   );
 });
@@ -146,6 +147,18 @@ describe('validation MicroTransform', () => {
 
     it('passes when fl is normal', () => {
       expect(() => request.apply(buildCtx('q=*:*&fl=id,title,price'))).not.toThrow();
+    });
+
+    it('throws when bq uses local params', () => {
+      expect(() => request.apply(buildCtx('q=*:*&defType=edismax&qf=title&bq={!boost b=2}category:food'))).toThrow('Local params ({!...}) syntax in bq is not supported');
+    });
+
+    it('throws when bq uses func local params', () => {
+      expect(() => request.apply(buildCtx('q=*:*&defType=edismax&qf=title&bq={!func}sum(1,price)'))).toThrow('Local params ({!...}) syntax in bq is not supported');
+    });
+
+    it('passes when bq is a normal boost query', () => {
+      expect(() => request.apply(buildCtx('q=*:*&defType=edismax&qf=title&bq=category:food^10'))).not.toThrow();
     });
   });
 

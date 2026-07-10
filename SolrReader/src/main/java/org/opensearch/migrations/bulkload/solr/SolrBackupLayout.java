@@ -71,24 +71,37 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             log.warn("Failed to list directories in {}", dataDir, e);
         }
+        // Solr 6/7 non-incremental SolrCloud BACKUP writes a bare `zk_backup/` directory
+        // (no numeric suffix). Fall back to that if no numbered revisions exist.
+        var bareZkBackup = dataDir.resolve("zk_backup");
+        if (Files.isDirectory(bareZkBackup)) {
+            log.info("Found bare zk_backup directory (Solr 6/7 layout): {}", bareZkBackup);
+            return bareZkBackup;
+        }
         return null;
     }
 
     /**
      * Given a list of directory names (from S3 listing or filesystem), finds the
      * latest {@code zk_backup_N} name.
+     * Falls back to bare {@code zk_backup} (no numeric suffix) for Solr 6/7 backups.
      *
      * @param dirNames list of directory names (not full paths)
      * @return the name of the latest zk_backup directory (e.g. "zk_backup_1"), or null
      */
     public static String findLatestZkBackupName(List<String> dirNames) {
-        return dirNames.stream()
+        var numbered = dirNames.stream()
             .filter(name -> ZK_BACKUP_PATTERN.matcher(name).matches())
             .max(Comparator.comparingInt(name -> {
                 var m = ZK_BACKUP_PATTERN.matcher(name);
                 return m.matches() ? Integer.parseInt(m.group(1)) : -1;
             }))
             .orElse(null);
+        if (numbered != null) {
+            return numbered;
+        }
+        // Solr 6/7 fallback: bare zk_backup/ with no numeric suffix
+        return dirNames.contains("zk_backup") ? "zk_backup" : null;
     }
 
     /**
@@ -121,6 +134,65 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             log.warn("Failed to list shard metadata in {}", metadataDir, e);
             return List.of();
+        }
+    }
+
+    /**
+     * Counts the shards in a Solr collection backup. Tries three strategies in order so the
+     * shard count agrees with what {@link SolrBackupSource} will later read from the same
+     * directory:
+     * <ol>
+     *   <li>SolrCloud incremental: count latest entries in {@code shard_backup_metadata/}.</li>
+     *   <li>SolrCloud non-incremental and shard-per-directory layouts: count immediate
+     *       subdirectories that contain Lucene segments (either directly, or under
+     *       {@code <shard>/data/index/}).</li>
+     *   <li>Standalone core / flat backup: a single shard.</li>
+     * </ol>
+     *
+     * @param collectionDir the resolved data directory for the collection
+     * @return shard count, always &ge; 1
+     */
+    public static int countShards(Path collectionDir) {
+        if (collectionDir == null || !Files.isDirectory(collectionDir)) {
+            return 1;
+        }
+        var metadataDir = collectionDir.resolve("shard_backup_metadata");
+        if (Files.isDirectory(metadataDir)) {
+            var shardFiles = findLatestShardMetadataFiles(metadataDir);
+            if (!shardFiles.isEmpty()) {
+                return shardFiles.size();
+            }
+        }
+        try (var entries = Files.list(collectionDir)) {
+            long shardDirs = entries
+                .filter(Files::isDirectory)
+                .filter(SolrBackupLayout::looksLikeShardDir)
+                .count();
+            if (shardDirs > 0) {
+                return (int) shardDirs;
+            }
+        } catch (IOException e) {
+            log.warn("Failed to enumerate shard directories under {}: {}", collectionDir, e.getMessage());
+        }
+        return 1;
+    }
+
+    private static boolean looksLikeShardDir(Path dir) {
+        if (containsSegmentsFile(dir)) {
+            return true;
+        }
+        var dataIndex = dir.resolve("data").resolve("index");
+        return containsSegmentsFile(dataIndex);
+    }
+
+    private static boolean containsSegmentsFile(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var entries = Files.list(dir)) {
+            return entries.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+        } catch (IOException e) {
+            return false;
         }
     }
 
@@ -214,8 +286,11 @@ public final class SolrBackupLayout {
                 var name = p.getFileName().toString();
                 return name.equals("shard_backup_metadata")
                     || name.equals("index")
+                    || name.equals("zk_backup")             // Solr 6/7 non-incremental layout
                     || ZK_BACKUP_PATTERN.matcher(name).matches()
-                    || name.startsWith("backup_");
+                    || name.startsWith("backup_")
+                    || name.equals("backup.properties")     // Solr 6/7 marker file
+                    || name.startsWith("snapshot.");        // Solr 6 snapshot.shardN dirs
             });
         } catch (IOException e) {
             return false;

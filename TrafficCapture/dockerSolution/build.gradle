@@ -1,11 +1,6 @@
-import org.opensearch.migrations.common.CommonUtils
-import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import org.opensearch.migrations.image.PullThroughCacheHelper
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id "com.avast.gradle.docker-compose"
-    id 'com.bmuschko.docker-remote-api'
 }
 
 // This keeps the build directory name concise (migration_console_staging)
@@ -15,93 +10,22 @@ def sourceDirectoryOverrides = [
         "staging": "migrationConsoleStaging"
 ]
 
-def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
-def ptc = new PullThroughCacheHelper(ptcEndpoint)
-
-// Build args for Dockerfiles that pull external base images
-def dockerBuildArgsMap = [
-        "elasticsearch_client_test_console": [
-                BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-        ],
-        "otel_collector": [
-                BASE_IMAGE: ptc.rewrite("public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"),
-        ],
-        "grafana": [
-                BASE_IMAGE: ptc.rewrite("docker.io/grafana/grafana:11.6.13"),
-        ],
+def libraries = [
+        project(":libraries:kafkaCommandLineFormatter")
 ]
 
-def dockerFilesForExternalServices = [
-        "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
-        "k8s_config_map_util_scripts": "k8sConfigMapUtilScripts",
-        "elasticsearch_client_test_console": "elasticsearchTestConsole",
-        "migration_console": migrationConsoleStagingDirName,
-        "otel_collector": "otelCollector",
-        "grafana": "grafana"
+def applications = [
+        project(":CreateSnapshot"),
+        project(":MetadataMigration"),
+        project(":libraries:kafkaUtils")
 ]
 
-dockerFilesForExternalServices.each { dockerImageName, projectName ->
-    // Register sync tasks FIRST, outside of any task configuration
-    def syncTaskProvider = null
-    def syncTaskProviderNoDocker = null
+// Sync task for migration console staging — used by buildImages project
+getMigrationConsoleSyncTask(project, "migration_console", migrationConsoleStagingDirName, libraries, applications, sourceDirectoryOverrides)
 
-    if (projectName == migrationConsoleStagingDirName) {
-
-        def libraries = [
-                project(":libraries:kafkaCommandLineFormatter")
-        ]
-
-        def applications = [
-                project(":CreateSnapshot"),
-                project(":MetadataMigration"),
-                project(":libraries:kafkaUtils")
-        ]
-        // Setup additional sync task which doesn't depend on the base image being built, for other projects to use
-        syncTaskProviderNoDocker = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, sourceDirectoryOverrides, false)
-        syncTaskProvider = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, sourceDirectoryOverrides, true)
-    }
-
-    // Now register the docker build task
-    tasks.register("buildDockerImage_${dockerImageName}", DockerBuildImage) {
-        if (projectName == migrationConsoleStagingDirName) {
-            CommonUtils.dependOnDockerImage(delegate, ":migrationConsole:buildDockerImage_migrationConsoleBase")
-            dependsOn syncTaskProvider
-
-            // Realize the task to get directory
-            def syncTask = syncTaskProvider.get()
-            inputDir = syncTask.destinationDir
-
-            // Calculate hash from the staging directory
-            def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(syncTask.destinationDir))
-            images.add("migrations/${dockerImageName}:${hashNonce}".toString())
-            images.add("migrations/${dockerImageName}:latest".toString())
-        } else {
-            def sourceDirName = sourceDirectoryOverrides.get(projectName, projectName)
-            inputDir = project.file("src/main/docker/${sourceDirName}")
-            def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
-            images.add("migrations/${dockerImageName}:${hashNonce}".toString())
-            images.add("migrations/${dockerImageName}:latest".toString())
-        }
-        // Pass pull-through cache build args if configured for this image
-        def extraArgs = dockerBuildArgsMap.get(dockerImageName, [:])
-        if (extraArgs) {
-            buildArgs = extraArgs
-        }
-    }
-}
-
-// elasticsearch_searchguard Dockerfile uses FROM custom-elasticsearch:7.10.2
-tasks.named('buildDockerImage_elasticsearch_searchguard') {
-    dependsOn ':custom-es-images:buildImage_es_7_10'
-}
-
-static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, Map sourceDirectoryOverrides, boolean dependOnBaseImage) {
+static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, Map sourceDirectoryOverrides) {
     def destDir = "build/docker/${dockerImageName}_${projectName}"
-    def taskName = "syncArtifact_${dockerImageName}_${projectName}"
-    if (!dependOnBaseImage) {
-        taskName = "${taskName}_noDockerBuild"
-    }
+    def taskName = "syncArtifact_${dockerImageName}_${projectName}_noDockerBuild"
 
     def syncTaskProvider = project.tasks.register(taskName, Sync) {
         into destDir
@@ -162,73 +86,12 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
         // Collect assemble tasks from libraries and applications
         def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
         dependsOn assembleTasks
-
-        if (dependOnBaseImage) {
-            dependsOn "buildDockerImage_elasticsearch_client_test_console"
-        }
     }
 
     return syncTaskProvider
 }
 
-def javaContainerServices = [
-        "capture_proxy": ":TrafficCapture:trafficCaptureProxyServer",
-        "capture_proxy_es": ":TrafficCapture:trafficCaptureProxyServer",
-        "traffic_replayer": ":TrafficCapture:trafficReplayer"
-]
-def baseImageOverrides = [
-        "capture_proxy_es": "elasticsearch_searchguard",
-]
-javaContainerServices.each { dockerImageName, projectName ->
-    def artifactProject = project(projectName);
-    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject, dockerImageName)
-    CommonUtils.createDockerfile(project, artifactProject, baseImageOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
-}
-
-// Stage self-signed certs into the capture_proxy Docker build context
-tasks.named("copyArtifact_capture_proxy").configure {
-    def certTask = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("generateSelfSignedCerts")
-    dependsOn certTask
-    from(certTask.map { it.outputs.files }) {
-        into("certs")
-    }
-}
-tasks.named("createDockerfile_capture_proxy").configure {
-    copyFile("certs", "/usr/share/captureProxy/config")
-}
-
-javaContainerServices.forEach { dockerImageName, gradleProjectName ->
-    def projectName = project(gradleProjectName).name;
-    def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
-    tasks.register("buildDockerImage_${dockerImageName}", DockerBuildImage) {
-        dependsOn "createDockerfile_${dockerImageName}"
-        inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
-    }
-}
 
 dockerCompose {
-    def extensionsDir = "src/main/docker/composeExtensions/"
-    useComposeFiles =
-            ['src/main/docker/docker-compose.yml',
-             "${extensionsDir}/" + (project.hasProperty("otel-collector") ?
-                     "${project.getProperty('otel-collector')}" :
-                     "otel-prometheus-jaeger.yml"),
-             "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
-            ]
+    useComposeFiles = ['src/main/docker/docker-compose.yml']
 }
-
-tasks.register('buildDockerImages') {
-    dependsOn tasks.named('buildDockerImage_k8s_config_map_util_scripts')
-    dependsOn tasks.named('buildDockerImage_elasticsearch_searchguard')
-    dependsOn tasks.named('buildDockerImage_migration_console')
-    dependsOn tasks.named('buildDockerImage_otel_collector')
-    dependsOn tasks.named('buildDockerImage_grafana')
-    dependsOn tasks.named('buildDockerImage_traffic_replayer')
-    dependsOn tasks.named('buildDockerImage_capture_proxy')
-    dependsOn tasks.named('buildDockerImage_capture_proxy_es')
-}
-
-tasks.getByName('composeUp')
-        .dependsOn(tasks.getByName('buildDockerImages'))

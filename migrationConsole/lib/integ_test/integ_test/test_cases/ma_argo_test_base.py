@@ -1,14 +1,69 @@
 from enum import Enum
 import logging
 import subprocess
+import time
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
-from console_link.models.argo_service import ArgoService
 from console_link.middleware.clusters import cat_indices, connection_check, clear_indices, ConnectionResult
 
+from ..integration_test_argo_service import IntegrationTestArgoService
+
 logger = logging.getLogger(__name__)
+
+_CLUSTER_CONNECT_RETRIES = 10
+_CLUSTER_CONNECT_WAIT_S = 30
+
+
+def _wait_for_connection(cluster, retries: int = _CLUSTER_CONNECT_RETRIES,
+                         wait_s: int = _CLUSTER_CONNECT_WAIT_S) -> ConnectionResult:
+    """Retry connection_check to tolerate transient AOS domain unavailability.
+
+    connection_check catches all network exceptions internally (including the AOSS
+    serverless path) and always returns a ConnectionResult — it never raises. A
+    truly unexpected exception should therefore propagate immediately rather than
+    be absorbed into the retry loop.
+    """
+    assert retries >= 1, "retries must be at least 1"
+    for attempt in range(1, retries + 1):
+        result = connection_check(cluster)
+        if result.connection_established:
+            return result
+        logger.warning("Connection attempt %d/%d failed for %s: %s",
+                       attempt, retries, cluster, result.connection_message)
+        if attempt < retries:
+            time.sleep(wait_s)
+    return result
+
+
+# Maps wildcard ClusterVersion (e.g. ES_7.x) to the concrete template name that exists in clusterWorkflows.yaml.
+# When minor_version is 'x', we pick the canonical representative minor version for that major.
+_WILDCARD_TEMPLATE_MAP = {
+    ("elasticsearch", 1): 5,
+    ("elasticsearch", 2): 4,
+    ("elasticsearch", 5): 6,
+    ("elasticsearch", 6): 8,
+    ("elasticsearch", 7): 10,
+    ("elasticsearch", 8): 19,
+    ("opensearch", 1): 3,
+    ("opensearch", 2): 19,
+    ("opensearch", 3): 1,
+}
+
+CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
+MIGRATION_COMPLETION_TIMEOUT_SECONDS = 1800
+
+
+def get_template_name(version: ClusterVersion) -> str:
+    minor = version.minor_version
+    if minor == 'x':
+        minor = _WILDCARD_TEMPLATE_MAP.get((version.full_cluster_type, version.major_version))
+        if minor is None:
+            raise ValueError(f"No template mapping for wildcard version {version}. "
+                             f"Add an entry to _WILDCARD_TEMPLATE_MAP.")
+    return f"{version.full_cluster_type}-{version.major_version}-{minor}-single-node"
+
 
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
 
@@ -24,7 +79,10 @@ class ClusterVersionCombinationUnsupported(Exception):
 class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
                  target_type: str = "OS", image_registry_prefix: str = "",
-                 speedup_factor: int = 20, observed_packet_timeout: int = 30):
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30,
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 transform_image_context: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer"):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
@@ -33,6 +91,10 @@ class MATestUserArguments:
         self.image_registry_prefix = image_registry_prefix
         self.speedup_factor = speedup_factor
         self.observed_packet_timeout = observed_packet_timeout
+        self.transform_image_basic = transform_image_basic
+        self.transform_image_sequence = transform_image_sequence
+        self.transform_image_context = transform_image_context
+        self.capture_proxy_service_type = capture_proxy_service_type
 
 
 class MATestBase:
@@ -53,13 +115,25 @@ class MATestBase:
             None if self.is_aoss
             else ClusterVersion(version_str=user_args.target_version)
         )
-        self.argo_service = ArgoService()
+        self.argo_service = IntegrationTestArgoService()
         self.workflow_name = None
         self.source_cluster = None
         self.target_cluster = None
         self.imported_clusters = False
 
-        if not self.is_aoss:
+        if self.is_aoss:
+            # AOSS targets are exposed via subclasses that override
+            # import_existing_clusters to construct the AOSS target_cluster
+            # directly. Such subclasses signal opt-in by leaving
+            # allow_source_target_combinations empty. A test with a non-empty
+            # combo list is configured for typed (ES/OS) targets and would
+            # crash on `self.target_version.full_cluster_type` in the default
+            # import_existing_clusters when target_version is None.
+            if allow_source_target_combinations:
+                raise ClusterVersionCombinationUnsupported(
+                    self.source_version, "AOSS",
+                    message="Test is configured for typed targets and is not AOSS-compatible")
+        else:
             supported_combo = False
             for (allowed_source, allowed_target) in allow_source_target_combinations:
                 if (is_incoming_version_supported(allowed_source, self.source_version) and
@@ -69,19 +143,17 @@ class MATestBase:
             if not supported_combo:
                 raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
-        self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
-                                             f"{self.source_version.major_version}-"
-                                             f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = None if self.is_aoss else (
-            f"{self.target_version.full_cluster_type}-"
-            f"{self.target_version.major_version}-"
-            f"{self.target_version.minor_version}-single-node"
-        )
+        self.source_argo_cluster_template = get_template_name(self.source_version)
+        self.target_argo_cluster_template = None if self.is_aoss else get_template_name(self.target_version)
 
         self.parameters = {}
         self.image_registry_prefix = user_args.image_registry_prefix
         self.speedup_factor = user_args.speedup_factor
         self.observed_packet_timeout = user_args.observed_packet_timeout
+        self.transform_image_basic = user_args.transform_image_basic
+        self.transform_image_sequence = user_args.transform_image_sequence
+        self.transform_image_context = user_args.transform_image_context
+        self.capture_proxy_service_type = user_args.capture_proxy_service_type
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
@@ -120,10 +192,12 @@ class MATestBase:
                 self.imported_clusters = True
                 self.source_cluster = source_cluster
                 self.target_cluster = target_cluster
-                source_con_result: ConnectionResult = connection_check(source_cluster)
-                assert source_con_result.connection_established is True
-                target_con_result: ConnectionResult = connection_check(target_cluster)
-                assert target_con_result.connection_established is True
+                source_con_result: ConnectionResult = _wait_for_connection(source_cluster)
+                assert source_con_result.connection_established is True, \
+                    f"Source cluster unreachable: {source_con_result.connection_message}"
+                target_con_result: ConnectionResult = _wait_for_connection(target_cluster)
+                assert target_con_result.connection_established is True, \
+                    f"Target cluster unreachable: {target_con_result.connection_message}"
                 clear_indices(source_cluster)
                 clear_indices(target_cluster)
                 self.target_operations.clear_index_templates(cluster=target_cluster)
@@ -211,14 +285,17 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
-            self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-            self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name,
+                                               timeout_seconds=CLUSTER_SETUP_TIMEOUT_SECONDS)
+            self.source_cluster = self.argo_service.get_cluster_config_from_workflow(
+                workflow_name=self.workflow_name, cluster_type="source")
+            self.target_cluster = self.argo_service.get_cluster_config_from_workflow(
+                workflow_name=self.workflow_name, cluster_type="target")
 
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 1000):
+    def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:
@@ -238,8 +315,8 @@ class MATestBase:
         pass
 
     def display_final_cluster_state(self):
-        source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")
-        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
+        source_response = cat_indices(cluster=self.source_cluster, refresh=True)
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True)
         logger.info("Printing document counts for source and target clusters:")
         print("SOURCE CLUSTER")
         print(source_response)
@@ -252,11 +329,36 @@ class MATestBase:
     def workflow_finish(self):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
+        # Two paths to a terminal phase:
+        #
+        # 1. k8s-local (imported_clusters=False): the workflow is waiting at its
+        #    second suspend (pause-for-migration-verification). Resume past it,
+        #    then wait for the ending phase.
+        # 2. imported_clusters=True: workflow_perform_migrations already drove
+        #    the functional steps. CDC tests' outer workflow runs to completion
+        #    via monitorWorkflow polling the inner migration-workflow until
+        #    Succeeded; non-CDC imported-clusters tests are typically already
+        #    terminal here (so wait is a fast no-op). The kafka/proxy/replayer
+        #    resources spawned by CDC tests keep running independently and are
+        #    cleaned up by helm uninstall / workflow reset, not by the outer
+        #    workflow's lifecycle.
+        #
+        # CDC outer workflows can take multiple minutes after verify_clusters
+        # because monitorWorkflow polls migration-workflow status on a 60s
+        # interval; a 300s budget here was too tight and frequently timed out
+        # the EKS pipelines (particularly Test0031, Test0033). 900s comfortably
+        # covers two monitor poll cycles plus the final evaluate/delete steps
+        # while still failing fast on truly stuck workflows.
         if not self.imported_clusters:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-            self.argo_service.wait_for_ending_phase(workflow_name=self.workflow_name)
+        self.argo_service.wait_for_ending_phase(
+            workflow_name=self.workflow_name, timeout_seconds=900
+        )
 
     def test_after(self):
         status_result = self.argo_service.get_workflow_status(workflow_name=self.workflow_name)
         phase = status_result.value.get("phase", "")
-        assert phase == "Succeeded"
+        assert phase == "Succeeded", f"Expected workflow phase 'Succeeded', got '{phase}'"
+
+    def assert_observability(self):
+        pass

@@ -3,19 +3,32 @@
 import logging
 import os
 import subprocess
+import termios
 import tempfile
 from typing import Optional, cast
 
 import click
+from kubernetes.client import V1Secret
+from kubernetes.client.rest import ApiException
 
-from ..models.secret_store import SecretStore
 from ...models.command_result import CommandResult
 from ..models.config import WorkflowConfig
-from ..models.utils import get_workflow_config_store, get_credentials_secret_store
+from ..models.utils import get_current_namespace, get_workflow_config_store, get_credentials_secret_store
+from .secret_utils import process_secrets, validate_and_find_secrets
 
 logger = logging.getLogger(__name__)
 
 session_name = 'default'
+NO_MANAGED_HTTP_BASIC_CREDENTIALS_MESSAGE = "No managed HTTP Basic credentials found."
+STDIN_SECRET_FORMAT_ERROR = (
+    "HTTP Basic credentials from stdin were not well-formed. Expected USERNAME:PASSWORD."
+)
+STDIN_SECRET_HELP = (
+    'Read one line from stdin in USERNAME:PASSWORD format. '
+    'The password is everything after the first colon. Emits no output on success.'
+)
+STDIN_SECRET_SILENT_HELP = 'Disable terminal echo while reading credentials from stdin.'
+SKIP_CONFIRMATION_HELP = 'Do not prompt for confirmation.'
 
 
 def _get_empty_config_template() -> str:
@@ -101,88 +114,6 @@ def _parse_config_from_stdin() -> str:
     return stdin_content
 
 
-def _validate_and_find_secrets(raw_yaml: str):
-    """Validate config via TS Zod schema and scrape secrets in one call.
-
-    Returns dict with 'valid' bool, optional 'errors', and optional 'validSecrets'/'invalidSecrets'.
-    """
-    from ..services.script_runner import ScriptRunner
-    runner = ScriptRunner()
-    result = runner.get_basic_creds_secrets_in_config(raw_yaml)
-    logger.info(f"got back script result for validate_and_find_secrets: {result}")
-    return result
-
-
-def _process_secrets(secret_store: SecretStore, result: dict, interactive: bool = False):
-    """Process secrets from a validate+findSecrets result."""
-    invalid_secrets = result.get('invalidSecrets')
-    if invalid_secrets:
-        raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 1 else ''} found:"
-                                   f" {invalid_secrets}")
-
-    valid_secrets = result.get('validSecrets', [])
-    if not valid_secrets:
-        return
-
-    existing = list(filter(secret_store.secret_exists, valid_secrets))
-    missing = list(set(valid_secrets) - set(existing))
-
-    _notify_existing_secrets(existing, interactive)
-    _handle_missing_config_secrets(secret_store, missing, interactive)
-
-
-def _notify_existing_secrets(existing, interactive):
-    if not existing:
-        return
-    msg = (f"Found {len(existing)} existing secret{'s' if len(existing) > 1 else ''} "
-           f"that will be used for HTTP-Basic authentication "
-           f"of requests to clusters:\n  " + "\n  ".join(existing))
-    if interactive:
-        click.echo(msg)
-    else:
-        logger.info(msg)
-
-
-def _handle_missing_config_secrets(secret_store, missing, interactive):
-    if not missing:
-        return
-    if interactive:
-        _handle_add_basic_creds_secrets(secret_store, missing)
-    else:
-        raise click.ClickException(
-            f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
-            f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
-            "\n  ".join(missing))
-
-
-def _handle_add_basic_creds_secrets(secret_store, missing_names):
-    num_missing = len(missing_names)
-    click.echo(f"{num_missing} secret{'s' if num_missing > 1 else ''} used in the cluster definitions must be created.")
-
-    i = 0
-    while i < len(missing_names):
-        s = missing_names[i]
-
-        if not click.confirm(f"Would you like to create secret '{s}' now?", default=True):
-            click.echo(f"Skipped creating {s}")
-            i += 1
-            continue
-
-        try:
-            username = click.prompt("Username", type=str)
-            password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
-
-            secret_store.save_secret(s, {"username": username, "password": password})
-            click.echo(f"Secret {s} saved successfully")
-            i += 1  # Only advance on success
-        except click.Abort:
-            click.echo(f"\nCancelled {s}")
-            if click.confirm("Retry this secret?", default=True):
-                continue  # Stay on same secret to give the user another chance (they can skip too)
-            else:
-                i += 1  # Move to next secret
-
-
 def _save_config(store, new_config: WorkflowConfig, session_name: str):
     """Save configuration to store"""
     try:
@@ -199,7 +130,7 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     raw_yaml = _parse_config_from_stdin()
 
     # Validate via TS and get secrets in one call — save regardless of validation result
-    result = _validate_and_find_secrets(raw_yaml)
+    result = validate_and_find_secrets(raw_yaml)
     new_config = WorkflowConfig(raw_yaml=raw_yaml)
     if not result.get('valid', False):
         _save_config(wf_config_store, new_config, session_name)
@@ -207,7 +138,7 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
             f"Configuration saved but has validation errors:\n{result.get('errors', 'Unknown error')}")
 
     _save_config(wf_config_store, new_config, session_name)
-    _process_secrets(secret_store, result, interactive=False)
+    process_secrets(secret_store, result, interactive=False)
 
 
 def _handle_editor_edit(store, secret_store, session_name: str):
@@ -225,7 +156,7 @@ def _handle_editor_edit(store, secret_store, session_name: str):
 
         raw_yaml = cast(str, edit_result.value)
 
-        result = _validate_and_find_secrets(raw_yaml)
+        result = validate_and_find_secrets(raw_yaml)
         if result.get('valid', False):
             break
 
@@ -246,14 +177,19 @@ def _handle_editor_edit(store, secret_store, session_name: str):
         current_config = WorkflowConfig(raw_yaml=raw_yaml)
 
     _save_config(store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
-    _process_secrets(secret_store, result, interactive=True)
+    process_secrets(secret_store, result, interactive=True)
 
 
 @configure_group.command(name="edit")
-@click.option('--stdin', is_flag=True, help='Read configuration from stdin instead of launching editor')
+@click.option(
+    '--stdin',
+    is_flag=True,
+    help='Read configuration from stdin instead of interactively launching an editor',
+)
 @click.pass_context
 def edit_config(ctx, stdin):
-    """Edit workflow configuration"""
+    """Edit workflow configuration.
+    Opens an interactive editor by default or reads from stdin with --stdin."""
     wf_config_store = get_workflow_config_store(ctx)
     secret_store = get_credentials_secret_store(ctx)
 
@@ -261,6 +197,243 @@ def edit_config(ctx, stdin):
         _handle_stdin_edit(wf_config_store, secret_store, session_name)
     else:
         _handle_editor_edit(wf_config_store, secret_store, session_name)
+
+
+def _credentials_secret_store(ctx):
+    _ensure_workflow_context(ctx)
+    return get_credentials_secret_store(ctx)
+
+
+def _ensure_workflow_context(ctx):
+    ctx.ensure_object(dict)
+    ctx.obj.setdefault('config_store', None)
+    ctx.obj.setdefault('secret_store', None)
+    ctx.obj.setdefault('namespace', get_current_namespace())
+
+
+def _load_current_config(ctx) -> WorkflowConfig:
+    _ensure_workflow_context(ctx)
+    store = get_workflow_config_store(ctx)
+    config = store.load_config(session_name)
+    if config is None or not config:
+        raise click.ClickException("No configuration found.")
+    return config
+
+
+def _configured_secret_names(ctx):
+    config = _load_current_config(ctx)
+    result = validate_and_find_secrets(config.raw_yaml)
+    if not result.get('valid', False):
+        raise click.ClickException(
+            f"Current configuration has validation errors:\n{result.get('errors', 'Unknown error')}")
+    invalid = result.get('invalidSecrets')
+    if invalid:
+        raise click.ClickException(f"Invalidly named secrets found: {invalid}")
+    return sorted(set(result.get('validSecrets', []) or []))
+
+
+def _managed_secret_names(ctx):
+    return sorted(_credentials_secret_store(ctx).list_secrets())
+
+
+def _show_secret_names(names, empty_message):
+    if not names:
+        click.echo(empty_message)
+        return
+    for name in names:
+        click.echo(name)
+
+
+def _missing_config_secret_names(ctx):
+    names = _configured_secret_names(ctx)
+    existing = _credentials_secret_store(ctx).secrets_exist(names)
+    return [name for name in names if not existing.get(name)]
+
+
+def _complete_managed_secret(ctx, _param, incomplete):
+    try:
+        return [name for name in _managed_secret_names(ctx) if name.startswith(incomplete)]
+    except Exception:
+        return []
+
+
+def _complete_missing_secret(ctx, _param, incomplete):
+    try:
+        return [name for name in _missing_config_secret_names(ctx) if name.startswith(incomplete)]
+    except Exception:
+        return []
+
+
+def _prompt_basic_auth_credentials():
+    username = click.prompt("Username", type=str)
+    password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
+    return {"username": username, "password": password}
+
+
+def _read_secret_stdin(silent: bool) -> str:
+    stdin_stream = click.get_text_stream('stdin')
+    if not silent or not stdin_stream.isatty():
+        return stdin_stream.read()
+
+    file_descriptor = stdin_stream.fileno()
+    original_attrs = termios.tcgetattr(file_descriptor)
+    silent_attrs = original_attrs[:]
+    silent_attrs[3] &= ~termios.ECHO
+    try:
+        termios.tcsetattr(file_descriptor, termios.TCSANOW, silent_attrs)
+        return stdin_stream.read()
+    finally:
+        termios.tcsetattr(file_descriptor, termios.TCSANOW, original_attrs)
+
+
+def _parse_basic_auth_credentials_from_stdin(silent: bool = False):
+    raw_credentials = _read_secret_stdin(silent).rstrip('\r\n')
+    if '\n' in raw_credentials or '\r' in raw_credentials or ':' not in raw_credentials:
+        raise click.ClickException(STDIN_SECRET_FORMAT_ERROR)
+
+    username, password = raw_credentials.split(':', 1)
+    if not username or not password:
+        raise click.ClickException(STDIN_SECRET_FORMAT_ERROR)
+
+    return {"username": username, "password": password}
+
+
+def _get_basic_auth_credentials(stdin: bool, silent: bool = False):
+    if silent and not stdin:
+        raise click.ClickException("--silent can only be used with --stdin.")
+    if stdin:
+        return _parse_basic_auth_credentials_from_stdin(silent)
+    return _prompt_basic_auth_credentials()
+
+
+def _read_raw_secret(secret_store, name):
+    try:
+        return secret_store.v1.read_namespaced_secret(name=name, namespace=secret_store.namespace)
+    except ApiException as e:
+        if e.status == 404:
+            return None
+        raise
+
+
+def _secret_has_managed_labels(secret_store, secret: V1Secret) -> bool:
+    labels = secret.metadata.labels if secret.metadata and secret.metadata.labels else {}
+    return all(labels.get(key) == value for key, value in secret_store.default_labels.items())
+
+
+def _require_managed_secret(secret_store, name):
+    if not secret_store.secret_exists(name):
+        raise click.ClickException(f"No managed HTTP Basic credentials found: {name}")
+
+
+def _credentials_save_message(message):
+    return (message
+            .replace("Secret created:", "Credentials created:")
+            .replace("Secret updated:", "Credentials updated:")
+            .replace("Secret deleted:", "Credentials deleted:"))
+
+
+@configure_group.group(name="credentials")
+def credentials_group():
+    """Configure HTTP Basic credentials for web servers the migration assistant communicates with."""
+
+
+@credentials_group.command(name="list")
+@click.pass_context
+def list_secrets(ctx):
+    """List managed HTTP Basic credentials."""
+    _show_secret_names(_managed_secret_names(ctx), NO_MANAGED_HTTP_BASIC_CREDENTIALS_MESSAGE)
+
+
+@credentials_group.command(name="create")
+@click.option('--show-missing', '--list', is_flag=True, default=False,
+              help='List configured HTTP Basic credentials that have not been created')
+@click.option(
+    '--stdin',
+    is_flag=True,
+    default=False,
+    help=STDIN_SECRET_HELP,
+)
+@click.option('--silent', is_flag=True, default=False, help=STDIN_SECRET_SILENT_HELP)
+@click.argument('name', required=False, shell_complete=_complete_missing_secret)
+@click.pass_context
+def create_secret(ctx, show_missing, stdin, silent, name):
+    """Create HTTP Basic credentials.
+    Interactively prompts for username and password by default.
+    Use --stdin to read USERNAME:PASSWORD non-interactively."""
+    if show_missing:
+        _show_secret_names(_missing_config_secret_names(ctx), "No missing HTTP Basic credentials found.")
+        return
+
+    if not name:
+        click.echo("Error: specify a credentials name or --show-missing.\n", err=True)
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+
+    secret_store = _credentials_secret_store(ctx)
+    existing = _read_raw_secret(secret_store, name)
+    if existing is not None:
+        if _secret_has_managed_labels(secret_store, existing):
+            raise click.ClickException(f"Managed HTTP Basic credentials already exist: {name}")
+        raise click.ClickException(f"Kubernetes Secret {name} already exists but is not managed by workflow configure.")
+
+    message = secret_store.save_secret(name, _get_basic_auth_credentials(stdin, silent))
+    if not stdin:
+        click.echo(_credentials_save_message(message))
+
+
+@credentials_group.command(name="update")
+@click.option('--list', 'list_names', is_flag=True, default=False, help='List managed HTTP Basic credentials')
+@click.option(
+    '--stdin',
+    is_flag=True,
+    default=False,
+    help=STDIN_SECRET_HELP,
+)
+@click.option('--silent', is_flag=True, default=False, help=STDIN_SECRET_SILENT_HELP)
+@click.argument('name', required=False, shell_complete=_complete_managed_secret)
+@click.pass_context
+def update_secret(ctx, list_names, stdin, silent, name):
+    """Update HTTP Basic credentials.
+    Interactively prompts for username and password by default.
+    Use --stdin to read USERNAME:PASSWORD non-interactively."""
+    if list_names:
+        _show_secret_names(_managed_secret_names(ctx), NO_MANAGED_HTTP_BASIC_CREDENTIALS_MESSAGE)
+        return
+    if not name:
+        click.echo("Error: specify a credentials name or --list.\n", err=True)
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+
+    secret_store = _credentials_secret_store(ctx)
+    _require_managed_secret(secret_store, name)
+    message = secret_store.save_secret(name, _get_basic_auth_credentials(stdin, silent))
+    if not stdin:
+        click.echo(_credentials_save_message(message))
+
+
+@credentials_group.command(name="delete")
+@click.option('--list', 'list_names', is_flag=True, default=False, help='List managed HTTP Basic credentials')
+@click.argument('name', required=False, shell_complete=_complete_managed_secret)
+@click.option('--confirm', 'yes', is_flag=True, hidden=True)
+@click.option('-y', '--yes', is_flag=True, default=False, help=SKIP_CONFIRMATION_HELP)
+@click.pass_context
+def delete_secret(ctx, list_names, name, yes):
+    """Delete managed HTTP Basic credentials.
+    Interactively prompts for confirmation by default. Use -y/--yes to skip the prompt."""
+    if list_names:
+        _show_secret_names(_managed_secret_names(ctx), NO_MANAGED_HTTP_BASIC_CREDENTIALS_MESSAGE)
+        return
+    if not name:
+        click.echo("Error: specify a credentials name or --list.\n", err=True)
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+
+    secret_store = _credentials_secret_store(ctx)
+    _require_managed_secret(secret_store, name)
+    if not yes and not click.confirm(f"Delete managed HTTP Basic credentials '{name}'?"):
+        click.echo("Cancelled")
+        return
+    click.echo(_credentials_save_message(secret_store.delete_secret(name)))
 
 
 @configure_group.command(name="clear")

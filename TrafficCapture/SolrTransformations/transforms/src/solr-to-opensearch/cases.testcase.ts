@@ -521,6 +521,58 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-stat-functions', {
+    description: 'Stat facet shorthand: avg, sum, min, max, unique, countvals, and count(*) as sub-facets',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics', price: 999, rating: 4 },
+      { id: '2', title: 'phone', category: 'electronics', price: 699, rating: 5 },
+      { id: '3', title: 'tablet', category: 'electronics', price: 499, rating: 3 },
+      { id: '4', title: 'shirt', category: 'clothing', price: 29, rating: 4 },
+      { id: '5', title: 'pants', category: 'clothing', price: 59, rating: 2 },
+      { id: '6', title: 'apple', category: 'food', price: 3, rating: 5 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&rows=0&wt=json&json.facet=' +
+      encodeURIComponent(JSON.stringify({
+        avg_price: 'avg(price)',
+        total_price: 'sum(price)',
+        min_price: 'min(price)',
+        max_price: 'max(price)',
+        unique_categories: 'unique(category)',
+        rated_count: 'countvals(rating)',
+        by_category: {
+          type: 'terms',
+          field: 'category',
+          sort: 'count desc',
+          facet: {
+            avg_price: 'avg(price)',
+            max_rating: 'max(rating)',
+          },
+        },
+      })),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+        price: { type: 'pfloat' },
+        rating: { type: 'pint' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+        price: { type: 'float' },
+        rating: { type: 'integer' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.response', rule: 'ignore', reason: 'Facet test — only validating $.facets, not hits' },
+      { path: '$.terminated_early', rule: 'ignore', reason: 'OpenSearch may return terminated_early with rows=0; Solr does not' },
+    ],
+  }),
+
   solrTest('facet-nested-terms-in-terms', {
     description: 'Nested facet: terms facet with a nested terms sub-facet',
     documents: [

@@ -22,9 +22,10 @@ public class JsonPythonTransformerProvider extends ScriptTransformerProvider {
 
     @Override
     protected IJsonTransformer buildTransformer(
-            String script, Object bindingsObject, Map<String, Object> config) throws IOException {
+            ResolvedScript script, Object bindingsObject, Map<String, Object> config) throws IOException {
         var venvPath = resolveVenvPath(config);
-        return new PythonTransformer(script, bindingsObject, venvPath);
+        var scriptParentPath = script.sourceFile() == null ? null : script.sourceFile().getParent();
+        return new PythonTransformer(script.source(), bindingsObject, venvPath, scriptParentPath);
     }
 
     @Override

@@ -50,13 +50,13 @@ In an AWS deployment, the Shared Logs Volume is an EFS volume that's mounted to 
 
 #### Cloudwatch Metrics
 
-The various services making up the Migration Assistant emit metrics and traces via an OpenTelemetry Collector to the configured metrics provider. In an AWS deployment, that's Cloudwatch & X-Ray, and in a Docker deployment it's Prometheus and Jaeger. The Migration Console contains basic functionality to query the metrics, and supports both the AWS and Docker deployment sources.
+The various services making up the Migration Assistant emit metrics and, when explicitly enabled, traces via OpenTelemetry Collector endpoints. In an AWS deployment, metrics go to CloudWatch and opt-in traces go to X-Ray; in a Docker deployment, metrics use Prometheus and opt-in traces can use Jaeger. The Migration Console contains basic functionality to query the metrics, and supports both the AWS and Docker deployment sources.
 
 ## Library Architecture and Interface
 
 The Console Library is intended to be a layer that provides a unified way to access the many components involved in a migration, regardless of the specific options enabled and where they are deployed.
 
-It allows "frontends" (a CLI app, a Web API, etc.) to ask questions and control a migration while being insulated from the details of how to communicate with each component ("backend services").
+It allows "frontends" (a CLI app, etc.) to ask questions and control a migration while being insulated from the details of how to communicate with each component ("backend services").
 
 The overall architecture can be seen in this diagram. Each of the subsections below discusses a component in more detail, moving from left (user) to right (deployed services). Green indicates examples, not definite implementations.
 
@@ -68,15 +68,13 @@ The overall architecture can be seen in this diagram. Each of the subsections be
 
 Currently, we have a couple of frontends that leverage the Migration Console library. The primary and most comprehensive is the command line interface (CLI), [source](https://github.com/opensearch-project/opensearch-migrations/blob/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/console_link/cli.py). Additionally, the `cluster-curl` application exposes only cluster-related calls (currently [in PR here](https://github.com/opensearch-project/opensearch-migrations/pull/1046)), and the integ tests that run on the Migration Console ([source](https://github.com/opensearch-project/opensearch-migrations/tree/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test)) make extensive use of the console library and serve as another frontend, though in a different form-factor (i.e. not user-facing).
 
-We intend to support a full web API that matches the CLI by programatically generating both the API and the CLI from a spec (yet to be defined). In the short term, a subset of the functionality is exposed via a Web API.
-
 #### CLI
 
 In the near term of the Migration Assistant, the CLI is the primary way for users to manage and understand their migration. After deploying their tools, a user will log onto the Migration Console and use the CLI for tasks like starting and checking the progress of their historic backfill, turning on and off the replayer, running `_cat/indices` against the source and target cluster, etc. These functions will be performed in the same way by the user, regardless of whether their tools are deployed locally on Docker, remotely on AWS, a different hosting platform, or a combination thereof.
 
 #### Generation from a spec
 
-For the CLI and (standard) web API, the intention is that the “frontend” should be very small--essentially just the necessary code to get the user’s data from the input source (either CLI commands or http requests) into the library itself. To accomplish this, the actual endpoints in both cases could be generated from an API spec or one of them from the other. This will be a helpful way to minimize the developer effort to support additional commands and ensure that behavior is consistent between the two modalities.
+The intention is that the "frontend" should be very small--essentially just the necessary code to get the user's data from the input source (e.g. CLI commands) into the library itself. To accomplish this, the actual endpoints could be generated from an API spec. This will be a helpful way to minimize the developer effort to support additional commands.
 
 #### Custom Frontends
 
@@ -100,11 +98,11 @@ This Environment object will be a parameter to every command function in the mid
 
 The frontend has a few options for how to interact with the Environment object. In the basic case, the frontend can ask the middleware layer to instantiate and populate the Environment. In this case, the middleware will load the YAML (from the default or a specified path), validate it, and create implementation models for each service involved. It will then return the Environment object to the frontend, and the frontend will supply it along with all command calls.
 
-In the "power user" case--likely to be used by an API, which may not rely on a `services.yaml` file--the frontend can start with an empty Environment, and define and instantiate the underlying models itself. When that Environment is passed into the commands exposed by the middleware layer, it will be used as the source of truth for all deployed services. One option for tools taking this option would be to define a custom configuration format and include an Environment builder/factory to convert that configuration into a suitable Environment object.
+In the "power user" case--which may not rely on a `services.yaml` file--the frontend can start with an empty Environment, and define and instantiate the underlying models itself. When that Environment is passed into the commands exposed by the middleware layer, it will be used as the source of truth for all deployed services. One option for tools taking this option would be to define a custom configuration format and include an Environment builder/factory to convert that configuration into a suitable Environment object.
 
 ### Middleware Layer
 
-The middleware layer is the public-facing API of the library as a whole. As much logic as possible related to error handling, type checking, manipulating arguments, and calling functions on the underlying models should happen through the middleware layer. This allows the frontend interfaces (CLI, web API, etc.) to remain very thin and suitable for generation from a spec.
+The middleware layer is the public-facing API of the library as a whole. As much logic as possible related to error handling, type checking, manipulating arguments, and calling functions on the underlying models should happen through the middleware layer. This allows the frontend interfaces (e.g. CLI) to remain very thin and suitable for generation from a spec.
 
 Each call into the middleware layer should include three pieces of data: the command to be called (e.g. `backfill scale`), any arguments for it (e.g. `units=5`), and the Environment object (which in this case might include a `RFS on ECS Backfill` model). The middleware layer is responsible for calling the appropriate function on the model, validating and passing in the arguments, and handling errors during the execution, and passing the result back to the original caller.
 

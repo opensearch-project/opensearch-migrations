@@ -347,30 +347,29 @@ public class SourceTestBase {
                 workItemRef::set
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
-                return RfsMigrateDocuments.runWithPipeline(
-                    extractor,
-                    clientFactory.determineVersionAndCreate(),
-                    snapshotName,
-                    tempDir,
-                    () -> docTransformer,
-                    false,
-                    allowlist,
-                    1000,
-                    Long.MAX_VALUE,
-                    10,
-                    0,              // no shard size limit in tests
-                    progressCursor,
-                    workCoordinator,
-                    Duration.ofMinutes(10),
-                    processManager,
-                    null,           // no WorkItemTimeProvider in tests
-                    sourceResourceProvider.getIndexMetadata(),
-                    indexAllowlist,
-                    context,
-                    new AtomicReference<>(),
-                    previousSnapshotName,
-                    previousSnapshotName != null ? DeltaMode.UPDATES_AND_DELETES : null
-                );
+                var sourceBuilder = org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource.builder(extractor, snapshotName, tempDir);
+                if (previousSnapshotName != null) {
+                    sourceBuilder.delta(previousSnapshotName, DeltaMode.UPDATES_AND_DELETES,
+                        () -> new org.opensearch.migrations.bulkload.tracing.RfsContexts.DeltaStreamContext(context, null));
+                }
+                var documentSource = sourceBuilder.build();
+
+                var scopedWorkCoordinator = RfsMigrateDocuments.prepareWorkCoordination(
+                    workCoordinator, processManager, documentSource, indexAllowlist, context);
+
+                var runner = org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap.builder()
+                    .documentSource(documentSource)
+                    .targetClient(clientFactory.determineVersionAndCreate())
+                    .maxDocsPerBatch(1000)
+                    .maxBytesPerBatch(Long.MAX_VALUE)
+                    .batchConcurrency(10)
+                    .transformerSupplier(() -> docTransformer)
+                    .allowlist(allowlist)
+                    .workCoordinator(scopedWorkCoordinator)
+                    .maxInitialLeaseDuration(Duration.ofMinutes(10))
+                    .cursorConsumer(progressCursor::set)
+                    .build();
+                return runner.migrateOneShard(context::createReindexContext);
             }
         } finally {
             FileSystemUtils.deleteDirectories(tempDir.toString());
@@ -455,7 +454,7 @@ public class SourceTestBase {
         var args = new CreateSnapshot.Args();
         args.snapshotName = snapshotName;
         args.snapshotRepoName = snapshotName + "_repo";
-        args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+        args.repoUri = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         args.sourceArgs.host = sourceContainer.getUrl();
         args.compressionEnabled = compressionEnabled;
         args.includeGlobalState = includeGlobalState;

@@ -1,5 +1,6 @@
 import console_link.middleware.clusters as clusters_
 
+import requests_mock as requests_mock_lib
 import unittest.mock as mock
 
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
@@ -44,6 +45,23 @@ def test_cat_indices_with_error_prints_cleanly():
     response_str = clusters_.cat_indices(cluster, refresh=False)
     cluster.call_api.assert_called_once()
     assert response_str == f"Error: Unable to perform cat-indices command with message: {error_message}"
+
+
+def test_cat_indices_always_returns_str(requests_mock):
+    """cat_indices must return str in both success and error paths so callers never need .decode()."""
+    # Success path
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    requests_mock.get(f"{cluster.endpoint}/_cat/indices/_all", text="green open my-index 1 0 5 0 10kb 10kb\n")
+    result = clusters_.cat_indices(cluster, refresh=False)
+    assert isinstance(result, str)
+    assert "my-index" in result
+
+    # Error path
+    err_cluster = mock.Mock(spec=Cluster)
+    err_cluster.call_api.side_effect = ConnectionError("cluster unreachable")
+    result = clusters_.cat_indices(err_cluster, refresh=False)
+    assert isinstance(result, str)
+    assert "Error" in result
 
 
 def test_clear_indices(requests_mock):
@@ -94,3 +112,39 @@ def test_call_api_timeout_returns_friendly_message():
     assert "15s" in result.error_message
     assert "--timeout" in result.error_message
     assert "HTTPSConnectionPool" not in result.error_message
+
+
+def test_connection_check_serverless_unknown_type_surfaces_warning(requests_mock):
+    cluster = create_valid_cluster(
+        endpoint="https://abc123.us-east-1.aoss.amazonaws.com",
+        auth_type=AuthMethod.NO_AUTH,
+    )
+    # GET / returns 404 (serverless)
+    requests_mock.get(f"{cluster.endpoint}/", status_code=404)
+    # KNN probe returns 403 (missing permissions)
+    requests_mock.put(requests_mock_lib.ANY, status_code=403,
+                      json={"error": {"reason": "User does not have permissions"}})
+    # _cat/indices succeeds (read access works)
+    requests_mock.get(f"{cluster.endpoint}/_cat/indices", text="")
+
+    result = clusters_.connection_check(cluster)
+    assert result.connection_established
+    assert "Warning" in result.connection_message
+    assert "403" in result.connection_message
+    assert "permissions" in result.connection_message
+
+
+def test_connection_check_serverless_known_type_no_warning(requests_mock):
+    cluster = create_valid_cluster(
+        endpoint="https://abc123.us-east-1.aoss.amazonaws.com",
+        auth_type=AuthMethod.NO_AUTH,
+    )
+    requests_mock.get(f"{cluster.endpoint}/", status_code=404)
+    requests_mock.put(requests_mock_lib.ANY, status_code=400,
+                      text="KNN features not supported on TIMESERIES collection type")
+    requests_mock.get(f"{cluster.endpoint}/_cat/indices", text="")
+
+    result = clusters_.connection_check(cluster)
+    assert result.connection_established
+    assert "Warning" not in result.connection_message
+    assert "Successfully connected" in result.connection_message

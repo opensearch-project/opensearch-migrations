@@ -76,14 +76,8 @@ Users can interact with the migration process through the CLI, which orchestrate
 
 ## Building Images
 
-Build images with docker (requires docker)
-
-```bash
-./gradlew buildDockerImages
-```
-
-Build images with buildkit and jib. 
-See [buildImages](buildImages/README-K8s.md) for instructions to set 
+Build images with buildkit and jib.
+See [buildImages](buildImages/README-K8s.md) for instructions to set
 that up.
 
 ```bash

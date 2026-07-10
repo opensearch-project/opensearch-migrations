@@ -240,6 +240,70 @@ fieldExpr
       if (boost !== null) return { type: 'boost', child: node, value: boost };
       return node;
     }
+  // FieldGroup: field:(subquery) — Solr's "field hoisting" sugar.
+  // `marketplace:(US OR UK)` is canonical sugar for `(marketplace:US OR marketplace:UK)`.
+  // The inner query is walked and every BareNode (and nested phrase / wildcard
+  // bareValue) gets the outer field hoisted onto it. Nested field expressions
+  // inside the group keep their own field — the hoist is non-overriding.
+  //
+  // Examples (all produce results equivalent to expanding the field manually):
+  //   `marketplace:(US OR UK)`        → group{ bool{ or: [field{marketplace,US}, field{marketplace,UK}] } }
+  //   `marketplace:(US OR JP UK)`     → group{ bool{ or: [field{...,US}, field{...,JP}, field{...,UK}] } }
+  //   `tag:(NOT foo)`                 → group{ bool{ not: [field{tag,foo}] } }
+  //   `tag:("foo bar" OR baz)`        → group{ bool{ or: [phrase{tag,"foo bar"}, field{tag,baz}] } }
+  //   `tag:(foo OR other:bar)`        → group{ bool{ or: [field{tag,foo}, field{other,bar}] } }   // nested field wins
+  //
+  // Boost on the outer group is preserved: `marketplace:(US OR UK)^2` → boost{group{...}, 2}.
+  / field:identifier ":" "(" _ expr:query _ ")" boost:boost? {
+      // Hoist `field` onto every bare leaf inside `expr`. Pre-existing field
+      // and phrase-with-field nodes inside the subexpression are left alone
+      // (the inner field wins, matching Solr semantics).
+      function hoist(n) {
+        if (n === null || typeof n !== 'object') return n;
+        switch (n.type) {
+          case 'bare':
+            if (n.isPhrase) {
+              return { type: 'phrase', text: n.value, field: field };
+            }
+            return { type: 'field', field: field, value: n.value };
+          case 'phrase':
+            // Bare phrase already became {type:'phrase', field:undefined} via
+            // bareValue — give it our field. A phrase that already had a
+            // field came through fieldExpr (handled via 'field' / 'phrase'
+            // with field set) — leave it alone.
+            if (n.field === undefined || n.field === null) {
+              return { type: 'phrase', text: n.text, field: field };
+            }
+            return n;
+          case 'field':
+          case 'range':
+            // Already field-qualified — keep as-is.
+            return n;
+          case 'bool':
+            return {
+              type: 'bool',
+              and: (n.and || []).map(hoist),
+              or: (n.or || []).map(hoist),
+              not: (n.not || []).map(hoist),
+              implicit: n.implicit,
+            };
+          case 'group':
+            return { type: 'group', child: hoist(n.child) };
+          case 'boost':
+            return { type: 'boost', child: hoist(n.child), value: n.value };
+          case 'filter':
+            return { type: 'filter', child: hoist(n.child) };
+          case 'matchAll':
+            return n;
+          default:
+            return n;
+        }
+      }
+      const hoisted = hoist(expr);
+      const node = { type: 'group', child: hoisted };
+      if (boost !== null) return { type: 'boost', child: node, value: boost };
+      return node;
+    }
   // FieldNode: field:value (unquoted)
   // `title:java` → FieldNode { field: "title", value: "java" }
   / field:identifier ":" val:valueChars boost:boost? {
@@ -278,9 +342,32 @@ bareValue
 // ─── Terminals ───────────────────────────────────────────────────────────────
 
 // Range bound value: alphanumeric string or * (for unbounded ranges like [* TO 100]).
+//
+// Supported forms:
+//   - Numbers / strings:                 10, 1.5, abc
+//   - Wildcard:                          *
+//   - ISO-8601 timestamps:               2020-01-01T00:00:00Z
+//                                        2020-01-01T00:00:00.123Z
+//   - Solr date-math NOW expressions:    NOW
+//                                        NOW-365DAYS
+//                                        NOW+1HOUR
+//                                        NOW/DAY
+//                                        NOW/MONTH-6MONTHS
+//                                        NOW/MONTH+1DAY/HOUR
+//
+// Characters added beyond the original [a-zA-Z0-9._\-]+:
+//   ':'  for ISO timestamps (T00:00:00) and date-math operators
+//   '/'  for date-math rounding (NOW/MONTH)
+//   '+'  for date-math additive offsets (NOW+1HOUR)
+// `-` is already covered by the original character class.
+//
+// We deliberately do NOT include whitespace; the surrounding `_` rules in
+// fieldExpr handle whitespace around the bound, and Solr requires "TO" to
+// be surrounded by whitespace, so an unquoted bound never contains a literal
+// space.
 rangeVal
   = "*" { return '*'; }
-  / $[a-zA-Z0-9._\-]+
+  / $[a-zA-Z0-9._\-:/+]+
 
 // Unquoted value characters: letters, digits, and common special chars.
 // Determines what can appear in unquoted field values.
@@ -336,7 +423,11 @@ funcArg
   = funcNumericLiteral
   / funcStringConstant
   / funcCall
+  / funcWildcard
   / funcFieldRef
+
+funcWildcard
+  = "*" { return { kind: 'field', name: '*' }; }
 
 funcNumericLiteral
   = val:$("-"? [0-9]+ ("." [0-9]+)? ([eE] [+\-]? [0-9]+)?) {

@@ -96,11 +96,16 @@ function convertFilterAgg(aggResult: JavaMap): JavaMap {
  * Supports:
  *   - Terms / range / histogram aggregations (which have a `buckets` array)
  *   - Filter aggregations (from query facets, which have `doc_count`)
+ *   - Metric aggregations (avg, sum, min, max, value_count, cardinality — which have a `value` key)
  *
  * For both bucket-based and filter aggregations, any nested aggregation results
  * are recursively converted.
+ *
+ * Metric aggregations return their scalar value directly, matching Solr's
+ * json.facet response format where stat facets are plain numbers:
+ *   Solr: { "facets": { "count": 100, "avg_price": 29.95 } }
  */
-function convertSingleAgg(aggResult: any): JavaMap {
+function convertSingleAgg(aggResult: any): JavaMap | number {
   if (!isMapLike(aggResult)) {
     throw new Error(`Expected aggregation result to be a Map, got: ${typeof aggResult}`);
   }
@@ -108,6 +113,11 @@ function convertSingleAgg(aggResult: any): JavaMap {
   const buckets: any[] = aggResult.get('buckets');
   if (Array.isArray(buckets)) {
     return convertBucketAgg(buckets);
+  }
+  // Metric aggregations (avg, sum, min, max, value_count, cardinality)
+  // return { "value": <number> }. Solr returns the scalar directly.
+  if (aggResult.has('value') && !aggResult.has('doc_count')) {
+    return aggResult.get('value');
   }
   if (aggResult.has('doc_count')) {
     return convertFilterAgg(aggResult);

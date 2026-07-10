@@ -534,9 +534,10 @@ inProgress:
 % ...
 
 [gamma|targetSecurityLogs|sourceSecurityLogs|01_01_02_indices]
-% workflow approve
+% workflow approve step --list
 1 targetSecurityLogs -> sourceSecurityLogs -> 01_01_02_indices -> metadata
-[1] # user has approved the results of the metadata step 
+% workflow approve step "*metadata"
+# user has approved the results of the metadata step
 
 [gamma|targetSecurityLogs|sourceSecurityLogs|01_01_01_indices]
 % workflow status

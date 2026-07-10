@@ -1,8 +1,9 @@
 /**
- * Deploy the Migration Assistant CFN stack (Create-VPC mode) and capture exports.
+ * Deploy the Migration Assistant CFN stack and capture exports.
  *
- * Runs the bootstrap script with --deploy-create-vpc-cfn, then parses the
- * MigrationsExportString output into env vars.
+ * Supports two VPC modes:
+ *   - Create VPC (default): --deploy-create-vpc-cfn
+ *   - Import VPC: --deploy-import-vpc-cfn (requires vpcId, subnetIds)
  *
  * Sets these env vars:
  *   - env.MA_STACK_NAME
@@ -14,12 +15,18 @@
  *
  * Usage:
  *   bootstrapMA(
- *       stackName: "Migration-Assistant-Infra-Create-VPC-eks-${stage}-${region}",
+ *       stackName: "...",
  *       stage: maStageName,
  *       region: params.REGION,
  *       bootstrap: bootstrap,           // from resolveBootstrap()
  *       eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
- *       kubectlContext: "my-custom-context"
+ *       kubectlContext: "my-custom-context",
+ *       // Optional — import VPC mode:
+ *       vpcId: "vpc-xxx",
+ *       subnetIds: "subnet-a,subnet-b",
+ *       createVpcEndpoints: true,
+ *       // Optional — mirror images from another ECR:
+ *       maImagesSource: "ecr-registry-url"
  *   )
  */
 def call(Map config = [:]) {
@@ -43,14 +50,25 @@ def call(Map config = [:]) {
     def tlsMode = config.tlsMode
     def tlsFlag = tlsMode ? "--tls-mode ${tlsMode}" : ''
 
+    // Determine VPC mode
+    def vpcId = config.vpcId
+    def subnetIds = config.subnetIds
+    def deployFlag = vpcId ? '--deploy-import-vpc-cfn' : '--deploy-create-vpc-cfn'
+    def vpcFlags = vpcId ? "--vpc-id ${vpcId} --subnet-ids ${subnetIds}" : ''
+    def endpointFlag = config.createVpcEndpoints ? '--create-vpc-endpoints' : ''
+    def imageSourceFlag = config.maImagesSource ? "--ma-images-source ${config.maImagesSource}" : ''
+
     sh """
         ${bootstrap.script} \
-          --deploy-create-vpc-cfn \
+          ${deployFlag} \
           --stack-name "${stackName}" \
           --stage "${stage}" \
           --eks-access-principal-arn "${eksAccessPrincipalArn}" \
           ${bootstrap.flags} \
           ${tlsFlag} \
+          ${vpcFlags} \
+          ${endpointFlag} \
+          ${imageSourceFlag} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \

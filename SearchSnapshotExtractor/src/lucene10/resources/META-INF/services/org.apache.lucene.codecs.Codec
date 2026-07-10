@@ -1,0 +1,5 @@
+# Codec shims ported to Lucene 10 (ES 9.x / OS 3.x snapshots).
+# Class FQNs are pre-relocation; the ShadowJar rewrites the imports (but NOT service
+# file contents outside the META-INF rewrite handled by mergeServiceFiles) to the
+# shadow.lucene10 namespace at package time.
+org.opensearch.migrations.bulkload.lucene.version_10.Elasticsearch900Lucene101CodecFallback

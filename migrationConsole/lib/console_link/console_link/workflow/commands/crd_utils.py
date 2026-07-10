@@ -21,18 +21,37 @@ RESETTABLE_PLURALS = [
     'datasnapshots',
     'snapshotmigrations',
     'trafficreplays',
-    'approvalgates',
 ]
 
 DISPLAY_NAMES = {
-    'kafkaclusters': 'Kafka Cluster',
-    'capturedtraffics': 'Captured Traffic',
-    'captureproxies': 'Capture Proxy',
-    'datasnapshots': 'Data Snapshot',
-    'snapshotmigrations': 'Snapshot Migration',
-    'trafficreplays': 'Traffic Replay',
-    'approvalgates': 'Approval Gate',
+    'kafkaclusters': 'kafkacluster',
+    'capturedtraffics': 'capturedtraffic',
+    'captureproxies': 'captureproxy',
+    'datasnapshots': 'datasnapshot',
+    'snapshotmigrations': 'snapshotmigration',
+    'trafficreplays': 'trafficreplay',
+    'approvalgates': 'approvalgate',
 }
+
+PLURAL_FROM_TYPE = {v: k for k, v in DISPLAY_NAMES.items()}
+
+
+def resource_display_name(plural, name):
+    """Format a resource as type.name for display."""
+    return f"{DISPLAY_NAMES.get(plural, plural)}.{name}"
+
+
+def parse_resource_path(path):
+    """Parse a type.name string into (plural, name). Returns None if no dot."""
+    dot = path.find('.')
+    if dot < 0:
+        return None
+    type_part = path[:dot]
+    name_part = path[dot + 1:]
+    plural = PLURAL_FROM_TYPE.get(type_part)
+    if plural and name_part:
+        return (plural, name_part)
+    return None
 
 
 def has_glob(pattern):
@@ -66,6 +85,34 @@ def list_migration_resources(namespace, plurals=None):
                     item.get('status', {}).get('phase', 'Unknown'),
                     item.get('spec', {}).get('dependsOn', []) or [],
                 ))
+        except ApiException:
+            pass
+    return results
+
+
+def list_migration_resources_full(namespace):
+    """List all migration CRD instances with full objects."""
+    return list_resources_full(namespace, RESETTABLE_PLURALS)
+
+
+def list_resources_full(namespace, resource_type_filter):
+    """List CRD instances with full objects.
+
+    Returns dict keyed by plural containing lists of CR dicts.
+    resource_type_filter is required — caller must specify which resource types to list.
+    """
+    custom = client.CustomObjectsApi()
+    results = {}
+    for plural in resource_type_filter:
+        try:
+            items = custom.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+            ).get('items', [])
+            if items:
+                results[plural] = items
         except ApiException:
             pass
     return results

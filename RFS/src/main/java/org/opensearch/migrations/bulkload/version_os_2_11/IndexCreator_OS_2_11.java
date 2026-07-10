@@ -188,14 +188,28 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                     throw invalidResponse;
                 }
 
-                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, indexName);
-                ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
+                // Settings serialize as flat keys ("index.knn.algo_param.m") or
+                // nested under "index"; remove the full path, then the stripped path.
+                log.debug("Removing setting '{}' from index '{}' settings", illegalArgument, indexName);
+                ObjectNodeUtils.removeFieldsByPath(settings, illegalArgument);
+                ObjectNodeUtils.removeFieldsByPath(settings, illegalArgument.substring("index.".length()));
             }
 
             log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", indexName, illegalArguments);
             return;
         }
+
+        var removedTokenFilters = invalidResponse.getRemovedTokenFilters();
+        if (!removedTokenFilters.isEmpty()) {
+            // The settings ObjectNode is the inner "settings" body; pass it through a synthetic
+            // wrapper so the utility can locate analysis.analyzer.<name>.filter consistently.
+            var wrapper = mapper.createObjectNode();
+            wrapper.set("settings", settings);
+            ObjectNodeUtils.removeAnalyzerFilters(wrapper, removedTokenFilters);
+            log.info("Reattempting creation of index '{}' after removing removed token filters: {}", indexName, removedTokenFilters);
+            return;
+        }
+
 
         var unsupportedMappingParams = invalidResponse.getUnsupportedMappingParameters();
 

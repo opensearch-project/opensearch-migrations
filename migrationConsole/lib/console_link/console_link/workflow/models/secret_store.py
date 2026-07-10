@@ -241,6 +241,10 @@ class SecretStore:
         logger.info(f"Found {len(resource_names)} secrets matching: {label_selector}")
         return resource_names
 
+    def _has_default_labels(self, secret) -> bool:
+        labels = getattr(secret.metadata, 'labels', None) or {}
+        return all(labels.get(key) == value for key, value in self.default_labels.items())
+
     def secrets_exist(
             self,
             resource_names: List[str]
@@ -290,7 +294,7 @@ class SecretStore:
         return result
 
     def secret_exists(self, resource_name: str) -> bool:
-        """Check if a single secret exists
+        """Check if a single managed secret exists
 
 
         Args:
@@ -300,11 +304,11 @@ class SecretStore:
             True if secret exists, False otherwise
         """
         try:
-            self.v1.read_namespaced_secret(
+            secret = self.v1.read_namespaced_secret(
                 name=resource_name,
                 namespace=self.namespace
             )
-            return True
+            return self._has_default_labels(secret)
         except ApiException as e:
             if e.status == 404:
                 return False

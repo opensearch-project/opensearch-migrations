@@ -25,6 +25,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneField;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -108,7 +109,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -174,7 +175,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -267,6 +268,7 @@ public class LuceneDocumentsReaderTest {
         }
         when(mockReader.leaves()).thenAnswer(inv -> leaves);
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
+        when(mockReader.getIndexDirectoryPath()).thenReturn(tempDirectory);
 
         // Create a custom LuceneDocumentsReader for testing
         LuceneIndexReader reader = new IndexReader9(Paths.get("dummy"), false, "dummy_field") {
@@ -292,7 +294,7 @@ public class LuceneDocumentsReaderTest {
         }, 0, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<LuceneDocumentChange> actualDocuments = reader.streamDocumentChanges("dummy")
+        List<LuceneDocumentChange> actualDocuments = LuceneReader.streamDocumentChanges(reader, "dummy")
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(10));
@@ -340,7 +342,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
-            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
+            Flux<LuceneDocumentChange> documents = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
@@ -380,7 +382,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {
-            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), startingDocIndex);
+            Flux<LuceneDocumentChange> documents = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName(), startingDocIndex);
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(startingDocIndex));

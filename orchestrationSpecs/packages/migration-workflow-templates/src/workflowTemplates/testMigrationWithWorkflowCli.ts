@@ -10,10 +10,14 @@ import {
     DEFAULT_RESOURCES,
 } from "@opensearch-migrations/schemas";
 
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {
+    CommonWorkflowParameters,
+    DEFAULT_WORKFLOW_SCRIPTS_ROOT,
+    workflowScriptCommand,
+    workflowScriptRootEnvVars
+} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
+import {K8S_RESOURCE_RETRY_STRATEGY, CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
@@ -34,25 +38,35 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         // Currently using base64 as a workaround for passing complex JSON through Argo workflow parameters.
         // Consider using ConfigMaps or a dedicated typed parameter passing mechanism instead.
         .addRequiredInput("migrationConfigBase64", typeToken<string>())
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/bash", "-c"])
+            .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
-            .addArgs([configureAndSubmitScript])
+            .addEnvVarsFromRecord({
+                MIGRATION_CONFIG_BASE64: cb.inputs.migrationConfigBase64,
+                RUN_NONCE: expr.literal("1"), // Solr 6 / 7 tests need a known snapshot suffix.
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("configureAndSubmitWorkflow.sh")])
         )
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
     .addTemplate("monitorWorkflow", t => t
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/bash", "-c"])
+            .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addArgs([monitorScript])
+            .addEnvVarsFromRecord({
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("monitorWorkflow.sh")])
             // Monitor script exit codes:
             // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
             // - Exit 1: Workflow still running - retry monitoring
@@ -76,28 +90,20 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
 
     .addTemplate("evaluateWorkflowResult", t => t
         .addRequiredInput("monitorResult", typeToken<string>())
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/bash", "-c"])
+            .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
-            .addArgs([`
-set -e
-echo "Evaluating workflow result..."
-echo "Monitor output: $MONITOR_RESULT"
-
-# Check if the output contains "Phase: Succeeded"
-if echo "$MONITOR_RESULT" | grep -q "Phase: Succeeded"; then
-    echo "Migration workflow completed successfully"
-    exit 0
-else
-    echo "Migration workflow did not succeed"
-    exit 1
-fi
-            `])
+            .addEnvVarsFromRecord({
+                MONITOR_RESULT: cb.inputs.monitorResult,
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("evaluateWorkflowResult.sh")])
         )
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
     .addTemplate("deleteMigrationWorkflow", t => t

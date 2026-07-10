@@ -1,14 +1,15 @@
 import json
 import logging
 import time
+import uuid
 
 from console_link.models.cluster import HttpMethod
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
-    make_proxy_cluster, cleanup_cdc_resources, send_bulk,
+    CDC_SOURCE_TARGET_COMBINATIONS, wait_for_replayer_consuming,
+    make_proxy_cluster, send_bulk,
+    log_kafka_consumer_group_state, assert_replay_drained,
 )
 from ..common_utils import execute_api_call
 
@@ -39,7 +40,7 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
             migrations_required=[MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
-        uid = self.unique_id
+        uid = f"{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.idx_bulk = f"cdc0033-bulk-{uid}"
         self.idx_lifecycle = f"cdc0033-lifecycle-{uid}"
         self.idx_template = f"cdc0033-tmpl-{uid}"
@@ -49,6 +50,7 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-only-imported-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -56,13 +58,12 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available")
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(self.argo_service.namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds)
-        logger.info("Replayer is running, ready for CDC traffic")
+        logger.info("CDC workflow submitted; replayer readiness is checked before traffic is sent")
 
     def post_migration_actions(self):
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=self.argo_service.namespace)
+        wait_for_replayer_consuming(namespace=self.argo_service.namespace, workflow_name=self.workflow_name)
+        log_kafka_consumer_group_state(label="replay-start")
         proxy = make_proxy_cluster(self.source_cluster)
         ops = self.source_operations
 
@@ -172,75 +173,77 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
         ops = self.target_operations
         target = self.target_cluster
 
-        # 1. idx_bulk: 45 docs (50 - 5 deleted by delete_by_query)
-        logger.info("Verifying idx_bulk doc count on target (expect 45)...")
-        ops.check_doc_counts_match(
-            cluster=target,
-            expected_index_details={self.idx_bulk: {"count": 45}},
-            max_attempts=120, delay=10.0,
-        )
+        try:
+            # 1. idx_bulk: 45 docs (50 - 5 deleted by delete_by_query)
+            logger.info("Verifying idx_bulk doc count on target (expect 45)...")
+            ops.check_doc_counts_match(
+                cluster=target,
+                expected_index_details={self.idx_bulk: {"count": 45}},
+                max_attempts=120, delay=10.0,
+            )
 
-        # 2. idx_bulk: doc_10 was partially updated (survives delete_by_query since value=10 >= 5)
-        logger.info("Verifying partial update on doc_10...")
-        resp = ops.get_document(index_name=self.idx_bulk, doc_id="doc_10", cluster=target)
-        content = resp.json()["_source"]
-        assert content["title"] == "Updated bulk doc 10", f"Expected updated title, got {content}"
-        assert content["value"] == 10, f"Expected value=10 preserved, got {content}"
+            # 2. idx_bulk: doc_10 was partially updated (survives delete_by_query since value=10 >= 5)
+            logger.info("Verifying partial update on doc_10...")
+            resp = ops.get_document(index_name=self.idx_bulk, doc_id="doc_10", cluster=target)
+            content = resp.json()["_source"]
+            assert content["title"] == "Updated bulk doc 10", f"Expected updated title, got {content}"
+            assert content["value"] == 10, f"Expected value=10 preserved, got {content}"
 
-        # 3. idx_bulk: update_by_query changed category to C for value >= 40
-        logger.info("Verifying update_by_query result (doc_45 should have category=C)...")
-        resp = ops.get_document(index_name=self.idx_bulk, doc_id="doc_45", cluster=target)
-        content = resp.json()["_source"]
-        assert content["category"] == "C", f"Expected category=C for doc_45, got {content}"
+            # 3. idx_bulk: update_by_query changed category to C for value >= 40
+            logger.info("Verifying update_by_query result (doc_45 should have category=C)...")
+            resp = ops.get_document(index_name=self.idx_bulk, doc_id="doc_45", cluster=target)
+            content = resp.json()["_source"]
+            assert content["category"] == "C", f"Expected category=C for doc_45, got {content}"
 
-        # 4. idx_lifecycle: 2 docs (index was deleted and recreated)
-        logger.info("Verifying idx_lifecycle on target (expect 2 docs after recreate)...")
-        ops.check_doc_counts_match(
-            cluster=target,
-            expected_index_details={self.idx_lifecycle: {"count": 2}},
-            max_attempts=120, delay=10.0,
-        )
-        # Verify the recreated doc has the 'tag' field (new mapping)
-        resp = ops.get_document(index_name=self.idx_lifecycle, doc_id="lc_2", cluster=target)
-        content = resp.json()["_source"]
-        assert content["tag"] == "recreated", f"Expected tag=recreated, got {content}"
-        # Verify lc_1 is gone (was in the deleted index)
-        ops.get_document(index_name=self.idx_lifecycle, doc_id="lc_1", cluster=target,
-                         expected_status_code=404, max_attempts=3)
+            # 4. idx_lifecycle: 2 docs (index was deleted and recreated)
+            logger.info("Verifying idx_lifecycle on target (expect 2 docs after recreate)...")
+            ops.check_doc_counts_match(
+                cluster=target,
+                expected_index_details={self.idx_lifecycle: {"count": 2}},
+                max_attempts=120, delay=10.0,
+            )
+            # Verify the recreated doc has the 'tag' field (new mapping)
+            resp = ops.get_document(index_name=self.idx_lifecycle, doc_id="lc_2", cluster=target)
+            content = resp.json()["_source"]
+            assert content["tag"] == "recreated", f"Expected tag=recreated, got {content}"
+            # Verify lc_1 is gone (was in the deleted index)
+            ops.get_document(index_name=self.idx_lifecycle, doc_id="lc_1", cluster=target,
+                             expected_status_code=404, max_attempts=3)
 
-        # 5. idx_lifecycle: settings change replicated
-        logger.info("Verifying settings change on target...")
-        resp = ops.get_index(index_name=self.idx_lifecycle, cluster=target)
-        settings = resp.json()[self.idx_lifecycle]["settings"]["index"]
-        assert settings.get("refresh_interval") == "5s", \
-            f"Expected refresh_interval=5s, got {settings.get('refresh_interval')}"
+            # 5. idx_lifecycle: settings change replicated
+            logger.info("Verifying settings change on target...")
+            resp = ops.get_index(index_name=self.idx_lifecycle, cluster=target)
+            settings = resp.json()[self.idx_lifecycle]["settings"]["index"]
+            assert settings.get("refresh_interval") == "5s", \
+                f"Expected refresh_interval=5s, got {settings.get('refresh_interval')}"
 
-        # 6. idx_template: 2 docs written via alias
-        logger.info("Verifying idx_template on target (expect 2 docs)...")
-        ops.check_doc_counts_match(
-            cluster=target,
-            expected_index_details={self.idx_template: {"count": 2}},
-            max_attempts=120, delay=10.0,
-        )
-        # Verify template was applied (number_of_replicas=0)
-        resp = ops.get_index(index_name=self.idx_template, cluster=target)
-        idx_settings = resp.json()[self.idx_template]["settings"]["index"]
-        assert idx_settings.get("number_of_replicas") == "0", \
-            f"Expected number_of_replicas=0 from template, got {idx_settings.get('number_of_replicas')}"
-        # Verify alias exists on target
-        resp = execute_api_call(cluster=target, method=HttpMethod.GET,
-                                path=f"/_alias/{self.alias_name}")
-        alias_data = resp.json()
-        assert self.idx_template in alias_data, \
-            f"Expected alias {self.alias_name} to point to {self.idx_template}, got {alias_data}"
-
-    def test_after(self):
-        pass
+            # 6. idx_template: 2 docs written via alias
+            logger.info("Verifying idx_template on target (expect 2 docs)...")
+            ops.check_doc_counts_match(
+                cluster=target,
+                expected_index_details={self.idx_template: {"count": 2}},
+                max_attempts=120, delay=10.0,
+            )
+            # Verify template was applied (number_of_replicas=0)
+            resp = ops.get_index(index_name=self.idx_template, cluster=target)
+            idx_settings = resp.json()[self.idx_template]["settings"]["index"]
+            assert idx_settings.get("number_of_replicas") == "0", \
+                f"Expected number_of_replicas=0 from template, got {idx_settings.get('number_of_replicas')}"
+            # Verify alias exists on target
+            resp = execute_api_call(cluster=target, method=HttpMethod.GET,
+                                    path=f"/_alias/{self.alias_name}")
+            alias_data = resp.json()
+            assert self.idx_template in alias_data, \
+                f"Expected alias {self.alias_name} to point to {self.idx_template}, got {alias_data}"
+        finally:
+            assert_replay_drained(label="replay-end")
 
     def cleanup(self):
         # Delete composable index templates created by this test from both clusters.
         # These survive index deletion and cause 400 errors on reruns due to
         # conflicting index patterns.
+        # Note: import_existing_clusters() clears target templates at test start,
+        # but source templates need explicit cleanup here.
         for cluster in [self.source_cluster, self.target_cluster]:
             try:
                 execute_api_call(cluster=cluster, method=HttpMethod.DELETE,
@@ -248,4 +251,3 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
                                  max_attempts=1)
             except Exception as e:
                 logger.debug("Failed to delete index template %s: %s", self.template_name, e)
-        cleanup_cdc_resources(self.argo_service.namespace)

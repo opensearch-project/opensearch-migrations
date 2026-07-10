@@ -15,10 +15,13 @@ kill_minikube_processes() {
 }
 
 start() {
-  # Development setup to allow using an insecure registry
+  # localTesting.sh attaches the minikube node container to the host's
+  # local-migrations-network Docker network and configures containerd to mirror
+  # localhost:5001 -> http://docker-registry:5000, so we don't need an
+  # insecure-registry flag or the minikube registry addon here.
   TMP_OUTPUT=$(mktemp)
 
-  minikube start --insecure-registry="0.0.0.0/0" 2>&1 | tee "$TMP_OUTPUT"
+  minikube start --driver=docker 2>&1 | tee "$TMP_OUTPUT"
   EXIT_CODE=${PIPESTATUS[0]}
 
   if [[ $EXIT_CODE -ne 0 ]]; then
@@ -36,10 +39,6 @@ start() {
 
   rm -f "$TMP_OUTPUT"
   echo "✅  Minikube started successfully!"
-
-  # Enable registry addon for local image storage
-  minikube addons enable registry
-  echo "📦  Registry addon enabled"
 
   minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
   

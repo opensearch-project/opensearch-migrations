@@ -1,4 +1,0 @@
-service:
-  pipelines:
-    metrics:
-      processors: [ batch ]

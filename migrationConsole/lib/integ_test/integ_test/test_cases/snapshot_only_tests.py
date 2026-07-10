@@ -98,7 +98,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         """Build workflow parameters for snapshot-only migration."""
-        snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
+        snapshot_repo = {"awsRegion": self.s3_region, "repoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:
             snapshot_repo["endpoint"] = self.s3_endpoint
 
@@ -127,7 +127,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def display_final_cluster_state(self):
         """Display target cluster indices."""
-        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True)
         logger.info("Target cluster indices after migration:")
         logger.info("TARGET CLUSTER")
         logger.info(target_response)

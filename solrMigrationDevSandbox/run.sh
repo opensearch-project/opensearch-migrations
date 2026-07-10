@@ -141,12 +141,12 @@ else
   echo "=== Step 2: Building translation shim ==="
   cd ..
   mkdir -p TrafficCapture/transformationShim/build/versionDir
-  # Requires Java 17 — override JAVA_HOME if current version is too old
+  # Requires Java 21 — override JAVA_HOME if current version is too old
   SHIM_JAVA_HOME="${JAVA_HOME:-}"
-  if [[ -d "/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home" ]]; then
-    SHIM_JAVA_HOME="/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home"
-  elif [[ -d "/usr/lib/jvm/java-17-amazon-corretto" ]]; then
-    SHIM_JAVA_HOME="/usr/lib/jvm/java-17-amazon-corretto"
+  if [[ -d "/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home" ]]; then
+    SHIM_JAVA_HOME="/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home"
+  elif [[ -d "/usr/lib/jvm/java-21-amazon-corretto" ]]; then
+    SHIM_JAVA_HOME="/usr/lib/jvm/java-21-amazon-corretto"
   fi
   set +e
   JAVA_HOME="$SHIM_JAVA_HOME" \

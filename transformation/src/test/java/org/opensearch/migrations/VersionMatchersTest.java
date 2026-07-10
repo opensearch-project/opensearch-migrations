@@ -80,4 +80,14 @@ public class VersionMatchersTest {
             List.of("OS 1.3", "OS 2.3", "OS 4.0", "ES 2.3")
         );
     }
+
+    @Test
+    void isES_9_XTest() {
+        testPredicate(
+            VersionMatchers.isES_9_X,
+            "isES_9_X",
+            List.of("ES 9.0", "ES 9.1", "ES 9.1.5"),
+            List.of("ES 8.19", "ES 10.0", "OS 3.0")
+        );
+    }
 }

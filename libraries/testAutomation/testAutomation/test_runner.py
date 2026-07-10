@@ -17,7 +17,8 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3", "SOLR_8.11"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_8.19", "OS_1.3", "SOLR_6.6", "SOLR_7.7",
+                         "SOLR_8.11", "SOLR_9.8"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
@@ -61,7 +62,12 @@ class TestRunner:
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
                  combinations: List[Tuple[str, str]],
                  registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
-                 speedup_factor: int = 20, observed_packet_timeout: int = 30) -> None:
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30,
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 transform_image_context: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer",
+                 trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
+                 trace_backend: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -72,6 +78,13 @@ class TestRunner:
         self.skip_install = skip_install
         self.speedup_factor = speedup_factor
         self.observed_packet_timeout = observed_packet_timeout
+        self.transform_image_basic = transform_image_basic
+        self.transform_image_sequence = transform_image_sequence
+        self.transform_image_context = transform_image_context
+        self.capture_proxy_service_type = capture_proxy_service_type
+        self.trace_test_ids = trace_test_ids or []
+        self.trace_values_file = trace_values_file
+        self.trace_backend = trace_backend
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -90,7 +103,12 @@ class TestRunner:
         for report in reports:
             version_label = f"{report.summary.source_version} -> {report.summary.target_version}"
             row = [version_label]
-            test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
+            test_results = {
+                test.name: ("✓" if test.result == "passed"
+                            else "-" if test.result == "skipped"
+                            else "X")
+                for test in report.tests
+            }
             for name in all_test_names:
                 row.append(test_results.get(name, "N/A"))
             matrix_rows.append(row)
@@ -123,12 +141,15 @@ class TestRunner:
         summary_data = {k: v for k, v in data.get("summary", {}).items() if k in summary_fields}
         return TestReport(tests=tests, summary=TestSummary(**summary_data))
 
-    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
+    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str,
+                             unique_id: str = None, report_suffix: str = None):
         dir_normal = base_dir.rstrip("/")
         source_version_normal = source_version.lower().replace("_", "-").replace(".", "-")
         target_version_normal = target_version.lower().replace("_", "-").replace(".", "-")
-        file_name = (f"{dir_normal}/test-report-{source_version_normal}-to-{target_version_normal}-"
-                     f"{self.unique_id}.json")
+        active_unique_id = unique_id or self.unique_id
+        suffix = f"-{report_suffix}" if report_suffix else ""
+        file_name = (f"{dir_normal}/test-report-{source_version_normal}-to-{target_version_normal}"
+                     f"{suffix}-{active_unique_id}.json")
         with open(file_name, "w", encoding="utf-8") as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
 
@@ -150,43 +171,56 @@ class TestRunner:
         self._print_summary_table(reports=reports)
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
-                  reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
+                  reuse_clusters: bool = False, skip_workflow_reset: bool = False,
+                  test_reports_dir: str = None, test_ids: Optional[List[str]] = None,
+                  unique_id: str = None, report_suffix: str = None) -> TestReport:
         """Runs pytest tests via background exec + poll to survive WebSocket drops."""
-        logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
+        active_test_ids = self.test_ids if test_ids is None else test_ids
+        active_unique_id = unique_id or self.unique_id
+        logger.info(f"Executing migration test cases with pytest and test ID filters: {active_test_ids}")
         command_list = [
             "pipenv",
             "run",
             "pytest",
             "/root/lib/integ_test/integ_test/ma_workflow_test.py",
-            f"--unique_id={self.unique_id}",
+            f"--unique_id={active_unique_id}",
             f"--source_version={source_version}",
         ]
         if target_version == TargetType.AOSS.value:
             command_list.append("--target_type=AOSS")
         else:
             command_list.append(f"--target_version={target_version}")
-        if self.test_ids:
-            command_list.append(f"--test_ids={','.join(self.test_ids)}")
+        if active_test_ids:
+            command_list.append(f"--test_ids={','.join(active_test_ids)}")
         if keep_workflows:
             command_list.append("--keep_workflows")
+        if skip_workflow_reset:
+            command_list.append("--skip_workflow_reset")
         if reuse_clusters:
             command_list.append("--reuse_clusters")
         if self.registry_prefix:
             command_list.append(f"--image_registry_prefix={self.registry_prefix}")
+        if self.transform_image_basic:
+            command_list.append(f"--transform_image_basic={self.transform_image_basic}")
+        if self.transform_image_sequence:
+            command_list.append(f"--transform_image_sequence={self.transform_image_sequence}")
+        if self.transform_image_context:
+            command_list.append(f"--transform_image_context={self.transform_image_context}")
+        command_list.append(f"--capture_proxy_service_type={self.capture_proxy_service_type}")
         command_list.append(f"--speedup_factor={self.speedup_factor}")
         command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
         command_list.append("-s")
 
-        log_file = f"/tmp/{self.unique_id}_pytest.log"
-        exit_code_file = f"/tmp/{self.unique_id}_exit_code"
+        log_file = f"/tmp/{active_unique_id}_pytest.log"
+        exit_code_file = f"/tmp/{active_unique_id}_exit_code"
 
-        self.k8s_service.exec_background_cmd(
+        background_pod = self.k8s_service.exec_background_cmd(
             command_list=command_list, log_file=log_file, exit_code_file=exit_code_file)
 
         exit_code = self.k8s_service.poll_cmd_completion(
-            log_file=log_file, exit_code_file=exit_code_file)
+            log_file=log_file, exit_code_file=exit_code_file, expected_console_pod=background_pod)
 
-        output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
+        output_file_path = f"/root/lib/integ_test/results/{active_unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
                                                                    unbuffered=False)
@@ -194,7 +228,8 @@ class TestRunner:
         logger.debug(f"Received the following test data: {test_data}")
         if test_reports_dir:
             self.write_report_to_file(base_dir=test_reports_dir, report_data=test_data, source_version=source_version,
-                                      target_version=target_version)
+                                      target_version=target_version, unique_id=active_unique_id,
+                                      report_suffix=report_suffix)
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
@@ -223,25 +258,149 @@ class TestRunner:
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
-    def cleanup_deployment(self) -> None:
+    def _report_failed(self, test_report: TestReport) -> bool:
+        expected = test_report.summary.expected
+        if expected is not None and expected == 0 and test_report.summary.failed == 0:
+            logger.info(f"No compatible tests for {test_report.summary.source_version} → "
+                        f"{test_report.summary.target_version}, skipping")
+            return False
+
+        tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+        if expected is not None and test_report.summary.passed != expected:
+            logger.warning(f"Expected {test_report.summary.expected} tests but only "
+                           f"{test_report.summary.passed} passed "
+                           f"({test_report.summary.failed} failed)")
+            tests_failed = True
+        return tests_failed
+
+    def _enable_trace_collection(self) -> None:
+        logger.info("Enabling trace collection for second-phase observability tests")
+        self.k8s_service.reset_migration_resources()
+        self.k8s_service.helm_upgrade(
+            chart_path=self.ma_chart_path,
+            release_name=MA_RELEASE_NAME,
+            values_file=self.trace_values_file,
+            reuse_values=True,
+            wait=True,
+            timeout="10m",
+        )
+        self.k8s_service.wait_for_daemonset_rollout("otel-trace-collector", timeout_seconds=600)
+        if self.trace_backend == "jaeger":
+            self.k8s_service.wait_for_service("jaeger-query", timeout_seconds=300)
+        self.k8s_service.wait_for_all_healthy_pods(timeout=600)
+
+    def _run_trace_phase(self, source_version: str, target_version: str, keep_workflows: bool,
+                         reuse_clusters: bool, test_reports_dir: str = None) -> TestReport:
+        self._enable_trace_collection()
+        trace_unique_id = f"{self.unique_id}-trace"
+        return self.run_tests(
+            source_version=source_version,
+            target_version=target_version,
+            keep_workflows=keep_workflows,
+            reuse_clusters=reuse_clusters,
+            skip_workflow_reset=keep_workflows,
+            test_reports_dir=test_reports_dir,
+            test_ids=self.trace_test_ids,
+            unique_id=trace_unique_id,
+            report_suffix="trace",
+        )
+
+    def cleanup_deployment(self) -> bool:
+        """Tear down the Migration Assistant deployment.
+
+        Mirrors the sequence a customer would run, with test-only extras
+        clearly separated. Every step is resilient — no single step aborts
+        the ones that follow it.
+
+        Returns True when cleanup is fully clean: 'kyverno-ma' and the main
+        namespace are both fully deleted, AND step 5 left no residual PVCs.
+        Returns False if any of those signal incomplete cleanup. The CLI
+        entrypoint translates False into a non-zero exit code so the Jenkins
+        post block surfaces the incomplete cleanup as UNSTABLE.
+        Outer infra teardown (EKS/minikube delete) still handles any residue.
+
+        Customer-parity sequence (steps 1-3):
+
+          1. cleanup_ack_dashboard_crs — ACK controller must still be alive
+             to finalise AWS-side dashboards (step 3 kills the controller).
+          2. workflow reset --all --include-proxies --delete-storage — the
+             customer-facing CLI that teardowns MA CRDs + children in
+             dependency order and strips stuck finalizers.
+          3. helm uninstall ma — tears down the umbrella chart (10m timeout).
+
+        Test-scaffolding extras (steps 4-7):
+
+          4. cleanup_clusters — source/target test cluster helm releases.
+          5. delete_all_pvcs — any non-Kafka residual PVCs (timeout governed
+             by K8sService.PVC_DELETION_TIMEOUT_SECONDS).
+             Returns the names of any PVCs that didn't terminate; a non-empty
+             list signals a stuck finalizer and propagates to the bool return.
+          6. delete_namespace — webhook cleanup + kubectl delete namespace.
+          7. wait_for_namespace_deleted — warn-only. Raising here previously
+             aborted the Jenkins post block and left CFN stacks behind; the
+             outer infra teardown (EKS/minikube delete) finishes the job.
+
+        Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
+        timeout is not treated as a hard failure.
+        """
         helm_uninstall_error = None
+
+        # 1. Dashboards (ACK controller alive).
         self.k8s_service.cleanup_ack_dashboard_crs()
-        self.k8s_service.cleanup_strimzi_crs()
+
+        # 2. workflow reset: ordered CRD teardown + Kafka PVCs + finaliser strip.
+        try:
+            self.k8s_service.exec_migration_console_cmd(
+                ["/bin/bash", "-lc",
+                 "workflow reset --all --include-proxies --delete-storage"],
+                unbuffered=False,
+            )
+        except Exception as e:
+            logger.warning(f"workflow reset --delete-storage failed (continuing): {e}")
+
+        # 3. helm uninstall (10m timeout set in helm_uninstall).
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
             helm_uninstall_error = e
+
+        # 4. Test-only source/target clusters.
         self.cleanup_clusters()
+
+        # 5. Residual PVCs.
+        residual_pvcs: List[str] = []
+        try:
+            residual_pvcs = self.k8s_service.delete_all_pvcs()
+        except Exception as e:
+            logger.warning(f"delete_all_pvcs raised unexpectedly (continuing): {e}")
+
+        if residual_pvcs:
+            logger.error(
+                "Residual PVCs after %ds — likely a stuck finalizer "
+                "(Strimzi/csi-provisioner/kafka-broker-pvc). A customer running "
+                "the equivalent cleanup would also see this and need manual "
+                "intervention. Residuals (%d): %s",
+                self.k8s_service.PVC_DELETION_TIMEOUT_SECONDS,
+                len(residual_pvcs), residual_pvcs,
+            )
+
+        # 6. Namespace + webhooks.
         self.k8s_service.delete_namespace()
-        # Assert both namespaces are actually gone
-        self.k8s_service.wait_for_namespace_deleted("kyverno-ma", timeout_seconds=60)
-        self.k8s_service.wait_for_namespace_deleted(self.k8s_service.namespace, timeout_seconds=120)
+
+        # 7. Confirm namespaces gone; warn-only, outer infra teardown handles residue.
+        kyverno_gone = self.k8s_service.wait_for_namespace_deleted(
+            "kyverno-ma", timeout_seconds=60)
+        ma_gone = self.k8s_service.wait_for_namespace_deleted(
+            self.k8s_service.namespace, timeout_seconds=120)
+
         if helm_uninstall_error:
             raise HelmCommandFailed(
                 f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "
                 f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
             ) from helm_uninstall_error
+
+        return ma_gone and kyverno_gone and not residual_pvcs
 
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
@@ -294,10 +453,15 @@ class TestRunner:
                             mc_repo = f"{prefix}migrations/migration_console"
                             chart_values.update({
                                 "images.captureProxy.repository": f"{prefix}migrations/capture_proxy",
+                                "images.captureProxy.pullPolicy": "Always",
                                 "images.trafficReplayer.repository": f"{prefix}migrations/traffic_replayer",
+                                "images.trafficReplayer.pullPolicy": "Always",
                                 "images.reindexFromSnapshot.repository": f"{prefix}migrations/reindex_from_snapshot",
+                                "images.reindexFromSnapshot.pullPolicy": "Always",
                                 "images.migrationConsole.repository": mc_repo,
+                                "images.migrationConsole.pullPolicy": "Always",
                                 "images.installer.repository": mc_repo,
+                                "images.installer.pullPolicy": "Always",
                                 # Kyverno image overrides
                                 "charts.kyverno.values.webhooksCleanup.image.repository": mc_repo,
                                 "charts.kyverno.values.test.image.repository": mc_repo,
@@ -313,29 +477,34 @@ class TestRunner:
                                              target_version=target_version,
                                              keep_workflows=keep_workflows,
                                              reuse_clusters=reuse_clusters,
+                                             skip_workflow_reset=keep_workflows,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
 
-                expected = test_report.summary.expected
-                # Version pairs with no compatible tests (expected==0) are not failures
-                if expected is not None and expected == 0 and test_report.summary.failed == 0:
-                    logger.info(f"No compatible tests for {source_version} → {target_version}, skipping")
+                if self._report_failed(test_report):
+                    logger.warning(f"Tests failed (or no tests executed) for migrations "
+                                   f"from {source_version} to {target_version}.")
+                    combos_with_failures.append(f"{source_version} -> {target_version}")
                 else:
-                    tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+                    logger.info(f"Tests passed successfully for migrations "
+                                f"from {source_version} to {target_version}.")
 
-                    if expected is not None and test_report.summary.passed != expected:
-                        logger.warning(f"Expected {test_report.summary.expected} tests but only "
-                                       f"{test_report.summary.passed} passed "
-                                       f"({test_report.summary.failed} failed)")
-                        tests_failed = True
-
-                    if tests_failed:
-                        logger.warning(f"Tests failed (or no tests executed) for migrations "
-                                       f"from {source_version} to {target_version}.")
-                        combos_with_failures.append(f"{source_version} -> {target_version}")
-                    else:
-                        logger.info(f"Tests passed successfully for migrations "
-                                    f"from {source_version} to {target_version}.")
+                    if self.trace_test_ids:
+                        trace_report = self._run_trace_phase(
+                            source_version=source_version,
+                            target_version=target_version,
+                            keep_workflows=keep_workflows,
+                            reuse_clusters=reuse_clusters,
+                            test_reports_dir=test_reports_dir,
+                        )
+                        test_reports.append(trace_report)
+                        if self._report_failed(trace_report):
+                            logger.warning(f"Trace tests failed (or no tests executed) for migrations "
+                                           f"from {source_version} to {target_version}.")
+                            combos_with_failures.append(f"{source_version} -> {target_version} (trace)")
+                        else:
+                            logger.info(f"Trace tests passed successfully for migrations "
+                                        f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
                 combos_with_failures.append(f"{source_version} -> {target_version}")
@@ -377,24 +546,29 @@ def _generate_unique_id() -> str:
     return f"{random_part}-{timestamp}"
 
 
-def get_version_combinations(source_version, target_version, target_type):
-    source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
+def get_version_combinations(source_versions: List[str], target_versions: List[str], target_type: TargetType):
     if target_type == TargetType.AOSS:
-        return [(s, TargetType.AOSS.value) for s in source_list]
-    target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
-    return [(s, t) for s in source_list for t in target_list if s != t]
+        return [(s, TargetType.AOSS.value) for s in source_versions]
+    return [(s, t) for s in source_versions for t in target_versions if s != t]
 
 
-def parse_args() -> argparse.Namespace:
+def _normalize_all(value: str) -> str:
+    """Normalize 'all' case-insensitively; leave other values unchanged."""
+    return 'all' if value.lower() == 'all' else value
+
+
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
     )
     source_versions = VALID_SOURCE_VERSIONS + ['all']
     parser.add_argument(
         "--source-version",
+        nargs='+',
+        type=_normalize_all,
         choices=source_versions,
-        default="ES_5.6",
-        help=f"Source version to use. Must be one of: {', '.join(source_versions)}"
+        default=["ES_5.6"],
+        help=f"One or more source versions, or 'all' (case-insensitive). Must be from: {', '.join(source_versions)}"
     )
     parser.add_argument(
         "--target-type",
@@ -405,6 +579,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-version",
+        type=_normalize_all,
         choices=VALID_TARGET_VERSIONS + ['all'],
         default="OS_2.19",
         help=f"Target version (only used when --target-type={TargetType.OPENSEARCH.value}). "
@@ -472,6 +647,24 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
     )
     parser.add_argument(
+        "--trace-test-ids",
+        type=_parse_test_ids,
+        default=[],
+        help="Optional comma-separated test IDs to run after enabling trace collection with helm upgrade."
+    )
+    parser.add_argument(
+        "--trace-values-file",
+        type=str,
+        default=None,
+        help="Optional Helm values overlay used for the trace test phase."
+    )
+    parser.add_argument(
+        "--trace-backend",
+        choices=("jaeger", "xray"),
+        default=None,
+        help="Trace backend expected in the trace test phase. Use jaeger for local tests and xray for EKS."
+    )
+    parser.add_argument(
         "--registry-prefix",
         type=str,
         default="",
@@ -510,7 +703,39 @@ def parse_args() -> argparse.Namespace:
         default=30,
         help="Observed packet connection timeout for traffic replayer (default: 30)"
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--transform-image-basic",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the basic transform fixture bank."
+    )
+    parser.add_argument(
+        "--transform-image-sequence",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the sequence transform fixture bank."
+    )
+    parser.add_argument(
+        "--transform-image-context",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the context-only transform fixture bank."
+    )
+    parser.add_argument(
+        "--capture-proxy-service-type",
+        choices=("LoadBalancer", "ClusterIP"),
+        default="LoadBalancer",
+        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
+    )
+    args = parser.parse_args(argv)
+    if args.trace_test_ids:
+        if not args.trace_values_file:
+            parser.error("--trace-values-file is required when --trace-test-ids is provided")
+        if not args.trace_backend:
+            parser.error("--trace-backend is required when --trace-test-ids is provided")
+    elif args.trace_values_file or args.trace_backend:
+        parser.error("--trace-values-file and --trace-backend require --trace-test-ids")
+    return args
 
 
 def main() -> None:
@@ -534,8 +759,12 @@ def main() -> None:
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
 
     target_type = TargetType(args.target_type)
-    combinations = get_version_combinations(source_version=args.source_version,
-                                            target_version=args.target_version,
+    if "all" in args.source_version and len(args.source_version) > 1:
+        sys.exit("error: 'all' cannot be combined with specific source versions")
+    source_versions = VALID_SOURCE_VERSIONS if args.source_version == ["all"] else args.source_version
+    target_versions = VALID_TARGET_VERSIONS if args.target_version == "all" else [args.target_version]
+    combinations = get_version_combinations(source_versions=source_versions,
+                                            target_versions=target_versions,
                                             target_type=target_type)
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
@@ -550,10 +779,25 @@ def main() -> None:
                              values_file=dev_values_file,
                              skip_install=args.skip_install,
                              speedup_factor=args.speedup_factor,
-                             observed_packet_timeout=args.observed_packet_timeout)
+                             observed_packet_timeout=args.observed_packet_timeout,
+                             transform_image_basic=args.transform_image_basic,
+                             transform_image_sequence=args.transform_image_sequence,
+                             transform_image_context=args.transform_image_context,
+                             capture_proxy_service_type=args.capture_proxy_service_type,
+                             trace_test_ids=args.trace_test_ids,
+                             trace_values_file=args.trace_values_file,
+                             trace_backend=args.trace_backend or "")
 
     if args.delete_only:
-        return test_runner.cleanup_deployment()
+        fully_clean = test_runner.cleanup_deployment()
+        if not fully_clean:
+            logger.warning(
+                "Cleanup finished with namespaces still terminating — "
+                "exiting rc=2 so the caller can surface it as UNSTABLE. "
+                "Infra teardown will remove any residue."
+            )
+            sys.exit(2)
+        return
     if args.delete_clusters_only:
         return test_runner.cleanup_clusters()
     skip_delete = args.skip_delete

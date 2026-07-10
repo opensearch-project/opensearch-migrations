@@ -7,14 +7,15 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
-import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
+import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
+import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.lucene.version_9.MappedDirectory;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
@@ -54,11 +55,37 @@ public class SolrBackupSource implements DocumentSource {
     private final Path backupDir;
     private final String collectionName;
     private final JsonNode solrSchema;
+    private final int solrMajorVersion;
+    private final FieldMappingContext mappingContext;
 
-    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema) {
+    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema, int solrMajorVersion) {
         this.backupDir = backupDir;
         this.collectionName = collectionName;
         this.solrSchema = solrSchema;
+        this.solrMajorVersion = solrMajorVersion;
+        this.mappingContext = buildMappingContext(solrSchema);
+    }
+
+    private static FieldMappingContext buildMappingContext(JsonNode schema) {
+        if (schema == null) return null;
+        var osMappings = SolrSchemaConverter.convertToOpenSearchMappings(
+            schema.path("fields"), schema.path("dynamicFields"),
+            schema.path("copyFields"), schema.path("fieldTypes"));
+        return new FieldMappingContext(osMappings);
+    }
+
+    /**
+     * Selects the Lucene reader matching the Solr source version:
+     * Solr 6 → Lucene 6, Solr 7 → Lucene 7, Solr 8/9 → Lucene 9 (8 via backward-codecs).
+     */
+    private LuceneIndexReader newLuceneReader(Path indexDir) {
+        return switch (solrMajorVersion) {
+            case 6 -> new IndexReader6(indexDir);
+            case 7 -> new IndexReader7(indexDir, false, null);
+            case 8, 9 -> new IndexReader9(indexDir, false, null);
+            default -> throw new IllegalArgumentException(
+                "Unsupported Solr major version: " + solrMajorVersion + " (supported: 6, 7, 8, 9)");
+        };
     }
 
     @Override
@@ -145,8 +172,7 @@ public class SolrBackupSource implements DocumentSource {
             log.atInfo().setMessage("Parsed shard mappings for {} shard(s) from {}").addArgument(result.size()).addArgument(metadataDir).log();
             return result;
         } catch (IOException e) {
-            log.atWarn().setCause(e).setMessage("Failed to read shard metadata from {}").addArgument(metadataDir).log();
-            return null;
+            throw new SolrBackupReadException("Failed to read shard metadata from " + metadataDir, e);
         }
     }
 
@@ -154,6 +180,10 @@ public class SolrBackupSource implements DocumentSource {
      * Discover shard directories from the backup (non-UUID layouts).
      */
     List<Path> discoverShardDirs() {
+        if (!Files.isDirectory(backupDir)) {
+            log.warn("Backup directory does not exist, treating as empty collection: {}", backupDir);
+            return List.of();
+        }
         if (hasSegmentsFile(backupDir)) {
             return List.of(backupDir);
         }
@@ -171,6 +201,11 @@ public class SolrBackupSource implements DocumentSource {
                     if (hasSegmentsFile(shardDir)) {
                         return Stream.of(shardDir);
                     }
+                    // Solr 6 SolrCloud BACKUP writes snapshot.shardN/ dirs; stubs may be empty
+                    // before the shardPreparer downloads the actual index files.
+                    if (shardDir.getFileName().toString().startsWith("snapshot.")) {
+                        return Stream.of(shardDir);
+                    }
                     var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);
                     if (hasSegmentsFile(indexPath)) {
                         return Stream.of(indexPath);
@@ -179,15 +214,16 @@ public class SolrBackupSource implements DocumentSource {
                 })
                 .toList();
 
-            if (!shardDirs.isEmpty()) {
-                log.atInfo().setMessage("Discovered {} shard(s) in backup: {}").addArgument(shardDirs.size()).addArgument(backupDir).log();
-                return shardDirs;
+            if (shardDirs.isEmpty()) {
+                throw new SolrBackupReadException(
+                    "No Lucene segments found in backup directory: " + backupDir
+                        + ". Expected segments_N files in the directory or its subdirectories.");
             }
+            log.atInfo().setMessage("Discovered {} shard(s) in backup: {}").addArgument(shardDirs.size()).addArgument(backupDir).log();
+            return shardDirs;
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list backup directory: " + backupDir, e);
+            throw new SolrBackupReadException("Failed to list backup directory: " + backupDir, e);
         }
-
-        return List.of(backupDir);
     }
 
     private static boolean hasSegmentsFile(Path dir) {
@@ -195,7 +231,7 @@ public class SolrBackupSource implements DocumentSource {
         try (var stream = Files.list(dir)) {
             return stream.anyMatch(p -> p.getFileName().toString().startsWith(SEGMENTS_FILE_PREFIX));
         } catch (IOException e) {
-            return false;
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
         }
     }
 
@@ -203,6 +239,11 @@ public class SolrBackupSource implements DocumentSource {
      * Read a Lucene index using a MappedDirectory (for SolrCloud UUID backups).
      */
     private Flux<Document> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
+        if (solrMajorVersion < 8) {
+            return Flux.error(new IllegalStateException(
+                "SolrCloud UUID-mapped (incremental) backups are not supported for Solr "
+                    + solrMajorVersion + ".x; SIP-12 was introduced in Solr 8.9. Use a non-incremental backup."));
+        }
         try {
             var fsDir = FSDirectory.open(indexDir);
             var mappedDir = new MappedDirectory(fsDir, fileNameMapping);
@@ -230,7 +271,7 @@ public class SolrBackupSource implements DocumentSource {
      */
     private Flux<Document> readLuceneIndex(Path indexDir, long startingDocOffset) {
         try {
-            var reader = new IndexReader9(indexDir, false, null);
+            var reader = newLuceneReader(indexDir);
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
 
@@ -249,35 +290,13 @@ public class SolrBackupSource implements DocumentSource {
     ) {
         var scheduler = Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
 
-        var sortedLeaves = directoryReader.leaves().stream()
-            .map(LuceneLeafReaderContext::reader)
-            .sorted(SegmentNameSorter.INSTANCE)
-            .toList();
-
-        int[] docBases = new int[sortedLeaves.size()];
-        for (int i = 1; i < sortedLeaves.size(); i++) {
-            docBases[i] = docBases[i - 1] + sortedLeaves.get(i - 1).maxDoc();
-        }
-
-        return Flux.range(0, sortedLeaves.size())
-            .concatMap(segIdx -> {
-                var segReader = sortedLeaves.get(segIdx);
-                int segDocBase = docBases[segIdx];
-                var liveDocs = segReader.getLiveDocs();
-                var liveDocStream = (liveDocs != null)
-                    ? liveDocs.stream()
-                    : IntStream.range(0, segReader.maxDoc());
-
-                return Flux.fromStream(liveDocStream.boxed())
-                    .flatMapSequential(docIdx -> Mono.fromCallable(() ->
-                        SolrLuceneDocReader.getDocument(
-                            segReader, docIdx, true, segDocBase,
-                            DocumentChangeType.INDEX
-                        )
-                    ).subscribeOn(scheduler), 10)
-                    .filter(Objects::nonNull);
-            })
-            .skip(startingDocOffset)
+        return LuceneReader.getSegmentsFromStartingSegment(
+                directoryReader.leaves(), (int) startingDocOffset)
+            .concatMap(readerAndBase -> LuceneReader.<LuceneDocumentChange>readLiveDocsFromSegment(
+                readerAndBase, (int) startingDocOffset, 10, scheduler,
+                (reader, docIdx, segDocBase) -> Mono.justOrEmpty(
+                    SolrLuceneDocReader.getDocument(
+                        reader, docIdx, true, segDocBase, DocumentChangeType.INDEX, mappingContext))))
             .map(SolrBackupSource::toDocument)
             .doFinally(s -> scheduler.dispose());
     }
@@ -288,9 +307,9 @@ public class SolrBackupSource implements DocumentSource {
                 .map(p -> p.getFileName().toString())
                 .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No segments_N file found in: " + dir));
+                .orElseThrow(() -> new SolrBackupReadException("No segments_N file found in: " + dir));
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list directory: " + dir, e);
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
         }
     }
 

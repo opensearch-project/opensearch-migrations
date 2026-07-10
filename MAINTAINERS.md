@@ -15,6 +15,8 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Nagaraj G          | [nagarajg17](https://github.com/nagarajg17)           | Amazon      |
 | Nirav Pithadiya    | [niravpi](https://github.com/niravpi)                 | Amazon      |
 | Hai Yan            | [oeyh](https://github.com/oeyh)                       | Amazon      |
+| Jeff Zemerick      | [jzonthemtn](https://github.com/jzonthemtn)           | Mtnfog      |
+| Andreas Wagenmann  | [awagen](https://github.com/awagen)                    | Independent |
 
 
 ## Emeritus

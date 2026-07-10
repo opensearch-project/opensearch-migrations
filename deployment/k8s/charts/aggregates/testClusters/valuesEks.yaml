@@ -38,6 +38,8 @@ source:
     elasticsearch.yml: |
       cluster.name: "test-cluster"
       network.host: 0.0.0.0
+      xpack.security.enabled: false
+      xpack.ml.enabled: false
 
       ######## Start Search Guard Demo Configuration ########
       # WARNING: revise all the lines below before you go into production

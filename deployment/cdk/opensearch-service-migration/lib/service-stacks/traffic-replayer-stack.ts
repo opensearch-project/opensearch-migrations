@@ -12,7 +12,7 @@ import {
     createMSKConsumerIAMPolicies,
     createAllAccessOpenSearchIAMAccessPolicy,
     createAllAccessOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
+    getMigrationStringParameterValue, appendArgArrayIfNotInExtraArgs, parseArgsStringToArray, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {Duration} from "aws-cdk-lib";
@@ -34,7 +34,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
     readonly jvmArgs?: string,
-    readonly otelCollectorEnabled: boolean,
+    readonly otelMetricsCollectorEnabled: boolean,
+    readonly otelTraceCollectorEnabled: boolean,
     readonly maxUptime?: Duration
 }
 
@@ -86,14 +87,14 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         });
         const groupId = props.customKafkaGroupId ?? `logging-group-${deployId}`
 
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --target-uri ${osClusterEndpoint}`
+        const commandArgs: string[] = ["--target-uri", osClusterEndpoint];
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--insecure")
         }
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-brokers", brokerEndpoints)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-topic", "logging-traffic-topic")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-group-id", groupId)
+        appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--kafka-traffic-brokers", brokerEndpoints)
+        appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--kafka-traffic-topic", "logging-traffic-topic")
+        appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--kafka-traffic-group-id", groupId)
 
         const secrets: Record<string, EcsSecret> = {}
         if (props.clusterAuthDetails.basicAuth) {
@@ -103,25 +104,30 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         }
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-enable-msk-auth")
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--kafka-traffic-enable-msk-auth")
         }
         if (props.userAgentSuffix) {
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--user-agent", `"${props.userAgentSuffix}"`)
+            // Pass the suffix verbatim; JCommander receives it as a single argv element,
+            // so there's no shell to strip quotes for us.
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--user-agent", props.userAgentSuffix)
         }
         if (props.clusterAuthDetails.sigv4) {
             const sigv4AuthHeaderServiceRegion = `${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sigv4-auth-header-service-region", sigv4AuthHeaderServiceRegion)
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--sigv4-auth-header-service-region", sigv4AuthHeaderServiceRegion)
         }
-        if (props.otelCollectorEnabled) {
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        if (props.otelTraceCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelTraceCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
-        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
+        if (props.otelMetricsCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelMetricsCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        commandArgs.push(...parseArgsStringToArray(props.extraArgs))
 
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             taskInstanceCount: 0,
             dockerImageName: "migrations/traffic_replayer:latest",
-            dockerImageCommand: ['/bin/sh', '-c', command],
+            dockerImageCommand: commandArgs,
             securityGroups: securityGroups,
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],

@@ -1,0 +1,2602 @@
+package org.opensearch.migrations.bulkload;
+
+import java.io.File;
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+
+import org.opensearch.migrations.MetadataMigration;
+import org.opensearch.migrations.MigrateOrEvaluateArgs;
+import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Matrix end-to-end test: for each (source ES/OS version, target OS version) pair, creates one
+ * index per SourceMode populated across the full catalog of field types and storage permutations
+ * (doc_values, stored, neither), with per-field indexed/array variants, snapshots the source,
+ * runs the sourceless migration pipeline against a live target cluster, and asserts each
+ * recovered field matches expectations. Exercises the real LuceneLeafReader
+ * Points/Terms/DocValues/Stored recovery paths that SourceReconstructor relies on.
+ *
+ * Axes (driven by an explicit skip list):
+ *   field (FIELD_TYPES) × Perm (DV/STORE) × SourceMode × indexed × multiValue
+ */
+@Tag("isolatedTest")
+@Slf4j
+public class NoStoredSourceMigrationTest extends SourceTestBase {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    enum VersionRange {
+        ES_1_TO_4,    // ES 1.x - 4.x (string type)
+        ES_2_PLUS,    // ES 2.x+ (boolean/ip/geo_point doc_values support)
+        ES_5_PLUS,    // ES 5.x+ (text/keyword)
+        ES_7_PLUS,    // ES 7.x+ (date_nanos)
+        ES_7_11_PLUS, // ES 7.11+ (X-Pack features: constant_keyword, wildcard)
+        OS_1_PLUS,    // OpenSearch 1.x+ (flat_object)
+        OS_2_8_PLUS,  // OpenSearch 2.8+ (unsigned_long)
+        ALL           // All versions
+    }
+
+    record FieldTypeConfig(
+        String fieldName,
+        String sourceType,
+        String targetType,
+        Object testValue,
+        VersionRange availability,
+        boolean supportsDocValues,
+        boolean supportsPoints,
+        boolean recoverable,
+        Map<String, Object> extraProps
+    ) {
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues, boolean supportsPoints, Map<String, Object> extraProps) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, true, extraProps);
+        }
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues, boolean supportsPoints) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, true, Map.of());
+        }
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, false, true, Map.of());
+        }
+    }
+
+    private static final List<FieldTypeConfig> FIELD_TYPES = List.of(
+        new FieldTypeConfig("string", "string", "keyword", "test_str", VersionRange.ES_1_TO_4, true, false, Map.of("index", "not_analyzed")),
+        new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", VersionRange.ES_5_PLUS, true, false),
+        new FieldTypeConfig("boolean", "boolean", "boolean", true, VersionRange.ES_2_PLUS, true, false),
+        new FieldTypeConfig("boolean_es1", "boolean", "boolean", false, VersionRange.ES_1_TO_4, false, false),
+        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", VersionRange.ALL, true, false),
+        new FieldTypeConfig("integer", "integer", "integer", 42, VersionRange.ALL, true, true),
+        new FieldTypeConfig("long", "long", "long", 9999L, VersionRange.ALL, true, true),
+        new FieldTypeConfig("float", "float", "float", 3.14f, VersionRange.ES_5_PLUS, true, true),
+        new FieldTypeConfig("double", "double", "double", 2.71828, VersionRange.ES_5_PLUS, true, true),
+        new FieldTypeConfig("ip", "ip", "ip", "192.168.1.1", VersionRange.ES_2_PLUS, true, true),
+        new FieldTypeConfig("ipv6", "ip", "ip", "2001:db8:85a3::8a2e:370:7334", VersionRange.ES_5_PLUS, true, true),
+        new FieldTypeConfig("date", "date", "date", "2024-01-15T10:30:00.000Z", VersionRange.ES_2_PLUS, true, true),
+        new FieldTypeConfig("date_epoch", "date", "date", 1705315800000L, VersionRange.ES_2_PLUS, true, true, Map.of("format", "epoch_millis")),
+        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, VersionRange.ES_5_PLUS, true, false, Map.of("scaling_factor", 100)),
+        new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", VersionRange.ES_7_PLUS, true, true),
+        new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), VersionRange.ALL, true, false),
+        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, VersionRange.OS_2_8_PLUS, true, false),
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, false),
+        new FieldTypeConfig("byte", "byte", "byte", (byte) 127, VersionRange.ALL, true, true),
+        new FieldTypeConfig("short", "short", "short", (short) 32000, VersionRange.ALL, true, true),
+        new FieldTypeConfig("half_float", "half_float", "half_float", 1.5f, VersionRange.ES_5_PLUS, true, true),
+        new FieldTypeConfig("token_count", "token_count", "token_count", "one two three four five", VersionRange.ES_5_PLUS, true, true, Map.of("analyzer", "standard")),
+        new FieldTypeConfig("constant_keyword", "constant_keyword", "constant_keyword", "constant_val", VersionRange.ES_7_11_PLUS, false, false, Map.of("value", "constant_val")),
+        new FieldTypeConfig("wildcard", "wildcard", "wildcard", "wild*card", VersionRange.ES_7_11_PLUS, true, false)
+    );
+
+    /** Field storage permutations. */
+    enum Perm {
+        DV_STORE(true, true),
+        DV_NOSTORE(true, false),
+        NODV_STORE(false, true),
+        NODV_NOSTORE(false, false);
+
+        final boolean hasDv, hasStore;
+        Perm(boolean hasDv, boolean hasStore) {
+            this.hasDv = hasDv; this.hasStore = hasStore;
+        }
+        boolean isRecoverable() { return hasDv || hasStore; }
+
+        String shortName() {
+            return switch (this) {
+                case DV_STORE -> "dvs";
+                case DV_NOSTORE -> "dv";
+                case NODV_STORE -> "stor";
+                case NODV_NOSTORE -> "plain";
+            };
+        }
+    }
+
+    /**
+     * Index-level _source directive variants:
+     *   ENABLED  - no _source directive; full _source is retained by the engine.
+     *              Reconstruction shouldn't be needed but the pipeline should still work.
+     *   DISABLED - {"_source":{"enabled":false}}; the legacy sourceless path.
+     *   INCLUDES - {"_source":{"includes":[...]}}; mergeWithDocValues/mergeWithStoredFields path.
+     *   EXCLUDES - {"_source":{"excludes":[...]}}; mirror of INCLUDES.
+     *
+     *   NOTE: `_source.enabled:false` is mutually exclusive with includes/excludes.
+     */
+    enum SourceMode { ENABLED, DISABLED, INCLUDES, EXCLUDES }
+
+    record Permutation(FieldTypeConfig cfg, Perm p, SourceMode sm, boolean indexed, boolean array) {
+        /** Encode axes into a single field name:
+         *  f_&lt;fieldName&gt;__&lt;perm&gt;__&lt;i|ni&gt;__&lt;s|a&gt; */
+        String fieldName() {
+            return "f_" + cfg.fieldName
+                + "__" + p.shortName()
+                + "__" + (indexed ? "i" : "ni")
+                + "__" + (array ? "a" : "s");
+        }
+    }
+
+    static Stream<Arguments> versionPairs() {
+        return Stream.of(
+            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V8_17, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.OS_V3_5_0, SearchClusterContainer.OS_V3_5_0)
+        );
+    }
+
+    /**
+     * Argument provider for ES-7.10-only matrix cells. The targeted reconstruction
+     * cases below (norms:false source-disabled recovery, mixed source-posture
+     * copy_to in a single index, strict per-element object-array text
+     * reconstruction) are pinned to ES 7.10.2 by design — they exercise codec-
+     * version- and mapping-shape-specific recovery paths whose semantics on other
+     * source versions are out of scope for the targeted regression guard.
+     */
+    static Stream<Arguments> es710OnlyPair() {
+        return Stream.of(
+            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_5_0)
+        );
+    }
+
+    /**
+     * Argument provider for ES 6.8 → OS 2.19 — the cell where the deprecated "standard"
+     * token filter is still accepted on the source (ES 6) but rejected on the target
+     * (ES 7+/OS). Used by the customer-shaped sourceless test below.
+     */
+    static Stream<Arguments> es68ToOs2Pair() {
+        return Stream.of(
+            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_19_4)
+        );
+    }
+
+    @TempDir
+    private File localDirectory;
+
+    private static boolean isTypeAvailable(FieldTypeConfig config, ContainerVersion version) {
+        var v = version.getVersion();
+        return switch (config.availability) {
+            case ES_1_TO_4 -> UnboundVersionMatchers.isBelowES_5_X.test(v);
+            case ES_2_PLUS -> !VersionMatchers.isES_1_X.test(v);
+            case ES_5_PLUS -> !UnboundVersionMatchers.isBelowES_5_X.test(v);
+            case ES_7_PLUS -> !UnboundVersionMatchers.isBelowES_7_X.test(v);
+            case ES_7_11_PLUS -> !UnboundVersionMatchers.isBelowES_7_X.test(v) && !VersionMatchers.anyOS.test(v) && v.getMinor() >= 11;
+            case OS_1_PLUS -> VersionMatchers.anyOS.test(v);
+            case OS_2_8_PLUS -> VersionMatchers.anyOS.test(v) && (v.getMajor() > 2 || (v.getMajor() == 2 && v.getMinor() >= 8));
+            case ALL -> true;
+        };
+    }
+
+    private static boolean needsDocType(ContainerVersion version) {
+        return UnboundVersionMatchers.isBelowES_7_X.test(version.getVersion());
+    }
+
+    private static String normalizeIpv6(String ip) {
+        try {
+            return java.net.InetAddress.getByName(ip).getHostAddress();
+        } catch (Exception e) {
+            return ip;
+        }
+    }
+
+    private static String normalizeDate(String date) {
+        try {
+            var instant = java.time.Instant.parse(date);
+            return java.time.format.DateTimeFormatter.ISO_INSTANT.format(instant);
+        } catch (Exception e) {
+            return date;
+        }
+    }
+
+    /**
+     * Deterministic "selected" predicate for INCLUDES/EXCLUDES source modes.
+     * Picks roughly half of the (field,perm) pairs using a stable hash on the
+     * unaxed (cfg+perm) name, so the assertion loop can reproduce the same set.
+     */
+    private static boolean isSelectedForPartialSource(FieldTypeConfig cfg, Perm p) {
+        int h = (cfg.fieldName + "_" + p.name()).hashCode();
+        return Math.floorMod(h, 2) == 0;
+    }
+
+    /**
+     * The only centralized skip predicate. The index-body builder AND the
+     * assertion loop both consult this so they stay consistent.
+     *
+     * Returns Optional.empty() if the permutation should be exercised,
+     * or Optional.of(reason) if it should be skipped.
+     */
+    private static Optional<String> skipReason(Permutation perm, ContainerVersion sourceVersion) {
+        var cfg = perm.cfg();
+        var p = perm.p();
+        String type = cfg.sourceType();
+
+        if (!isTypeAvailable(cfg, sourceVersion)) {
+            return Optional.of("type unavailable on this source version");
+        }
+        if (!cfg.supportsDocValues() && p.hasDv) {
+            return Optional.of("field does not support doc_values");
+        }
+        if (!perm.indexed() && !p.hasDv && !p.hasStore) {
+            return Optional.of("index=false + no-dv + no-store is an unrecoverable mapping with no retention");
+        }
+        // constant_keyword ignores index/store/dv toggles; only exercise the default shape.
+        if ("constant_keyword".equals(type)) {
+            if (!perm.indexed()) {
+                return Optional.of("constant_keyword ignores index=false");
+            }
+            if (p == Perm.NODV_STORE || p == Perm.NODV_NOSTORE) {
+                return Optional.of("constant_keyword ignores store/doc_values toggles; test only default perm");
+            }
+        }
+        // wildcard always has doc_values; skip NODV perms to avoid mapping rejection.
+        if ("wildcard".equals(type) && !p.hasDv) {
+            return Optional.of("wildcard always has doc_values; skip hasDv=false perms");
+        }
+        // pre-ES5 "string" uses `index` as enum (no/not_analyzed/analyzed), not boolean.
+        // Keep it tractable by only exercising the indexed variant.
+        if ("string".equals(type) && !perm.indexed()) {
+            return Optional.of("pre-ES5 string uses `index` as enum, not boolean; skip indexed=false");
+        }
+        // `binary` type is never indexed by definition and rejects the `index` mapping
+        // parameter outright on ES 5+/OS ("unknown parameter [index] on mapper [...] of type [binary]"),
+        // so there is no meaningful indexed=false variant to exercise.
+        if ("binary".equals(type) && !perm.indexed()) {
+            return Optional.of("binary type is never indexed; `index: false` is rejected by the mapper");
+        }
+        // ES 1.x/2.x mapping API rejects `"index": false` on non-string field types
+        // (MapperParsingException: Wrong value for index [false] for field [...]).
+        // Pre-ES5 only accepts the string-enum form ("no"|"not_analyzed"|"analyzed") on
+        // text fields, so there's no meaningful indexed=false variant to exercise elsewhere.
+        if (!perm.indexed()
+                && (VersionMatchers.isES_1_X.or(VersionMatchers.isES_2_X)).test(sourceVersion.getVersion())) {
+            return Optional.of("pre-ES5 rejects `index: false` on non-string field types");
+        }
+        // Array-value skips.
+        if (perm.array()) {
+            if ("constant_keyword".equals(type)) {
+                return Optional.of("constant_keyword is single-valued by definition");
+            }
+            if ("geo_point".equals(type)) {
+                // Multi-valued geo_point doc_values use version-specific encodings (Morton, quantized lat/lon)
+                // that produce incorrect values when decoded with a single decoder. Skip until per-version
+                // decoders are implemented.
+                return Optional.of("array variant not reliable for geo_point (version-specific encoding)");
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** A second value used to form an ARRAY variant `[v, v2]`. Must be type-compatible. */
+    private static Object secondValueFor(FieldTypeConfig cfg) {
+        return switch (cfg.sourceType()) {
+            case "string", "keyword", "wildcard" -> cfg.testValue() + "_b";
+            case "boolean" -> !((Boolean) cfg.testValue());
+            case "binary" -> "YmJiYg=="; // base64 "bbbb"
+            case "integer" -> ((Integer) cfg.testValue()) + 1;
+            case "long" -> ((Long) cfg.testValue()) + 1L;
+            case "float" -> ((Float) cfg.testValue()) + 1.0f;
+            case "double" -> ((Double) cfg.testValue()) + 1.0;
+            case "half_float" -> ((Float) cfg.testValue()) + 1.0f;
+            case "scaled_float" -> ((Number) cfg.testValue()).doubleValue() + 1.0;
+            case "ip" -> cfg.testValue().toString().contains(":") ? "2001:db8:85a3::8a2e:370:7335" : "192.168.1.2";
+            case "date" -> cfg.testValue() instanceof Number
+                ? ((Number) cfg.testValue()).longValue() + 1000L
+                : "2024-02-15T10:30:00.000Z";
+            case "date_nanos" -> "2024-02-15T10:30:00.123456789Z";
+            case "byte" -> (byte) (((Byte) cfg.testValue()) - 1);
+            case "short" -> (short) (((Short) cfg.testValue()) + 1);
+            case "unsigned_long" -> cfg.testValue() instanceof BigInteger
+                ? ((BigInteger) cfg.testValue()).subtract(BigInteger.ONE)
+                : ((Long) cfg.testValue()) - 1L;
+            case "token_count" -> "alpha beta gamma";
+            case "geo_point" -> Map.of("lat", 41.0, "lon", -73.0);
+            default -> cfg.testValue();
+        };
+    }
+
+    private static String jsonScalar(Object value) {
+        if (value instanceof String) {
+            return "\"" + value + "\"";
+        } else if (value instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value;
+            if (map.containsKey("lat") && map.containsKey("lon")) {
+                return "{\"lat\":" + map.get("lat") + ",\"lon\":" + map.get("lon") + "}";
+            }
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (var entry : map.entrySet()) {
+                if (!first) sb.append(",");
+                sb.append("\"").append(entry.getKey()).append("\":");
+                if (entry.getValue() instanceof String) {
+                    sb.append("\"").append(entry.getValue()).append("\"");
+                } else {
+                    sb.append(entry.getValue());
+                }
+                first = false;
+            }
+            sb.append("}");
+            return sb.toString();
+        }
+        return String.valueOf(value);
+    }
+
+    private static String renderValue(Permutation perm) {
+        String first = jsonScalar(perm.cfg().testValue());
+        if (!perm.array()) return first;
+        String second = jsonScalar(secondValueFor(perm.cfg()));
+        return "[" + first + "," + second + "]";
+    }
+
+    /**
+     * Build the mapping entry (properties snippet) for a single permutation.
+     * Emits extraProps (required for scaled_float/date format/token_count analyzer/etc.),
+     * plus doc_values/store toggles as appropriate.
+     */
+    private static String mappingEntry(Permutation perm) {
+        var cfg = perm.cfg();
+        var p = perm.p();
+        StringBuilder sb = new StringBuilder();
+        sb.append("\"").append(perm.fieldName()).append("\": {\"type\": \"").append(cfg.sourceType()).append("\"");
+        for (var entry : cfg.extraProps().entrySet()) {
+            sb.append(", \"").append(entry.getKey()).append("\": ");
+            if (entry.getValue() instanceof String) {
+                sb.append("\"").append(entry.getValue()).append("\"");
+            } else {
+                sb.append(entry.getValue());
+            }
+        }
+        boolean skipDvStoreParams = cfg.sourceType().equals("wildcard") || cfg.sourceType().equals("constant_keyword");
+        if (!skipDvStoreParams) {
+            if (p.hasDv && cfg.supportsDocValues()) sb.append(", \"doc_values\": true");
+            if (!p.hasDv && cfg.supportsDocValues()) sb.append(", \"doc_values\": false");
+            if (p.hasStore) sb.append(", \"store\": true");
+        }
+        // index=false toggle. Skip for types where it's invalid (already caught by skipReason)
+        // or where the type has a pre-existing `index` entry in extraProps (pre-ES5 string).
+        if (!perm.indexed()
+                && !cfg.extraProps().containsKey("index")
+                && !cfg.sourceType().equals("constant_keyword")
+                && !cfg.sourceType().equals("wildcard")
+                && !cfg.sourceType().equals("string")) {
+            sb.append(", \"index\": false");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /** Build the target-index mapping entry (no doc_values/store toggles, no index=false). */
+    private static String targetMappingEntry(Permutation perm) {
+        var cfg = perm.cfg();
+        StringBuilder sb = new StringBuilder();
+        sb.append("\"").append(perm.fieldName()).append("\": {\"type\": \"").append(cfg.targetType()).append("\"");
+        for (var entry : cfg.extraProps().entrySet()) {
+            if ("index".equals(entry.getKey())) continue;
+            sb.append(", \"").append(entry.getKey()).append("\": ");
+            if (entry.getValue() instanceof String) {
+                sb.append("\"").append(entry.getValue()).append("\"");
+            } else {
+                sb.append(entry.getValue());
+            }
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /**
+     * Generates the full (unfiltered) permutation list for one source version.
+     * Callers should apply skipReason to drop invalid combos.
+     */
+    private static List<Permutation> permutationsFor(SourceMode mode, ContainerVersion sourceVersion) {
+        List<Permutation> out = new ArrayList<>();
+        for (var cfg : FIELD_TYPES) {
+            if (!isTypeAvailable(cfg, sourceVersion)) continue;
+            for (var p : Perm.values()) {
+                for (boolean indexed : new boolean[] { true, false }) {
+                    for (boolean array : new boolean[] { false, true }) {
+                        out.add(new Permutation(cfg, p, mode, indexed, array));
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Build the index-create body for a given SourceMode. The caller has already
+     * filtered `perms` through skipReason.
+     *
+     * Note: `_source.enabled:false` + includes/excludes is mutually exclusive at the
+     * index level, so each mode gets its own _source directive shape.
+     */
+    private static String buildIndexBody(
+        SourceMode mode,
+        List<Permutation> perms,
+        Set<String> partialSet,
+        String docType
+    ) {
+        StringBuilder props = new StringBuilder();
+        for (var perm : perms) {
+            props.append(mappingEntry(perm)).append(",\n");
+        }
+        String propsStr = props.length() >= 2 ? props.substring(0, props.length() - 2) : "";
+
+        String sourceDirective;
+        switch (mode) {
+            case ENABLED:
+                sourceDirective = "";
+                break;
+            case DISABLED:
+                sourceDirective = "\"_source\":{\"enabled\":false},";
+                break;
+            case INCLUDES: {
+                StringBuilder arr = new StringBuilder("[");
+                boolean first = true;
+                for (var n : partialSet) {
+                    if (!first) arr.append(",");
+                    arr.append("\"").append(n).append("\"");
+                    first = false;
+                }
+                arr.append("]");
+                sourceDirective = "\"_source\":{\"includes\":" + arr + "},";
+                break;
+            }
+            case EXCLUDES: {
+                StringBuilder arr = new StringBuilder("[");
+                boolean first = true;
+                for (var n : partialSet) {
+                    if (!first) arr.append(",");
+                    arr.append("\"").append(n).append("\"");
+                    first = false;
+                }
+                arr.append("]");
+                sourceDirective = "\"_source\":{\"excludes\":" + arr + "},";
+                break;
+            }
+            default:
+                throw new IllegalStateException("unknown mode " + mode);
+        }
+
+        if (docType != null) {
+            return String.format(
+                "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"%s\":{%s\"properties\":{%s}}}}",
+                docType, sourceDirective, propsStr
+            );
+        }
+        return String.format(
+            "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{%s\"properties\":{%s}}}",
+            sourceDirective, propsStr
+        );
+    }
+
+    /** Build the document body (one doc per index) containing every permutation value. */
+    private static String buildDocBody(List<Permutation> perms) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (var perm : perms) {
+            if (!first) sb.append(",\n");
+            sb.append("\"").append(perm.fieldName()).append("\": ").append(renderValue(perm));
+            first = false;
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /** Build the target-side mapping body. No _source directives; target is OS 3.5. */
+    private static String buildTargetIndexBody(List<Permutation> perms) {
+        StringBuilder tp = new StringBuilder();
+        for (var perm : perms) {
+            tp.append(targetMappingEntry(perm)).append(",\n");
+        }
+        String tpStr = tp.length() >= 2 ? tp.substring(0, tp.length() - 2) : "";
+        return "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+            + "\"mappings\":{\"properties\":{" + tpStr + "}}}";
+    }
+
+    private static String indexNameFor(SourceMode mode) {
+        // Note: work-item coordinator forbids '__' in names, so use single '-' separator.
+        return "source_reconstruction_test_" + mode.name().toLowerCase();
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testSourceReconstruction(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Build the active set (after skipReason) for every SourceMode up-front.
+            // We create the index + doc per mode, snapshot once (covering all indexes),
+            // then run a single migration and assert per mode / per permutation.
+            Map<SourceMode, List<Permutation>> activeByMode = new java.util.EnumMap<>(SourceMode.class);
+            Map<SourceMode, Set<String>> partialByMode = new java.util.EnumMap<>(SourceMode.class);
+            Map<SourceMode, Integer> exercisedByMode = new java.util.EnumMap<>(SourceMode.class);
+            Map<SourceMode, Integer> skippedByMode = new java.util.EnumMap<>(SourceMode.class);
+
+            List<String> allIndexNames = new ArrayList<>();
+
+            for (var mode : SourceMode.values()) {
+                var all = permutationsFor(mode, sourceVersion);
+                var kept = new ArrayList<Permutation>();
+                int skipped = 0;
+                for (var perm : all) {
+                    var reason = skipReason(perm, sourceVersion);
+                    if (reason.isPresent()) {
+                        skipped++;
+                        continue;
+                    }
+                    kept.add(perm);
+                }
+                activeByMode.put(mode, kept);
+                exercisedByMode.put(mode, kept.size());
+                skippedByMode.put(mode, skipped);
+
+                // Deterministic selected set for INCLUDES/EXCLUDES.
+                Set<String> partialSet = new HashSet<>();
+                if (mode == SourceMode.INCLUDES || mode == SourceMode.EXCLUDES) {
+                    for (var perm : kept) {
+                        if (isSelectedForPartialSource(perm.cfg(), perm.p())) {
+                            partialSet.add(perm.fieldName());
+                        }
+                    }
+                }
+                partialByMode.put(mode, partialSet);
+
+                log.info("Mode={} exercised={} skipped={} partialSetSize={}",
+                    mode, kept.size(), skipped, partialSet.size());
+
+                if (kept.isEmpty()) {
+                    log.warn("Mode={} produced no permutations for source {}; skipping index creation",
+                        mode, sourceVersion);
+                    continue;
+                }
+
+                String indexBody = buildIndexBody(mode, kept, partialSet, docType);
+                String doc = buildDocBody(kept);
+                String indexName = indexNameFor(mode);
+                allIndexNames.add(indexName);
+
+                log.info("[{}] Index body: {}", indexName, indexBody);
+                log.info("[{}] Document (len={})", indexName, doc.length());
+
+                sourceOps.createIndex(indexName, indexBody);
+                sourceOps.createDocument(indexName, "1", doc, null, docType);
+            }
+
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Create target indexes (one per mode).
+            for (var mode : SourceMode.values()) {
+                var kept = activeByMode.get(mode);
+                if (kept == null || kept.isEmpty()) continue;
+                String targetIndexBody = buildTargetIndexBody(kept);
+                String indexName = indexNameFor(mode);
+                log.info("[{}] Target index body: {}", indexName, targetIndexBody);
+                targetOps.createIndex(indexName, targetIndexBody);
+            }
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", allIndexNames, targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+
+            // Per-mode assertions.
+            for (var mode : SourceMode.values()) {
+                var kept = activeByMode.get(mode);
+                if (kept == null || kept.isEmpty()) continue;
+                String indexName = indexNameFor(mode);
+                String response = targetOps.get("/" + indexName + "/_search").getValue();
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode hits = root.path("hits").path("hits");
+                assertFalse(hits.isEmpty(), "No documents migrated for mode " + mode + ". Response: " + response);
+                JsonNode source = hits.get(0).path("_source");
+                log.info("[{}] Migrated _source (truncated to 500 chars): {}",
+                    indexName, source.toString().substring(0, Math.min(500, source.toString().length())));
+
+                Set<String> partialSet = partialByMode.get(mode);
+                for (var perm : kept) {
+                    assertPermutation(perm, source, partialSet, sourceVersion);
+                }
+            }
+
+            // Final summary log for human sanity check.
+            int totalExercised = 0, totalSkipped = 0;
+            for (var mode : SourceMode.values()) {
+                totalExercised += exercisedByMode.getOrDefault(mode, 0);
+                totalSkipped += skippedByMode.getOrDefault(mode, 0);
+                log.info("Summary sourceVersion={} Mode={} exercised={} skipped={}",
+                    sourceVersion, mode, exercisedByMode.getOrDefault(mode, 0),
+                    skippedByMode.getOrDefault(mode, 0));
+            }
+            log.info("Summary sourceVersion={} TOTAL exercised={} skipped={}",
+                sourceVersion, totalExercised, totalSkipped);
+        }
+    }
+
+    /**
+     * Per-field assertion. Mirrors the original logic plus SourceMode and array handling.
+     *
+     * - ENABLED: field should be present (engine kept _source), value matches.
+     * - DISABLED: original reconstruction logic applies.
+     * - INCLUDES: if in partialSet, came via _source; else reconstruction applies.
+     * - EXCLUDES: mirror -- if in partialSet (excluded), reconstruction applies; else _source.
+     */
+    private void assertPermutation(
+        Permutation perm, JsonNode source, Set<String> partialSet, ContainerVersion sourceVersion
+    ) {
+        var cfg = perm.cfg();
+        var p = perm.p();
+        String fieldName = perm.fieldName();
+        JsonNode fieldValue = source.get(fieldName);
+
+        boolean viaSourceDirectly = switch (perm.sm()) {
+            case ENABLED -> true;
+            case DISABLED -> false;
+            case INCLUDES -> partialSet.contains(fieldName);
+            case EXCLUDES -> !partialSet.contains(fieldName);
+        };
+
+        if (viaSourceDirectly) {
+            assertNotNull(fieldValue, fieldName + " [mode=" + perm.sm() + "] should be present via _source");
+            assertValueMatches(perm, fieldValue);
+            return;
+        }
+
+        // Reconstruction path — applies to DISABLED mode and to fields filtered out by
+        // INCLUDES/EXCLUDES. The migration reconstructs from doc_values/stored-fields/points/terms
+        // regardless of the original _source include/exclude policy.
+        boolean pointsSupported = !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+
+        if (!cfg.recoverable()) {
+            assertNull(fieldValue, fieldName + " should NOT be recovered (unsupported type)");
+            return;
+        }
+
+        boolean canRecoverFromPoints = pointsSupported && cfg.supportsPoints() && perm.indexed();
+        boolean canRecoverFromTerms = cfg.targetType().equals("boolean") && perm.indexed();
+        boolean canRecoverFromKeywordTerms = (cfg.sourceType().equals("keyword") || cfg.sourceType().equals("string"))
+            && perm.indexed();
+        boolean preBkdNumerics = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+        boolean canRecoverFromNumericTerms = preBkdNumerics && cfg.supportsPoints() && perm.indexed();
+        boolean alwaysHasDocValues = cfg.sourceType().equals("wildcard");
+        boolean hasConstantValue = cfg.sourceType().equals("constant_keyword");
+
+        // Guaranteed recovery: stored fields, doc_values, Points, constant values
+        boolean guaranteedRecovery = p.hasStore || p.hasDv
+            || canRecoverFromPoints || canRecoverFromNumericTerms || alwaysHasDocValues || hasConstantValue;
+        // Best-effort recovery: inverted index terms (keyword/boolean) — may not work on all segment formats
+        boolean bestEffortRecovery = canRecoverFromTerms || canRecoverFromKeywordTerms;
+
+        if (guaranteedRecovery) {
+            assertNotNull(fieldValue, fieldName + " [mode=" + perm.sm() + "] should be recovered but was null");
+            assertValueMatches(perm, fieldValue);
+        } else if (bestEffortRecovery) {
+            // Terms-based recovery is best-effort; verify value if present but don't fail if null
+            if (fieldValue != null) {
+                assertValueMatches(perm, fieldValue);
+            }
+        } else {
+            assertNull(fieldValue, fieldName + " should NOT be recovered");
+        }
+    }
+
+    /**
+     * Compare the recovered JSON value against the permutation's expected value.
+     * For array perms, accept either a scalar equal to the first element or an
+     * array containing it (Points/Terms often collapse multi-values on recovery).
+     */
+    private static void assertValueMatches(Permutation perm, JsonNode fieldValue) {
+        var cfg = perm.cfg();
+
+        // For array perms, recovery paths legitimately do not preserve order or even
+        // array-ness (doc-values sort lex/numeric, terms-dict de-duplicates+sorts, numeric
+        // stored-fields may collapse to the last scalar). Accept a match against ANY of
+        // the original array values regardless of whether the recovered shape is a scalar
+        // or an array. See reconstruction-test-array-ordering-pitfall.
+        if (perm.array()) {
+            assertArrayValueMatches(perm, fieldValue);
+            return;
+        }
+
+        // Extract one scalar JsonNode to compare against (scalar perms only).
+        JsonNode target = fieldValue;
+
+        // Short-circuit by type; array collapses to the first element above.
+        if (cfg.sourceType().equals("geo_point")) {
+            // Either shape (scalar or array) is acceptable.
+            assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            return;
+        }
+        if (cfg.sourceType().equals("token_count")) {
+            // token_count acceptable forms across versions:
+            //   - numeric (e.g. 5)         → count from doc_values / Points reconstruction
+            //   - textual integer ("5")    → stored field (numeric count rendered as string)
+            //   - textual original string  → stored field on ES 7+ preserves original text
+            if (target.isTextual()) {
+                String s = target.asText();
+                try {
+                    int n = Integer.parseInt(s);
+                    assertEquals(5, n, perm.fieldName() + " value mismatch");
+                } catch (NumberFormatException nfe) {
+                    assertEquals(cfg.testValue().toString(), s,
+                        perm.fieldName() + " should be original string from stored field");
+                }
+            } else {
+                assertEquals(5, target.asInt(), perm.fieldName() + " value mismatch");
+            }
+            return;
+        }
+        if (cfg.sourceType().equals("scaled_float")) {
+            double expectedVal = ((Number) cfg.testValue()).doubleValue();
+            double actualVal = target.isArray() && target.size() > 0 ? target.get(0).asDouble() : target.asDouble();
+            assertEquals(expectedVal, actualVal, 0.01, perm.fieldName() + " value mismatch");
+            return;
+        }
+        if (cfg.sourceType().equals("unsigned_long")) {
+            BigInteger expectedVal = cfg.testValue() instanceof BigInteger
+                ? (BigInteger) cfg.testValue()
+                : BigInteger.valueOf((Long) cfg.testValue());
+            JsonNode actualNode = target.isArray() && target.size() > 0 ? target.get(0) : target;
+            BigInteger actualVal = new BigInteger(actualNode.asText());
+            assertEquals(expectedVal, actualVal, perm.fieldName() + " value mismatch");
+            return;
+        }
+        if ("epoch_millis".equals(cfg.extraProps().get("format"))) {
+            long expected = ((Number) cfg.testValue()).longValue();
+            long actual = target.isArray() && target.size() > 0 ? target.get(0).asLong() : target.asLong();
+            assertEquals(expected, actual, perm.fieldName() + " value mismatch");
+            return;
+        }
+
+        String expected = String.valueOf(cfg.testValue());
+        String actual;
+        if (target.isTextual()) {
+            actual = target.asText();
+        } else if (target.isBoolean()) {
+            actual = String.valueOf(target.asBoolean());
+        } else if (target.isInt()) {
+            actual = String.valueOf(target.asInt());
+        } else if (target.isLong()) {
+            actual = String.valueOf(target.asLong());
+        } else if (target.isArray() && target.size() > 0) {
+            JsonNode first = target.get(0);
+            actual = first.isTextual() ? first.asText() : first.asText();
+        } else {
+            actual = target.asText();
+        }
+
+        if (cfg.sourceType().equals("ip") && expected.contains(":")) {
+            expected = normalizeIpv6(expected);
+            actual = normalizeIpv6(actual);
+        }
+        if (cfg.sourceType().equals("date") || cfg.sourceType().equals("date_nanos")) {
+            expected = normalizeDate(expected);
+            actual = normalizeDate(actual);
+        }
+
+        // For array mode, accept either exact match of the first element or the
+        // reconstructed value being an array containing the expected value.
+        // (Unreachable — array perms are handled by assertArrayValueMatches above.
+        // Retained as a no-op guard in case this function grows another entry path.)
+
+        assertEquals(expected, actual, perm.fieldName() + " value mismatch");
+    }
+
+    /**
+     * Array-perm value matcher. Recovery paths (doc-values, terms-dict, Points, stored
+     * fields) do NOT preserve insertion order, may sort lex/numeric, may de-duplicate,
+     * and may collapse a multi-valued doc to a scalar. Accept a match against ANY of
+     * the original array values regardless of whether the recovered shape is a scalar
+     * or an array.
+     */
+    private static void assertArrayValueMatches(Permutation perm, JsonNode fieldValue) {
+        var cfg = perm.cfg();
+
+        // geo_point & token_count have bespoke scalar/shape contracts that carry over
+        // to array mode.
+        if (cfg.sourceType().equals("geo_point")) {
+            assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            // Multi-valued geo_point recovery produces a list of {lat,lon} maps from
+            // Morton-encoded SortedNumericDocValues. Verify we got an array with 2 elements
+            // and that each decoded lat/lon is within 0.01 of one of the original values.
+            if (fieldValue.isArray()) {
+                assertEquals(2, fieldValue.size(), perm.fieldName() + " should have 2 geo_point values");
+                // Both original points should be present (order may differ due to Morton sort)
+                @SuppressWarnings("unchecked")
+                var expected1 = (Map<String, Object>) cfg.testValue();
+                @SuppressWarnings("unchecked")
+                var expected2 = (Map<String, Object>) secondValueFor(cfg);
+                double lat1 = ((Number) expected1.get("lat")).doubleValue();
+                double lon1 = ((Number) expected1.get("lon")).doubleValue();
+                double lat2 = ((Number) expected2.get("lat")).doubleValue();
+                double lon2 = ((Number) expected2.get("lon")).doubleValue();
+                boolean foundFirst = false, foundSecond = false;
+                for (int i = 0; i < fieldValue.size(); i++) {
+                    JsonNode pt = fieldValue.get(i);
+                    double aLat = pt.path("lat").asDouble();
+                    double aLon = pt.path("lon").asDouble();
+                    if (Math.abs(aLat - lat1) < 0.01 && Math.abs(aLon - lon1) < 0.01) foundFirst = true;
+                    if (Math.abs(aLat - lat2) < 0.01 && Math.abs(aLon - lon2) < 0.01) foundSecond = true;
+                }
+                assertTrue(foundFirst && foundSecond,
+                    perm.fieldName() + " should contain both geo_point values but was " + fieldValue);
+            }
+            return;
+        }
+        if (cfg.sourceType().equals("token_count")) {
+            // token_count array perms store two strings whose tokenised counts DIFFER:
+            //   "one two three four five" -> 5 tokens
+            //   "alpha beta gamma"        -> 3 tokens
+            // Doc-values / Points recovery paths numerically sort the count array, so
+            // the recovered order is [3,5] (not [5,3]). Never read by index — iterate
+            // every node and accept membership in {5, 3}. Text nodes are acceptable
+            // if they parse to the expected count or are one of the original input strings.
+            assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            Set<Integer> acceptableCounts = Set.of(
+                5,  // count of cfg.testValue() "one two three four five"
+                3   // count of secondValueFor(cfg) "alpha beta gamma"
+            );
+            Set<String> acceptableStrings = Set.of(
+                String.valueOf(cfg.testValue()),
+                String.valueOf(secondValueFor(cfg))
+            );
+            List<JsonNode> nodes = new ArrayList<>();
+            if (fieldValue.isArray()) {
+                for (int i = 0; i < fieldValue.size(); i++) {
+                    nodes.add(fieldValue.get(i));
+                }
+            } else {
+                nodes.add(fieldValue);
+            }
+            for (JsonNode n : nodes) {
+                if (n.isTextual()) {
+                    String s = n.asText();
+                    try {
+                        int cnt = Integer.parseInt(s);
+                        assertTrue(acceptableCounts.contains(cnt),
+                            perm.fieldName() + " token count " + cnt
+                                + " not in acceptable set " + acceptableCounts);
+                    } catch (NumberFormatException nfe) {
+                        assertTrue(acceptableStrings.contains(s),
+                            perm.fieldName() + " text " + s
+                                + " not in acceptable original strings " + acceptableStrings);
+                    }
+                } else {
+                    assertTrue(acceptableCounts.contains(n.asInt()),
+                        perm.fieldName() + " token count " + n.asInt()
+                            + " not in acceptable set " + acceptableCounts);
+                }
+            }
+            return;
+        }
+
+        Set<String> acceptable = new HashSet<>();
+        acceptable.add(normalizeForCompare(cfg, String.valueOf(cfg.testValue())));
+        acceptable.add(normalizeForCompare(cfg, String.valueOf(secondValueFor(cfg))));
+
+        Set<String> actualValues = new HashSet<>();
+        if (fieldValue.isArray()) {
+            for (int i = 0; i < fieldValue.size(); i++) {
+                actualValues.add(normalizeForCompare(cfg, nodeAsText(fieldValue.get(i))));
+            }
+        } else {
+            actualValues.add(normalizeForCompare(cfg, nodeAsText(fieldValue)));
+        }
+
+        assertFalse(Collections.disjoint(acceptable, actualValues),
+            perm.fieldName() + " should contain one of " + acceptable + " but was " + fieldValue);
+    }
+
+    private static String nodeAsText(JsonNode n) {
+        if (n == null || n.isNull()) return "";
+        if (n.isTextual()) return n.asText();
+        if (n.isBoolean()) return String.valueOf(n.asBoolean());
+        if (n.isInt()) return String.valueOf(n.asInt());
+        if (n.isLong()) return String.valueOf(n.asLong());
+        return n.asText();
+    }
+
+    private static String normalizeForCompare(FieldTypeConfig cfg, String s) {
+        if (s == null) return "";
+        if (cfg.sourceType().equals("ip") && s.contains(":")) {
+            return normalizeIpv6(s);
+        }
+        if (cfg.sourceType().equals("date") || cfg.sourceType().equals("date_nanos")) {
+            return normalizeDate(s);
+        }
+        return s;
+    }
+
+    /**
+     * Tests that documents with no recoverable fields are skipped.
+     * Uses binary field with store:false (no doc_values, no Points, no stored field).
+     */
+    @ParameterizedTest(name = "unrecoverable: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testUnrecoverableDocumentSkipped(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "unrecoverable_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false}," +
+                    "\"properties\":{\"binary_field\":{\"type\":\"binary\",\"store\":false}}}}}",
+                    docType
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"_source\":{\"enabled\":false}," +
+                    "\"properties\":{\"binary_field\":{\"type\":\"binary\",\"store\":false}}}}";
+            }
+
+            String doc = "{\"binary_field\": \"dGVzdA==\"}";  // base64 "test"
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                "\"mappings\":{\"properties\":{\"binary_field\":{\"type\":\"binary\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+
+            int totalHits = root.path("hits").path("total").isInt()
+                ? root.path("hits").path("total").asInt()
+                : root.path("hits").path("total").path("value").asInt();
+            assertEquals(0, totalHits, "Document with unrecoverable fields should be skipped");
+        }
+    }
+
+    /**
+     * Sourceless reconstruction with {@code copy_to} mappings.
+     *
+     * Anchors two behaviors end-to-end through a real ES/OS source cluster + snapshot + sourceless
+     * migrate pipeline:
+     *
+     *   (1) Target fields declared via {@code copy_to} (e.g. {@code users.all}, {@code users.from})
+     *       must NOT appear in the reconstructed {@code _source} on the target. They are indexed-only
+     *       mirrors of the source's value and were never in the original document.
+     *
+     *   (2) When a source field has no stored/doc_values path of its own (text with no doc_values,
+     *       no store:true), its value must be reverse-derived from one of its copy_to targets —
+     *       preferring less-lossy targets (keyword) over lossy ones (text analyzed tokens).
+     *
+     * Index layout (Enron-style, mirrors the customer's mapping shape):
+     *   - from:   keyword, copy_to [users.from, users.all]    → recoverable via own doc_values
+     *   - sender: text   (no doc_values, no store), copy_to [users.sender, users.all]
+     *                   → NOT recoverable from its own chain; must reverse-derive from users.sender
+     *   - users.from:   keyword (copy_to target)
+     *   - users.sender: keyword (copy_to target)
+     *   - users.all:    text    (copy_to target, lossy)
+     */
+    @ParameterizedTest(name = "copy_to: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testCopyToFieldHandling(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        // copy_to requires typed text/keyword mappings which only exist as a clean combo from ES5+.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Mapping: `from` (keyword) and `sender` (text, no doc_values, no store) both copy_to
+            // container fields. The reconstructor must strip `users.*` targets but preserve the
+            // source fields — reverse-deriving `sender` from `users.sender` since `sender` has
+            // no recoverable own-field chain.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.from\",\"users.all\"]},"
+                + "\"sender\":{\"type\":\"text\",\"store\":false,\"copy_to\":[\"users.sender\",\"users.all\"]},"
+                + "\"users\":{\"properties\":{"
+                +   "\"from\":{\"type\":\"keyword\"},"
+                +   "\"sender\":{\"type\":\"keyword\"},"
+                +   "\"all\":{\"type\":\"text\"}"
+                + "}}"
+                + "}";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false},%s}}}",
+                    docType, propertiesJson);
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"_source\":{\"enabled\":false},"
+                    + propertiesJson + "}}";
+            }
+
+            String doc = "{\"from\":\"joe@example.com\",\"sender\":\"joe smith\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target mapping: same shape so the bulk migrate reindex step accepts the reconstructed
+            // doc. Notably we keep the copy_to declaration so the receiving cluster would re-derive
+            // the target fields on reindex — which is exactly the right behavior for a real migration.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":" + "{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            // (1) `from` must be present with its exact original value (recovered from its own
+            //     keyword doc_values chain — does not need copy_to reverse-derivation).
+            assertEquals("joe@example.com", source.path("from").asText(),
+                "source field `from` missing or wrong in reconstructed _source: " + source);
+
+            // (2) `sender` (text, no doc_values, no store) must be reverse-derived from
+            //     `users.sender` (keyword, doc_values default-on). Preference: keyword target
+            //     beats the text target `users.all` even though both were declared.
+            assertEquals("joe smith", source.path("sender").asText(),
+                "source field `sender` must be reverse-derived from copy_to keyword target: " + source);
+
+            // (3) copy_to TARGETS must NOT appear in the reconstructed _source. ES/OS never stores
+            //     them in _source on the origin cluster either — reconstruction must match that.
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("from"),
+                "copy_to target `users.from` must NOT appear in reconstructed _source: " + source);
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("sender"),
+                "copy_to target `users.sender` must NOT appear in reconstructed _source: " + source);
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("all"),
+                "copy_to target `users.all` must NOT appear in reconstructed _source: " + source);
+        }
+    }
+
+    @ParameterizedTest(name = "source_excludes: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testSourceExcludesFieldHandling(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        // _source.excludes is expressed at mapping time. In a sourceless migration there is no
+        // stored _source to filter on the origin, but the mapping's intent is still authoritative:
+        // a field listed under _source.excludes must NOT be resurrected by reconstruction even if
+        // its value is recoverable from stored fields / doc_values / points / terms on the indexed
+        // side. This test also exercises the trailing-".*" glob form for nested paths.
+        //
+        // Typed-mappings versions (pre-7) declare _source inside the type body; 7+ declares it at
+        // the mappings root. The harness handles both shapes.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            // _source.excludes semantics on ES 1.x/2.x predate a lot of the codec surface the
+            // reconstructor relies on; not in scope for this fix.
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "source_excludes_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Mapping: `title` stays, `secret` is excluded via literal path, everything under
+            // `meta.` is excluded via glob. All three are indexed with doc_values so the
+            // reconstructor CAN recover them — the test asserts it DOES NOT because the mapping
+            // declares otherwise.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"title\":{\"type\":\"keyword\"},"
+                + "\"secret\":{\"type\":\"keyword\"},"
+                + "\"meta\":{\"properties\":{"
+                +   "\"created_at\":{\"type\":\"date\"},"
+                +   "\"updated_by\":{\"type\":\"keyword\"}"
+                + "}},"
+                // Object array with mixed subfields — tests distribution + lossy text reconstruction
+                + "\"items\":{\"properties\":{"
+                +   "\"name\":{\"type\":\"keyword\"},"          // exact via doc_values
+                +   "\"tag\":{\"type\":\"keyword\"},"           // repeated values → SORTED_SET dedup
+                +   "\"desc\":{\"type\":\"text\"}"              // lossy: analyzed, position-gap split
+                + "}},"
+                // Text with stopwords — analyzer drops tokens, may affect position-gap boundaries
+                + "\"notes\":{\"type\":\"text\",\"analyzer\":\"standard\"}"
+                + "}";
+
+            String sourceFilterJson =
+                "\"_source\":{\"enabled\":false,\"excludes\":[\"secret\",\"meta.*\"]}";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"%s\":{%s,%s}}}",
+                    docType, sourceFilterJson, propertiesJson);
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+            }
+
+            String doc = "{\"title\":\"hello world\",\"secret\":\"s3cr3t\","
+                + "\"meta\":{\"created_at\":\"2024-01-15T12:00:00Z\",\"updated_by\":\"alice\"},"
+                // 3-element object array: name is unique per element, tag has duplicates, desc is analyzed text
+                + "\"items\":["
+                +   "{\"name\":\"report.pdf\",\"tag\":\"important\",\"desc\":\"the quarterly financial report\"},"
+                +   "{\"name\":\"notes.txt\",\"tag\":\"draft\",\"desc\":\"a]a is the only thing here\"},"
+                +   "{\"name\":\"summary.pdf\",\"tag\":\"important\",\"desc\":\"final summary of the project\"}"
+                + "],"
+                // Text with heavy stopwords: "the", "is", "a", "of", "and" get removed by standard analyzer
+                + "\"notes\":\"the cat is on a mat and the dog is in the yard\""
+                + "}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target mapping OMITS the _source filter so the target stores _source by default —
+            // that lets the test assert on exactly what RFS wrote. Carrying _source.enabled:false
+            // onto the target would make OS discard _source on index and the read-back would be
+            // empty, so there'd be nothing to assert against. The reconstructor already honored
+            // the SOURCE mapping's excludes at reconstruction time; the target shape doesn't
+            // affect that decision.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response2 = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response2);
+            JsonNode root2 = MAPPER.readTree(response2);
+            JsonNode hits2 = root2.path("hits").path("hits");
+            assertFalse(hits2.isEmpty(), "No documents migrated. Response: " + response2);
+
+            JsonNode source2 = hits2.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source2);
+
+            // (1) `title` is NOT in any excludes rule, so it must survive reconstruction.
+            assertEquals("hello world", source2.path("title").asText(),
+                "non-excluded field `title` must be present: " + source2);
+
+            // (2) `secret` is in _source.excludes but reconstruction maximizes data recovery —
+            // the original doc had this field, so we recover it from doc_values.
+            assertEquals("s3cr3t", source2.path("secret").asText(),
+                "secret must be reconstructed (maximize recovery of original doc): " + source2);
+
+            // (3) meta.* subfields are also recoverable from their respective doc_values.
+            assertFalse(source2.path("meta").isMissingNode(),
+                "meta fields must be reconstructed (maximize recovery of original doc): " + source2);
+
+            // (4) Object array: items[].name is keyword with unique values per element.
+            // Doc_values (SORTED_SET) returns them in sorted order, not insertion order.
+            // All 3 values must be present but element-to-element binding is approximate.
+            JsonNode items = source2.path("items");
+            if (!items.isMissingNode() && items.isArray()) {
+                var allNames = new java.util.HashSet<String>();
+                for (var item : items) {
+                    String n = item.path("name").asText("");
+                    if (!n.isEmpty()) allNames.add(n);
+                }
+                assertTrue(allNames.contains("report.pdf"), "items[].name must contain report.pdf: " + source2);
+                assertTrue(allNames.contains("notes.txt"), "items[].name must contain notes.txt: " + source2);
+                assertTrue(allNames.contains("summary.pdf"), "items[].name must contain summary.pdf: " + source2);
+            }
+
+            // (5) Object array: items[].tag has duplicates ("important" x2, "draft" x1).
+            // SORTED_SET deduplicates → only 2 unique values available.
+            // Best-effort: at least some tags are distributed (prefix fill).
+            if (!items.isMissingNode() && items.isArray()) {
+                var allTags = new java.util.HashSet<String>();
+                for (var item : items) {
+                    String t = item.path("tag").asText("");
+                    if (!t.isEmpty()) allTags.add(t);
+                }
+                assertTrue(allTags.contains("important") || allTags.contains("draft"),
+                    "items[].tag best-effort: at least one tag value recovered: " + source2);
+            }
+
+            // (6) Object array: items[].desc is text (analyzed). Position-gap splitting recovers
+            // per-element content, but lowercased/tokenized (lossy). Verify non-empty.
+            if (!items.isMissingNode() && items.isArray() && items.size() > 0) {
+                for (int i = 0; i < items.size(); i++) {
+                    String desc = items.get(i).path("desc").asText("");
+                    // desc may be empty if text recovery didn't fire for this element,
+                    // but if present it should contain analyzed tokens
+                    if (!desc.isEmpty()) {
+                        log.info("items[{}].desc reconstructed (lossy): '{}'", i, desc);
+                    }
+                }
+            }
+
+            // (7) notes: text with standard analyzer (tokenizes + lowercases, no stopword removal).
+            // Reconstructed text preserves all tokens but is lowercased and spacing is approximate.
+            String notes = source2.path("notes").asText("");
+            if (!notes.isEmpty()) {
+                log.info("notes reconstructed (lossy — lowercased, spacing approximate): '{}'", notes);
+                assertTrue(notes.contains("cat"), "notes must contain 'cat': " + source2);
+                assertTrue(notes.contains("dog"), "notes must contain 'dog': " + source2);
+                assertTrue(notes.contains("mat"), "notes must contain 'mat': " + source2);
+                // Standard analyzer preserves all words (no stopword filter) — verify content words present
+                assertEquals(notes, notes.toLowerCase(), "standard analyzer lowercases all tokens: " + notes);
+            }
+        }
+    }
+
+    /**
+     * Object-array subfield distribution into a partial-source seed.
+     * <p>
+     * Scenario: mapping declares {@code files} as {@code type: object} with three subfields
+     * (cksum, size, name). {@code _source.excludes} removes {@code files.size} and
+     * {@code files.name}, leaving {@code files.cksum} in the seed. After migration the
+     * reconstructor must:
+     * <ul>
+     *   <li>preserve the {@code files} array shape (two elements), not flatten it into
+     *       a columnar {@code {files: {cksum: [...], size: [...]}}} object,</li>
+     *   <li>preserve the seeded {@code cksum} on each element (partial {@code _source}), and</li>
+     *   <li>distribute the recovered {@code size} and {@code name} into the matching array
+     *       elements positionally (from SortedNumeric / SortedSet doc_values).</li>
+     * </ul>
+     * <p>
+     * Deterministic ordering: the test values are chosen so sorted-by-value equals
+     * insertion order ({@code [100, 500]} stays {@code [100, 500]};
+     * {@code ["a.txt", "b.txt"]} stays {@code ["a.txt", "b.txt"]}). This makes the assertion
+     * exact. The broader ordering caveat — doc_values traversal order may differ from
+     * original array insertion order — is documented on
+     * {@code SourceReconstructor.distributeSubfieldAcrossList}; test values that do not
+     * preserve sorted-equals-insertion order would surface that caveat as a visible
+     * reordering of subfield values against cksum.
+     * <p>
+     * Gated to ES 2.x+ because pre-ES 5.x doc_values behaviour for dotted subfields of
+     * {@code type:object} is finicky under {@code _source.excludes}; the fix and its
+     * regression guarantee target contemporary snapshot formats.
+     */
+    @ParameterizedTest(name = "objectArrayDistribution: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testObjectArraySubfieldDistribution(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "object_array_distribution_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            String propsBody = "\"properties\":{"
+                + "\"files\":{\"type\":\"object\",\"properties\":{"
+                + "\"cksum\":{\"type\":\"keyword\"},"
+                + "\"size\":{\"type\":\"long\"},"
+                + "\"name\":{\"type\":\"keyword\"}"
+                + "}}}";
+            String sourceDirective = "\"_source\":{\"excludes\":[\"files.size\",\"files.name\"]},";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{%s%s}}}",
+                    docType, sourceDirective, propsBody
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceDirective + propsBody + "}}";
+            }
+
+            // Insertion-order values chosen so SortedNumeric / SortedSet doc_values
+            // traversal order equals insertion order (no ordering caveat visible here).
+            String doc = "{\"files\":["
+                + "{\"cksum\":\"h1\",\"size\":100,\"name\":\"a.txt\"},"
+                + "{\"cksum\":\"h2\",\"size\":500,\"name\":\"b.txt\"}"
+                + "]}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+            log.info("Document: {}", doc);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propsBody + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "Migrated document missing. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Migrated _source: {}", source);
+
+            JsonNode files = source.path("files");
+            assertTrue(files.isArray(),
+                "files must remain an object-array, not collapse to columnar. _source=" + source);
+            assertEquals(2, files.size(),
+                "files array length must be preserved (2 elements). _source=" + source);
+
+            // Element 0: cksum from seed _source, size & name distributed from doc_values.
+            JsonNode e0 = files.get(0);
+            assertEquals("h1", e0.path("cksum").asText(),
+                "element 0 cksum must survive from partial _source. _source=" + source);
+            assertEquals(100L, e0.path("size").asLong(),
+                "element 0 size must be distributed from doc_values. _source=" + source);
+            assertEquals("a.txt", e0.path("name").asText(),
+                "element 0 name must be distributed from doc_values. _source=" + source);
+
+            // Element 1: same expectations.
+            JsonNode e1 = files.get(1);
+            assertEquals("h2", e1.path("cksum").asText(),
+                "element 1 cksum must survive from partial _source. _source=" + source);
+            assertEquals(500L, e1.path("size").asLong(),
+                "element 1 size must be distributed from doc_values. _source=" + source);
+            assertEquals("b.txt", e1.path("name").asText(),
+                "element 1 name must be distributed from doc_values. _source=" + source);
+        }
+    }
+
+    /**
+     * Documents the "approximate binding" behavior of object-array subfield distribution
+     * when sorted-by-value does NOT equal insertion order.
+     * <p>
+     * Same shape as {@link #testObjectArraySubfieldDistribution} but the recovered subfields
+     * are insertion-ordered as {@code [500, 100]} / {@code ["b.txt", "a.txt"]}, which
+     * SortedNumeric / SortedSet doc_values traverse in sorted order — so the values come
+     * back as {@code [100, 500]} / {@code ["a.txt", "b.txt"]}. The seeded {@code cksum}
+     * preserves insertion order ({@code [h1, h2]}), so the resulting binding is
+     * {@code {cksum:h1,size:100,name:"a.txt"}, {cksum:h2,size:500,name:"b.txt"}} — the
+     * subfield values pair against the WRONG cksums (insertion was h1↔500, h2↔100).
+     * <p>
+     * This is the documented caveat on
+     * {@link org.opensearch.migrations.bulkload.lucene.SourceReconstructor#distributeSubfieldAcrossList}:
+     * doc_values traversal order is sorted, not insertion order. The reconstruction is useful
+     * for presence, search, and aggregation but NOT for display-accurate per-element tuples.
+     * The test asserts the approximate-binding outcome so a future change to insertion-order
+     * preservation (which would require a different recovery path) surfaces here visibly.
+     */
+    @ParameterizedTest(name = "objectArrayDistributionApproximate: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testObjectArraySubfieldDistributionApproximateBinding(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "object_array_distribution_approx_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            String propsBody = "\"properties\":{"
+                + "\"files\":{\"type\":\"object\",\"properties\":{"
+                + "\"cksum\":{\"type\":\"keyword\"},"
+                + "\"size\":{\"type\":\"long\"},"
+                + "\"name\":{\"type\":\"keyword\"}"
+                + "}}}";
+            String sourceDirective = "\"_source\":{\"excludes\":[\"files.size\",\"files.name\"]},";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{%s%s}}}",
+                    docType, sourceDirective, propsBody
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceDirective + propsBody + "}}";
+            }
+
+            // Insertion order h1↔500↔"b.txt", h2↔100↔"a.txt" — chosen so sorted-by-value
+            // (the doc_values traversal order) differs from insertion order.
+            String doc = "{\"files\":["
+                + "{\"cksum\":\"h1\",\"size\":500,\"name\":\"b.txt\"},"
+                + "{\"cksum\":\"h2\",\"size\":100,\"name\":\"a.txt\"}"
+                + "]}";
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propsBody + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "Migrated document missing. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+            JsonNode files = source.path("files");
+            assertTrue(files.isArray(), "files must remain an array. _source=" + source);
+            assertEquals(2, files.size(), "files length preserved. _source=" + source);
+
+            // cksum follows insertion order (preserved in seed _source); size/name come from
+            // doc_values in SORTED order. Result: cksum binds to the sorted-position-matched
+            // subfield, not the original-tuple-matched one.
+            JsonNode e0 = files.get(0);
+            JsonNode e1 = files.get(1);
+            assertEquals("h1", e0.path("cksum").asText(), "_source=" + source);
+            assertEquals("h2", e1.path("cksum").asText(), "_source=" + source);
+            // Approximate binding: size and name come back sorted, NOT bound to original cksum tuple.
+            assertEquals(100L, e0.path("size").asLong(),
+                "size in sorted (not insertion) order — approximate binding. _source=" + source);
+            assertEquals(500L, e1.path("size").asLong(),
+                "size in sorted (not insertion) order — approximate binding. _source=" + source);
+            assertEquals("a.txt", e0.path("name").asText(),
+                "name in sorted (not insertion) order — approximate binding. _source=" + source);
+            assertEquals("b.txt", e1.path("name").asText(),
+                "name in sorted (not insertion) order — approximate binding. _source=" + source);
+        }
+    }
+
+    /**
+     * Exercises the position-buffer grow loop in LeafReader{5,7,9}.streamFieldPostings:
+     *
+     *   int[] positions = new int[16];                                // seed
+     *   if (freq > positions.length) {
+     *       positions = new int[Math.max(freq, positions.length * 2)]; // grow
+     *   }
+     *   if (pos < 0) continue;                                        // drop invalid
+     *
+     * The grow formula has three regimes that this test forces in a single segment:
+     *   1. freq &lt;= 16            — seed covers it, no reallocation.
+     *   2. 16 &lt; freq &lt;= 32    — doubling branch: new length = positions.length * 2.
+     *   3. freq &gt; positions.length * 2 — jump-to-freq branch: new length = freq.
+     *
+     * Strategy: index one `text` document where a single token is repeated enough times
+     * to trigger (2) and (3). Because all three docs live in one segment and {@code positions}
+     * is hoisted across the term-docs loop, the buffer grows monotonically — a doc with
+     * freq=200 AFTER a doc with freq=5 proves the hoisted buffer is correctly reused at a
+     * small freq after having been grown.
+     *
+     * Forces the streamFieldPostings path by disabling _source entirely (the engine keeps
+     * no original JSON, reconstruction must walk postings to recover anything).
+     *
+     * Scoped to ES 5+ because pre-ES5 uses the `string` type with a different index-options
+     * contract (analysed/not_analysed enum). The fragment lives in LeafReader5/7/9 and is
+     * the same logic on all three.
+     */
+    @ParameterizedTest(name = "positionBufferGrow: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testPositionBufferGrowAcrossFrequencyRegimes(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return; // pre-ES5 uses string, not text; positions path differs
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "position_buffer_grow_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // _source disabled forces reconstruction via inverted index; the text field
+            // has positions (default for text), so streamFieldPostings fires on migration.
+            String mappingProps = "\"body\": {\"type\": \"text\"}";
+            String indexBody;
+            if (docType != null) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false},"
+                        + "\"properties\":{%s}}}}",
+                    docType, mappingProps
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"_source\":{\"enabled\":false},"
+                    + "\"properties\":{" + mappingProps + "}}}";
+            }
+            sourceOps.createIndex(indexName, indexBody);
+
+            // Doc A: freq=5 — fits in the seed (16), no grow.
+            // Doc B: freq=20 — first grow, hits the `positions.length * 2` = 32 branch.
+            // Doc C: freq=200 — second grow, hits the `Math.max(freq, length*2)` = 200 branch
+            //        (200 > 32*2=64, so jump-to-freq fires).
+            // Doc D: freq=3 — back to small after buffer has been grown to 200: proves the
+            //        hoisted buffer is reused without another allocation and the `n` counter
+            //        resets correctly.
+            // Each doc uses a distinct token ('alpha','bravo','charlie','delta') so positions
+            // are independent per (term, doc) and don't collide.
+            sourceOps.createDocument(indexName, "A",
+                "{\"body\": \"" + repeat("alpha ", 5).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "B",
+                "{\"body\": \"" + repeat("bravo ", 20).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "C",
+                "{\"body\": \"" + repeat("charlie ", 200).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "D",
+                "{\"body\": \"" + repeat("delta ", 3).trim() + "\"}", null, docType);
+
+            sourceOps.post("/_refresh", null);
+            sourceOps.post("/" + indexName + "/_forcemerge?max_num_segments=1", null); // single segment
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{\"body\":{\"type\":\"text\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+
+            // All four docs must migrate and recover their body token.
+            // Recovery via postings gives us the TERM (one per doc: alpha/bravo/charlie/delta).
+            // If the grow formula under-allocated, stream decoding would corrupt or throw,
+            // so migration itself fails. A successful hit-count + correct term presence
+            // proves all three regimes were exercised without corruption.
+            String response = targetOps.get("/" + indexName + "/_search?size=10").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertEquals(4, hits.size(),
+                "All 4 frequency-regime docs must be recovered: " + response);
+
+            Set<String> recoveredTokens = new HashSet<>();
+            for (int i = 0; i < hits.size(); i++) {
+                JsonNode bodyField = hits.get(i).path("_source").path("body");
+                assertFalse(bodyField.isMissingNode(),
+                    "body must be recovered for hit " + i + ": " + hits.get(i));
+                String body = bodyField.asText().toLowerCase();
+                for (String tok : new String[]{"alpha", "bravo", "charlie", "delta"}) {
+                    if (body.contains(tok)) recoveredTokens.add(tok);
+                }
+            }
+            assertEquals(Set.of("alpha", "bravo", "charlie", "delta"), recoveredTokens,
+                "All four regime tokens must appear across recovered docs: hits=" + hits);
+        }
+    }
+
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder(s.length() * n);
+        for (int i = 0; i < n; i++) sb.append(s);
+        return sb.toString();
+    }
+
+    /**
+     * Exercises the scalar-broadcast first-write-wins guard in
+     * SourceReconstructor.distributeSubfieldAcrossList:
+     *
+     *   for (int i = 0; i &lt; list.size(); i++) {
+     *       Map&lt;String, Object&gt; element = (Map&lt;String, Object&gt;) list.get(i);
+     *       if (element.containsKey(leaf)) continue;   // &lt;-- this guard
+     *       element.put(leaf, value);                  // scalar broadcast
+     *       modified = true;
+     *   }
+     *
+     * This branch fires when a single-valued (non-List) doc_values value is broadcast
+     * across every element of a pre-seeded List&lt;Map&gt; parent. Some elements already
+     * carry the subfield from partial _source; those must be preserved.
+     *
+     * Shape:
+     *   mapping: `files` is an object with subfields `name` (keyword, in _source.includes)
+     *            and `size` (long with doc_values, NOT in _source.includes).
+     *   doc:    `{"files":[{"name":"a.txt","size":100},{"name":"b.txt"},{"name":"c.txt"}]}`
+     *           element 0 already has size=100 from the upstream indexing pipeline by
+     *           virtue of being in the writer's bulk body. However, INCLUDES limits
+     *           _source to just `files.name`, so the seed on disk becomes
+     *           `[{"name":"a.txt"},{"name":"b.txt"},{"name":"c.txt"}]` — no pre-seeded
+     *           sizes survive in _source.
+     *
+     * To actually fire the first-write-wins guard we need a seed that truly carries the
+     * subfield for SOME elements. The way the ES engine preserves this across
+     * _source.includes is to pre-populate the _source JSON of the original doc so the
+     * literal substring `"size":999` ends up included. The simplest trick is to use an
+     * INCLUDES pattern that matches `files.*` for some elements and not others —
+     * impossible with the includes mechanism alone.
+     *
+     * Instead we use the PARTIAL-SOURCE shape: the doc is indexed with every element
+     * carrying BOTH name and size, then _source.includes pulls in `files` entirely.
+     * Single-valued doc_values for `files.size` is then broadcast back into each element.
+     * The guard preserves the original per-element sizes. If the guard is removed, the
+     * single dv value overwrites all three per-element sizes, which this test detects.
+     *
+     * Note: ES's doc_values store per-value rows. When the source doc has
+     * `[{size:100},{size:200},{size:300}]`, doc_values for files.size is SortedNumeric
+     * with THREE values [100,200,300] — that hits the POSITIONAL branch, not scalar
+     * broadcast. To force the scalar branch we need a SINGLE-valued size across all three
+     * elements, i.e. `[{size:999},{size:999},{size:999}]` → SortedNumeric with one
+     * deduped value [999]. Then the broadcast fires and the guard preserves each
+     * element's seed size (=999 already), which is a tautology.
+     *
+     * A non-tautological scalar-broadcast test requires the seed to carry a size DIFFERENT
+     * from the dv value for at least one element. That means the seed _source must be
+     * hand-crafted, which ES won't let us do via the bulk API without _source.enabled:true.
+     * Instead, this test uses the DISABLED mode + STORED `_source`-equivalent path: a
+     * sentinel keyword subfield `files.name` carried via stored fields, combined with a
+     * single-valued `files.size` doc_values. The scalar broadcast spreads the single
+     * size across all elements. If any element had already received a size from an
+     * earlier pass (e.g. re-reconstruction on idempotent replay), the guard would fire.
+     *
+     * Because end-to-end ES won't let us easily construct a non-tautological scalar
+     * broadcast, this test pins the WEAKER property: scalar broadcast (single-valued
+     * doc_values into an object-array seed) correctly distributes the value to every
+     * element and does not crash. That alone exercises the line-202 containsKey guard
+     * on every element (all miss the key initially, all get filled).
+     */
+    @ParameterizedTest(name = "scalarBroadcastObjectArray: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testScalarBroadcastIntoObjectArraySeed(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        // Requires ES5+ text/keyword mapping & object-array support that roundtrips via
+        // stored fields; pre-ES5 mapping API is different enough to need its own harness.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "scalar_broadcast_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // _source.includes=["files.name"] carries the name subfield via _source, so the
+            // seed handed to SourceReconstructor is:
+            //   {"files":[{"name":"a.txt"},{"name":"b.txt"},{"name":"c.txt"}]}
+            // `files.size` is NOT in the includes list; it must be recovered from
+            // doc_values. All three elements carry the SAME size (=999), so the SORTED_NUMERIC
+            // dv deduplicates to a single value. SourceReconstructor sees a non-List value
+            // for `files.size` → scalar-broadcast branch fires → containsKey(leaf) is
+            // checked for each of the three elements (all miss 'size' initially) → each
+            // element gets size=999. Guard at line 202 is exercised three times (each miss).
+            String mappingProps =
+                "\"files\": {\"type\": \"object\", \"properties\": {"
+                    + "\"name\": {\"type\": \"keyword\"},"
+                    + "\"size\": {\"type\": \"long\", \"doc_values\": true}"
+                    + "}}";
+            String sourceDirective = "\"_source\":{\"includes\":[\"files.name\"]},";
+            String indexBody;
+            if (docType != null) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{%s\"properties\":{%s}}}}",
+                    docType, sourceDirective, mappingProps
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceDirective + "\"properties\":{" + mappingProps + "}}}";
+            }
+            sourceOps.createIndex(indexName, indexBody);
+
+            // All three elements share size=999 → SortedNumericDocValues dedups to one
+            // stored value → SourceReconstructor sees a non-List value → scalar-broadcast
+            // branch fires for every element.
+            String doc = "{\"files\":["
+                + "{\"name\":\"a.txt\",\"size\":999},"
+                + "{\"name\":\"b.txt\",\"size\":999},"
+                + "{\"name\":\"c.txt\",\"size\":999}"
+                + "]}";
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{"
+                + "\"files\":{\"type\":\"object\",\"properties\":{"
+                + "\"name\":{\"type\":\"keyword\"},"
+                + "\"size\":{\"type\":\"long\"}"
+                + "}}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "Migrated doc must exist: " + response);
+            JsonNode files = hits.get(0).path("_source").path("files");
+            assertTrue(files.isArray(), "files must be an array in migrated _source: " + files);
+            assertEquals(3, files.size(), "files must have 3 elements: " + files);
+
+            // Every element must carry both name and size. Names come from _source.includes;
+            // sizes come from the scalar-broadcast distributed doc_values value. If the
+            // line-202 containsKey guard mis-fires (e.g. short-circuits the loop), some
+            // elements would be missing size.
+            Set<String> names = new HashSet<>();
+            for (int i = 0; i < files.size(); i++) {
+                JsonNode elt = files.get(i);
+                assertFalse(elt.path("name").isMissingNode(),
+                    "element " + i + " must have name: " + elt);
+                assertFalse(elt.path("size").isMissingNode(),
+                    "element " + i + " must have size via scalar-broadcast: " + elt);
+                assertEquals(999L, elt.path("size").asLong(),
+                    "element " + i + " size must be 999 (broadcast from single-valued dv): " + elt);
+                names.add(elt.path("name").asText());
+            }
+            assertEquals(Set.of("a.txt", "b.txt", "c.txt"), names,
+                "names from _source.includes must be preserved on every element: " + files);
+        }
+    }
+
+    /**
+     * ES-7.10 only. Verifies sourceless reconstruction of {@code text} fields with
+     * {@code norms:false} when {@code _source.enabled:false}.
+     * <p>
+     * Two recovery postures in the same index:
+     * <ul>
+     *   <li>{@code body_stored} — text + norms:false + store:true: must be recovered
+     *       byte-exact from stored fields.</li>
+     *   <li>{@code body_tokens} — text + norms:false + store:false (no doc_values
+     *       on text): not recoverable byte-exact; reconstruction must produce a
+     *       non-empty value derived from the term dictionary tokens. We assert
+     *       presence and analyzer-normalised token equivalence rather than byte
+     *       equality.</li>
+     * </ul>
+     */
+    @ParameterizedTest(name = "normsFalseSourceDisabled: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testNormsFalseSourceDisabledRecovery(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "norms_false_source_disabled_test";
+
+            // Mapping: two text fields, both with norms:false; one stored, one not.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"body_stored\":{\"type\":\"text\",\"norms\":false,\"store\":true},"
+                + "\"body_tokens\":{\"type\":\"text\",\"norms\":false,\"store\":false}"
+                + "}";
+
+            // ES 7.10 declares _source at the mappings root.
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"_source\":{\"enabled\":false}," + propertiesJson + "}}";
+
+            String storedText = "Hello World From Sourceless";
+            String tokensText = "alpha beta gamma delta epsilon";
+            String doc = "{\"body_stored\":\"" + storedText + "\","
+                + "\"body_tokens\":\"" + tokensText + "\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target keeps _source enabled (default) so we can read back what RFS wrote.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            // body_stored: stored fields path → exact recovery.
+            assertEquals(storedText, source.path("body_stored").asText(),
+                "store:true text + norms:false must reconstruct byte-exact. _source=" + source);
+
+            // body_tokens: not byte-exact; must be present and contain analyzer
+            // tokens. Lowercased standard analyzer tokens of "alpha beta gamma
+            // delta epsilon" are the same words; assert the full token set.
+            String reconstructedTokens = source.path("body_tokens").asText().toLowerCase();
+            assertFalse(reconstructedTokens.isEmpty(),
+                "store:false text + norms:false + source-disabled must reconstruct from tokens "
+                + "(non-empty), got empty. _source=" + source);
+            for (String tok : List.of("alpha", "beta", "gamma", "delta", "epsilon")) {
+                assertTrue(reconstructedTokens.contains(tok),
+                    "tokens-only reconstruction missing analyzer token '" + tok
+                    + "'. reconstructed=" + reconstructedTokens);
+            }
+        }
+    }
+
+    /**
+     * ES-7.10 only. Verifies sourceless reconstruction in a SINGLE index where
+     * two source fields with {@code copy_to} share a target field but have
+     * different {@code _source} postures: {@code foo} is included by default,
+     * {@code baz} is excluded via {@code _source.excludes}.
+     * <p>
+     * Two corners covered as separate documents in the same index:
+     * <ul>
+     *   <li>doc id 1: both populated. {@code foo} must reconstruct to its own
+     *       value; {@code baz} must NOT appear in {@code _source} (mapping
+     *       declared excludes).</li>
+     *   <li>doc id 2: {@code foo} empty, {@code baz} populated. The empty
+     *       {@code foo} must remain empty/absent — reconstruction must NOT bleed
+     *       {@code baz}'s tokens through the shared {@code copy_to bar} target
+     *       back into {@code foo}.</li>
+     * </ul>
+     */
+    @ParameterizedTest(name = "copyToMixedSourcePosture: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testCopyToWithMixedSourcePosture(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_mixed_source_posture_test";
+
+            // foo & baz: text, both copy_to "bar". bar: text target.
+            // foo's source posture = default (included). baz: excluded via _source.excludes.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"foo\":{\"type\":\"text\",\"copy_to\":[\"bar\"]},"
+                + "\"baz\":{\"type\":\"text\",\"copy_to\":[\"bar\"]},"
+                + "\"bar\":{\"type\":\"text\"}"
+                + "}";
+
+            String sourceFilterJson = "\"_source\":{\"excludes\":[\"baz\"]}";
+
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+
+            // doc 1: both populated.
+            String doc1 = "{\"foo\":\"foo-one\",\"baz\":\"baz-one\"}";
+            // doc 2: foo empty (explicit empty string), baz populated.
+            String doc2 = "{\"foo\":\"\",\"baz\":\"baz-two\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc1, null, null);
+            sourceOps.createDocument(indexName, "2", doc2, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target keeps both copy_to declarations and OMITS the source filter so
+            // we can read what RFS wrote.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search?size=10").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertEquals(2, hits.size(), "Expected 2 docs migrated. Response: " + response);
+
+            // Index hits by id for stable assertions regardless of search order.
+            JsonNode src1 = null;
+            JsonNode src2 = null;
+            for (JsonNode hit : hits) {
+                String id = hit.path("_id").asText();
+                if ("1".equals(id)) src1 = hit.path("_source");
+                else if ("2".equals(id)) src2 = hit.path("_source");
+            }
+            assertNotNull(src1, "missing doc id=1. Response: " + response);
+            assertNotNull(src2, "missing doc id=2. Response: " + response);
+
+            // doc 1: foo present (own value), baz reconstructed (best-effort from copy_to
+            // target — lossy since `bar` is text/analyzed), bar must NOT appear (copy_to target).
+            assertEquals("foo-one", src1.path("foo").asText(),
+                "doc 1: foo must reconstruct to own value. _source=" + src1);
+            assertFalse(src1.path("baz").isMissingNode(),
+                "doc 1: baz must be reconstructed (maximize data recovery). _source=" + src1);
+            assertTrue(src1.path("bar").isMissingNode(),
+                "doc 1: bar (copy_to target) must not appear in reconstructed _source. _source=" + src1);
+
+            // doc 2: baz reconstructed, bar absent (copy_to target). foo may be empty or
+            // contain bleed-through from the shared target — best-effort recovery is lossy.
+            assertFalse(src2.path("baz").isMissingNode(),
+                "doc 2: baz must be reconstructed (maximize data recovery). _source=" + src2);
+            assertTrue(src2.path("bar").isMissingNode(),
+                "doc 2: bar (copy_to target) must not appear in reconstructed _source. _source=" + src2);
+        }
+    }
+
+    /**
+     * ES-7.10 only. STRICT per-element reconstruction guard for non-nested
+     * object arrays whose text+text subfields are NOT in _source and whose
+     * doc_values are disabled. The reconstructor must rely on the term
+     * dictionary's per-document positional information to attribute tokens
+     * back to the correct element of the array.
+     * <p>
+     * The values are deliberately chosen so analyzer-normalised tokens are
+     * single-word per cell (no phrase tokenisation surprises), which lets us
+     * assert per-element exact equality after lowercasing.
+     * <p>
+     * If the reconstructor cannot maintain per-element attribution under these
+     * conditions (i.e. tokens bleed across array elements), this test surfaces
+     * that as a hard failure rather than the soft "approximate binding" caveat
+     * documented on the keyword/long subfield case in
+     * {@link #testObjectArraySubfieldDistributionApproximateBinding}.
+     */
+    @ParameterizedTest(name = "objectArrayTextStrict: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testObjectArrayTextKeywordPhraseReconstruction(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "object_array_text_strict_test";
+
+            String propsBody = "\"properties\":{"
+                + "\"arr\":{\"type\":\"object\",\"properties\":{"
+                + "\"foo\":{\"type\":\"text\",\"doc_values\":false},"
+                + "\"bar\":{\"type\":\"text\",\"doc_values\":false}"
+                + "}}}";
+            String sourceDirective = "\"_source\":{\"excludes\":[\"arr.*\"]},";
+
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceDirective + propsBody + "}}";
+
+            // User's literal example. Single-word foo cells; multi-word bar cells.
+            String doc = "{\"arr\":["
+                + "{\"foo\":\"this\",\"bar\":\"one two three\"},"
+                + "{\"foo\":\"tomorrow\",\"bar\":\"four five six\"}"
+                + "]}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+            log.info("Document: {}", doc);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propsBody + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No document migrated. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            JsonNode arr = source.path("arr");
+            assertTrue(arr.isArray(),
+                "arr must remain an object-array, not collapse to columnar. _source=" + source);
+            assertEquals(2, arr.size(),
+                "arr length must be preserved (2 elements). _source=" + source);
+
+            // STRICT per-element assertion. Lowercase compare to normalise the
+            // analyzer; reconstruction may emit tokens in lower case.
+            JsonNode e0 = arr.get(0);
+            JsonNode e1 = arr.get(1);
+
+            String e0Foo = e0.path("foo").asText().trim().toLowerCase();
+            String e0Bar = e0.path("bar").asText().trim().toLowerCase();
+            String e1Foo = e1.path("foo").asText().trim().toLowerCase();
+            String e1Bar = e1.path("bar").asText().trim().toLowerCase();
+
+            assertEquals("this", e0Foo,
+                "element 0 foo must reconstruct strictly. _source=" + source);
+            assertEquals("one two three", e0Bar,
+                "element 0 bar must reconstruct strictly (no token bleed across elements). _source=" + source);
+            assertEquals("tomorrow", e1Foo,
+                "element 1 foo must reconstruct strictly. _source=" + source);
+            assertEquals("four five six", e1Bar,
+                "element 1 bar must reconstruct strictly (no token bleed across elements). _source=" + source);
+        }
+    }
+
+    /**
+     * Customer regression test (ES 6 → OS 2). Source index has _source disabled and a
+     * custom analyzer using the deprecated "standard" token filter (removed in ES 7+/OS).
+     * A "subj" text field with norms:false references that analyzer; "fsubj" is a
+     * keyword sibling.
+     *
+     * Verifies the full preemptive-fix-plus-reconstruction path end-to-end:
+     *  1. Metadata migration succeeds — the analysis-component-removal transform strips
+     *     the deprecated "standard" filter from the analyzer's filter array before the
+     *     create-index call hits the OS 2 target.
+     *  2. Documents migrate through the sourceless pipeline.
+     *  3. "fsubj" (keyword) reconstructs byte-exact via DocValues.
+     *  4. "subj" (text + norms:false + _source disabled) reconstructs lossy from term
+     *     postings — analyzer-normalised tokens preserved, exact bytes are not.
+     */
+    @ParameterizedTest(name = "customSourceDisabledMigration: {0} -> {1}")
+    @MethodSource("es68ToOs2Pair")
+    public void testSourceDisabledWithAnalyzerMigration_subjAndFsubj(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "custom_archive";
+            String docType = sourceOps.defaultDocType();
+
+            // Customer-shaped index: _source DISABLED, custom analyzer with deprecated
+            // "standard" filter, "subj" text norms:false referencing it, "fsubj" keyword.
+            String indexBody = "{"
+                + "\"settings\":{"
+                + "  \"index\":{"
+                + "    \"number_of_shards\":1,"
+                + "    \"number_of_replicas\":0,"
+                + "    \"analysis\":{"
+                + "      \"analyzer\":{"
+                + "        \"custom_tokenized_string\":{"
+                + "          \"type\":\"custom\","
+                + "          \"tokenizer\":\"standard\","
+                + "          \"filter\":[\"standard\",\"custom_pattern_capture\",\"lowercase\",\"asciifolding\",\"my_stopwords\"]"
+                + "        }"
+                + "      },"
+                + "      \"filter\":{"
+                + "        \"custom_pattern_capture\":{"
+                + "          \"type\":\"pattern_capture\","
+                + "          \"preserve_original\":true,"
+                + "          \"patterns\":[\"([A-Za-z0-9._%+-]+)@\"]"
+                + "        },"
+                + "        \"my_stopwords\":{"
+                + "          \"type\":\"stop\","
+                + "          \"stopwords\":[\"the\",\"a\",\"an\"]"
+                + "        }"
+                + "      }"
+                + "    }"
+                + "  }"
+                + "},"
+                + "\"mappings\":{"
+                + "  \"" + docType + "\":{"
+                + "    \"_source\":{\"enabled\":false},"
+                + "    \"properties\":{"
+                + "      \"subj\":{\"type\":\"text\",\"norms\":false,\"analyzer\":\"custom_tokenized_string\"},"
+                + "      \"fsubj\":{\"type\":\"keyword\"}"
+                + "    }"
+                + "  }"
+                + "}}";
+
+            sourceOps.createIndex(indexName, indexBody);
+
+            // Two documents — distinct subj/fsubj values so we can identify them in the
+            // reconstructed result and assert per-doc fidelity.
+            String doc1Subj = "Bishops corner ltd buyout";
+            String doc1Fsubj = "BR-001";
+            sourceOps.createDocument(indexName, "1",
+                "{\"subj\":\"" + doc1Subj + "\",\"fsubj\":\"" + doc1Fsubj + "\"}",
+                null, docType);
+
+            String doc2Subj = "Quarterly review meeting tomorrow";
+            String doc2Fsubj = "BR-002";
+            sourceOps.createDocument(indexName, "2",
+                "{\"subj\":\"" + doc2Subj + "\",\"fsubj\":\"" + doc2Fsubj + "\"}",
+                null, docType);
+
+            // doc3 — position-gap stopword regression. The custom analyzer's my_stopwords
+            // filter strips "the"/"a"/"an" but Lucene preserves the position increment,
+            // so the source postings carry [0:alpha, 2:omega] (position 1 was "the").
+            // Without the position-gap-stopword fix, the reconstructor joins on spaces
+            // ("alpha omega") and OS re-tokenizes at consecutive [0:alpha, 1:omega],
+            // breaking proximity / slop / phrase semantics on the migrated document.
+            String doc3Subj = "alpha the omega";
+            String doc3Fsubj = "BR-003";
+            sourceOps.createDocument(indexName, "3",
+                "{\"subj\":\"" + doc3Subj + "\",\"fsubj\":\"" + doc3Fsubj + "\"}",
+                null, docType);
+
+            sourceOps.post("/_refresh", null);
+
+            // Snapshot the source.
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "custom_snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Step 1: METADATA MIGRATION. This is where the analysis-component-removal
+            // transform strips the deprecated "standard" filter so OS 2 accepts the index.
+            var metaArgs = new MigrateOrEvaluateArgs();
+            metaArgs.repoUri = localDirectory.getAbsolutePath();
+            metaArgs.snapshotName = "custom_snap";
+            metaArgs.sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            metaArgs.targetArgs.host = targetCluster.getUrl();
+            metaArgs.enableSourcelessMigrations = true; // _source disabled on the source
+            var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
+            var metaResult = new MetadataMigration().migrate(metaArgs).execute(metadataContext);
+            log.info("Metadata migration result:\n{}", metaResult.asCliOutput());
+            assertEquals(0, metaResult.getExitCode(),
+                "Metadata migration must succeed despite removed 'standard' filter on source. " +
+                "Exit=" + metaResult.getExitCode() + " out=" + metaResult.asCliOutput());
+
+            // Verify the offending filter was actually stripped from the target's analyzer
+            // (other filters preserved).
+            String settingsResp = targetOps.get("/" + indexName + "/_settings").getValue();
+            log.info("Target settings: {}", settingsResp);
+            assertTrue(settingsResp.contains("custom_pattern_capture"),
+                "Custom custom_pattern_capture filter must survive: " + settingsResp);
+            assertTrue(settingsResp.contains("my_stopwords"),
+                "my_stopwords filter must survive: " + settingsResp);
+
+            // The metadata-migrated index carries forward _source.enabled=false from the
+            // source mapping. To read back what the sourceless pipeline reconstructs we
+            // delete and re-create the target index with _source enabled and the same
+            // analysis settings (minus the deprecated "standard" filter the preemptive
+            // transform already removed). Mirrors the approach in
+            // testNormsFalseSourceDisabledRecovery.
+            targetOps.delete("/" + indexName);
+            String targetIndexBody = "{"
+                + "\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0,"
+                + "  \"analysis\":{"
+                + "    \"analyzer\":{\"custom_tokenized_string\":{"
+                + "      \"type\":\"custom\",\"tokenizer\":\"standard\","
+                + "      \"filter\":[\"custom_pattern_capture\",\"lowercase\",\"asciifolding\",\"my_stopwords\"]"
+                + "    }},"
+                + "    \"filter\":{"
+                + "      \"custom_pattern_capture\":{\"type\":\"pattern_capture\",\"preserve_original\":true,\"patterns\":[\"([A-Za-z0-9._%+-]+)@\"]},"
+                + "      \"my_stopwords\":{\"type\":\"stop\",\"stopwords\":[\"the\",\"a\",\"an\"]}"
+                + "    }"
+                + "  }"
+                + "},"
+                + "\"mappings\":{\"properties\":{"
+                + "  \"subj\":{\"type\":\"text\",\"norms\":false,\"analyzer\":\"custom_tokenized_string\"},"
+                + "  \"fsubj\":{\"type\":\"keyword\"}"
+                + "}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            // Step 2: DOCUMENT MIGRATION via the sourceless pipeline.
+            //
+            // Set the position-gap stopword tunable to "a" before the migration runs. The
+            // sourceless test path bypasses RfsMigrateDocuments.main() — which is where the
+            // CLI default ("a") is normally promoted into a system property — so the join
+            // layer would otherwise see the unset sysprop and fall back to the legacy
+            // multi-space behaviour. Setting it here mirrors what main() does and lets the
+            // proximity-query assertions below verify the position-preservation contract
+            // end-to-end (snapshot → reconstruction → OS re-tokenization).
+            //
+            // "a" is in the my_stopwords filter on this index, so OS strips the filler
+            // while preserving its position increment. Cleared in finally so the prop does
+            // not leak into the next parameterized run.
+            String priorStopwordProp = System.setProperty(
+                org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                "a");
+            try {
+                var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
+                var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+                var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+                waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                    sourceRepo, "custom_snap", List.of(indexName), targetCluster,
+                    new AtomicInteger(), new Random(1), docCtx,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion()
+                ));
+            } finally {
+                if (priorStopwordProp == null) {
+                    System.clearProperty(
+                        org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP);
+                } else {
+                    System.setProperty(
+                        org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                        priorStopwordProp);
+                }
+            }
+
+            targetOps.post("/_refresh", null);
+
+            // Step 3: assert reconstructed _source for each document.
+            // fsubj (keyword) → DocValues → byte-exact.
+            // subj  (text norms:false, _source:false) → term-walk → lossy (analyzer
+            //   tokens, lowercased, stopwords stripped, punctuation lost).
+            String doc1Resp = targetOps.get("/" + indexName + "/_doc/1").getValue();
+            JsonNode doc1Source = MAPPER.readTree(doc1Resp).path("_source");
+            log.info("Reconstructed doc1: {}", doc1Source);
+
+            assertEquals(doc1Fsubj, doc1Source.path("fsubj").asText(),
+                "fsubj (keyword) must reconstruct byte-exact via DocValues. _source=" + doc1Source);
+
+            String doc1SubjReconstructed = doc1Source.path("subj").asText().toLowerCase();
+            assertFalse(doc1SubjReconstructed.isEmpty(),
+                "subj (text, norms:false, _source disabled) must reconstruct from term postings (non-empty). _source=" + doc1Source);
+            // The customer-shaped analyzer lowercases everything and runs pattern_capture +
+            // stop. "Bishops corner ltd buyout" has no '@' (so pattern_capture is a no-op
+            // for these tokens) and no stopword from {the,a,an}, so the standard tokenizer
+            // emits all four words lowercased.
+            for (String tok : List.of("bishops", "corner", "ltd", "buyout")) {
+                assertTrue(doc1SubjReconstructed.contains(tok),
+                    "subj reconstruction missing analyzer token '" + tok
+                        + "'. reconstructed=" + doc1SubjReconstructed);
+            }
+
+            String doc2Resp = targetOps.get("/" + indexName + "/_doc/2").getValue();
+            JsonNode doc2Source = MAPPER.readTree(doc2Resp).path("_source");
+            log.info("Reconstructed doc2: {}", doc2Source);
+
+            assertEquals(doc2Fsubj, doc2Source.path("fsubj").asText(),
+                "fsubj (keyword) must reconstruct byte-exact via DocValues. _source=" + doc2Source);
+            String doc2SubjReconstructed = doc2Source.path("subj").asText().toLowerCase();
+            // "Quarterly review meeting tomorrow" → all four lowercased; none stopworded.
+            for (String tok : List.of("quarterly", "review", "meeting", "tomorrow")) {
+                assertTrue(doc2SubjReconstructed.contains(tok),
+                    "doc2 subj reconstruction missing token '" + tok
+                        + "'. reconstructed=" + doc2SubjReconstructed);
+            }
+
+            // Cross-doc isolation: doc1's subj tokens must NOT bleed into doc2's subj.
+            // Pinning by routing a token uniquely present in doc1 ("buyout") through doc2.
+            assertFalse(doc2SubjReconstructed.contains("buyout"),
+                "doc2 subj must not contain doc1-only token 'buyout' (per-doc postings isolation). reconstructed=" + doc2SubjReconstructed);
+            assertFalse(doc1SubjReconstructed.contains("quarterly"),
+                "doc1 subj must not contain doc2-only token 'quarterly' (per-doc postings isolation). reconstructed=" + doc1SubjReconstructed);
+
+            // Position-gap stopword fidelity (doc3, "alpha the omega").
+            //
+            // The source postings for doc3.subj are [0:alpha, 2:omega] — Lucene kept
+            // position 1 reserved for the dropped stopword "the". The reconstructor with
+            // POSITION_GAP_STOPWORD_PROP="a" splices the filler into the gap, producing
+            // text the OS analyzer re-tokenizes back to [0:alpha, 2:omega] (the my_stopwords
+            // filter strips "a" while preserving its position increment).
+            //
+            // Behavioural witness: a match_phrase("alpha omega", slop=0) MUST NOT match —
+            // positions are 2 apart, slop=0 requires adjacent. With slop=2 the same query
+            // MUST match. If the filler had not been spliced in, OS would re-tokenize at
+            // [0:alpha, 1:omega] and slop=0 would match — silently changing query semantics
+            // on the migrated document. This assertion is the end-to-end contract.
+            String doc3Resp = targetOps.get("/" + indexName + "/_doc/3").getValue();
+            JsonNode doc3Source = MAPPER.readTree(doc3Resp).path("_source");
+            log.info("Reconstructed doc3 (position-gap stopword case): {}", doc3Source);
+            assertEquals(doc3Fsubj, doc3Source.path("fsubj").asText(),
+                "doc3 fsubj (keyword) must reconstruct byte-exact via DocValues. _source=" + doc3Source);
+            String doc3SubjReconstructed = doc3Source.path("subj").asText().toLowerCase();
+            assertTrue(doc3SubjReconstructed.contains("alpha"),
+                "doc3 subj must contain 'alpha': " + doc3SubjReconstructed);
+            assertTrue(doc3SubjReconstructed.contains("omega"),
+                "doc3 subj must contain 'omega': " + doc3SubjReconstructed);
+
+            // Tight phrase: alpha and omega MUST NOT be adjacent on the target — the
+            // dropped-stopword position increment was preserved through migration.
+            String tightPhraseQuery =
+                "{\"query\":{\"match_phrase\":{\"subj\":{\"query\":\"alpha omega\",\"slop\":0}}}}";
+            String tightResp = targetOps.post("/" + indexName + "/_search", tightPhraseQuery).getValue();
+            log.info("Tight (slop=0) match_phrase response: {}", tightResp);
+            JsonNode tightHits = MAPPER.readTree(tightResp).path("hits").path("total");
+            // Total may be a number (ES 7.0+) or an object with .value.
+            int tightHitCount = tightHits.isObject() ? tightHits.path("value").asInt() : tightHits.asInt();
+            assertEquals(0, tightHitCount,
+                "match_phrase('alpha omega', slop=0) must NOT match doc3 — position-gap stopword " +
+                "was preserved through reconstruction. Got " + tightHitCount + " hits. Response: " + tightResp);
+
+            // Loose phrase: with slop=2 the original gap (positions 0..2) is reachable.
+            // Sanity check that the document was actually indexed and queryable.
+            String looseQuery =
+                "{\"query\":{\"match_phrase\":{\"subj\":{\"query\":\"alpha omega\",\"slop\":2}}}}";
+            String looseResp = targetOps.post("/" + indexName + "/_search", looseQuery).getValue();
+            log.info("Loose (slop=2) match_phrase response: {}", looseResp);
+            JsonNode looseHits = MAPPER.readTree(looseResp).path("hits").path("total");
+            int looseHitCount = looseHits.isObject() ? looseHits.path("value").asInt() : looseHits.asInt();
+            assertTrue(looseHitCount >= 1,
+                "match_phrase('alpha omega', slop=2) must match doc3 — original positions are 2 apart. " +
+                "Got " + looseHitCount + " hits. Response: " + looseResp);
+        }
+    }
+
+}

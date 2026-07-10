@@ -3,6 +3,7 @@ Interactive manage Text-UI for workflow CLI.
 interactive tree navigation for status viewing and approval.
 """
 import base64
+import logging
 import os
 import platform
 import subprocess
@@ -20,7 +21,13 @@ from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
 from .tree_state_manager import TreeStateManager
+from .resource_tree_state_manager import RESOURCE_ID_PREFIX
+from ..commands.artifact_store import ArtifactStoreError
+from ..commands.crd_utils import resource_display_name
+from ..commands.show import read_managed_output
 from ..tree_utils import is_approval_node
+
+logger = logging.getLogger(__name__)
 
 TREE_ROOT_ANCHOR = "workflow-tree"
 
@@ -29,6 +36,11 @@ NODE_TYPE_POD = "Pod"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
+DESC_SHOW_OUTPUT = "Show Output"
+PATCH_OUTPUT_STEPS = {
+    "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
+    "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
+}
 
 
 class WorkflowTreeApp(App):
@@ -43,7 +55,8 @@ class WorkflowTreeApp(App):
                  argo_service: ArgoWorkflowInterface,
                  pod_scraper: PodScraperInterface,
                  workflow_waiter: WaiterInterface,
-                 refresh_interval: float):
+                 refresh_interval: float,
+                 resource_view: bool = False):
         super().__init__()
         self.title = f"[{namespace}] {name}"  # override from base
 
@@ -56,10 +69,15 @@ class WorkflowTreeApp(App):
         self._workflow_waiter = workflow_waiter
         self._pod_scraper = pod_scraper
         self._refresh_interval = refresh_interval
+        self._resource_view = resource_view
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
-        self._tree_state = TreeStateManager(on_new_pod=self._pods.observe_node)
+        if resource_view:
+            from .resource_tree_state_manager import ResourceTreeStateManager
+            self._tree_state = ResourceTreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
+        else:
+            self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
         self._logs = LogManager(pod_scraper, namespace)
         self._live = LiveStatusManager(refresh_interval)
 
@@ -103,7 +121,63 @@ class WorkflowTreeApp(App):
     def _refresh_workflow_worker(self) -> None:
         """Worker: Fetch data and route back to main thread."""
         res, data = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_workflow_data, data if res.get('success') else {})
+        workflow_data = data if res.get('success') else {}
+
+        if self._resource_view:
+            sections = self._build_resource_sections(workflow_data)
+            self.call_from_thread(self._handle_resource_data, sections, workflow_data)
+        else:
+            self.call_from_thread(self._handle_workflow_data, workflow_data)
+
+    def _build_resource_sections(self, workflow_data: Dict):
+        """Build resource sections with workflow steps merged (runs in worker thread)."""
+        from ..resource_tree import (
+            build_resource_tree, extract_workflow_steps_by_resource, mark_not_configured_groups,
+        )
+        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        sections = build_resource_tree(self._namespace)
+        if workflow_data and workflow_data.get('status', {}).get('nodes'):
+            tree_nodes = build_nested_workflow_tree(workflow_data)
+            filtered_tree = filter_tree_nodes(tree_nodes)
+            steps = extract_workflow_steps_by_resource(filtered_tree)
+            self._assign_workflow_progress(sections, steps)
+            mark_not_configured_groups(sections, filtered_tree)
+        return sections
+
+    @staticmethod
+    def _assign_workflow_progress(sections, steps):
+        """Attach workflow step subtrees to matching resource nodes."""
+        for resource in (
+            r for section in sections for group in section.groups
+            for r in group.resources
+        ):
+            if resource.name in steps:
+                resource.workflow_progress = steps[resource.name]
+            for child in resource.children:
+                if child.name in steps:
+                    child.workflow_progress = steps[child.name]
+
+    def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
+        """Handle pre-built resource sections on the main thread."""
+        if not sections:
+            self._tree_state.reset(LOADING_ROOT_LABEL)
+            self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
+            return
+
+        new_run_id = workflow_data.get('status', {}).get('startedAt') if workflow_data else None
+        is_restart = self.current_run_id != new_run_id
+
+        if is_restart:
+            self.current_run_id = new_run_id
+            self._pods.clear_cache()
+            self._tree_state.rebuild(sections, workflow_data)
+        else:
+            self._tree_state.update(sections, workflow_data)
+
+        self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+        self.set_timer(self._refresh_interval, self.action_refresh_workflow)
 
     def _handle_workflow_data(self, new_data: Dict, force_reload: bool = False) -> None:
         """The Conductor routes data to the relevant managers."""
@@ -123,9 +197,7 @@ class WorkflowTreeApp(App):
             self._tree_state.update(new_data)
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
-
         self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
-
         self.update_pod_status()
         self._update_dynamic_bindings()
         self.set_timer(self._refresh_interval, self.action_refresh_workflow)
@@ -150,7 +222,12 @@ class WorkflowTreeApp(App):
     def _force_refresh_workflow(self) -> None:
         """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
         res, data = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_workflow_data, data if res.get('success') else {}, True)
+        workflow_data = data if res.get('success') else {}
+        if self._resource_view:
+            sections = self._build_resource_sections(workflow_data)
+            self.call_from_thread(self._handle_resource_data, sections, workflow_data, True)
+        else:
+            self.call_from_thread(self._handle_workflow_data, workflow_data, True)
 
     # --- Event Handlers & Actions ---
 
@@ -163,6 +240,130 @@ class WorkflowTreeApp(App):
         """Get current node data from tree widget's cursor."""
         node = self.tree_root_widget.cursor_node
         return node.data if node and node.data else None
+
+    @staticmethod
+    def _input_parameter(node_data: Dict, name: str) -> Optional[str]:
+        for param in node_data.get('inputs', {}).get('parameters', []):
+            if param.get('name') == name:
+                return param.get('value')
+        return None
+
+    def _collect_managed_output_refs(self):
+        """Collect CR-status output refs for the selected node or descendants.
+
+        Argo Server can read artifacts by current workflow/node/artifact name,
+        but that lookup depends on the workflow CR still existing. `workflow
+        show` is resource-centric so it can read the latest retained output
+        after old workflows have been replaced. Manage follows that same path
+        by using the patch-output steps, whose inputs identify the migration CR
+        and status output key that `show` reads.
+        """
+        tree_node = self.tree_root_widget.cursor_node
+        if not tree_node:
+            logger.info("Show output requested with no selected tree node")
+            return []
+
+        selected_data = tree_node.data or {}
+        logger.info(
+            "Collecting managed output refs from selected node id=%s name=%s type=%s phase=%s",
+            selected_data.get('id'),
+            selected_data.get('display_name') or selected_data.get('displayName'),
+            selected_data.get('type'),
+            selected_data.get('phase'),
+        )
+
+        refs = []
+        stack = [tree_node]
+        while stack:
+            current = stack.pop()
+            data = current.data or {}
+            display_name = data.get('display_name') or data.get('displayName') or ''
+            step_name = display_name.split('(')[0].strip()
+            patch_spec = PATCH_OUTPUT_STEPS.get(step_name)
+            if patch_spec:
+                plural, output_name = patch_spec
+                resource_name = self._input_parameter(data, 'resourceName')
+                if resource_name:
+                    resource_path = resource_display_name(plural, resource_name)
+                    logger.info(
+                        "Found managed output ref patch_step=%s node_id=%s resource=%s output=%s",
+                        step_name,
+                        data.get('id'),
+                        resource_path,
+                        output_name,
+                    )
+                    refs.append((resource_path, output_name))
+                else:
+                    logger.warning(
+                        "Managed output patch step %s node_id=%s had no resourceName input",
+                        step_name,
+                        data.get('id'),
+                    )
+            stack.extend(reversed(current.children))
+        # Fallback for resource nodes: search raw workflow data for patch-output steps
+        # (they may be filtered out of the tree by collect_notable_steps)
+        if not refs and selected_data.get('id', '').startswith(RESOURCE_ID_PREFIX):
+            resource_name = selected_data.get('id', '').removeprefix(RESOURCE_ID_PREFIX)
+            refs = self._find_output_refs_in_workflow_data(resource_name)
+        logger.info("Collected %s managed output ref(s)", len(refs))
+        return refs
+
+    def _find_output_refs_in_workflow_data(self, resource_name: str):
+        """Search raw workflow nodes for patch-output steps matching a resource."""
+        workflow_data = self._tree_state._workflow_data
+        if not workflow_data:
+            return []
+        refs = []
+        for node in (workflow_data.get('status', {}).get('nodes', {}) or {}).values():
+            display_name = node.get('displayName', '')
+            step_name = display_name.split('(')[0].strip()
+            patch_spec = PATCH_OUTPUT_STEPS.get(step_name)
+            if not patch_spec:
+                continue
+            plural, output_name = patch_spec
+            node_resource = self._input_parameter(node, 'resourceName')
+            if node_resource == resource_name:
+                resource_path = resource_display_name(plural, node_resource)
+                refs.append((resource_path, output_name))
+        return refs
+
+    def action_view_output(self) -> None:
+        output_refs = self._collect_managed_output_refs()
+        if not output_refs:
+            logger.info("Show output unavailable because no managed output artifacts were found")
+            self.notify("Output is not available yet", severity="warning")
+            return
+        node = self.current_node_data or {}
+        display_name = node.get('display_name') or node.get('displayName') or self._workflow_name
+        output_texts = []
+        for resource_name, output_name in output_refs:
+            logger.info(
+                "Fetching managed output via CR status namespace=%s resource=%s output=%s",
+                self._namespace,
+                resource_name,
+                output_name,
+            )
+            try:
+                output = read_managed_output(self._namespace, resource_name, output_name)
+                logger.info(
+                    "Managed output fetch succeeded resource=%s output=%s s3_key=%s bytes=%s",
+                    resource_name,
+                    output_name,
+                    output.ref.get('s3Key'),
+                    len(output.content.encode('utf-8')),
+                )
+                output_texts.append((f"{resource_name} / {output_name}", output.content))
+            except ArtifactStoreError as e:
+                logger.warning(
+                    "Managed output unavailable resource=%s output=%s error=%s",
+                    resource_name,
+                    output_name,
+                    e,
+                )
+                self.notify(f"Output unavailable: {resource_name} / {output_name}", severity="error")
+                return
+        logger.info("Opening pager with %s output artifact(s) for display_name=%s", len(output_texts), display_name)
+        self._logs.show_output_texts_in_pager(self, output_texts, display_name, clean=True)
 
     def action_follow_logs(self) -> None:
         if not self.current_node_data or self.current_node_data.get('type') != NODE_TYPE_POD:
@@ -203,6 +404,17 @@ class WorkflowTreeApp(App):
         pod_name = self._pods.get_name(node_data['id'])
         if pod_name:
             self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
+
+    def action_view_resource_logs(self) -> None:
+        """View logs for a migration resource via the workflow log CLI."""
+        node = self.current_node_data
+        if not node or not node.get('resource_path'):
+            return
+        resource_path = node['resource_path']
+        with self.suspend():
+            os.system('clear')
+            cmd = f"workflow log resource {resource_path} | less -R"
+            os.system(cmd)
 
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
@@ -279,19 +491,30 @@ class WorkflowTreeApp(App):
 
         node = self.current_node_data
         if node:
-            node_id = node.get('id')
-            ntype = node.get('type')
-            pod_resolved = self._pods.get_name(node_id) is not None
-
-            if ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
-                self.bind("o", "view_logs", description="View Logs")
-                if node.get('phase') == PHASE_RUNNING:
-                    self.bind("f", "follow_logs", description="Follow Logs")
-                self.bind("c", "copy_pod_name", description="Copy Pod Name")
-            elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
-                self.bind("a", "approve_step", description="Approve")
+            self._bind_node_actions(node)
 
         self.refresh_bindings()
+
+    def _bind_node_actions(self, node: Dict) -> None:
+        """Bind context-sensitive keys for the selected node."""
+        node_id = node.get('id') or ''
+        ntype = node.get('type')
+
+        if node_id.startswith(RESOURCE_ID_PREFIX):
+            self.bind("l", "view_resource_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+        elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
+            self.bind("l", "view_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+            if node.get('phase') == PHASE_RUNNING:
+                self.bind("f", "follow_logs", description="Follow Logs")
+            self.bind("c", "copy_pod_name", description="Copy Pod Name")
+        elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            self.bind("a", "approve_step", description="Approve")
+        elif self._collect_managed_output_refs():
+            self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 
 
 # --- Utilities ---

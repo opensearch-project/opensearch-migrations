@@ -1,12 +1,13 @@
 def call(Map config = [:]) {
     def jobName = config.jobName ?: "solutionsCFNTest"
+    def defaultGitBranch = config.defaultGitBranch ?: 'main'
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: defaultGitBranch, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "sol-integ", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
@@ -34,6 +35,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(periodicCron(jobName))
         }
 
         stages {

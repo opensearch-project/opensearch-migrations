@@ -11,6 +11,8 @@ import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
 import type { ParamRule } from './validation';
 import { convertSort, isMapLike, isSolrDateMathGap, convertSolrDateGap } from './utils';
+import { parseFuncQuery } from '../query-engine/parser/parser';
+import type { FuncNode } from '../query-engine/ast/nodes';
 
 /** Solr query params this feature handles. */
 export const params = ['json.facet'];
@@ -435,6 +437,63 @@ function convertQueryFacet(def: JavaMap): JavaMap {
 
 // endregion
 
+// region Stat (metric) facets
+
+/**
+ * Solr stat function → OpenSearch metric aggregation mapping.
+ *
+ * Solr's json.facet allows shorthand stat facets as plain strings:
+ *   "avg_price": "avg(price)"
+ * These map to OpenSearch metric aggregations:
+ *   "avg_price": { "avg": { "field": "price" } }
+ */
+const STAT_FUNC_MAP: Record<string, string> = {
+  avg: 'avg',
+  sum: 'sum',
+  min: 'min',
+  max: 'max',
+  unique: 'cardinality',
+  hll: 'cardinality',
+  countvals: 'value_count',
+};
+
+/**
+ * Convert a Solr stat facet string (e.g., "avg(price)") to an OpenSearch metric agg.
+ */
+function convertStatFacet(expr: string): JavaMap {
+  const func = parseFuncQuery(expr);
+  return convertFuncToMetricAgg(func);
+}
+
+function convertFuncToMetricAgg(func: FuncNode): JavaMap {
+  // count(*) → value_count on _id (every doc has one, equivalent to doc count)
+  if (func.name === 'count') {
+    const inner = new Map<string, any>();
+    inner.set('field', '_id');
+    return new Map<string, any>([['value_count', inner]]);
+  }
+
+  const osAggType = STAT_FUNC_MAP[func.name];
+  if (!osAggType) {
+    throw new Error(`Unsupported stat function '${func.name}' in json.facet`);
+  }
+
+  if (func.args.length !== 1) {
+    throw new Error(`Stat function '${func.name}' expects exactly 1 argument, got ${func.args.length}`);
+  }
+
+  const arg = func.args[0];
+  if (!('kind' in arg) || arg.kind !== 'field') {
+    throw new Error(`Stat function '${func.name}' expects a field reference argument`);
+  }
+
+  const inner = new Map<string, any>();
+  inner.set('field', arg.name);
+  return new Map<string, any>([[osAggType, inner]]);
+}
+
+// endregion
+
 /** Log a warning for any keys in a facet definition that are not in the known set. */
 function warnUnknownKeys(def: JavaMap, knownKeys: Set<string>, facetType: string): void {
   const unknownKeys: string[] = [];
@@ -498,7 +557,10 @@ export function convertJsonFacets(solrJsonFacet: JavaMap, ctx: RequestContext): 
   const aggs = new Map<string, any>();
   for (const name of solrJsonFacet.keys()) {
     const facetDef = solrJsonFacet.get(name);
-    aggs.set(name, convertSingleFacet(facetDef, ctx));
+    const converted = typeof facetDef === 'string'
+      ? convertStatFacet(facetDef)
+      : convertSingleFacet(facetDef, ctx);
+    aggs.set(name, converted);
   }
   return aggs;
 }

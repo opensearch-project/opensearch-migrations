@@ -10,5 +10,11 @@ fi
 
 contextId="$1"
 
+# Ensure the CDK CLI and the app's dependencies match. The script invokes
+# `npx cdk`, which resolves to the locally-pinned `aws-cdk` in this package's
+# node_modules; running the globally-installed `cdk` can cause cloud-assembly
+# schema mismatches between CLI and library.
+npm ci
+
 export CDK_CLI_COMMAND=deploy
-cdk deploy "*" --c contextId=$contextId --require-approval never --concurrency 5
+npx cdk deploy "*" --c contextId=$contextId --require-approval never --concurrency 5

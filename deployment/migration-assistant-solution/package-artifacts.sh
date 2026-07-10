@@ -38,6 +38,16 @@ echo "Copying solution-manifest.yaml..."
 cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"
 sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
 
+WORKFLOW_SCHEMA_PATH="${WORKFLOW_SCHEMA_PATH:-${PROJECT_ROOT}/workflowMigration.schema.json}"
+if [[ ! -f "${WORKFLOW_SCHEMA_PATH}" ]]; then
+  echo "ERROR: workflow schema not found at ${WORKFLOW_SCHEMA_PATH}." >&2
+  echo "  Generate it first with deployment/k8s/generateWorkflowSchemaArtifact.sh," >&2
+  echo "  or set WORKFLOW_SCHEMA_PATH to an existing workflowMigration.schema.json." >&2
+  exit 1
+fi
+echo "Copying workflow schema from ${WORKFLOW_SCHEMA_PATH}..."
+cp "${WORKFLOW_SCHEMA_PATH}" "${TEMP_DIR}/deployment/global-s3-assets/workflowMigration.schema.json"
+
 touch "${TEMP_DIR}/deployment/regional-s3-assets/test.txt"
 touch "${TEMP_DIR}/deployment/open-source/test.txt"
 

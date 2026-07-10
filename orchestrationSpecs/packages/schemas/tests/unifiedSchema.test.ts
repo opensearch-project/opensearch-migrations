@@ -12,6 +12,12 @@ import {
 
 const strimziFixturePath = path.resolve(__dirname, "fixtures", "strimzi", "minimal-openapi.json");
 
+function getAutoCreateProperties(schema: any) {
+    return schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf
+        .find((branch: any) => branch.properties?.autoCreate)
+        .properties.autoCreate.properties;
+}
+
 const validConfig = {
     sourceClusters: {
         source: {
@@ -88,8 +94,7 @@ describe("unified schema builder", () => {
 
         expect(JSON.stringify({
             mode: schema["x-orchestration-specs-strimzi-schema-mode"],
-            autoCreate: (schema as any).properties.kafkaClusterConfiguration.additionalProperties.anyOf[0]
-                .properties.autoCreate.properties,
+            autoCreate: getAutoCreateProperties(schema),
             defs: {
                 StrimziKafkaSpec: (schema as any).$defs.StrimziKafkaSpec,
                 StrimziKafkaNodePoolSpec: (schema as any).$defs.StrimziKafkaNodePoolSpec,

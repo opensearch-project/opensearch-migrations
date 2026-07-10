@@ -90,13 +90,18 @@ def main():
                         f"exec {' '.join(original_command)}"
                     ]
 
-                # Case 3: Container has neither - use default image entrypoint
+                # Case 3: Container has neither - use the image's ENTRYPOINT.
+                # The searchguard-wrapped elasticsearch image (the only image this
+                # chart deploys as "source") defines ENTRYPOINT as
+                # /usr/local/bin/entrypoint.sh, which execs bin/elasticsearch.
+                # See TrafficCapture/dockerSolution/src/main/docker/
+                # elasticsearchWithSearchGuard/Dockerfile.
                 else:
                     container['command'] = ['sh', '-c']
                     container['args'] = [
                         "unset AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE\n"
                         "unset AWS_CONTAINER_CREDENTIALS_FULL_URI\n"
-                        "exec /usr/local/bin/docker-entrypoint.sh eswrapper"
+                        "exec /usr/local/bin/entrypoint.sh"
                     ]
 
             # Output as JSON directly

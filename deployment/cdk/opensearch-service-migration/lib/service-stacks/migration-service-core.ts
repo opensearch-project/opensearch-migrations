@@ -43,7 +43,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskInstanceCount?: number,
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
-    readonly otelCollectorEnabled?: boolean,
+    readonly otelMetricsCollectorEnabled?: boolean,
+    readonly otelTraceCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
     readonly ephemeralStorageGiB?: number,
     readonly secrets?: Record<string, EcsSecret>
@@ -154,8 +155,13 @@ export class MigrationServiceCore extends Stack {
             });
         }
 
-        if (props.otelCollectorEnabled) {
-            OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName, props.stage);
+        if (props.otelMetricsCollectorEnabled || props.otelTraceCollectorEnabled) {
+            OtelCollectorSidecar.addOtelCollectorContainer(
+                serviceTaskDef,
+                serviceLogGroup.logGroupName,
+                props.stage,
+                props.otelTraceCollectorEnabled
+            );
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {

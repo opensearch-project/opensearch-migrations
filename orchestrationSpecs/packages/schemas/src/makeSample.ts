@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
-import {fullUnwrapType, unwrapSchema, ZOD_OPTIONAL_TYPES} from "./schemaUtilities";
+import {fullUnwrapType, getDescription, unwrapSchema, ZOD_OPTIONAL_TYPES} from "./schemaUtilities";
 
 // Path context for tracking descent through the schema
 export type SchemaPath = string[];
@@ -319,7 +319,7 @@ function schemaToJsonWithComments(
         keys.forEach((key, index) => {
             const fieldSchema = shape[key];
             const fieldCtx = extendPath(ctx, key);
-            const description = fullUnwrapType(fieldSchema).description;
+            const description = getDescription(fieldSchema);
             const typeName = getTypeName(fieldSchema);
             const optional = isOptional(fieldSchema);
             const nextIndent = currentIndent.incrementComment(optional);

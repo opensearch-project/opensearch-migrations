@@ -1,7 +1,10 @@
 package org.opensearch.migrations.transform.shim.netty;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,7 @@ public final class HttpMessageUtil {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
+    private static final TypeReference<List<Object>> LIST_TYPE_REF = new TypeReference<>() {};
 
     private static final Set<String> RESTRICTED_REQUEST_HEADERS = Set.of(
         "host", "content-length", "transfer-encoding", "connection",
@@ -58,7 +62,15 @@ public final class HttpMessageUtil {
         var body = request.content().toString(StandardCharsets.UTF_8);
         if (!body.isEmpty()) {
             var payload = new LinkedHashMap<String, Object>();
-            payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
+            String contentType = request.headers().get(HttpHeaderNames.CONTENT_TYPE);
+            if (contentType != null && contentType.startsWith("application/x-www-form-urlencoded")) {
+                payload.put(JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY,
+                    parseFormEncodedBody(body));
+            } else if (contentType == null || contentType.startsWith("application/json")) {
+                payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
+            } else {
+                payload.put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY, body);
+            }
             map.put(JsonKeysForHttpMessage.PAYLOAD_KEY, payload);
         }
         return map;
@@ -154,7 +166,15 @@ public final class HttpMessageUtil {
     static String extractBodyString(Map<String, Object> map) {
         var payload = (Map<String, Object>) map.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
         if (payload == null) return null;
-        // Prefer inlinedJsonBody — may be a Map (serialize with Jackson) or a String (passthrough)
+        // Prefer inlinedJsonSequenceBodies (NDJSON) when present — used by _bulk-style requests.
+        // Matches the replayer's NettyJsonBodySerializeHandler semantics: one JSON doc per line
+        // with a trailing newline. See OpenSearch _bulk API which requires the trailing newline.
+        var ndjsonBodies = payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
+        if (ndjsonBodies instanceof List) {
+            return serializeNdjson((List<?>) ndjsonBodies);
+        }
+        // inlinedJsonBody may be a Map, a List (top-level JSON array), or a String (passthrough).
+        // Jackson's ObjectMapper handles both Map and List without additional branching.
         var jsonBody = payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
         if (jsonBody != null) {
             if (jsonBody instanceof String) return (String) jsonBody;
@@ -164,19 +184,84 @@ public final class HttpMessageUtil {
                 throw new IllegalStateException("Failed to serialize inlinedJsonBody", e);
             }
         }
+        // Check for form-encoded body — serialize back to form-encoded string
+        var formBody = (Map<String, List<String>>) payload.get(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY);
+        if (formBody != null) {
+            return serializeFormEncodedBody(formBody);
+        }
         // Fallback to inlinedTextBody (String)
         return (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
     }
 
+    private static String serializeFormEncodedBody(Map<String, List<String>> formBody) {
+        var sb = new StringBuilder();
+        for (var entry : formBody.entrySet()) {
+            for (String value : entry.getValue()) {
+                if (!sb.isEmpty()) sb.append('&');
+                sb.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8));
+                sb.append('=');
+                sb.append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+            }
+        }
+        return sb.toString();
+    }
+
+    static Map<String, List<String>> parseFormEncodedBody(String body) {
+        var params = new LinkedHashMap<String, List<String>>();
+        if (body == null || body.isEmpty()) return params;
+        for (String pair : body.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq >= 0 ? URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8) : URLDecoder.decode(pair, StandardCharsets.UTF_8);
+            String value = eq >= 0 ? URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8) : "";
+            params.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
+        }
+        return params;
+    }
+
     /**
-     * Parse a JSON string into a LinkedHashMap if valid JSON object, otherwise return the raw string.
-     * This allows transforms to work with Maps (fast .get()/.set()) instead of parsing JSON in JS.
-     * Only parses JSON objects (starting with '{') — arrays and other types stay as strings.
+     * Serialize a list of JSON values as NDJSON: one JSON document per line, each followed by '\n'
+     * (including the last one). Matches the OpenSearch _bulk API requirement and is semantically
+     * equivalent to the replayer's NettyJsonBodySerializeHandler.serializePayloadList with
+     * addLastNewline=true (i.e. no sibling binary/text body present).
+     */
+    private static String serializeNdjson(List<?> items) {
+        var sb = new StringBuilder();
+        for (var item : items) {
+            try {
+                sb.append(MAPPER.writeValueAsString(item)).append('\n');
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Failed to serialize inlinedJsonSequenceBodies item", e);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Parse a JSON string into a structured value for efficient Map/List access by transforms.
+     * - Objects (starting with '{') → LinkedHashMap
+     * - Arrays (starting with '[')  → List<Object>  (matches replayer JsonAccumulator semantics)
+     * - Anything else or parse failure → raw String (passthrough)
+     *
+     * Storing a top-level array under INLINED_JSON_BODY_DOCUMENT_KEY is aligned with the replayer's
+     * NettyJsonBodyAccumulateHandler, which stores a single top-level JSON value (Map or Object[])
+     * under the same key. Only a stream of multiple top-level JSON values (true NDJSON) maps to
+     * INLINED_NDJSON_BODIES_DOCUMENT_KEY — that ingress path is not handled here (see LIMITATIONS
+     * shortcode NDJSON-INGEST-PARITY).
      */
     private static Object parseJsonOrText(String body) {
-        if (body.isEmpty() || body.charAt(0) != '{') return body;
+        if (body.isEmpty()) return body;
+        var first = body.charAt(0);
+        TypeReference<?> typeRef;
+        if (first == '{') {
+            typeRef = MAP_TYPE_REF;
+        } else if (first == '[') {
+            typeRef = LIST_TYPE_REF;
+        } else {
+            return body;
+        }
         try {
-            return MAPPER.readValue(body, MAP_TYPE_REF);
+            return MAPPER.readValue(body, typeRef);
         } catch (JsonProcessingException ignored) {
             return body;
         }

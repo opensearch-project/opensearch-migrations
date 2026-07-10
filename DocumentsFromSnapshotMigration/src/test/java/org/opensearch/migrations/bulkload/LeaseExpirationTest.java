@@ -160,7 +160,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
             args.snapshotRepoName = SNAPSHOT_NAME + "_repo";
-            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.repoUri = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = esSourceContainer.getUrl();
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
@@ -360,10 +360,16 @@ public class LeaseExpirationTest extends SourceTestBase {
                 var successorItems = parentHits.get(0).path("_source")
                     .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
 
-                // ASSERT: successor checkpoint doc is in early-trigger range
-                Assertions.assertTrue(successorItems.startsWith("geonames__0__"),
+                // ASSERT: successor checkpoint doc is in early-trigger range.  The work-item id is a
+                // base64url(indexName) + "__" + shard + "__" + docId string (see #2880), so decode it
+                // via the canonical parser rather than string-matching a plaintext prefix.
+                var successor = IWorkCoordinator.WorkItemAndDuration.WorkItem
+                    .valueFromWorkItemString(successorItems);
+                Assertions.assertEquals("geonames", successor.getIndexName(),
+                    "Successor should be for index geonames, got: " + successorItems);
+                Assertions.assertEquals(0, (int) successor.getShardNumber(),
                     "Successor should be for shard 0, got: " + successorItems);
-                var checkpointDoc = Integer.parseInt(successorItems.substring("geonames__0__".length()));
+                var checkpointDoc = successor.getStartingDocId();
                 Assertions.assertTrue(checkpointDoc >= 40 && checkpointDoc <= 44,
                     "Checkpoint doc should be 40-44 (early trigger at ~t=45s); got " + checkpointDoc);
             } finally {

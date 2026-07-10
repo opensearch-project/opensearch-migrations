@@ -1,46 +1,4 @@
-version: '3.7'
 services:
-
-
-  prometheus:
-    container_name: prometheus
-    image: mirror.gcr.io/prom/prometheus:v2.53.0
-    networks:
-      - migrations
-    volumes:
-      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--enable-feature=exemplar-storage'
-
-  # Jaeger
-  # Found regression with latest tag not being able to connect to port 4317 on docker startup, reverted to '1' tag
-  # until resolved
-  jaeger:
-    image: mirror.gcr.io/jaegertracing/all-in-one:1.58.1
-    networks:
-      - migrations
-    ports:
-      - "16686:16686"
-      - "4317"
-      - "4318"
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-
-  grafana:
-    image: 'migrations/grafana:latest'
-    networks:
-      - migrations
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./grafana_data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - prometheus
 
   kafka:
     image: mirror.gcr.io/apache/kafka:3.9.1
@@ -49,7 +7,6 @@ services:
     ports:
       - "9092:9092"
     environment:
-      # see https://github.com/apache/kafka/blob/3.7/docker/examples/jvm/single-node/plaintext/docker-compose.yml
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_HOST://kafka:9092,PLAINTEXT://kafka:19092'
@@ -65,6 +22,47 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
 
+  elasticsearch:
+    image: 'migrations/elasticsearch_searchguard:latest'
+    networks:
+      - migrations
+    environment:
+      - discovery.type=single-node
+    ports:
+      - '19200:9200'
+
+  capture-proxy:
+    image: 'migrations/capture_proxy:latest'
+    networks:
+      - migrations
+    ports:
+      - "9200:9200"
+    command:
+      - "--kafkaConnection"
+      - "kafka:9092"
+      - "--destinationUri"
+      - "https://elasticsearch:9200"
+      - "--insecureDestination"
+      - "--listenPort"
+      - "9200"
+      - "--sslCertChainFile"
+      - "/usr/share/captureProxy/config/pub.pem"
+      - "--sslKeyFile"
+      - "/usr/share/captureProxy/config/key.pem"
+    depends_on:
+      - kafka
+      - elasticsearch
+
+  opensearchtarget:
+    image: 'mirror.gcr.io/opensearchproject/opensearch:2.15.0'
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
+    networks:
+      - migrations
+    ports:
+      - "29200:9200"
+
   replayer:
     image: 'migrations/traffic_replayer:latest'
     networks:
@@ -78,18 +76,24 @@ services:
         condition: service_started
       opensearchtarget:
         condition: service_started
-#   command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 --target-uri https://opensearchtarget:9200 --target-username admin --target-password 'myStrongPassword123!' --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://otel-collector:4317  "
-    command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 --target-uri https://opensearchtarget:9200 --target-username admin --target-password 'myStrongPassword123!' --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://otel-collector:4317 --transformer-config '[{\"TypeMappingSanitizationTransformerProvider\":{\"sourceProperties\":{\"version\":{\"major\":7,\"minor\":10}}}}]'"
-  opensearchtarget:
-    image: 'mirror.gcr.io/opensearchproject/opensearch:2.15.0'
-    environment:
-      - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
-    networks:
-      - migrations
-    ports:
-      - "29200:9200"
-
+    command:
+      - "--speedup-factor"
+      - "2"
+      - "--target-uri"
+      - "https://opensearchtarget:9200"
+      - "--target-username"
+      - "admin"
+      - "--target-password"
+      - "myStrongPassword123!"
+      - "--insecure"
+      - "--kafka-traffic-brokers"
+      - "kafka:9092"
+      - "--kafka-traffic-topic"
+      - "logging-traffic-topic"
+      - "--kafka-traffic-group-id"
+      - "logging-group-default"
+      - "--transformer-config"
+      - '[{"TypeMappingSanitizationTransformerProvider":{"sourceProperties":{"version":{"major":7,"minor":10}}}}]'
 
   migration-console:
     image: 'migrations/migration_console:latest'
@@ -98,24 +102,13 @@ services:
     volumes:
       - sharedLogsVolume:/shared-logs-output
       - ./services.yaml:/config/migration_services.yaml
-      # this is a convenience thing for testing -- it should be removed before this makes it to prod.
-      # - ./migrationConsole/lib/console_link:/root/lib/console_link
       - ~/.aws:/root/.aws
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
       - AWS_PROFILE=default
-#    command: ./runTestBenchmarks.sh
-#    Uncomment below to enable Migration Console API in addition to enable in Dockerfile
-#    ports:
-#      - "8000:8000"
-
 
 volumes:
-  sharedComparatorSqlResults:
-    driver: local
   sharedLogsVolume:
-    driver: local
-  grafana_data:
     driver: local
 
 networks:

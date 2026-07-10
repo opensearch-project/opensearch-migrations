@@ -2,9 +2,11 @@ package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -99,6 +101,20 @@ public interface IWorkCoordinator extends AutoCloseable {
     void completeWorkItem(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
+     * Release the lease on a work item without marking it complete, so that another worker can
+     * pick it up immediately.  Intended for the case where the current worker is shutting down
+     * before any progress (i.e. no checkpoint cursor) has been made on the item — staying on the
+     * lease until natural expiration would needlessly block the work.  This is a no-op if the
+     * work item is already completed or if the lease has already rolled to a different worker.
+     * The lease exponent is intentionally left untouched: a release implies the work hasn't
+     * been done yet and the next acquirer should still benefit from any prior backoff signal.
+     */
+    void releaseWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException;
 
     /**
@@ -209,24 +225,33 @@ public interface IWorkCoordinator extends AutoCloseable {
         @Getter
         public static class WorkItem implements Serializable {
             private static final String SEPARATOR = "__";
+            private static final String SHARD_SETUP_SENTINEL = "shard_setup";
+            private static final Base64.Encoder INDEX_NAME_ENCODER = Base64.getUrlEncoder().withoutPadding();
+            private static final Base64.Decoder INDEX_NAME_DECODER = Base64.getUrlDecoder();
+
             String indexName;
             Integer shardNumber;
             Long startingDocId;
 
             public WorkItem(String indexName, Integer shardNumber, Long startingDocId) {
-                if (indexName.contains(SEPARATOR)) {
-                    throw new IllegalArgumentException(
-                            "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + SEPARATOR + "'"
-                    );
-                }
                 this.indexName = indexName;
                 this.shardNumber = shardNumber;
                 this.startingDocId = startingDocId;
             }
 
+            /**
+             * Serializes this work item to the id string stored in the work-coordination index.
+             * The index name is base64url-encoded (no padding) so it cannot collide with the
+             * {@link #SEPARATOR} regardless of what characters the source index name contains
+             * (see opensearch-project/opensearch-migrations#2880).  The {@code shard_setup}
+             * sentinel is preserved verbatim so existing bootstrap logic is unaffected.
+             */
             @Override
             public String toString() {
-                var name = indexName;
+                if (SHARD_SETUP_SENTINEL.equals(indexName) && shardNumber == null && startingDocId == null) {
+                    return SHARD_SETUP_SENTINEL;
+                }
+                var name = INDEX_NAME_ENCODER.encodeToString(indexName.getBytes(StandardCharsets.UTF_8));
                 if (shardNumber != null) {
                     name += SEPARATOR + shardNumber;
                 }
@@ -237,14 +262,21 @@ public interface IWorkCoordinator extends AutoCloseable {
             }
 
             public static WorkItem valueFromWorkItemString(String input) {
-                if ("shard_setup".equals(input)) {
+                if (SHARD_SETUP_SENTINEL.equals(input)) {
                     return new WorkItem(input, null, null);
                 }
                 var components = input.split(SEPARATOR + "+");
                 if (components.length != 3) {
                     throw new IllegalArgumentException("Illegal work item: '" + input + "'");
                 }
-                return new WorkItem(components[0], Integer.parseInt(components[1]), Long.parseLong(components[2]));
+                final String indexName;
+                try {
+                    indexName = new String(INDEX_NAME_DECODER.decode(components[0]), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Illegal work item: '" + input
+                            + "' (index name segment is not valid base64url)", e);
+                }
+                return new WorkItem(indexName, Integer.parseInt(components[1]), Long.parseLong(components[2]));
             }
         }
     }

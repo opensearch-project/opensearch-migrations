@@ -3,12 +3,13 @@ package org.opensearch.migrations.commands;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MetadataTransformationRegistry;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -33,6 +34,8 @@ public abstract class MigratorEvaluatorBase {
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
+    // Keep harmonized with the document worker's RfsMigrateDocuments.SNAPSHOT_READ_FAILED_EXIT_CODE.
+    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
@@ -57,19 +60,22 @@ public abstract class MigratorEvaluatorBase {
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             MetadataTransformationRegistry.logTransformerConfig("User supplied custom transform", transformerConfig);
-            var customTransformInfoBuilder = Transformers.TransformerInfo
+            var userTransformer = MetadataTransformationRegistry.configToTransformer(transformerConfig);
+            var userTransformInfo = Transformers.TransformerInfo
                     .builder()
                     .name("User Supplied Custom Transform")
-                    .descriptionLine("Custom transformation applied from supplied arguments.");
-                if (!versionSpecificCustomTransforms.getTransformerInfos().isEmpty()) {
-                    customTransformInfoBuilder
-                        .descriptionLine("Skipped default version-specific transformations:")
-                        .descriptionLine("(" + versionSpecificCustomTransforms.getTransformerInfos().stream()
-                            .map(Transformers.TransformerInfo::getName).collect(Collectors.joining(", ")) + ")") ;
-                }
-                return Transformers.builder()
-                    .transformer(MetadataTransformationRegistry.configToTransformer(transformerConfig))
-                    .transformerInfo(customTransformInfoBuilder.build())
+                    .descriptionLine("Custom transformation applied from supplied arguments.")
+                    .build();
+            // Auto-applied version-specific transforms (e.g. multi-type mapping union, analysis
+            // compatibility, knn shape fixes) ALWAYS run — a user-supplied transform composes
+            // alongside them rather than replacing them. The version transforms run first so the
+            // user transform sees already-normalized mappings.
+            return Transformers.builder()
+                    .transformer(new FanOutCompositeTransformer(
+                        versionSpecificCustomTransforms.getTransformer(),
+                        userTransformer))
+                    .transformerInfos(versionSpecificCustomTransforms.getTransformerInfos())
+                    .transformerInfo(userTransformInfo)
                     .build();
         }
         return versionSpecificCustomTransforms;
@@ -79,7 +85,6 @@ public abstract class MigratorEvaluatorBase {
         var mapper = new TransformerMapper(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
         var versionTransformer = mapper.getTransformer(
                 awarenessAttributes,
-                arguments.metadataTransformationParams,
                 allowLooseVersionMatches
         );
         var customTransformer = getCustomTransformer(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
@@ -87,6 +92,10 @@ public abstract class MigratorEvaluatorBase {
                 .addArgument(customTransformer.getClass().getSimpleName())
                 .addArgument(versionTransformer.getClass().getSimpleName())
                 .log();
+        // Custom transformers run BEFORE the version transformer. The auto-applied
+        // TypeMappingsSanitizationTransformer (multi-type union) and user-supplied custom
+        // transforms must reshape the index/mappings first so the version rules operate on
+        // already-resolved single-type mappings.
         return Transformers.builder()
                 .transformer(new FanOutCompositeTransformer(customTransformer.getTransformer(), versionTransformer))
                 .transformerInfos(customTransformer.getTransformerInfos())
@@ -105,6 +114,7 @@ public abstract class MigratorEvaluatorBase {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         items.succeedOnEmpty(arguments.succeedOnEmpty);
+        items.allowExistingIndexes(arguments.allowExistingIndexes);
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
         var indexTemplates = new ArrayList<CreationResult>();
@@ -114,6 +124,9 @@ public abstract class MigratorEvaluatorBase {
         items.componentTemplates(metadataResults.getComponentTemplates());
 
         if (metadataResults.fatalIssueCount() == 0) {
+            // Validate sourceless indices before proceeding with migration
+            validateSourcelessIndices(clusters);
+
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
             items.indexes(indexResults.getIndexes());
             items.aliases(indexResults.getAliases());
@@ -156,5 +169,76 @@ public abstract class MigratorEvaluatorBase {
     protected String createUnexpectedErrorMessage(Throwable e) {
         var causeMessage = Optional.of(e).map(Throwable::getCause).map(Throwable::getMessage).orElse(null);
         return "Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage);
+    }
+
+    /**
+     * Classify a failure from the migrate/evaluate flow. A non-retriable snapshot read failure —
+     * the snapshot's repo/global/index metadata could not be read — is mapped to the
+     * dedicated {@link #SNAPSHOT_READ_FAILED_EXIT_CODE} and a labeled message naming the snapshot
+     * path; anything else keeps the generic "unexpected failure" behavior. The detailed cause is
+     * logged here (to the run log); the caller surfaces the summary on stdout (see
+     * {@code MetadataMigration.run}) so it reaches the workflow log / CloudWatch before the process
+     * exits.
+     */
+    protected FailureClassification classifyFailure(Exception e) {
+        var readFailure = SnapshotReadFailures.find(e);
+        if (readFailure != null) {
+            var repo = arguments.repoUri;
+            var message = SnapshotReadFailures.describe(
+                readFailure, arguments.snapshotName, repo, arguments.s3Region);
+            log.atError().setCause(e).setMessage("{}").addArgument(message).log();
+            return new FailureClassification(SNAPSHOT_READ_FAILED_EXIT_CODE, message);
+        }
+        log.atError().setCause(e).setMessage("Unexpected failure").log();
+        return new FailureClassification(UNEXPECTED_FAILURE_CODE, createUnexpectedErrorMessage(e));
+    }
+
+    /** Outcome of {@link #classifyFailure(Exception)}: the process exit code and user-facing message. */
+    protected static class FailureClassification {
+        public final int exitCode;
+        public final String errorMessage;
+
+        public FailureClassification(int exitCode, String errorMessage) {
+            this.exitCode = exitCode;
+            this.errorMessage = errorMessage;
+        }
+    }
+
+    /**
+     * Validates that no selected indices have _source disabled unless --enable-sourceless-migrations is set.
+     * Throws ParameterException if sourceless indices are found without the flag.
+     */
+    protected void validateSourcelessIndices(Clusters clusters) {
+        var metadataFactory = clusters.getSource().getIndexMetadata();
+        var repoDataProvider = metadataFactory.getRepoDataProvider();
+        var skipFilter = FilterScheme.filterByAllowList(arguments.dataFilterArgs.indexAllowlist, FilterScheme.FilterContext.INDEX).negate();
+        var sourcelessIndices = new ArrayList<String>();
+
+        for (var index : repoDataProvider.getIndicesInSnapshot(arguments.snapshotName)) {
+            if (skipFilter.test(index.getName())) {
+                continue;
+            }
+            try {
+                var indexMetadata = metadataFactory.fromRepo(arguments.snapshotName, index.getName());
+                if (indexMetadata.needsSourceReconstruction()) {
+                    sourcelessIndices.add(index.getName());
+                }
+            } catch (Exception e) {
+                log.warn("Could not check _source status for index {}: {}", index.getName(), e.getMessage());
+            }
+        }
+
+        if (!sourcelessIndices.isEmpty() && !arguments.enableSourcelessMigrations) {
+            throw new com.beust.jcommander.ParameterException(
+                "The following indices have _source disabled or partial (includes/excludes): " + sourcelessIndices + ". "
+                + "Document backfill will not be able to migrate these indices without the "
+                + "--enable-sourceless-migrations flag on both metadata migration and backfill commands. "
+                + "With this flag, documents will be reconstructed from stored fields and doc_values."
+            );
+        }
+
+        if (!sourcelessIndices.isEmpty()) {
+            log.info("Sourceless indices detected (--enable-sourceless-migrations is set): {}", sourcelessIndices);
+        }
     }
 }

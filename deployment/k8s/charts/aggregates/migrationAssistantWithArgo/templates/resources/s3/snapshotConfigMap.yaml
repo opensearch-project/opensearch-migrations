@@ -1,4 +1,5 @@
 
+{{- if or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "") }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -8,6 +9,7 @@ metadata:
     workflows.argoproj.io/configmap-type: Parameter
 data:
   AWS_REGION: {{ .Values.aws.region }}
+  USE_LOCAL_STACK: {{ .Values.defaultBucketConfiguration.useLocalStack | quote }}
   {{- if .Values.defaultBucketConfiguration.useLocalStack }}
   ENDPOINT: "localstack://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566"
   ENDPOINT_HTTP: "http://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566"
@@ -21,3 +23,5 @@ data:
   SNAPSHOT_ROLE_ARN: ""
   {{- end }}
   BUCKET_NAME: {{ printf "\"migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
+  BUCKET_URI: {{ printf "\"s3://migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
+{{- end }}

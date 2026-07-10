@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from unittest.mock import MagicMock, patch
 
+from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
     copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
@@ -55,10 +56,15 @@ def mock_workflow_with_pod_and_suspend():
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod",
-                           "phase": PHASE_SUCCEEDED, "children": []},
+                           "phase": PHASE_SUCCEEDED, "children": ["node-1-patch"],
+                           "outputs": {"artifacts": [{"name": "metadataOutput"}]}},
+                "node-1-patch": {"id": "node-1-patch", "displayName": "patchMetadataEvaluateOutput",
+                                 "type": "Pod", "phase": PHASE_SUCCEEDED, "boundaryID": "node-1",
+                                 "children": [],
+                                 "inputs": {"parameters": [{"name": "resourceName", "value": "migration-0"}]}},
                 "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Resource", "phase": PHASE_RUNNING,
                            "children": [],
-                           "templateRef": {"name": "resource-management", "template": "waitforapproval"},
+                           "templateRef": {"name": "resource-management", "template": APPROVAL_TEMPLATE_NAME},
                            "inputs": {"parameters": [{"name": "resourceName", "value": "my-gate"}]}}
             }
         }
@@ -147,7 +153,7 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
         mock_waiter.trigger.reset_mock()
 
         assert await wait_until(pilot, lambda: "Waiting for Workflow" in get_clean_text_label(tree.root))
-        assert mock_waiter.trigger.call_count >= 1
+        assert await wait_until(pilot, lambda: mock_waiter.trigger.call_count >= 1)
 
 
 @pytest.mark.asyncio
@@ -190,9 +196,27 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
         # Test Log Viewing (triggers read_pod and read_pod_log)
         # We check the app's call to _get_pod_logs indirectly via the scraper mocks
         with patch.object(app, "_show_logs_in_pager") as mock_pager_method:
-            await pilot.press("o")
+            await pilot.press("l")
             await pilot.pause()
             mock_pager_method.assert_called_once()
+
+        with patch(
+            "console_link.workflow.tui.workflow_manage_app.read_managed_output"
+        ) as mock_read_output, patch.object(app._logs, "show_output_texts_in_pager") as mock_output_pager:
+            mock_read_output.return_value.content = "archived output"
+            mock_read_output.return_value.ref = {
+                "s3Key": "migration-outputs/snapshotmigration/migration-0/uid/metadataEvaluate/wf.log"
+            }
+            await pilot.press("o")
+            await pilot.pause()
+            mock_read_output.assert_called_once_with(
+                "default", "snapshotmigration.migration-0", "metadataEvaluate"
+            )
+            mock_output_pager.assert_called_once()
+            assert mock_output_pager.call_args.args[1] == [
+                ("snapshotmigration.migration-0 / metadataEvaluate", "archived output")
+            ]
+            assert mock_output_pager.call_args.kwargs == {"clean": True}
 
         # Test Clipboard (triggers external utility)
         with patch("console_link.workflow.tui.workflow_manage_app.copy_to_clipboard", return_value=True) as mock_cp:
@@ -201,6 +225,7 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
             mock_cp.assert_called_once_with("pod-1")
 
         # Test Approval (triggers argo_service.approve_step)
+        await pilot.press("down")  # Move to patch-output child
         await pilot.press("down")  # Move to Suspend (node-2)
         await pilot.pause()
 
@@ -213,6 +238,53 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
         await pilot.pause()
 
         argo_service.approve_step.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_show_output_falls_back_to_artifact_s3_key(mock_workflow_with_pod_and_suspend):
+    workflow = copy.deepcopy(mock_workflow_with_pod_and_suspend)
+
+    k8s_interface = MagicMock(spec=PodScraperInterface(None, None, None))
+    k8s_interface.fetch_pods_metadata.return_value = [
+        {"metadata": {"name": "pod-1", "annotations": {"workflows.argoproj.io/node-id": "node-1"}}}
+    ]
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, workflow)
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=k8s_interface,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+        tree.focus()
+        await pilot.press("down")
+        await pilot.pause()
+
+        with patch("console_link.workflow.tui.workflow_manage_app.read_managed_output") as mock_read_output, \
+                patch.object(app._logs, "show_output_texts_in_pager") as mock_output_pager:
+            mock_read_output.return_value.content = "archived s3 output"
+            mock_read_output.return_value.ref = {
+                "s3Key": "migration-outputs/snapshotmigration/migration-0/uid/metadataEvaluate/wf.log"
+            }
+            await pilot.press("o")
+            await pilot.pause()
+
+            mock_read_output.assert_called_once_with(
+                "default", "snapshotmigration.migration-0", "metadataEvaluate"
+            )
+            mock_output_pager.assert_called_once()
+            assert mock_output_pager.call_args.args[1] == [
+                ("snapshotmigration.migration-0 / metadataEvaluate", "archived s3 output")
+            ]
+            assert mock_output_pager.call_args.kwargs == {"clean": True}
 
 
 @pytest.mark.asyncio

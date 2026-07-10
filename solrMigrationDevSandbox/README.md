@@ -30,7 +30,7 @@ Add `--run-queries` to also execute 160 queries against Solr-direct and the Tran
 
 - Docker & Docker Compose
 - Python 3.11+ with `requests` (`pip install requests`)
-- Java 17 (Amazon Corretto) — only if shim image needs building
+- Java 21 (Amazon Corretto) — only if shim image needs building
 
 ## Endpoints
 

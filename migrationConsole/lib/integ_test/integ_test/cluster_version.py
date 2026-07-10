@@ -38,7 +38,36 @@ ElasticsearchV8_X = ClusterVersion("ES_8.x")
 OpensearchV1_X = ClusterVersion("OS_1.x")
 OpensearchV2_X = ClusterVersion("OS_2.x")
 OpensearchV3_X = ClusterVersion("OS_3.x")
+SolrV6_X = ClusterVersion("SOLR_6.x")
+SolrV7_X = ClusterVersion("SOLR_7.x")
 SolrV8_X = ClusterVersion("SOLR_8.x")
+SolrV9_X = ClusterVersion("SOLR_9.x")
+
+
+def build_combinations(sources, targets):
+    """Return the Cartesian product of the given sources and targets as a list of tuples."""
+    return [(s, t) for s in sources for t in targets]
+
+
+# RFS backfill matrix. OS→OS is out of scope for this matrix today: the
+# workflow surface for OS-source imports isn't exercised the same way as
+# ES-source and would report all-skipped rows.
+RFS_MIGRATION_COMBINATIONS = (
+    build_combinations(
+        [ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
+         ElasticsearchV6_X, ElasticsearchV7_X],
+        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
+)
+
+# CDC migration matrix: Capture and Replay is supported from ES 5.x onwards
+# (not ES 1.x/2.x). OS→OS excluded for the same reason as RFS above.
+CDC_MIGRATION_COMBINATIONS = (
+    build_combinations(
+        [ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X],
+        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
+)
 
 
 def is_incoming_version_supported(limiting_version: ClusterVersion, incoming_version: ClusterVersion):

@@ -4,13 +4,35 @@ import {
     expr,
     makeDirectTypeProxy,
     makeStringTypeProxy,
-    Volume
+    PlainObject,
+    Volume,
+    VolumeMount
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export type ContainerVolumePair = {
     readonly container: Container,
     readonly volumes: Volume[]
 };
+
+export function setupFileSourcesForContainer(
+    fileSourceVolumes: BaseExpression<any[]>,
+    fileSourceVolumeMounts: BaseExpression<any[]>,
+    def: ContainerVolumePair): ContainerVolumePair {
+    const {volumeMounts, ...restOfContainer} = def.container;
+    return {
+        volumes: makeDirectTypeProxy(expr.concatArrays(
+            expr.templateValue(def.volumes as PlainObject[]),
+            fileSourceVolumes
+        )) as Volume[],
+        container: {
+            ...restOfContainer,
+            volumeMounts: makeDirectTypeProxy(expr.concatArrays(
+                expr.templateValue((volumeMounts ?? []) as PlainObject[]),
+                fileSourceVolumeMounts
+            )) as VolumeMount[]
+        }
+    };
+}
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
@@ -94,8 +116,7 @@ export function setupLog4jConfigForContainer(
             {
                 name: LOG4J_CONFIG_VOLUME_NAME,
                 configMap: {
-                    name: makeStringTypeProxy(expr.ternary(
-                        expr.isEmpty(loggingConfigMapName),
+                    name: makeStringTypeProxy(expr.defaultTo(
                         expr.literal(DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME),
                         loggingConfigMapName)),
                     optional: makeDirectTypeProxy(expr.not(customLoggingEnabled))

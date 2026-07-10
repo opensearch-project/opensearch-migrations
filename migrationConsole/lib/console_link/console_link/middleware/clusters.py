@@ -67,7 +67,7 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
         else:
             cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
         r = cluster.call_api(cat_indices_path)
-        return r.json() if as_json else r.content
+        return r.json() if as_json else r.content.decode("utf-8")
     except Exception as e:
         logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
         return f"Error: Unable to perform cat-indices command with message: {e}"
@@ -131,6 +131,24 @@ def _solr_connection_check(cluster: Cluster, r, caught_exception) -> ConnectionR
                             connection_established=False)
 
 
+def _serverless_connection_check(cluster: Cluster) -> ConnectionResult:
+    """Check connectivity to an AOSS serverless collection and detect its type."""
+    collection_type = cluster.detect_serverless_collection_type(skip_root_probe=True)
+    try:
+        cluster.call_api("/_cat/indices", timeout=3)
+    except Exception as e:
+        logger.debug(f"Unable to access AOSS cluster: {cluster} with exception: {e}")
+        return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
+                                connection_established=False)
+    msg = "Successfully connected to serverless collection!"
+    if collection_type == "UNKNOWN":
+        probe_err = getattr(cluster, '_collection_type_probe_error', None) or "unknown error"
+        msg += (f"\n⚠ Warning: Could not detect collection type. "
+                f"The type detection probe failed ({probe_err}). "
+                f"Ensure the migration IAM role has index creation permissions in the AOSS data access policy.")
+    return ConnectionResult(connection_message=msg, connection_established=True)
+
+
 def connection_check(cluster: Cluster) -> ConnectionResult:
     # Probe GET / — mirrors Java getClusterVersion logic.
     # For non-serverless: returns the response directly (avoids a second GET /).
@@ -149,16 +167,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
         return _solr_connection_check(cluster, r, caught_exception)
 
     if caught_exception is None and r is not None and r.status_code == 404:
-        # Serverless — detect collection type (skip root probe, we already know it's 404)
-        cluster.detect_serverless_collection_type(skip_root_probe=True)
-        try:
-            cluster.call_api("/_cat/indices", timeout=3)
-            return ConnectionResult(connection_message="Successfully connected to serverless collection!",
-                                    connection_established=True)
-        except Exception as e:
-            logger.debug(f"Unable to access AOSS cluster: {cluster} with exception: {e}")
-            return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
-                                    connection_established=False)
+        return _serverless_connection_check(cluster)
 
     # Non-serverless — use the response from the probe directly
     if caught_exception is None and r is not None and r.status_code == 200:

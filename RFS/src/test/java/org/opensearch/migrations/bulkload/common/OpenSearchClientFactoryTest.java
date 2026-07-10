@@ -1,7 +1,9 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
@@ -19,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -159,6 +162,29 @@ class OpenSearchClientFactoryTest {
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
         verify(restClient, times(1)).getAsync("", null);
         verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void testGetClusterVersion_RetriesTimedOutRootDetection() {
+        var attempts = new AtomicInteger();
+        when(restClient.getAsync("", null)).thenReturn(Mono.defer(() -> {
+            if (attempts.incrementAndGet() == 1) {
+                return Mono.never();
+            }
+            return Mono.just(new HttpResponse(200, "OK", Map.of(), ROOT_RESPONSE_OS_1_0_0));
+        }));
+
+        var version = ClusterVersionDetector.detect(
+            restClient,
+            Duration.ofMillis(10),
+            Retry.fixedDelay(1, Duration.ofMillis(1))
+        );
+
+        assertThat(version, equalTo(Version.fromString("OS 1.0.0")));
+        assertEquals(2, attempts.get());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
     }
 

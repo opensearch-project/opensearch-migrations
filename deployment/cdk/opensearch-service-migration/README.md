@@ -15,14 +15,14 @@ There are certain requirements for imported and created VPCs used in this soluti
 Docker is used by CDK to build container images. If not installed, follow the steps [here](https://docs.docker.com/engine/install/) to set up. Later versions are recommended.
 ###### Git
 Git is used by the opensearch-migrations repo to fetch associated repositories. Steps to set up can be found [here](https://github.com/git-guides/install-git).
-###### Java 11
-Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 11.
+###### Java 21
+Java is used by the opensearch-migrations repo and Gradle, its associated build tool. The current required version is Java 21.
 
 ### Project required setup
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README
+2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README:
 ```shell
 ./buildDockerImages.sh
 ```
@@ -63,6 +63,8 @@ Update the file named `cdk.context.json` in this directory to select migration o
 This project uses CDK context parameters to configure deployments. These context values will dictate the composition of your stacks as well as which stacks get deployed.
 
 The full list of available configuration options for this project are listed [here](./options.md). Each option can be provided as an empty string `""` or simply not included, and in each of these 'empty' cases the option will use the project default value (if it exists) or CloudFormation's default value.
+
+OpenTelemetry is split by signal. `otelMetricsCollectorEnabled` defaults to `true` and starts the ECS sidecar with a metrics-only AWS collector configuration that exports to CloudWatch. `otelTraceCollectorEnabled` defaults to `false`; set it to `true` to pass trace endpoints to the migration services, create the X-Ray VPC endpoint for new VPCs, and use the sidecar configuration that exports traces to AWS X-Ray. The legacy `otelCollectorEnabled` context key is still accepted as an explicit compatibility override for both signals.
 
 Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
 1. CDK CLI passed context values, e.g. --c stage=dev2 (highest precedence)

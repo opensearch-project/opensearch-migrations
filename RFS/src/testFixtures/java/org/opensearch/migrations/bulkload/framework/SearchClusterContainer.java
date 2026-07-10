@@ -35,6 +35,7 @@ import org.testcontainers.utility.MountableFile;
  */
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
+    private static final int STARTUP_ATTEMPTS = Integer.getInteger("searchClusterContainer.startupAttempts", 3);
 
     /**
      * These settings must be injected via elasticsearch.yml for ES 5.0–5.4.
@@ -85,6 +86,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         merged.putAll(overrides);
         return Collections.unmodifiableMap(merged);
     }
+
+    public static final ContainerVersion ES_V9_1 = Elasticsearch9Version.fromTag("9.1.5");
+    public static final ContainerVersion ES_V9_0 = Elasticsearch9Version.fromTag("9.0.8");
 
     public static final ContainerVersion ES_V8_19 = Elasticsearch8Version.fromTag("8.19.11");
     public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.8");
@@ -370,7 +374,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             builder = builder.withCopyToContainer(Transferable.of(overrideFile.getContents()), overrideFile.getFilePath());
         }
 
-        builder.withEnv(version.getInitializationType().getEnvVariables())
+        builder.withStartupAttempts(STARTUP_ATTEMPTS)
+            .withEnv(version.getInitializationType().getEnvVariables())
             .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         this.containerVersion = version;
@@ -385,7 +390,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                                         version.getInitializationType().getEnvVariables()).putAll(
                                         supplementaryEnvVariables
                                     ).build();
-        builder.withEnv(combinedEnvVariables)
+        builder.withStartupAttempts(STARTUP_ATTEMPTS)
+                .withEnv(combinedEnvVariables)
                 .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
         this.containerVersion = version;
     }
@@ -393,10 +399,17 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public void copySnapshotData(final String directory) {
         try {
-            // Execute command to list all files in the directory
-            // `find` is not available on some versions of the containers, in which case it falls back to a ls/grep loop.
-            final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f" + " || " +
-                    "for dir in $(ls -1 -R " + CLUSTER_SNAPSHOT_DIR + " | grep ':' | sed 's/://g'); do for file in $(ls -1 $dir); do if [ -f \"$dir/$file\" ]; then echo \"$dir/$file\"; fi; done; done");
+            // List all files in the snapshot directory using ls -R; find is not available on all container images.
+            // ls -R with an absolute path outputs directory headers as "/path/to/dir:" followed by bare filenames.
+            // The while-read loop reconstructs full paths and filters to files only.
+            final var result = this.execInContainer("sh", "-c",
+                "ls -1 -R " + CLUSTER_SNAPSHOT_DIR + " 2>/dev/null | " +
+                "while IFS= read -r line; do " +
+                "case \"$line\" in " +
+                "*:) d=\"${line%:}\";; " +
+                "?*) [ -n \"$d\" ] && [ -f \"$d/$line\" ] && echo \"$d/$line\";; " +
+                "esac; " +
+                "done");
             log.debug("Process Exit Code: " + result.getExitCode());
             log.debug("Standard Output: " + result.getStdout());
             log.debug("Standard Error : " + result.getStderr());
@@ -418,15 +431,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     public void putSnapshotData(final String directory) {
+        putSnapshotData(directory, CLUSTER_SNAPSHOT_DIR);
+    }
+
+    public void putSnapshotData(final String directory, final String containerPath) {
         try {
-            this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
             var user = this.containerVersion.user;
             executeAndLog(ExecConfig.builder()
-                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR})
+                .command(new String[] {"sh", "-c", "mkdir -p " + containerPath})
+                .user("root")
+                .build());
+            this.copyFileToContainer(MountableFile.forHostPath(directory), containerPath);
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + containerPath})
                 .user("root")
                 .build());
             executeAndLog(ExecConfig.builder()
-                .command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR})
+                .command(new String[] {"sh", "-c", "chmod -R 777 " + containerPath})
                 .user("root")
                 .build());
         } catch (final Exception e) {
@@ -539,6 +560,20 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchVersion(imageName, version);
+        }
+    }
+
+    public static class Elasticsearch9Version extends ContainerVersion {
+        public Elasticsearch9Version(String imageName, Version version) {
+            // ES 9 reuses the ELASTICSEARCH_8 init flavor — same xpack security toggles,
+            // cluster.name, node.name, etc. When ES 9 requires new config (e.g. entitlements
+            // runtime, geoip updater), add an ELASTICSEARCH_9 flavor.
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
+        }
+        public static Elasticsearch9Version fromTag(String tag) {
+            String imageName = "custom-elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch9Version(imageName, version);
         }
     }
 

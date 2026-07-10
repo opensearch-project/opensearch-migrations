@@ -15,6 +15,13 @@ from console_link.workflow.commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 logger = logging.getLogger(__name__)
 
 _LABEL_CACHE_TTL = 120
+_FILTER_OPTION_LABELS = {
+    'source': 'source',
+    'target': 'target',
+    'snapshot': 'snapshot',
+    'task': 'task',
+    'from_snapshot_migration': 'from-snapshot-migration',
+}
 
 
 def _camel_to_kebab(name: str) -> str:
@@ -115,87 +122,43 @@ def _get_cached_label_data(ctx):
         return {}, []
 
 
-def _is_valid_combo(suggestion: str, valid_combos: list) -> bool:
-    """Check if suggestion labels are a subset of any valid combo."""
-    # Parse suggestion into set of (key, value) tuples
-    suggestion_set = set()
-    for part in suggestion.split(","):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            suggestion_set.add((k, v))
+def complete_label_value(label_key):
+    """Build a Click value completer for a known workflow log label."""
+    def complete(ctx, _, incomplete):
+        all_labels, valid_combos = _get_cached_label_data(ctx)
+        selected_pairs = _get_selected_filter_pairs(ctx, exclude_key=label_key)
+        completions = []
 
-    # Check if this is a subset of any valid combo
-    return any(suggestion_set <= combo for combo in valid_combos)
+        for value in sorted(all_labels.get(label_key, set())):
+            if not value.startswith(incomplete):
+                continue
+            if _is_valid_label_combo(selected_pairs + [(label_key, value)], valid_combos):
+                completions.append(CompletionItem(value))
 
+        return completions[:20]
 
-def get_label_completions(ctx, _, incomplete):
-    """Handles label completions showing key=value pairs and combinations."""
-    prefix, active_part = _split_incomplete_path(incomplete)
-    selected_keys = _get_selected_keys(prefix)
-    all_labels, valid_combos = _get_cached_label_data(ctx)
-
-    suggestions = []
-
-    if "=" in active_part:
-        # User has typed "key=" or "key=val"
-        key, val_prefix = active_part.split("=", 1)
-        suggestions = _get_value_completions(prefix, key, val_prefix, selected_keys, all_labels, valid_combos)
-    else:
-        # User is typing a new key
-        suggestions = _get_key_completions(prefix, active_part, selected_keys, all_labels, valid_combos)
-
-    return [CompletionItem(s) for s in suggestions[:20]]
+    return complete
 
 
-def _split_incomplete_path(incomplete):
-    """Splits 'k1=v1,k2' into ('k1=v1,', 'k2')."""
-    if "," in incomplete:
-        prefix, active = incomplete.rsplit(",", 1)
-        return f"{prefix},", active
-    return "", incomplete
-
-
-def _get_selected_keys(prefix):
-    """Extracts keys already present in the prefix to avoid duplicates."""
-    keys = set()
-    if not prefix:
-        return keys
-    for part in prefix.rstrip(",").split(","):
-        if "=" in part:
-            keys.add(part.split("=", 1)[0])
-    return keys
-
-
-def _get_value_completions(prefix, key, val_prefix, selected_keys, all_labels, valid_combos):
-    """Generates suggestions for values and possible next-label extensions."""
-    results = []
-    values = all_labels.get(key, set())
-
-    for v in sorted(values):
-        if not v.startswith(val_prefix):
+def _get_selected_filter_pairs(ctx, exclude_key=None):
+    pairs = []
+    for param_name, label_key in _FILTER_OPTION_LABELS.items():
+        if label_key == exclude_key:
             continue
+        value = ctx.params.get(param_name)
+        if value:
+            pairs.append((label_key, value))
 
-        base = f"{prefix}{key}={v}"
-        if _is_valid_combo(base, valid_combos):
-            results.append(base)
-
-        # Look ahead for next possible key-value pairs
-        for next_key, next_vals in sorted(all_labels.items()):
-            if next_key != key and next_key not in selected_keys:
-                for nv in sorted(next_vals):
-                    extended = f"{base},{next_key}={nv}"
-                    if _is_valid_combo(extended, valid_combos):
-                        results.append(extended)
-    return results
+    for selector in ctx.params.get('labels', ()) or ():
+        if not isinstance(selector, str) or '=' not in selector:
+            continue
+        key, value = selector.split('=', 1)
+        if key != exclude_key and value:
+            pairs.append((key, value))
+    return pairs
 
 
-def _get_key_completions(prefix, active_part, selected_keys, all_labels, valid_combos):
-    """Generates initial key=value suggestions for keys not yet selected."""
-    results = []
-    for key, values in sorted(all_labels.items()):
-        if key.startswith(active_part) and key not in selected_keys:
-            for v in sorted(values):
-                suggestion = f"{prefix}{key}={v}"
-                if _is_valid_combo(suggestion, valid_combos):
-                    results.append(suggestion)
-    return results
+def _is_valid_label_combo(pairs, valid_combos):
+    if not valid_combos:
+        return True
+    return any(set(pairs) <= combo for combo in valid_combos)

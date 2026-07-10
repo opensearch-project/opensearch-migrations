@@ -61,6 +61,17 @@ public class WorkCoordinatorTest {
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
 
+    /**
+     * Helper that mirrors the production encoding: build a serialized work-item id from a
+     * human-readable (indexName, shardNumber, startingDocId) triple via
+     * {@link IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()}.  Use this in tests
+     * instead of hand-concatenating {@code "name__0__0"} strings so the fixtures survive
+     * changes to the serialization format (see opensearch-project/opensearch-migrations#2880).
+     */
+    private static String workId(String indexName, int shardNumber, long startingDocId) {
+        return new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexName, shardNumber, startingDocId).toString();
+    }
+
     private Supplier<AbstractedHttpClient> httpClientSupplier;
 
     @BeforeEach
@@ -131,8 +142,7 @@ public class WorkCoordinatorTest {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
-                var newWorkItem = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(docId + "__0__0");
-                workCoordinator.createUnassignedWorkItem(newWorkItem.toString(), testContext::createUnassignedWorkContext);
+                workCoordinator.createUnassignedWorkItem(workId(docId, 0, 0L), testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
@@ -178,7 +188,7 @@ public class WorkCoordinatorTest {
                     IntStream.range(0, NUM_DOCS)
                             .mapToObj(i -> CompletableFuture.supplyAsync(() -> {
                                 try {
-                                    return workCoordinator.createUnassignedWorkItem("R__0__" + i, testContext::createUnassignedWorkContext);
+                                    return workCoordinator.createUnassignedWorkItem(workId("R", 0, i), testContext::createUnassignedWorkContext);
                                 } catch (IOException e) {
                                     throw new RuntimeException(e);
                                 }
@@ -250,6 +260,105 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
+    public void testReleaseWorkItemAllowsImmediateReacquisition(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Models the "shutdown before any docs migrated" scenario: worker A acquires the
+        // lease, makes no progress (no cursor / no successor possible), and releases the lease
+        // on shutdown.  Worker B should then be able to pick the same work item up immediately
+        // rather than waiting for the original lease to expire.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        // Long lease so that "expires naturally" is clearly not what's letting reacquisition succeed.
+        var longLease = Duration.ofSeconds(600);
+
+        try (var workerA = factory.get(httpClientSupplier.get(), 3600, "workerA")) {
+            var outcome = workerA.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+            var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+            Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+
+            // Sanity: another worker cannot grab this work item while workerA holds the lease.
+            try (var blocked = factory.get(httpClientSupplier.get(), 3600, "blocked")) {
+                var blockedOutcome = blocked.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+                Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, blockedOutcome);
+            }
+
+            workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+        }
+
+        // workerB should now be able to immediately re-acquire the same work item.
+        try (var workerB = factory.get(httpClientSupplier.get(), 3600, "workerB")) {
+            var outcome = workerB.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+            var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+            Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testReleaseWorkItemIsNoopIfLeaseRolledOver(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // If workerA's lease has already expired and workerB has picked the item up, a late
+        // releaseWorkItem call from workerA must NOT clobber workerB's lease — otherwise we
+        // could hand the same item to a third worker while workerB is still working on it.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        var shortLease = Duration.ofSeconds(2);
+
+        try (var workerA = factory.get(httpClientSupplier.get(), 3600, "workerA")) {
+            workerA.acquireNextWorkItem(shortLease, testContext::createAcquireNextItemContext);
+            // Wait out the lease so workerB can take over.
+            Thread.sleep(shortLease.plusSeconds(1).toMillis());
+
+            try (var workerB = factory.get(httpClientSupplier.get(), 3600, "workerB")) {
+                var bOutcome = workerB.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+                Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, bOutcome);
+
+                // workerA finally tries to release the item it had; should be a no-op.
+                workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+
+                // A third worker must not be able to acquire — workerB still owns it.
+                try (var workerC = factory.get(httpClientSupplier.get(), 3600, "workerC")) {
+                    var cOutcome = workerC.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+                    Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, cOutcome);
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testReleaseWorkItemIsNoopIfAlreadyCompleted(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Defensive: if a release call races against (or follows) completion, it must not
+        // resurrect a completed work item by clearing fields the script doesn't gate on.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        try (var worker = factory.get(httpClientSupplier.get(), 3600, "worker")) {
+            worker.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+            worker.completeWorkItem(workItemId, testContext::createCompleteWorkContext);
+            // Release after completion — should be a no-op.
+            worker.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+            Assertions.assertFalse(worker.workItemsNotYetComplete(testContext::createItemsPendingContext));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
     public void testAddSuccessorWorkItems(SearchClusterContainer.ContainerVersion version) throws Exception {
         setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
@@ -258,8 +367,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R__0__" + i;
-                workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+                workCoordinator.createUnassignedWorkItem(workId("R", 0, i), testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
@@ -278,7 +386,7 @@ public class WorkCoordinatorTest {
 
                 var successorWorkItems = new ArrayList<String>();
                 for (int j = 0; j < NUM_SUCCESSOR_ITEMS; j++) {
-                    successorWorkItems.add("successor__" + i + "__" + j);
+                    successorWorkItems.add(workId("successor", i, j));
                 }
 
                 workCoordinator.createSuccessorWorkItemsAndMarkComplete(
@@ -327,7 +435,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R__0__" + i;
+                final var docId = workId("R", 0, i);
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -360,9 +468,9 @@ public class WorkCoordinatorTest {
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         var docId = "R0";
-        var initialWorkItem = docId + "__0__0";
+        var initialWorkItem = workId(docId, 0, 0);
         var N_SUCCESSOR_ITEMS = 3;
-        var successorItems = (ArrayList<String>) IntStream.range(1, N_SUCCESSOR_ITEMS + 1).mapToObj(i -> docId + "__0__" + i).collect(Collectors.toList());
+        var successorItems = (ArrayList<String>) IntStream.range(1, N_SUCCESSOR_ITEMS + 1).mapToObj(i -> workId(docId, 0, i)).collect(Collectors.toList());
 
         var originalWorkItemExpiration = Duration.ofSeconds(5);
         final var seenWorkerItems = new ConcurrentHashMap<String, String>();
@@ -420,7 +528,7 @@ public class WorkCoordinatorTest {
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         var docId = "R0";
-        var initialWorkItem = docId + "__0__0";
+        var initialWorkItem = workId(docId, 0, 0);
         var N_SUCCESSOR_ITEMS = 3;
         var successorItems = (ArrayList<String>) IntStream.range(0, N_SUCCESSOR_ITEMS).mapToObj(i -> docId + "_successor_" + i).collect(Collectors.toList());
 
@@ -454,8 +562,8 @@ public class WorkCoordinatorTest {
         // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
-        var initialWorkItem = "R0__0__0";
-        var successorItems = new ArrayList<>(List.of("R0__0__0", "R1__0__0", "R2__0__0"));
+        var initialWorkItem = workId("R0", 0, 0);
+        var successorItems = new ArrayList<>(List.of(workId("R0", 0, 0), workId("R1", 0, 0), workId("R2", 0, 0)));
 
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "successorTest")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -490,9 +598,13 @@ public class WorkCoordinatorTest {
                 false
         );
         ArrayList<String> successorWorkItems = new ArrayList<>();
+        var parent = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
         for (int j = 0; j < numSuccessorItems; j++) {
-            // Replace "__" with "_" in workerId to create a unique name
-            successorWorkItems.add(workItemId.replace("__", "_") + "__0__" + j);
+            // Build a unique successor id that incorporates the parent's full identity so
+            // concurrent parents don't collide; route through the production encoder rather
+            // than hand-concatenating the serialized format.
+            var successorIndex = parent.getIndexName() + "-p" + parent.getStartingDocId() + "-s" + j;
+            successorWorkItems.add(workId(successorIndex, 0, j));
         }
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, workerName)) {
             workCoordinator.createSuccessorWorkItemsAndMarkComplete(
@@ -530,7 +642,7 @@ public class WorkCoordinatorTest {
                 3600, workerName
             )
         ) {
-            var doneId = DUMMY_FINISHED_DOC_ID + "__" + nonce.incrementAndGet() + "__0";
+            var doneId = workId(DUMMY_FINISHED_DOC_ID + "-" + nonce.incrementAndGet(), 0, 0);
             if (placeFinishedDoc) {
                 workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
                 workCoordinator.completeWorkItem(doneId, testContext::createCompleteWorkContext);

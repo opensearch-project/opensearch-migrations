@@ -19,7 +19,7 @@ def jsDistDir = "${buildDir}/dist"
 
 tasks.register('installDependencies', NpmTask) {
     description = "Install Node.js dependencies"
-    args = ['install']
+    args = ['ci']
 }
 
 tasks.register('test', NpmTask) {

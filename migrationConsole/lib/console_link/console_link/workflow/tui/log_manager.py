@@ -62,6 +62,39 @@ class LogManager:
             if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
 
+    def show_output_texts_in_pager(self, app, outputs: List[tuple[str, str]], display_name: str,
+                                   clean: bool = False) -> None:
+        """Open already-fetched archived output text in the pager."""
+        temp_path = None
+        try:
+            if clean:
+                text = []
+                for idx, (_title, content) in enumerate(outputs):
+                    if idx:
+                        text.append("\n")
+                    text.append(content.rstrip("\n"))
+                    text.append("\n")
+            else:
+                text = [f"=== Output: {display_name} ===\n"]
+                for title, content in outputs:
+                    text.append(f"\n\n### {title}\n")
+                    text.append(content)
+
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
+                f.write("".join(text))
+                temp_path = f.name
+
+            with app.suspend():
+                os.system('clear')
+                pager = os.environ.get('PAGER', 'less -qqR')
+                subprocess.run(pager.split() + [temp_path])
+
+        except Exception as e:
+            app.notify(f"Output Error: {e}", severity="error")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
     def _get_pod_logs(self, pod_name: str) -> str:
         """Internal helper to aggregate logs from all containers in a pod."""
         try:

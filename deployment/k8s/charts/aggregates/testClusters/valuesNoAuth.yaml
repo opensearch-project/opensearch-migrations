@@ -1,0 +1,86 @@
+# No-auth preset for testClusters (local / kind / in-cluster dev).
+#
+# Layer this on top of values.yaml to run BOTH the ES source and the OS target
+# with all authentication disabled and HTTP (no TLS) on 9200. Clients can hit
+# either cluster with plain `curl http://<host>:9200/...` — no -u, no -k.
+#
+# Usage:
+#   helm upgrade --install tc . -f values.yaml -f valuesNoAuth.yaml
+#
+# On EKS, use valuesEksNoAuth.yaml (which layers AFTER valuesEks.yaml) instead.
+#
+# What this changes vs values.yaml:
+#   ES source:
+#     - Drops the SearchGuard demo config from elasticsearch.yml
+#     - Switches protocol/probes from https to http, removes `-u admin:admin`
+#   OS target:
+#     - Sets plugins.security.disabled: true via config.opensearch.yml
+#     - Disables the securityConfig init that runs securityadmin.sh
+
+source:
+  protocol: http
+  createCert: false
+
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "docker-cluster"
+      network.host: 0.0.0.0
+      xpack.security.enabled: false
+      xpack.ml.enabled: false
+      # SearchGuard is shipped in this image; disable it since auth is off.
+      searchguard.disabled: true
+      cluster.routing.allocation.disk.threshold_enabled: false
+      node.max_local_storage_nodes: 3
+      discovery.type: single-node
+
+      s3.client.default.endpoint: "http://localstack:4566"
+      s3.client.default.path_style_access: true
+
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9200/_cluster/health)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9200/_cluster/health?timeout=5s)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+target:
+  # opensearch-project/opensearch chart 2.32.0
+  securityConfig:
+    enabled: false
+  config:
+    opensearch.yml: |
+      cluster.name: opensearch-cluster
+      network.host: 0.0.0.0
+      plugins.security.disabled: true

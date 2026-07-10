@@ -86,12 +86,25 @@ function parseParams(uri: string): URLSearchParams {
   return new URLSearchParams(q >= 0 ? uri.slice(q + 1) : '');
 }
 
-/** Extract body Map from a Java Map payload. Returns the inlinedJsonBody Map directly — no parsing. */
+/**
+ * Extract body from a Java Map payload.
+ *
+ * Returns one of:
+ *   - a JavaMap  (JSON object body — the common case)
+ *   - a List-like  (top-level JSON array body — e.g. /update/json/docs bulk ingest,
+ *                   matches replayer JsonAccumulator semantics where a top-level
+ *                   array is a valid single top-level JSON value)
+ *   - an empty Map (no payload, or non-JSON content)
+ *
+ * Transforms that care about the shape should use isMapLike / isJavaList guards.
+ */
 function getBodyMap(payload: JavaMap): JavaMap {
   if (!payload) return new Map();
   const jsonBody = payload.get('inlinedJsonBody');
-  if (jsonBody && typeof jsonBody.get === 'function') return jsonBody;
-  // Fallback: if body is a string (non-JSON content), return empty map
+  if (!jsonBody) return new Map();
+  // Map-shaped (typical JSON object) — return as-is
+  if (typeof jsonBody.get === 'function') return jsonBody;
+  // Fallback: non-Map (e.g. raw string from malformed body) — return empty map
   return new Map();
 }
 

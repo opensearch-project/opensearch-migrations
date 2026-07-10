@@ -548,7 +548,11 @@ public abstract class OpenSearchClient {
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
                         return Mono.just(resp);
                     }
-                    log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
+                    log.atInfo()
+                        .setMessage("Bulk response on index '{}' contains errors: {}")
+                        .addArgument(indexName)
+                        .addArgument(() -> truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
+                        .log();
 
                     // Allow lazy initialization of pendingOps (e.g., raw→ops conversion)
                     preCompactHook.run();

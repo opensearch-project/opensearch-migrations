@@ -5,13 +5,62 @@
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
 #
-# Can be run standalone or sourced by aws-bootstrap.sh (which calls
+# Can be run standalone or sourced by the migration-assistant CLI (which calls
 # mirror_images_to_ecr and mirror_charts_to_ecr directly).
 #
 # Usage: ./mirrorToEcr.sh <ecr-host> [--region <region>]
 # Example: ./mirrorToEcr.sh 123456789012.dkr.ecr.us-east-2.amazonaws.com
 # =============================================================================
 set -euo pipefail
+
+default_private_ecr_manifest() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  echo "$(cd "$script_dir/../infra/mirror" && pwd)/private-ecr-manifest.yaml"
+}
+
+manifest_section() {
+  local manifest="$1" section="$2"
+  awk -v section="$section" '
+    /^[A-Za-z0-9_-]+:[[:space:]]*$/ {
+      if (in_section) {
+        exit
+      }
+      in_section = ($1 == section ":")
+      next
+    }
+    in_section {
+      original = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+      if ($0 == original) {
+        next
+      }
+      sub(/[[:space:]]*#.*$/, "", $0)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 == "") {
+        next
+      }
+      if ($0 ~ /^".*"$/ || $0 ~ /^'\''.*'\''$/) {
+        $0 = substr($0, 2, length($0) - 2)
+      }
+      print
+    }
+  ' "$manifest"
+}
+
+load_private_ecr_manifest() {
+  local manifest="${1:-}"
+  if [ -z "$manifest" ]; then
+    manifest="$(default_private_ecr_manifest)"
+  fi
+  [ -f "$manifest" ] || { echo "Missing ECR mirror manifest: $manifest" >&2; return 1; }
+
+  CHARTS="$(manifest_section "$manifest" charts)"
+  IMAGES="$(manifest_section "$manifest" images)"
+
+  [ -n "$CHARTS" ] || { echo "No charts found in ECR mirror manifest: $manifest" >&2; return 1; }
+  [ -n "$IMAGES" ] || { echo "No images found in ECR mirror manifest: $manifest" >&2; return 1; }
+}
 
 # --- install crane if missing ---
 ensure_crane() {
@@ -76,12 +125,12 @@ copy_image() {
   ptc_src=$(ptc_rewrite "$ptc" "$image") && sources="$ptc_src ${sources}"
 
   for src in $sources; do
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
       if crane copy "$src" "$dest" 2>/dev/null; then
         [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
         echo "  ✅ $image"; return 0
       fi
-      sleep 5
+      sleep $((5 * 2**(attempt-1)))  # exponential backoff: 5s, 10s, 20s, 40s, 80s
     done
   done
   echo "  ❌ $image" >&2; return 1
@@ -150,6 +199,13 @@ mirror_charts_to_ecr() {
   ecr_pass=$(aws ecr get-login-password --region "$region")
   echo "$ecr_pass" | helm registry login "$ecr_host" -u AWS --password-stdin
 
+  # Log helm into public.ecr.aws so pulls of OCI charts hosted there
+  # (e.g. aws-controllers-k8s/acmpca-chart) don't stall on anonymous
+  # rate-limits / credential prompts. Best-effort — anonymous pulls
+  # usually work, but authenticated pulls are more reliable.
+  aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+    helm registry login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+
   echo ""
   echo "=== Mirroring Helm charts ==="
   local _chartlist _chart_fail=0
@@ -162,11 +218,26 @@ mirror_charts_to_ecr() {
     [ -z "$name" ] && continue
 
     echo "  Pulling $name $version from $repo..."
-    if echo "$repo" | grep -q '^oci://'; then
-      helm pull "$repo/$name" --version "$version" 2>/dev/null
-    else
-      helm pull "$name" --repo "$repo" --version "$version" 2>/dev/null
+    # Retry transient pull failures (DNS, github.io 5xx, OCI registry blip)
+    # the way image pulls already do. stdin from /dev/null so a credential
+    # prompt fails fast instead of hanging the whole bootstrap.
+    local _pull_err _attempt _ok=0
+    _pull_err=$(mktemp)
+    for _attempt in 1 2 3 4 5; do
+      if echo "$repo" | grep -q '^oci://'; then
+        helm pull "$repo/$name" --version "$version" </dev/null 2>"$_pull_err" && { _ok=1; break; }
+      else
+        helm pull "$name" --repo "$repo" --version "$version" </dev/null 2>"$_pull_err" && { _ok=1; break; }
+      fi
+      [ "$_attempt" -lt 5 ] && sleep $((_attempt * 5))
+    done
+    if [ "$_ok" -ne 1 ]; then
+      echo "  ❌ FAILED to pull $name $version after 5 attempts" >&2
+      sed 's/^/    /' "$_pull_err" >&2
+      rm -f "$_pull_err"
+      continue
     fi
+    rm -f "$_pull_err"
 
     local tgz
     tgz=$(ls ${name}-*.tgz 2>/dev/null | head -1)
@@ -177,7 +248,7 @@ mirror_charts_to_ecr() {
 
     aws ecr create-repository --repository-name "charts/${name}" --region "$region" 2>/dev/null || true
     echo "  Pushing $tgz → oci://${ecr_host}/charts"
-    helm push "$tgz" "oci://${ecr_host}/charts" 2>&1 || { echo "  ❌ FAILED to push $name" >&2; _chart_fail=1; }
+    helm push "$tgz" "oci://${ecr_host}/charts" </dev/null 2>&1 || { echo "  ❌ FAILED to push $name" >&2; _chart_fail=1; }
     rm -f "$tgz"
     echo "  ✅ $name $version"
   done < "$_chartlist"
@@ -191,23 +262,15 @@ mirror_charts_to_ecr() {
 # --- CLI entrypoint (only when run directly, not sourced) ---
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  . "$SCRIPT_DIR/privateEcrManifest.sh"
 
   ECR_HOST="${1:-}"
   shift || true
   REGION="${AWS_CFN_REGION:-us-east-1}"
+  MANIFEST_FILE=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --region) REGION="$2"; shift 2 ;;
-      --manifest)
-        . "$2"
-        [ -n "${TEST_CHARTS:-}" ] && CHARTS="$CHARTS
-$TEST_CHARTS"
-        [ -n "${TEST_IMAGES:-}" ] && IMAGES="$IMAGES
-$TEST_IMAGES"
-        [ -n "${BUILD_IMAGES:-}" ] && IMAGES="$IMAGES
-$BUILD_IMAGES"
-        shift 2 ;;
+      --manifest) MANIFEST_FILE="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -217,6 +280,7 @@ $BUILD_IMAGES"
     exit 1
   fi
 
+  load_private_ecr_manifest "${MANIFEST_FILE:-}"
   mirror_images_to_ecr "$ECR_HOST" "$REGION" "$IMAGES"
   mirror_charts_to_ecr "$ECR_HOST" "$REGION" "$CHARTS"
 fi

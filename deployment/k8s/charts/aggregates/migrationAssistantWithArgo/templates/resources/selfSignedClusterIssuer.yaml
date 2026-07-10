@@ -6,9 +6,19 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "50"
-    helm.sh/hook-delete-policy: hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: create-ca
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       annotations:
@@ -17,11 +27,12 @@ spec:
       serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
       containers:
       - name: create-ca
-        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
         imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -e
           echo "Setting up migrations CA chain (retrying until cert-manager is ready)..."
           for i in $(seq 1 60); do
             if cat <<'EOF' | kubectl apply -f - 2>&1; then
@@ -60,7 +71,7 @@ spec:
           EOF
               echo "Waiting for CA certificate to be ready..."
               for j in $(seq 1 30); do
-                STATUS=$(kubectl get certificate migrations-root-ca -n {{ .Release.Namespace }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+                STATUS=$(kubectl get certificate migrations-root-ca -n {{ .Release.Namespace }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
                 if [ "$STATUS" = "True" ]; then
                   echo "Migrations CA chain created successfully."
                   echo "  - ClusterIssuer 'migrations-selfsigned-bootstrap' (bootstrap only)"
@@ -70,8 +81,8 @@ spec:
                 fi
                 sleep 5
               done
-              echo "WARNING: CA certificate not ready after 150s, but resources were created."
-              exit 0
+              echo "ERROR: CA certificate not ready after 150s"
+              exit 1
             fi
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10

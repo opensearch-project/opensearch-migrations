@@ -79,20 +79,24 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     enum TemplateTypes {
         INDEX_TEMPLATE(
             (targetClient, name, body, context) -> targetClient.createIndexTemplate(name, body, context.createMigrateTemplateContext()),
-            (targetClient, name) -> targetClient.hasIndexTemplate(name)
+            (targetClient, name) -> targetClient.hasIndexTemplate(name),
+            FilterScheme.FilterContext.INDEX_TEMPLATE
         ),
 
         LEGACY_INDEX_TEMPLATE(
             (targetClient, name, body, context) -> targetClient.createLegacyTemplate(name, body, context.createMigrateLegacyTemplateContext()),
-            (targetClient, name) -> targetClient.hasLegacyTemplate(name)
+            (targetClient, name) -> targetClient.hasLegacyTemplate(name),
+            FilterScheme.FilterContext.LEGACY_INDEX_TEMPLATE
         ),
 
         COMPONENT_TEMPLATE(
             (targetClient, name, body, context) -> targetClient.createComponentTemplate(name, body, context.createComponentTemplateContext()),
-            (targetClient, name) -> targetClient.hasComponentTemplate(name)
+            (targetClient, name) -> targetClient.hasComponentTemplate(name),
+            FilterScheme.FilterContext.COMPONENT_TEMPLATE
         );
         final TemplateCreator creator;
         final TemplateExistsCheck alreadyExistsCheck;
+        final FilterScheme.FilterContext filterContext;
     }
 
     @FunctionalInterface
@@ -144,7 +148,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             MigrationMode mode,
             IClusterMetadataContext context
         ) {
-        var skipCreation = FilterScheme.filterByAllowList(templateAllowList).negate();
+        var skipCreation = FilterScheme.filterByAllowList(templateAllowList, templateType.filterContext).negate();
 
         return templatesToCreate.entrySet().stream().map(kvp -> {
             var templateName = kvp.getKey();
@@ -196,6 +200,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 }
                 return;
             } catch (Exception e) {
+                var removedTokenFilters = findRemovedTokenFilters(e);
+                if (!removedTokenFilters.isEmpty()) {
+                    ObjectNodeUtils.removeAnalyzerFilters(templateBody, removedTokenFilters);
+                    log.info("Reattempting creation of template '{}' after removing removed token filters: {}", templateName, removedTokenFilters);
+                    continue;
+                }
                 var unsupportedParams = findUnsupportedMappingParams(e);
                 if (unsupportedParams.isEmpty()) {
                     throw e;
@@ -216,6 +226,19 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         }
         return Set.of();
     }
+
+    private static Set<String> findRemovedTokenFilters(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidResponse ir) {
+                var filters = ir.getRemovedTokenFilters();
+                if (!filters.isEmpty()) {
+                    return filters;
+                }
+            }
+        }
+        return Set.of();
+    }
+
 
     private void removeUnsupportedMappingParams(String templateName, ObjectNode templateBody, Set<String> params) {
         // Legacy templates: mappings at top level; index/component templates: mappings under "template"

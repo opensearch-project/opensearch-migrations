@@ -99,11 +99,225 @@ export const testCases: TestCase[] = [
 
   // --- error paths ---
 
-  solrTest('update-cmd-error-delete-by-query', {
-    description: 'Delete-by-query should return 500',
+  // --- delete-by-query: happy path ---
+
+  solrTest('update-cmd-delete-by-query-simple', {
+    description: 'Delete documents matching a simple field query',
+    documents: [
+      { id: 'dbq-1', title: 'remove me' },
+      { id: 'dbq-2', title: 'keep me' },
+      { id: 'dbq-3', title: 'remove me' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:"remove me"' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-match-all', {
+    description: 'Delete all documents with *:* query',
+    documents: [
+      { id: 'dbq-all-1', title: 'one' },
+      { id: 'dbq-all-2', title: 'two' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: '*:*' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-no-match', {
+    description: 'Delete-by-query with no matching documents returns success',
+    documents: [{ id: 'dbq-keep', title: 'safe' }],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:nonexistent' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-with-commit', {
+    description: 'Delete-by-query with commit=true makes deletions immediately visible',
+    documents: [
+      { id: 'dbq-commit-1', title: 'visible' },
+      { id: 'dbq-commit-2', title: 'visible' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:visible' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-boolean-and', {
+    description: 'Delete-by-query with AND boolean query',
+    documents: [
+      { id: 'dbq-bool-1', title: 'alpha', category: 'draft' },
+      { id: 'dbq-bool-2', title: 'alpha', category: 'published' },
+      { id: 'dbq-bool-3', title: 'beta', category: 'draft' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:alpha AND category:draft' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'text' },
+      },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-boolean-or', {
+    description: 'Delete-by-query with OR boolean query',
+    documents: [
+      { id: 'dbq-or-1', title: 'remove' },
+      { id: 'dbq-or-2', title: 'delete' },
+      { id: 'dbq-or-3', title: 'keep' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:remove OR title:delete' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-wildcard', {
+    description: 'Delete-by-query with wildcard query',
+    documents: [
+      { id: 'dbq-wc-1', title: 'temporary_file' },
+      { id: 'dbq-wc-2', title: 'temporary_data' },
+      { id: 'dbq-wc-3', title: 'permanent' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:temporary*' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-range', {
+    description: 'Delete-by-query with range query on numeric field',
+    documents: [
+      { id: 'dbq-range-1', title: 'cheap', price: 5 },
+      { id: 'dbq-range-2', title: 'mid', price: 50 },
+      { id: 'dbq-range-3', title: 'expensive', price: 500 },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'price:[100 TO *]' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pint' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'integer' },
+      },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-negation', {
+    description: 'Delete-by-query with NOT query — delete everything except matching',
+    documents: [
+      { id: 'dbq-not-1', title: 'keep', category: 'important' },
+      { id: 'dbq-not-2', title: 'remove', category: 'trash' },
+      { id: 'dbq-not-3', title: 'also remove', category: 'junk' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: '*:* AND NOT category:important' } }),
+    requestPath: '/solr/testcollection/update?commit=true',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'text' },
+      },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  solrTest('update-cmd-delete-by-query-no-commit', {
+    description: 'Delete-by-query without commit param still succeeds (async visibility)',
+    documents: [
+      { id: 'dbq-nc-1', title: 'target' },
+    ],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { query: 'title:target' } }),
+    requestPath: '/solr/testcollection/update',
+    solrSchema: {
+      fields: { title: { type: 'text_general' } },
+    },
+    opensearchMapping: {
+      properties: { title: { type: 'text' } },
+    },
+    assertionRules: UPDATE_RESPONSE_RULES,
+  }),
+
+  // --- delete-by-query: error paths ---
+
+  solrTest('update-cmd-error-delete-by-query-empty', {
+    description: 'Delete-by-query with empty query should return 500',
     documents: [{ id: '1', title: 'test' }],
     method: 'POST',
-    requestBody: JSON.stringify({ delete: { query: 'title:test' } }),
+    requestBody: JSON.stringify({ delete: { query: '' } }),
+    requestPath: '/solr/testcollection/update',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('update-cmd-error-delete-by-query-id-and-query', {
+    description: 'Delete with both id and query should return 500 (mutually exclusive)',
+    documents: [{ id: '1', title: 'test' }],
+    method: 'POST',
+    requestBody: JSON.stringify({ delete: { id: '1', query: 'title:test' } }),
     requestPath: '/solr/testcollection/update',
     expectedStatusCode: 500,
     expectedErrorContains: 'Request transform failed',

@@ -9,10 +9,10 @@
  */
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "cdc-aoss"
+    def defaultStageId = config.defaultStageId ?: "aosscdc"
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-cdc-aoss-integ-test"
-    def defaultTestIds = config.defaultTestIds ?: "0034"
+    def defaultTestIds = config.defaultTestIds ?: "0034,0041"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
 
@@ -23,7 +23,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0034,0042)')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0034,0041)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Source cluster version')
             choice(name: 'SOURCE_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Source cluster type')
@@ -53,6 +53,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(periodicCron(jobName))
         }
 
         stages {
@@ -93,7 +94,7 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy Source & Bootstrap MA') {
+            stage('Deploy & Bootstrap MA') {
                 steps {
                     timeout(time: 150, unit: 'MINUTES') {
                         script {
@@ -122,7 +123,7 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy Source + AOSS Target') {
+            stage('Deploy Source & AOSS Target') {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -137,6 +138,7 @@ def call(Map config = [:]) {
                                         clusters: [
                                             [
                                                 clusterId: "source",
+                                                clusterName: "${maStageName}-source",
                                                 clusterVersion: env.sourceVer,
                                                 clusterType: params.SOURCE_CLUSTER_TYPE,
                                                 domainRemovalPolicy: "DESTROY",
@@ -153,6 +155,7 @@ def call(Map config = [:]) {
                                             ],
                                             [
                                                 clusterId: "target",
+                                                clusterName: "${maStageName}-target",
                                                 clusterType: "OPENSEARCH_SERVERLESS",
                                                 collectionType: "SEARCH",
                                                 standbyReplicas: "DISABLED",
@@ -216,7 +219,7 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"
-                                withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
                                     sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }
@@ -228,43 +231,13 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            if (env.eksClusterName) {
-                                cdcCleanupStep(kubeContext: env.eksKubeContext)
-                                eksCleanupStep(
-                                    stackName: env.STACK_NAME,
-                                    eksClusterName: env.eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-                            }
-
-                            // Delete AOSS collection stack and MA stack in parallel
-                            parallel(
-                                'Delete AOSS Stack': {
-                                    echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
-                                    sh "aws cloudformation delete-stack --stack-name ${env.CLUSTER_STACK} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${env.CLUSTER_STACK} --region ${region} || true"
-                                },
-                                'Delete MA Stack': {
-                                    echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
-                                    sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${env.STACK_NAME} --region ${region} || true"
-                                }
-                            )
-                        }
-
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true
-                            fi
-                        """
-                    }
-                }
-                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+                eksPostCleanup(
+                    maStackName: env.STACK_NAME,
+                    clusterStackName: env.CLUSTER_STACK,
+                    clusterInsideMaVpc: true,
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                )
             }
         }
     }

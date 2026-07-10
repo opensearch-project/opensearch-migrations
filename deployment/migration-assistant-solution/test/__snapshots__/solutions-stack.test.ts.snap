@@ -130,7 +130,7 @@ exports[`Solutions stack ECS stack with import VPC matches snapshot 1`] = `
       },
       "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
     },
-    "BootstrapEC2Instance36A69AF7e7021022bd1e0bb9": {
+    "BootstrapEC2Instance36A69AF723cb2ecc3dacad24": {
       "CreationPolicy": {
         "ResourceSignal": {
           "Count": 1,
@@ -211,7 +211,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check that these Node-22/NPM references are valid
-yum update && yum install -y git java-17-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+yum update && yum install -y git java-21-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
 systemctl start docker
 git init
 git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git
@@ -236,6 +236,8 @@ fi
 
 npm install -g aws-cdk 2>&1
 npm install 2>&1
+
+# Build Docker images for CDK's DockerImageAsset
 ./buildDockerImages.sh",
                 "encoding": "plain",
                 "group": "root",
@@ -324,7 +326,7 @@ npm install 2>&1
               "",
               [
                 "#!/bin/bash
-# fingerprint: e1f2c192c5813e3b
+# fingerprint: 6e880182a0153a3c
 (
   set +e
   /opt/aws/bin/cfn-init -v --region ",
@@ -335,7 +337,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7e7021022bd1e0bb9 -c default
+                " --resource BootstrapEC2Instance36A69AF723cb2ecc3dacad24 -c default
   /opt/aws/bin/cfn-signal -e $? --region ",
                 {
                   "Ref": "AWS::Region",
@@ -344,7 +346,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7e7021022bd1e0bb9
+                " --resource BootstrapEC2Instance36A69AF723cb2ecc3dacad24
   cat /var/log/cfn-init.log >&2
 )",
               ],
@@ -701,7 +703,7 @@ exports[`Solutions stack ECS stack with new VPC matches snapshot 1`] = `
       },
       "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
     },
-    "BootstrapEC2Instance36A69AF7fd76b0caa0c66db9": {
+    "BootstrapEC2Instance36A69AF7ba4ca28033971592": {
       "CreationPolicy": {
         "ResourceSignal": {
           "Count": 1,
@@ -782,7 +784,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check that these Node-22/NPM references are valid
-yum update && yum install -y git java-17-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+yum update && yum install -y git java-21-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
 systemctl start docker
 git init
 git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git
@@ -807,6 +809,8 @@ fi
 
 npm install -g aws-cdk 2>&1
 npm install 2>&1
+
+# Build Docker images for CDK's DockerImageAsset
 ./buildDockerImages.sh",
                 "encoding": "plain",
                 "group": "root",
@@ -890,7 +894,7 @@ npm install 2>&1
               "",
               [
                 "#!/bin/bash
-# fingerprint: f9318fc038a3f729
+# fingerprint: b886ada016436950
 (
   set +e
   /opt/aws/bin/cfn-init -v --region ",
@@ -901,7 +905,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7fd76b0caa0c66db9 -c default
+                " --resource BootstrapEC2Instance36A69AF7ba4ca28033971592 -c default
   /opt/aws/bin/cfn-signal -e $? --region ",
                 {
                   "Ref": "AWS::Region",
@@ -910,7 +914,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7fd76b0caa0c66db9
+                " --resource BootstrapEC2Instance36A69AF7ba4ca28033971592
   cat /var/log/cfn-init.log >&2
 )",
               ],

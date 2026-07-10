@@ -1,0 +1,162 @@
+# No-auth preset for testClusters on EKS.
+#
+# Layer this AFTER valuesEks.yaml so it strips SearchGuard from the ES source,
+# drops `-u admin:admin` from the S3 keystore-refresh sidecar, and disables the
+# opensearch-security plugin on the OS target.
+#
+# Usage:
+#   helm upgrade --install tc . \
+#     -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml \
+#     --set source.image="$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
+#     --set source.extraInitContainers[0].image="$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
+#     --set source.extraContainers[0].image="$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG"
+#
+# Note: Helm replaces lists wholesale, so `source.extraContainers` and
+# `source.extraInitContainers` from valuesEks.yaml are redefined in full below
+# with all auth flags removed.
+
+source:
+  # Elastic 8.5.1 chart: protocol drives the generated Service and, when TLS
+  # is off, the probes still need to be http-scheme (handled by valuesNoAuth
+  # siblings; here we only override EKS-specific plumbing).
+  protocol: http
+
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9200/_cluster/health)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9200/_cluster/health?timeout=5s)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "test-cluster"
+      network.host: 0.0.0.0
+      xpack.security.enabled: false
+      xpack.ml.enabled: false
+      # SearchGuard is shipped in this image; disable it since auth is off.
+      searchguard.disabled: true
+      cluster.routing.allocation.disk.threshold_enabled: false
+      node.max_local_storage_nodes: 3
+      discovery.type: single-node
+      s3.client.default.endpoint: ${S3_CLIENT_ENDPOINT:}
+
+  # Sidecar and init: same plumbing as valuesEks.yaml but with auth dropped.
+  # The image field is left as the sentinel so --set overrides are still
+  # required; see header comment.
+  extraInitContainers:
+    - name: init-es-keystore
+      image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          set -euo pipefail
+          if [[ -s /keystore/elasticsearch.keystore ]]; then
+            echo "Keystore already exists; skipping create"
+            exit 0
+          fi
+          TMP_CONF="$(mktemp -d)"
+          export ES_PATH_CONF="$TMP_CONF"
+          bin/elasticsearch-keystore create
+          cp "$ES_PATH_CONF/elasticsearch.keystore" /keystore/elasticsearch.keystore
+          chmod 0600 /keystore/elasticsearch.keystore
+          rm -rf "$TMP_CONF"
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /keystore
+
+  extraContainers:
+    - name: refresh-s3-keystore
+      image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+      command: ["/bin/bash", "-ec"]
+      env:
+        - name: REFRESH_SECONDS
+          value: "60"
+      args:
+        - |
+          set -euo pipefail
+          : "${AWS_CONTAINER_CREDENTIALS_FULL_URI:?missing}"
+          : "${AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE:?missing}"
+
+          while true; do
+            TOKEN="$(cat "$AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")"
+            JSON="$(curl -sS -H "Authorization: $TOKEN" "$AWS_CONTAINER_CREDENTIALS_FULL_URI")"
+
+            AK="$(echo "$JSON" | sed -n 's/.*"AccessKeyId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            SK="$(echo "$JSON" | sed -n 's/.*"SecretAccessKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            ST="$(echo "$JSON" | sed -n 's/.*"Token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+            if [[ -z "$AK" || -z "$SK" || -z "$ST" ]]; then
+              echo "Failed to parse credentials JSON: $JSON" >&2
+              sleep 10
+              continue
+            fi
+
+            TMP_CONF="$(mktemp -d)"
+            export ES_PATH_CONF="$TMP_CONF"
+            cp /usr/share/elasticsearch/config/elasticsearch.keystore "$ES_PATH_CONF/elasticsearch.keystore" || true
+
+            echo -n "$AK" | bin/elasticsearch-keystore add -f -x s3.client.default.access_key
+            echo -n "$SK" | bin/elasticsearch-keystore add -f -x s3.client.default.secret_key
+            echo -n "$ST" | bin/elasticsearch-keystore add -f -x s3.client.default.session_token
+
+            cp "$ES_PATH_CONF/elasticsearch.keystore" /usr/share/elasticsearch/config/elasticsearch.keystore
+            chmod 0600 /usr/share/elasticsearch/config/elasticsearch.keystore
+            rm -rf "$TMP_CONF"
+
+            POD_IP="$(hostname -i | awk '{print $1}')"
+            ES_URL="http://${POD_IP}:9200"
+
+            until curl -sS -o /dev/null "$ES_URL"; do sleep 2; done
+            echo "Connection established to {$ES_URL}.  Refreshing secure settings"
+            curl -sS -X POST "$ES_URL/_nodes/reload_secure_settings" >/dev/null || true
+            echo "Finished reloading credentials"
+
+            sleep "$REFRESH_SECONDS"
+          done
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+          subPath: elasticsearch.keystore
+
+target:
+  # opensearch-project/opensearch 2.32.0 chart
+  securityConfig:
+    enabled: false
+  config:
+    opensearch.yml: |
+      cluster.name: opensearch-cluster
+      network.host: 0.0.0.0
+      plugins.security.disabled: true

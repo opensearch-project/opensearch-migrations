@@ -27,6 +27,7 @@ import {SynchronizationConfig} from "./synchronization";
 type MetadataScopeBase = {
     k8sMetadata: { name: string } & GenericScope,
     entrypoint?: string,
+    onExit?: string,
     serviceAccountName?: string,
     parallelism?: number,
     synchronization?: SynchronizationConfig
@@ -75,6 +76,17 @@ export class WorkflowBuilder<
     ) {
         return new WorkflowBuilder(
             {...this.metadataScope, entrypoint: name},
+            this.inputsScope,
+            this.templateSigScope,
+            this.templateFullScope
+        );
+    }
+
+    setOnExit<Name extends Extract<keyof TemplateSigScope, string>>(
+        name: Name
+    ) {
+        return new WorkflowBuilder(
+            {...this.metadataScope, onExit: name},
             this.inputsScope,
             this.templateSigScope,
             this.templateFullScope

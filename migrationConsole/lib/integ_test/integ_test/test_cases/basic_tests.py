@@ -1,9 +1,10 @@
 import logging
-from ..cluster_version import (
-    ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X,
-    OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
-)
-from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
+import subprocess
+import time
+import uuid
+from ..cluster_version import RFS_MIGRATION_COMBINATIONS
+from ..integration_test_argo_service import ENDING_ARGO_PHASES
+from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -11,30 +12,17 @@ logger = logging.getLogger(__name__)
 # This test case is subject to removal, as its value looks limited
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
-        allow_combinations = [
-            (ElasticsearchV1_X, OpensearchV1_X),
-            (ElasticsearchV1_X, OpensearchV2_X),
-            (ElasticsearchV1_X, OpensearchV3_X),
-            (ElasticsearchV2_X, OpensearchV1_X),
-            (ElasticsearchV2_X, OpensearchV2_X),
-            (ElasticsearchV2_X, OpensearchV3_X),
-            (ElasticsearchV5_X, OpensearchV1_X),
-            (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV5_X, OpensearchV3_X),
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV6_X, OpensearchV3_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV3_X),
-        ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document (target cluster as coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
-                         allow_source_target_combinations=allow_combinations)
-        self.index_name = f"test_0001_{self.unique_id}"
+                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
+        # Use an index name containing the work-coordinator separator ('__') to pin the fix
+        # for opensearch-project/opensearch-migrations#2880 — prior to that fix, any index
+        # whose name contained '__' was silently unmigratable because the work-item id
+        # parser split on the first two occurrences of the separator.
+        self.index_name = f"test__0001__{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0001_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
@@ -66,30 +54,13 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
-        allow_combinations = [
-            (ElasticsearchV1_X, OpensearchV1_X),
-            (ElasticsearchV1_X, OpensearchV2_X),
-            (ElasticsearchV1_X, OpensearchV3_X),
-            (ElasticsearchV2_X, OpensearchV1_X),
-            (ElasticsearchV2_X, OpensearchV2_X),
-            (ElasticsearchV2_X, OpensearchV3_X),
-            (ElasticsearchV5_X, OpensearchV1_X),
-            (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV5_X, OpensearchV3_X),
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV6_X, OpensearchV3_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV3_X),
-        ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document (default coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
-                         allow_source_target_combinations=allow_combinations)
-        self.index_name = f"test_0002_{self.unique_id}"
+                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
+        self.index_name = f"test_0002_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0002_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
@@ -104,5 +75,72 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
 
     def verify_clusters(self):
         # Validate single document exists on target
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id, max_attempts=10, delay=3.0)
+
+
+class Test0003ApprovalGateIntegration(MATestBase):
+    """Exercises the workflow approve CLI against a real approval gate.
+
+    Runs with skipApprovals=false so the workflow blocks at the evaluatemetadata
+    approval gate. The test then uses `workflow approve step --all` to unblock it
+    and verifies the migration completes successfully.
+    """
+
+    def __init__(self, user_args: MATestUserArguments):
+        description = "Verifies workflow approve CLI can approve a real gate."
+        super().__init__(user_args=user_args,
+                         description=description,
+                         migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
+                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
+        self.index_name = f"test_0003_{self.unique_id}-{uuid.uuid4().hex[:4]}"
+        self.doc_id = "test_0003_doc"
+        self.doc_type = "sample_type"
+
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
+        super().prepare_workflow_parameters(keep_workflows=keep_workflows)
+        self.parameters["skip-approvals"] = "false"
+
+    def prepare_clusters(self):
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id, doc_type=self.doc_type)
+
+    def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
+        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
+        self._approve_gates_until_suspended_or_ended(timeout_seconds)
+
+    def _approve_gates_until_suspended_or_ended(self, timeout_seconds: int):
+        """Approve gates until the workflow suspends (post-migration verification) or ends."""
+        deadline = time.time() + timeout_seconds
+        interval = 10
+        approved_any = False
+        while time.time() < deadline:
+            status_result = self.argo_service.get_workflow_status(self.workflow_name)
+            if status_result.success:
+                phase = status_result.value.get("phase", "")
+                has_suspended = status_result.value.get("has_suspended_nodes", False)
+                if phase == "Running" and has_suspended:
+                    logger.info("Workflow reached suspend (post-migration verification)")
+                    return
+                if phase in ENDING_ARGO_PHASES:
+                    logger.info("Workflow reached ending phase: %s", phase)
+                    return
+
+            result = subprocess.run(
+                ["workflow", "approve", "step", "--all"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                logger.info("Approval gates approved: %s", result.stdout.strip())
+                approved_any = True
+            else:
+                logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
+            time.sleep(interval)
+        raise TimeoutError(
+            f"Workflow did not reach suspend or ending phase within {timeout_seconds}s "
+            f"(approved_any={approved_any})"
+        )
+
+    def verify_clusters(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)

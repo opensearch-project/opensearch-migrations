@@ -51,6 +51,27 @@ The `valuesSolrSourceEks.yaml` overlay layers on top of `valuesSolrSource.yaml`:
 - Removes explicit S3 credentials (SDK auto-discovers from Pod Identity)
 - Adds tolerations for the dedicated search node pool
 
+## No-Auth Mode
+
+Both `values.yaml` and `valuesEks.yaml` leave HTTPS + basic-auth turned on
+(SearchGuard on the ES source, the security plugin on the OS target). For
+developer workflows that want to exercise the migration paths against an
+anonymous, plain-HTTP pair of clusters, layer on the no-auth presets:
+
+```bash
+# Local / kind / in-cluster dev
+helm install tc . -f values.yaml -f valuesNoAuth.yaml
+
+# EKS (layer AFTER valuesEks.yaml)
+helm install tc . -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml
+```
+
+With these overlays active, the clusters are reachable with `curl
+http://elasticsearch-master:9200/` and `curl
+http://opensearch-cluster-master:9200/` — no `-u`, no `-k`. Configure the
+workflow session's `sourceClusters` / `targetClusters` with the matching
+`http://...` endpoints and omit `authConfig` entirely.
+
 ## S3 Snapshot Support
 
 The default base image for ES 7.10 that this installation uses constructed by

@@ -15,6 +15,11 @@ sourceSets {
             srcDir 'src/lucene9/resources'
         }
     }
+    lucene10 {
+        resources {
+            srcDir 'src/lucene10/resources'
+        }
+    }
 }
 
 configurations {
@@ -23,9 +28,14 @@ configurations {
     lucene7
     lucene9
     lucene9Implementation.extendsFrom(lucene9)
+    lucene10
 }
 
 tasks.named('processLucene9Resources').configure {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+tasks.named('processLucene10Resources').configure {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
@@ -62,8 +72,17 @@ tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks
     }
 }
 
+tasks.register('shadowLucene10', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn processLucene10Resources
+    mergeServiceFiles()
+    archiveClassifier.set('lucene10-shadow')
+    configurations = [project.configurations.lucene10]
+    from sourceSets.lucene10.output
+    relocate 'org.apache.lucene', 'shadow.lucene10.org.apache.lucene'
+}
+
 tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9
+    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9, shadowLucene10
 }
 
 tasks.named('build') {
@@ -81,7 +100,7 @@ publishing {
             pom {
                 description = 'Reads Elasticsearch/OpenSearch snapshots and extracts documents and metadata via Lucene'
             }
-            ['shadowLucene5', 'shadowLucene6', 'shadowLucene7', 'shadowLucene9'].each { taskName ->
+            ['shadowLucene5', 'shadowLucene6', 'shadowLucene7', 'shadowLucene9', 'shadowLucene10'].each { taskName ->
                 artifact(tasks.named(taskName))
             }
         }
@@ -118,8 +137,15 @@ dependencies {
     lucene9 libs.lucene.v9.suggest
     lucene9 libs.zstd.jni
 
+    lucene10 libs.lucene.v10.core
+    lucene10 libs.lucene.v10.analysis.common
+    lucene10 libs.lucene.v10.backward.codecs
+    lucene10 libs.lucene.v10.suggest
+    lucene10 libs.zstd.jni
+
     implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
+    implementation shadowLucene10.outputs.files
 }

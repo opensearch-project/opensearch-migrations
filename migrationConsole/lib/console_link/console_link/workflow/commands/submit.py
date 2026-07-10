@@ -7,13 +7,15 @@ preserving any migration CRD-owned resources.
 import logging
 import subprocess
 import click
+import time
 
-from ..models.utils import ExitCode, load_k8s_config
+from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +77,8 @@ def _remove_existing_workflow(workflow_name, namespace):
 @click.command(name="submit")
 @click.option(
     '--namespace',
-    default='ma',
-    help='Kubernetes namespace for the workflow (default: ma)'
+    default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE',
+    help='Kubernetes namespace for the workflow'
 )
 @click.option(
     '--wait',
@@ -99,16 +101,25 @@ def _remove_existing_workflow(workflow_name, namespace):
 @click.option(
     '--session',
     default='default',
+    hidden=True,
     help='Configuration session name to load parameters from (default: default)'
 )
 @click.option(
     '--workflow-name',
     default=DEFAULT_WORKFLOW_NAME,
     shell_complete=get_workflow_completions,
+    hidden=True,
     help='Name of the workflow to replace if it already exists'
 )
+@click.option(
+    '--unique-run-nonce',
+    default=str(int(time.time())),
+    hidden=True,
+    help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as '
+         'snapshotName downstream)'
+)
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name):
+def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -128,10 +139,16 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         click.echo("\nPlease configure the workflow first using 'workflow configure edit'", err=True)
         ctx.exit(ExitCode.FAILURE.value)
 
-    click.echo("NOT checking if all secrets have been created.  Run `workflow configure edit` to confirm")
-
     try:
         load_k8s_config()
+
+        # Verify that every HTTP-Basic secret referenced by the saved config still
+        # exists in the cluster. If the config has changed or a secret has been
+        # deleted since `workflow configure edit`, fail fast with a clear error
+        # rather than letting the workflow fail mid-run.
+        secret_store = get_credentials_secret_store_for_namespace(namespace)
+        verify_configured_secrets_exist(secret_store, config.raw_yaml)
+
         runner = ScriptRunner()
 
         config_yaml = config.raw_yaml
@@ -143,7 +160,10 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         try:
             submit_result = runner.submit_workflow(
                 config_yaml,
-                ["--workflow-name", workflow_name],
+                [
+                    "--workflow-name", workflow_name,
+                    "--unique-run-nonce", unique_run_nonce
+                ],
             )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')

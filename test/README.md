@@ -10,10 +10,6 @@ Featured in this directory is a `./awsE2ESolutionSetup` script whose goal is to 
 3. Deploy the Migration Assistant CDK (containing the Migration tooling and potentially an OpenSearch Domain) located in this repo [here](../deployment/cdk/opensearch-service-migration)
    * The CDK context options for this CDK can be used to customize this deployment and can be provided with a custom context file using the `--context-file` option
    * A sample CDK context file can be seen [here](defaultMigrationContext.json)
-4. Add the traffic stream source security group created by the Migration Assistant CDK to each source cluster node
-   * This is to allow source cluster nodes to send captured traffic from the Capture Proxy to the given traffic stream source, which is normally Kafka or AWS MSK
-5. Run the `./startCaptureProxy.sh` script for starting the Capture Proxy process on each source cluster node
-   * This script is automatically added to each EC2 instance on creation
 
 #### Configuring a Historical Migration focused E2E environment
 A more focused experience for only testing historical migrations can be achieved with this script by customizing the CDK context options to minimize live capture resources like so:
@@ -25,7 +21,6 @@ Source Context File
     "networkStackSuffix": "ec2-source-<STAGE>",
     "distVersion": "7.10.2",
     "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
-    "captureProxyEnabled": false,
     "securityDisabled": true,
     "minDistribution": false,
     "cpuArch": "x64",
@@ -58,11 +53,6 @@ Migration Context File
 }
 ```
 Note: That this deployment will still deploy an unused Kafka broker ECS service, as a traffic stream source is still required for Migration Assistant deployments, but this linkage should be untangled with: https://opensearch.atlassian.net/browse/MIGRATIONS-1532
-
-In the same vein, the `--skip-capture-proxy` option can be provided to skip any capture proxy setup on source cluster nodes
-```
-./awsE2ESolutionSetup.sh --source-context-file <SOURCE_CONTEXT_FILE> --migration-context-file <MIGRATION_CONTEXT_FILE> --source-context-id source-single-node-ec2 --migration-context-id rfs-backfill --skip-capture-proxy
-```
 
 #### Placeholder substitution with awsE2ESolutionSetup.sh
 

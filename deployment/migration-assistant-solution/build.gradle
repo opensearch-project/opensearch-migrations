@@ -5,7 +5,6 @@ import org.gradle.api.tasks.*
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id 'com.bmuschko.docker-remote-api'
     id 'com.github.node-gradle.node'
 }
 

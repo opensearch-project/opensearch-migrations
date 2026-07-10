@@ -22,6 +22,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
             .or(VersionMatchers.isES_7_X)
             .or(VersionMatchers.isES_5_X)
             .or(VersionMatchers.isES_8_X)
+            .or(VersionMatchers.isES_9_X)
             .or(VersionMatchers.anyOS)
             .test(version);
     }

@@ -55,7 +55,11 @@ full-migration workflow, run
 For the end-to-end validation and transformation flow, including how the
 console entrypoint, `MigrationConfigTransformer`, unified schema loading, and
 Kafka/Strimzi validation fit together, see
-[ConfigValidationFile.md](./ConfigValidationFlow.md).
+[ConfigValidationFlow.md](./ConfigValidationFlow.md).
+
+For how transformed workflow config becomes migration resource parameters,
+generated migration CRDs/VAPs, and the immutable `MigrationRun` history resource, see
+[resolvingMigrationParametersFromConfigs.md](../docs/resolvingMigrationParametersFromConfigs.md).
 
 The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
@@ -213,11 +217,11 @@ sourceClusters:
       #awsRegion: string
       ##  Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint
       #endpoint: string
-      ##  s3:///BUCKETNAME/PATH
-      #s3RepoPathUri: string
+      ##  s3:///BUCKETNAME/PATH  (or gs://BUCKETNAME/PATH)
+      #repoPathUri: string
     proxy:
       #loggingConfigurationOverrideConfigMap: string
-      #otelCollectorEndpoint: http://otel-collector:4317
+      #otelMetricsCollectorEndpoint: http://otel-collector:4317
 targetClusters:
   <NAME>:
 ...

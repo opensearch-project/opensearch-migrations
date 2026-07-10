@@ -6,9 +6,19 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "51"
-    helm.sh/hook-delete-policy: hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: create-issuer
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       annotations:
@@ -17,10 +27,11 @@ spec:
       serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
       containers:
       - name: create-issuer
-        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -e
           echo "Creating AWSPCAClusterIssuer (retrying until aws-privateca-issuer is ready)..."
           for i in $(seq 1 60); do
             if cat <<'EOF' | kubectl apply -f - 2>&1; then

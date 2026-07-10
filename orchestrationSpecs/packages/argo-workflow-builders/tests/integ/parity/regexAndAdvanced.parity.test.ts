@@ -1,9 +1,8 @@
 import { expr, renderWorkflowTemplate, typeToken } from "../../../src/index.js";
 import { submitProbe } from "../infra/probeHelper.js";
 import { submitRenderedWorkflow } from "../infra/probeHelper.js";
-import { BuilderVariant, ParitySpec, reportContractResult, reportKnownBroken, reportParityResult } from "../infra/parityHelper.js";
+import { BuilderVariant, ParitySpec, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
-import { describeBroken } from "../infra/brokenTestControl.js";
 
 function spec(
   name: string,
@@ -31,12 +30,11 @@ describe("Regex And Advanced - regexMatch valid email", () => {
     });
   });
 
-  describeBroken("Builder - regexMatch", () => {
+  describe("Builder - regexMatch", () => {
     const builderVariant: BuilderVariant = {
       name: "regexMatch",
       code: "expr.toString(expr.regexMatch(expr.literal('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}$'), ctx.inputs.email))",
     };
-    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -77,12 +75,11 @@ describe("Regex And Advanced - regexMatch invalid email", () => {
     });
   });
 
-  describeBroken("Builder - regexMatch", () => {
+  describe("Builder - regexMatch", () => {
     const builderVariant: BuilderVariant = {
       name: "regexMatch",
       code: "expr.toString(expr.regexMatch(expr.literal('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}$'), ctx.inputs.email))",
     };
-    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -118,12 +115,11 @@ describe("Regex And Advanced - regexFind extract pattern", () => {
     });
   });
 
-  describeBroken("Builder - regexFind", () => {
+  describe("Builder - regexFind", () => {
     const builderVariant: BuilderVariant = {
       name: "regexFind",
       code: "expr.regexFind(expr.literal('[a-zA-Z][1-9]'), ctx.inputs.text)",
     };
-    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -176,12 +172,11 @@ describe("Regex And Advanced - regexReplaceAll capture groups", () => {
     });
   });
 
-  describeBroken("Builder - regexReplaceAll", () => {
+  describe("Builder - regexReplaceAll", () => {
     const builderVariant: BuilderVariant = {
       name: "regexReplaceAll",
       code: "expr.regexReplaceAll(expr.literal('a(x*)b'), expr.literal('${1}W'), ctx.inputs.text)",
     };
-    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t

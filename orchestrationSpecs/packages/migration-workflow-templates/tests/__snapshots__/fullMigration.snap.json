@@ -7,6 +7,7 @@
   "spec": {
     "serviceAccountName": "argo-workflow-executor",
     "entrypoint": "main",
+    "onExit": "cleanupapprovalgates",
     "parallelism": 100,
     "arguments": {
       "parameters": [
@@ -15,12 +16,24 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -33,6 +46,308 @@
         "steps": [
           []
         ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "initializerunmetadata",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageCaptureProxyLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "captureProxyImage"
+                }
+              }
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "captureProxyPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "trafficReplayerImage"
+                }
+              }
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "trafficReplayerPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "reindexFromSnapshotImage"
+                }
+              }
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "reindexFromSnapshotPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "migrationConsoleImage"
+                }
+              }
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "migrationConsolePullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "coordinatorClusterImage"
+                }
+              }
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "coordinatorClusterPullPolicy"
+                }
+              }
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "WORKFLOW_NAME",
+              "value": "{{workflow.name}}"
+            },
+            {
+              "name": "WORKFLOW_UID",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "WORKFLOW_CREATION_TIMESTAMP",
+              "value": "{{workflow.creationTimestamp}}"
+            },
+            {
+              "name": "MIGRATION_RUN_NUMBER",
+              "value": "{{workflow.parameters.migrationRunNumber}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/initializeRunMetadata.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "cleanupapprovalgates",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageCaptureProxyLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "captureProxyImage"
+                }
+              }
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "captureProxyPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "trafficReplayerImage"
+                }
+              }
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "trafficReplayerPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "reindexFromSnapshotImage"
+                }
+              }
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "reindexFromSnapshotPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "migrationConsoleImage"
+                }
+              }
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "migrationConsolePullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "coordinatorClusterImage"
+                }
+              }
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "coordinatorClusterPullPolicy"
+                }
+              }
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "WORKFLOW_NAME",
+              "value": "{{workflow.name}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/cleanupApprovalGates.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -63,6 +378,16 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "resourceName",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -80,8 +405,12 @@
                     "value": "{{inputs.parameters.kafkaClusterConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
-                    "value": "{{=inputs.parameters.clusterName+'.vapretry'}}"
+                    "value": "{{='kafkacluster.'+inputs.parameters.clusterName+'.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -108,6 +437,14 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
                     "name": "clusterConfig",
@@ -185,6 +522,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "minPodReplicas"
+            },
+            {
               "name": "topicPartitions"
             },
             {
@@ -200,6 +540,10 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "resourceName",
+              "value": ""
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -253,6 +597,10 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
+                    "name": "minPodReplicas",
+                    "value": "{{inputs.parameters.minPodReplicas}}"
+                  },
+                  {
                     "name": "topicPartitions",
                     "value": "{{inputs.parameters.topicPartitions}}"
                   },
@@ -303,10 +651,137 @@
                   {
                     "name": "checksumForReplayer",
                     "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   }
                 ]
               },
               "name": "setupProxy"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupsingles3source",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "loaderConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "topicCrName"
+            },
+            {
+              "name": "kafkaClusterOwnerUid"
+            },
+            {
+              "name": "topicPartitions"
+            },
+            {
+              "name": "topicReplicas"
+            },
+            {
+              "name": "topicConfig"
+            },
+            {
+              "name": "groupName_view",
+              "value": "S3 Source"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "reconcilecapturedtrafficandload",
+                "name": "s3-traffic-loader"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "loaderConfig",
+                    "value": "{{inputs.parameters.loaderConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{inputs.parameters.kafkaClusterOwnerUid}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "topicConfigChecksum",
+                    "value": "{{=sprig.dig('topicConfigChecksum', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": ""
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=sprig.dig('sourceLabel', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  }
+                ]
+              },
+              "name": "setupS3Source"
             }
           ]
         ],
@@ -391,6 +866,14 @@
                   {
                     "name": "snapshotItemConfig",
                     "value": "{{inputs.parameters.snapshotItemConfig}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },
@@ -421,11 +904,11 @@
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyforcaptureproxy",
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
-              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -450,16 +933,16 @@
                   }
                 ]
               },
-              "name": "waitForProxyDeps"
+              "name": "waitIndefinitelyForProxyDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
-              "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
+              "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
               "arguments": {
                 "parameters": [
                   {
@@ -484,7 +967,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -493,7 +976,7 @@
                 "template": "createorgetsnapshot",
                 "name": "create-or-get-snapshot"
               },
-              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed') && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed') && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -529,16 +1012,20 @@
                     "value": "{{=toJSON(sprig.dict(\"config\", sprig.dict(\"createSnapshotConfig\", fromJSON(inputs.parameters.snapshotItemConfig)['config']), \"repoConfig\", fromJSON(inputs.parameters.snapshotItemConfig)['repo'], \"label\", fromJSON(inputs.parameters.snapshotItemConfig)['label']))}}"
                   },
                   {
-                    "name": "targetLabel",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['label']}}"
-                  },
-                  {
                     "name": "semaphoreConfigMapName",
                     "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['semaphoreConfigMapName']}}"
                   },
                   {
                     "name": "semaphoreKey",
                     "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['semaphoreKey']}}"
+                  },
+                  {
+                    "name": "dataSnapshotName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['resourceUid']}}"
                   }
                 ]
               },
@@ -663,7 +1150,7 @@
                   },
                   {
                     "name": "snapshotItemConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotPrefix\", item['snapshotPrefix'], \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"configChecksum\", item['configChecksum']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotPrefix\", item['snapshotPrefix'], \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "sourceConfig",
@@ -701,6 +1188,10 @@
               "name": "targetConfig"
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "snapshotConfig"
             },
             {
@@ -711,6 +1202,18 @@
             },
             {
               "name": "resourceUid"
+            },
+            {
+              "name": "resourceCreationTimestamp"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
+              "name": "workloadIdentityChecksum"
             },
             {
               "name": "groupName_view"
@@ -767,15 +1270,6 @@
         "steps": [
           [
             {
-              "template": "donothing",
-              "arguments": {
-                "parameters": []
-              },
-              "name": "idGenerator"
-            }
-          ],
-          [
-            {
               "templateRef": {
                 "template": "migratemetadata",
                 "name": "metadata-migration"
@@ -790,6 +1284,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -814,6 +1312,14 @@
                   {
                     "name": "crdName",
                     "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "resourceCreationTimestamp",
+                    "value": "{{inputs.parameters.resourceCreationTimestamp}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -870,8 +1376,12 @@
                     "value": "{{inputs.parameters.crdName}}"
                   },
                   {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}"
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",
@@ -899,7 +1409,7 @@
                   },
                   {
                     "name": "sessionName",
-                    "value": "{{steps.idGenerator.id}}"
+                    "value": "{{='rfs-'+inputs.parameters.workloadIdentityChecksum}}"
                   },
                   {
                     "name": "crdUid",
@@ -994,8 +1504,12 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
-                    "value": "{{=inputs.parameters.resourceName+'.vapretry'}}"
+                    "value": "{{='snapshotmigration.'+inputs.parameters.resourceName+'.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -1009,7 +1523,7 @@
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
@@ -1037,7 +1551,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -1066,7 +1580,11 @@
                 "parameters": [
                   {
                     "name": "resourceUid",
-                    "value": "{{inputs.parameters.resourceUid}}"
+                    "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceUid}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   },
                   {
                     "name": "groupName_view",
@@ -1129,6 +1647,10 @@
                     "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['targetConfig'])}}"
                   },
                   {
+                    "name": "sourceConfig",
+                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
+                  },
+                  {
                     "name": "snapshotConfig",
                     "value": "{{=toJSON(sprig.dict(\"snapshotName\", (('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName)), \"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['label'], \"repoConfig\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['repoConfig']))}}"
                   },
@@ -1149,8 +1671,20 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "resourceCreationTimestamp",
+                    "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceCreationTimestamp}}"
+                  },
+                  {
                     "name": "sourceEndpoint",
                     "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                  },
+                  {
+                    "name": "workloadIdentityChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
                   }
                 ]
               },
@@ -1203,16 +1737,25 @@
               "name": "kafkaClusterName"
             },
             {
-              "name": "fromProxy"
+              "name": "sourceLabel"
             },
             {
-              "name": "fromProxyConfigChecksum"
+              "name": "fromCapturedTraffic"
+            },
+            {
+              "name": "fromCapturedTrafficSourceKind"
+            },
+            {
+              "name": "fromCapturedTrafficConfigChecksum"
             },
             {
               "name": "targetConfig"
             },
             {
               "name": "replayerOptions"
+            },
+            {
+              "name": "useLocalStack"
             },
             {
               "name": "name"
@@ -1233,6 +1776,10 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "resourceName",
+              "value": ""
             },
             {
               "name": "dependsOnSnapshotMigrations"
@@ -1273,8 +1820,20 @@
                     "value": "{{inputs.parameters.replayerOptions}}"
                   },
                   {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{=sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
-                    "value": "{{=inputs.parameters.name+'.trafficreplay.vapretry'}}"
+                    "value": "{{='trafficreplay.'+inputs.parameters.name+'.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -1288,13 +1847,17 @@
           [
             {
               "templateRef": {
-                "template": "waitforsnapshotmigration",
+                "template": "waitindefinitelyforsnapshotmigration",
                 "name": "resource-management"
               },
               "withParam": "{{inputs.parameters.dependsOnSnapshotMigrations}}",
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && !(0 == len(inputs.parameters.dependsOnSnapshotMigrations))}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=item['resourceName']}}"
+                  },
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
@@ -1308,22 +1871,18 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "resourceName",
-                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
-                  },
-                  {
                     "name": "checksumField",
                     "value": "checksumForReplayer"
                   }
                 ]
               },
-              "name": "waitForSnapshotMigrationDeps"
+              "name": "waitIndefinitelyForSnapshotMigrationDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyfortrafficsource",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -1331,7 +1890,7 @@
                 "parameters": [
                   {
                     "name": "configChecksum",
-                    "value": "{{inputs.parameters.fromProxyConfigChecksum}}"
+                    "value": "{{inputs.parameters.fromCapturedTrafficConfigChecksum}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -1342,27 +1901,31 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.fromProxy}}"
+                    "name": "sourceName",
+                    "value": "{{inputs.parameters.fromCapturedTraffic}}"
                   },
                   {
-                    "name": "checksumField",
-                    "value": "checksumForReplayer"
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.fromCapturedTrafficSourceKind}}"
                   }
                 ]
               },
-              "name": "waitForProxy"
+              "name": "waitIndefinitelyForTrafficSource"
             }
           ],
           [
             {
               "templateRef": {
                 "template": "waitforkafkacluster",
-                "name": "resource-management"
+                "name": "setup-kafka"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
@@ -1370,10 +1933,6 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
                   }
                 ]
               },
@@ -1416,12 +1975,20 @@
                     "value": "{{inputs.parameters.name}}"
                   },
                   {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}"
                   },
                   {
                     "name": "replayerOptions",
                     "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{inputs.parameters.useLocalStack}}"
                   },
                   {
                     "name": "imageTrafficReplayerLocation",
@@ -1593,11 +2160,26 @@
         "steps": [
           [
             {
+              "template": "initializerunmetadata",
+              "arguments": {
+                "parameters": []
+              },
+              "name": "initializeRunMetadata"
+            },
+            {
               "template": "setupsinglekafkacluster",
               "withParam": "{{=(('kafkaClusters' in fromJSON(inputs.parameters.config)) ? (fromJSON(inputs.parameters.config)['kafkaClusters']) : ([]))}}",
               "when": "{{='kafkaClusters' in fromJSON(inputs.parameters.config)}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "kafkaClusterConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid']))}}"
@@ -1617,6 +2199,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=item['name']}}"
                   },
                   {
                     "name": "groupName_view",
@@ -1653,7 +2239,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1688,6 +2274,71 @@
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
                   },
                   {
+                    "name": "minPodReplicas",
+                    "value": "{{=sprig.dig('minPodReplicas', 0, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=toJSON(sprig.dig('topicSpecOverrides', 'config', sprig.dict(), fromJSON(item['kafkaConfig'])))}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "2"
+                  }
+                ]
+              },
+              "name": "createProxy"
+            },
+            {
+              "template": "setupsingles3source",
+              "withParam": "{{=sprig.dig('s3TrafficLoaders', [], fromJSON(inputs.parameters.config))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "loaderConfig",
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceLabel\", item['sourceLabel'], \"s3Uri\", item['s3Uri'], \"awsRegion\", item['awsRegion'], \"endpoint\", sprig.dig('endpoint', '', item), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"kafkaClusterName\", sprig.dig('label', '', fromJSON(item['kafkaConfig'])), \"resourceUid\", sprig.dig('resourceUid', '', item)))}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{=sprig.dig('label', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{=sprig.dig('kafkaTopic', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicCrName",
+                    "value": "{{=item['name']+'-topic'}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{=sprig.dig('clusterResourceUid', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
                     "name": "topicPartitions",
                     "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
                   },
@@ -1709,7 +2360,7 @@
                   }
                 ]
               },
-              "name": "createProxy"
+              "name": "createS3Source"
             },
             {
               "template": "createsnapshotsforsource",
@@ -1827,7 +2478,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']}}"
+                    "value": "{{=item['resourceName']}}"
                   },
                   {
                     "name": "groupName_view",
@@ -1879,6 +2530,10 @@
                     "value": "{{=jsonpath(toJSON(item), '$.name')}}"
                   },
                   {
+                    "name": "sourceLabel",
+                    "value": "{{=jsonpath(toJSON(item), '$.sourceLabel')}}"
+                  },
+                  {
                     "name": "dependsOn",
                     "value": "{{=jsonpath(toJSON(item), '$.dependsOn')}}"
                   },
@@ -1887,12 +2542,16 @@
                     "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
                   },
                   {
-                    "name": "fromProxy",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromProxy')}}"
+                    "name": "fromCapturedTraffic",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
                   },
                   {
-                    "name": "fromProxyConfigChecksum",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromProxyConfigChecksum')}}"
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficSourceKind')}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficConfigChecksum",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficConfigChecksum')}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1927,8 +2586,16 @@
                     "value": "{{=item['replayerConfig']}}"
                   },
                   {
+                    "name": "resourceName",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{=sprig.dig('useLocalStack', false, fromJSON(item['replayerConfig']))}}"
+                  },
+                  {
                     "name": "groupName_view",
-                    "value": "{{=item['fromProxy']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
+                    "value": "{{=item['fromCapturedTraffic']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
                   },
                   {
                     "name": "sortOrder_view",

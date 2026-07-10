@@ -57,11 +57,12 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
         .addRequiredInput("snapshotPrefix", typeToken<string>())
-        .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
         .addRequiredInput("semaphoreKey", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("dataSnapshotName", typeToken<string>())
+        .addRequiredInput("dataSnapshotUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -84,7 +85,9 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         })
                     ),
                     semaphoreConfigMapName: b.inputs.semaphoreConfigMapName,
-                    semaphoreKey: b.inputs.semaphoreKey
+                    semaphoreKey: b.inputs.semaphoreKey,
+                    dataSnapshotName: b.inputs.dataSnapshotName,
+                    dataSnapshotUid: b.inputs.dataSnapshotUid
                 }), {
                     when: tasks => tasks.getSnapshotName.outputs.autoCreate
                 }

@@ -547,4 +547,63 @@ describe('aggs-to-facets MicroTransform', () => {
       expect(catBuckets[1].size).toBe(2);
     });
   });
+
+  describe('metric aggregation (stat facet) response conversion', () => {
+    it('should return scalar value for avg metric agg', () => {
+      const avgAgg = new Map<string, any>([['value', 29.95]]);
+      const aggs = new Map([['avg_price', avgAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      expect(facets.get('avg_price')).toBe(29.95);
+    });
+
+    it('should return scalar value for value_count metric agg', () => {
+      const countAgg = new Map<string, any>([['value', 42]]);
+      const aggs = new Map([['num_products', countAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      expect(facets.get('num_products')).toBe(42);
+    });
+
+    it('should handle metric aggs nested inside bucket aggs', () => {
+      const avgAgg = new Map<string, any>([['value', 15.5]]);
+      const outerBuckets = [
+        new Map<string, any>([
+          ['key', 'electronics'],
+          ['doc_count', 10],
+          ['avg_price', avgAgg],
+        ]),
+      ];
+      const aggs = new Map([
+        ['categories', new Map<string, any>([['buckets', outerBuckets]])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 50 });
+      response.apply(ctx);
+
+      const bucket: JavaMap = ctx.responseBody.get('facets').get('categories').get('buckets')[0];
+      expect(bucket.get('avg_price')).toBe(15.5);
+    });
+
+    it('should handle metric aggs alongside bucket aggs at top level', () => {
+      const avgAgg = new Map<string, any>([['value', 25]]);
+      const aggs = new Map<string, any>([
+        ['categories', osTermsAgg([{ key: 'food', doc_count: 3 }])],
+        ['avg_price', avgAgg],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      expect(facets.get('avg_price')).toBe(25);
+      expect(facets.get('categories').get('buckets')).toHaveLength(1);
+    });
+  });
 });

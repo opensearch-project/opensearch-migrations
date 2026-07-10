@@ -24,9 +24,10 @@ import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, expr, makeDirectTypeProxy, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 import {SynchronizationConfig} from "./synchronization";
+import {assertNoBareTemplateString} from "./templateLiteralGuard";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
@@ -157,6 +158,8 @@ type PodConfigData = {
     hostAliases?: HostAlias[];
     podSpecPatch?: AllowLiteralOrExpression<string>;
     disruptable?: boolean;
+    dynamicVolumes?: BaseExpression<any[], any>[];
+    dynamicVolumeMounts?: BaseExpression<any[], any>[];
 };
 
 export class ContainerBuilder<
@@ -231,15 +234,30 @@ export class ContainerBuilder<
     }
 
     getBody() {
-        const volumes = Object.entries(this.volumeScope).map(([name, config]) => ({
-            name,
-            configMap: config.configMap
-        }));
+        const volumes = Object.entries(this.volumeScope).map(([name, config]) => {
+            const {mountPath, readOnly, volume, ...volumeSource} = config as Record<string, PlainObject>;
+            return volume ?? {
+                name,
+                ...volumeSource
+            };
+        });
         const volumeMounts = Object.entries(this.volumeScope).map(([name, config]) => ({
-        name,
+            name,
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));
+        const allVolumes = this.podConfig.dynamicVolumes?.length
+            ? makeDirectTypeProxy(expr.concatArrays(
+                expr.templateValue(volumes as PlainObject[]),
+                ...this.podConfig.dynamicVolumes
+            ))
+            : volumes;
+        const allVolumeMounts = this.podConfig.dynamicVolumeMounts?.length
+            ? makeDirectTypeProxy(expr.concatArrays(
+                expr.templateValue(volumeMounts as PlainObject[]),
+                ...this.podConfig.dynamicVolumeMounts
+            ))
+            : volumeMounts;
         const shortLivedAnnotations = this.podConfig.disruptable
             ? undefined : { 'karpenter.sh/do-not-disrupt': 'true' };
         const mergedMetadata = (this.podConfig.metadata || shortLivedAnnotations) ? {
@@ -262,11 +280,11 @@ export class ContainerBuilder<
             ...(this.podConfig.securityContext && { securityContext: this.podConfig.securityContext }),
             ...(this.podConfig.hostAliases && { hostAliases: this.podConfig.hostAliases }),
             ...(this.podConfig.podSpecPatch && { podSpecPatch: this.podConfig.podSpecPatch }),
-            ...(volumes.length > 0 && { volumes }),
+            ...((Array.isArray(allVolumes) ? allVolumes.length > 0 : true) && { volumes: allVolumes }),
             container: {
                 ...this.bodyScope,
                 env: this.envScope as Record<string, ExpressionOrConfigMapValue<any>>,
-                ...(volumeMounts.length > 0 && { volumeMounts })
+                ...((Array.isArray(allVolumeMounts) ? allVolumeMounts.length > 0 : true) && { volumeMounts: allVolumeMounts })
             }
         };
     }
@@ -400,11 +418,19 @@ export class ContainerBuilder<
 
     addArtifactOutput<Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, ArtifactScope>,
-        path: string
+        path: string,
+        options: { s3Key?: AllowLiteralOrExpression<string> } = {}
     ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands, ExtendScope<ArtifactScope, { [K in Name]: OutputArtifactDef }>> {
+        assertNoBareTemplateString(options.s3Key, "artifact output s3Key");
+        const artifact: OutputArtifactDef = {
+            name,
+            path,
+            archive: { none: {} },
+            ...(options.s3Key ? { s3: { key: options.s3Key } } : {})
+        };
         const newArtifacts: OutputArtifactsRecord = {
             ...this.outputArtifacts,
-            [name as string]: { name, path, archive: { none: {} } } as OutputArtifactDef
+            [name as string]: artifact
         };
         return new ContainerBuilder(
             this.parentWorkflowScope,
@@ -445,6 +471,30 @@ export class ContainerBuilder<
             this.podConfig,
             this.outputArtifacts
         );
+    }
+
+    addDynamicVolumes(
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => {
+            volumes: BaseExpression<any[], any>;
+            volumeMounts: BaseExpression<any[], any>;
+        }
+    ): ContainerBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ContainerScope,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope,
+        PodConfigBrands
+    > {
+        const additions = builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs });
+        return this.withUpdates({
+            podConfig: {
+                ...this.podConfig,
+                dynamicVolumes: [...(this.podConfig.dynamicVolumes ?? []), additions.volumes],
+                dynamicVolumeMounts: [...(this.podConfig.dynamicVolumeMounts ?? []), additions.volumeMounts],
+            }
+        });
     }
 
     addEnvVar<Name extends string>(

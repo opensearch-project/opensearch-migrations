@@ -5,6 +5,7 @@ import java.util.List;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -13,6 +14,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
@@ -20,7 +22,6 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 @AllArgsConstructor
@@ -46,16 +47,10 @@ public class CreateSnapshot {
         public String snapshotRepoName;
 
         @Parameter(
-                names = {"--file-system-repo-path" },
-                required = false,
-                description = "The full path to the snapshot repo on the file system.")
-        public String fileSystemRepoPath;
-
-        @Parameter(
-                names = {"--s3-repo-uri" },
-                required = false,
-                description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
-        public String s3RepoUri;
+                names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
+                required = true,
+                description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
+        public String repoUri;
 
         @Parameter(
                 names = {"--s3-region" },
@@ -64,10 +59,10 @@ public class CreateSnapshot {
         public String s3Region;
 
         @Parameter(
-                names = {"--s3-endpoint" },
+                names = {"--endpoint", "--s3-endpoint" },
                 required = false,
-                description = "The S3 endpoint setting to specify when creating a snapshot repository")
-        public String s3Endpoint;
+                description = "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)")
+        public String endpoint;
 
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
@@ -108,12 +103,20 @@ public class CreateSnapshot {
         public boolean includeGlobalState = true;
 
         @Parameter(
-                required = false,
-                names = {"--otel-collector-endpoint" },
-                arity = 1,
-                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-                + "forwarded. If no value is provided, metrics will not be forwarded.")
-        String otelCollectorEndpoint;
+            required = false,
+            names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+                "Omit this option to disable trace export.")
+        String otelTraceCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+                "Omit this option to disable metric export.")
+        String otelMetricsCollectorEndpoint;
 
         @Parameter(
                 names = {"--source-type"},
@@ -128,13 +131,6 @@ public class CreateSnapshot {
         public List<String> solrCollections = List.of();
     }
 
-    @Getter
-    @AllArgsConstructor
-    public static class S3RepoInfo {
-        String awsRegion;
-        String repoUri;
-    }
-
     public static void main(String[] args) throws Exception {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
@@ -147,19 +143,15 @@ public class CreateSnapshot {
         }
 
         var rootContext = new RootSnapshotContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(arguments.otelTraceCollectorEndpoint, arguments.otelMetricsCollectorEndpoint),
                 RootSnapshotContext.SCOPE_NAME, ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
-            throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
-        }
-        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
-            throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
-        }
-        if (arguments.s3RepoUri != null && arguments.s3Region == null) {
-            throw new ParameterException("If an s3 repo is being used, s3-region must be set");
+        var parsedRepoUri = RepoUri.parse(arguments.repoUri);
+        if (parsedRepoUri instanceof RepoUri.S3RepoUri && arguments.s3Region == null) {
+            throw new ParameterException("If an s3 repo is being used, --s3-region must be set");
         }
 
         var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());

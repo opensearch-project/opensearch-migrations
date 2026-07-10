@@ -1,14 +1,18 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -159,7 +163,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
             args.snapshotRepoName = SNAPSHOT_NAME + "_repo";
-            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.repoUri = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = esSourceContainer.getUrl();
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
@@ -303,6 +307,105 @@ public class ProcessLifecycleTest extends SourceTestBase {
             }
             return process.exitValue();
         });
+    }
+
+    /**
+     * A non-retriable snapshot read failure must surface a clearly-labeled
+     * ERROR log (with the snapshot path/context) and exit with the dedicated
+     * {@link RfsMigrateDocuments#SNAPSHOT_READ_FAILED_EXIT_CODE} BEFORE the process terminates,
+     * rather than dying with a generic exit code and an unlabeled stack trace.
+     *
+     * <p>The harness builds a valid snapshot, then we corrupt the repository metadata on disk so the
+     * worker fails while reading the snapshot. The target/coordinator are healthy, so the only thing
+     * that fails is the snapshot read.
+     */
+    @Test
+    public void testNonRetriableSnapshotReadFailureExitsWithDedicatedCode() throws Exception {
+        testProcess(RfsMigrateDocuments.SNAPSHOT_READ_FAILED_EXIT_CODE,
+            d -> {
+                corruptSnapshotRepoMetadata(d.tempDirSnapshot);
+
+                String targetAddress = d.proxyContainer.getProxyUriAsString();
+                var processBuilder = setupProcess(
+                    d.tempDirSnapshot,
+                    d.tempDirLucene,
+                    targetAddress,
+                    new String[] {
+                        "--documents-per-bulk-request", "10",
+                        "--max-connections", "1",
+                        "--initial-lease-duration", "PT10M",
+                    });
+
+                var result = runAndCaptureOutput(processBuilder, 90);
+                Assertions.assertTrue(
+                    result.output.contains("Non-retriable snapshot read failure"),
+                    "Expected a labeled snapshot-read-failure ERROR log before exit, but got:\n" + result.output);
+                return result.exitCode;
+            });
+    }
+
+    /**
+     * Overwrite the top-level repository metadata file(s) ({@code index-N}) in a filesystem snapshot
+     * repo with garbage, so the first attempt to parse the repo metadata throws a
+     * {@code SnapshotRepo.CannotParseRepoFile} (a {@code SnapshotReadFailure}).
+     */
+    @SneakyThrows
+    private static void corruptSnapshotRepoMetadata(Path snapshotDir) {
+        final List<Path> repoDataFiles;
+        try (var files = Files.list(snapshotDir)) {
+            repoDataFiles = files
+                .filter(p -> p.getFileName().toString().startsWith("index-"))
+                .toList();
+        }
+        Assertions.assertFalse(repoDataFiles.isEmpty(),
+            "Expected a repository metadata 'index-N' file to corrupt in " + snapshotDir);
+        for (var p : repoDataFiles) {
+            Files.writeString(p, "not-valid-repo-metadata");
+        }
+    }
+
+    @AllArgsConstructor
+    private static class ProcessResult {
+        final int exitCode;
+        final String output;
+    }
+
+    /**
+     * Run the process capturing its combined stdout/stderr so the test can assert on log content as
+     * well as the exit code. Mirrors {@link SourceTestBase#runAndMonitorProcess} but retains output.
+     */
+    @SneakyThrows
+    private static ProcessResult runAndCaptureOutput(ProcessBuilder processBuilder, int timeoutSeconds) {
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.PIPE);
+        var process = processBuilder.start();
+        var output = new StringBuilder();
+        var readerThread = new Thread(() -> {
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (output) {
+                        output.append(line).append(System.lineSeparator());
+                    }
+                    log.atInfo().setMessage("from sub-process: {}").addArgument(line).log();
+                }
+            } catch (IOException e) {
+                log.atWarn().setCause(e).setMessage("Couldn't read sub-process output").log();
+            }
+        });
+        readerThread.start();
+
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroy();
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
+            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
+        }
+        readerThread.join(TimeUnit.SECONDS.toMillis(5));
+        synchronized (output) {
+            return new ProcessResult(process.exitValue(), output.toString());
+        }
     }
 
 }

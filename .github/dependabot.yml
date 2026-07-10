@@ -1,12 +1,34 @@
 version: 2
+
+# Grouping notes:
+#   * Each ecosystem has TWO groups:
+#       - a "*-version" group (applies-to: version-updates, the default) that
+#         batches the scheduled weekly bumps into a single PR.
+#       - a "*-security" group (applies-to: security-updates) that batches
+#         Dependabot security alerts into a single PR. WITHOUT this, security
+#         updates ignore groups entirely and open one PR per advisory.
+#   * Multiple manifests of the same ecosystem are folded into one update entry
+#     via `directories:` (plural) so a single config covers every lockfile.
+
 updates:
   - package-ecosystem: "npm"
-    directory: "/deployment/migration-assistant-solution"
+    directories:
+      - "/deployment/migration-assistant-solution"
+      - "/deployment/cdk/opensearch-service-migration"
+      - "/orchestrationSpecs"
+      - "/transformation/standardJavascriptTransforms"
+      - "/TrafficCapture/SolrTransformations/transforms"
+      - "/schema-viewer"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 1
     groups:
-      migration-assistant-npm:
+      npm-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      npm-security:
+        applies-to: security-updates
         patterns:
           - "*"
     ignore:
@@ -26,36 +48,18 @@ updates:
         update-types:
           - "version-update:semver-major"
 
-  - package-ecosystem: "npm"
-    directory: "/deployment/cdk/opensearch-service-migration"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      opensearch-cdk-npm:
-        patterns:
-          - "*"
-    ignore:
-      - dependency-name: "eslint"
-        update-types:
-          - "version-update:semver-major"
-      - dependency-name: "@eslint/*"
-        update-types:
-          - "version-update:semver-major"
-      - dependency-name: "typescript"
-        update-types:
-          - "version-update:semver-major"
-      - dependency-name: "typescript-eslint"
-        update-types:
-          - "version-update:semver-major"
-
   - package-ecosystem: "gradle"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 1
     groups:
-      gradle-all:
+      gradle-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      gradle-security:
+        applies-to: security-updates
         patterns:
           - "*"
     ignore:
@@ -75,12 +79,9 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
       - dependency-name: "errorprone"
-      - dependency-name: "software.amazon.msk:aws-msk-iam-auth" # > 2.3.4 requires java 17
       - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
-      - dependency-name: "com.diffplug.spotless" # Spotless Plugin >= 8 requres java 17 which requires solutions release to update
-      - dependency-name: "io.freefair.lombok" # Lombok Plugin >= 9 requres java 17 which requires solutions release to update
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -88,86 +89,34 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 1
     groups:
-      github-actions-all:
+      github-actions-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
         patterns:
           - "*"
 
   - package-ecosystem: "pip"
-    directory: "/migrationConsole/lib/console_link"
+    directories:
+      - "/migrationConsole/lib/console_link"
+      - "/migrationConsole/cluster_tools"
+      - "/migrationConsole/lib/integ_test"
+      - "/libraries/testAutomation"
+      - "/test/cleanupDeployment"
+      - "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
+      - "/solrMigrationDevSandbox"
+      - "/transformation/transformationPlugins/jsonMessageTransformers/jsonPythonTransformerProvider/custom_transform"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 1
     groups:
-      pip-console-link:
+      pip-version:
+        applies-to: version-updates
         patterns:
           - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/migrationConsole/cluster_tools"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-cluster-tools:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/migrationConsole/lib/integ_test"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-integ-test:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/libraries/testAutomation"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-test-automation:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/test/cleanupDeployment"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-cleanup-deployment:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-es-test-console:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-k8s-configmap-utils:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/TrafficCapture/dockerSolution/otelConfigs"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-otel-configs:
+      pip-security:
+        applies-to: security-updates
         patterns:
           - "*"

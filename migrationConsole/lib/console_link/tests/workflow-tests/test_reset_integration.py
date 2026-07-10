@@ -21,7 +21,7 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli  # noqa: F401
-from console_link.workflow.commands.approve import approve_gate
+from console_link.workflow.commands.approve import LABEL_WORKFLOW, approve_gate
 from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION, list_migration_resources
 from console_link.workflow.commands.reset import _delete_crd, _get_resource_completions  # noqa: F401
 
@@ -143,7 +143,7 @@ def _wait_for_crd_endpoint(custom, namespace, plural, timeout=60):
             time.sleep(0.5)
 
 
-def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
+def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None, labels=None):
     custom = client.CustomObjectsApi()
     _wait_for_crd_endpoint(custom, namespace, plural)
     body = {
@@ -157,7 +157,7 @@ def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
             "snapshotmigrations": "SnapshotMigration",
             "trafficreplays": "TrafficReplay",
         }[plural],
-        "metadata": {"name": name, "namespace": namespace},
+        "metadata": {"name": name, "namespace": namespace, "labels": labels or {}},
         "spec": {"dependsOn": depends_on or []},
     }
 
@@ -325,10 +325,8 @@ class TestResetListIntegration:
             check=False,
         )
         assert result.returncode == 0
-        assert "Capture Proxy" in result.stdout
-        assert "my-proxy" in result.stdout
-        assert "Snapshot Migration" in result.stdout
-        assert "my-snap" in result.stdout
+        assert "captureproxy.my-proxy" in result.stdout
+        assert "snapshotmigration.my-snap" in result.stdout
         assert "workflow reset --all" in result.stdout
         assert "workflow submit" in result.stdout
 
@@ -344,7 +342,7 @@ class TestResetSingleIntegration:
 
         result = _invoke_workflow_cli(runner, ["reset", "snap-c", "--namespace", reset_ns])
         assert result.exit_code == 0
-        assert "Deleted snap-c" in result.output
+        assert "Deleted snapshotmigration.snap-c" in result.output
         _assert_deleted(reset_ns, "snapshotmigrations", "snap-c")
 
     def test_reset_nonexistent_resource(self, runner, reset_ns):
@@ -380,7 +378,7 @@ class TestResetSingleIntegration:
         result = _invoke_workflow_cli(runner, ["reset", "kafka-a", "--namespace", reset_ns])
         assert result.exit_code != 0
         assert "Cannot delete because dependent resources still exist:" in result.output
-        assert "Captured Traffic: topic-a" in result.output
+        assert "capturedtraffic.topic-a" in result.output
         assert "--cascade" in result.output
         assert _get_phase(reset_ns, "kafkaclusters", "kafka-a") == VALID_PHASES["kafkaclusters"]
         assert _get_phase(reset_ns, "capturedtraffics", "topic-a") == VALID_PHASES["capturedtraffics"]
@@ -399,7 +397,7 @@ class TestResetSingleIntegration:
         result = _invoke_workflow_cli(runner, ["reset", "snap-a", "--namespace", reset_ns])
         assert result.exit_code != 0
         assert "Cannot delete because dependent resources still exist:" in result.output
-        assert "Snapshot Migration: mig-a" in result.output
+        assert "snapshotmigration.mig-a" in result.output
         assert "--cascade" in result.output
 
     def test_reset_with_cascade_deletes_dependents(self, runner, reset_ns):
@@ -477,7 +475,7 @@ class TestResetAllIntegration:
         _assert_deleted(reset_ns, "capturedtraffics", "topic-g")
         _assert_deleted(reset_ns, "kafkaclusters", "kafka-g")
         assert _get_phase(reset_ns, "captureproxies", "proxy-g") == VALID_PHASES["captureproxies"]
-        assert "Keeping protected proxies alive: proxy-g" in result.output
+        assert "Keeping protected proxies alive: captureproxy.proxy-g" in result.output
         assert "Use --include-proxies to delete them." in result.output
 
     def test_reset_all_with_include_proxies_deletes_everything(self, runner, reset_ns):
@@ -522,10 +520,17 @@ class TestApproveIntegration:
         assert _get_phase(reset_ns, "approvalgates", "gate-c") == "Approved"
 
     def test_approve_cli_with_glob(self, runner, reset_ns):
-        _create_crd_instance(reset_ns, "approvalgates", "eval-metadata", phase=VALID_PHASES["approvalgates"])
-        _create_crd_instance(reset_ns, "approvalgates", "migrate-metadata", phase=VALID_PHASES["approvalgates"])
+        workflow_labels = {LABEL_WORKFLOW: "migration-workflow"}
+        _create_crd_instance(
+            reset_ns, "approvalgates", "eval-metadata",
+            phase=VALID_PHASES["approvalgates"], labels=workflow_labels,
+        )
+        _create_crd_instance(
+            reset_ns, "approvalgates", "migrate-metadata",
+            phase=VALID_PHASES["approvalgates"], labels=workflow_labels,
+        )
 
-        result = _invoke_workflow_cli(runner, ["approve", "eval-*", "--namespace", reset_ns])
+        result = _invoke_workflow_cli(runner, ["approve", "step", "--pre-approve", "eval-*", "--namespace", reset_ns])
         assert result.exit_code == 0
         assert "Approved eval-metadata" in result.output
         assert _get_phase(reset_ns, "approvalgates", "eval-metadata") == "Approved"
@@ -534,15 +539,14 @@ class TestApproveIntegration:
     def test_approve_cli_no_pending(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "approvalgates", "gate-d", phase="Approved")
 
-        result = _invoke_workflow_cli(runner, ["approve", "gate-d", "--namespace", reset_ns])
-        assert "No pending" in result.output
+        result = _invoke_workflow_cli(runner, ["approve", "step", "gate-d", "--namespace", reset_ns])
+        assert "No steps are currently being waited on" in result.output
 
     def test_approve_cli_no_match(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "approvalgates", "gate-e", phase=VALID_PHASES["approvalgates"])
 
-        result = _invoke_workflow_cli(runner, ["approve", "nonexistent-*", "--namespace", reset_ns])
-        assert "No pending gates match" in result.output
-        assert "gate-e" in result.output
+        result = _invoke_workflow_cli(runner, ["approve", "step", "nonexistent-*", "--namespace", reset_ns])
+        assert "No steps are currently being waited on" in result.output
 
 
 @pytest.mark.slow
@@ -556,8 +560,8 @@ class TestAutocompleteIntegration:
         _create_crd_instance(reset_ns, "captureproxies", "proxy-ac", phase=VALID_PHASES["captureproxies"])
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-ac", phase=VALID_PHASES["snapshotmigrations"])
         completions = _get_resource_completions_subprocess(reset_ns, "")
-        assert "proxy-ac" in completions
-        assert "snap-ac" in completions
+        assert "captureproxy.proxy-ac" in completions
+        assert "snapshotmigration.snap-ac" in completions
 
     def test_autocomplete_filters_by_prefix(self, reset_ns):
         cache_file = (
@@ -567,6 +571,6 @@ class TestAutocompleteIntegration:
 
         _create_crd_instance(reset_ns, "captureproxies", "proxy-x", phase=VALID_PHASES["captureproxies"])
         _create_crd_instance(reset_ns, "captureproxies", "other-y", phase=VALID_PHASES["captureproxies"])
-        completions = _get_resource_completions_subprocess(reset_ns, "proxy")
-        assert "proxy-x" in completions
-        assert "other-y" not in completions
+        completions = _get_resource_completions_subprocess(reset_ns, "captureproxy.proxy")
+        assert "captureproxy.proxy-x" in completions
+        assert "captureproxy.other-y" not in completions

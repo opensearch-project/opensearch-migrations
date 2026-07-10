@@ -9,7 +9,7 @@ from base64 import b64encode
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from console_link.models.client_options import ClientOptions
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, SourceCluster
 from moto import mock_aws
 from tests.utils import create_valid_cluster
 import requests
@@ -338,6 +338,39 @@ def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
         assert "test.opensearchtarget.com" == host_header
 
 
+def test_source_proxy_sigv4_call_signs_with_source_endpoint(requests_mock, aws_credentials):
+    source_endpoint = "https://search-test-source.us-east-1.es.amazonaws.com"
+    proxy_endpoint = "https://capture-proxy:9201"
+    source_cluster = SourceCluster({
+        "endpoint": source_endpoint,
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-1",
+            "service": "es"
+        },
+        "proxy": {
+            "endpoint": proxy_endpoint,
+            "allow_insecure": True
+        }
+    })
+
+    requests_mock.put(f"{proxy_endpoint}/test-index/_doc/1", json={'result': 'created'})
+
+    with mock_aws():
+        response = source_cluster.proxy.call_api(
+            "/test-index/_doc/1",
+            method=HttpMethod.PUT,
+            data=json.dumps({"test": True})
+        )
+
+    assert response.status_code == 200
+    assert requests_mock.last_request.url == f"{proxy_endpoint}/test-index/_doc/1"
+    assert requests_mock.last_request.headers['Host'] == "search-test-source.us-east-1.es.amazonaws.com"
+    auth_header = requests_mock.last_request.headers['Authorization']
+    assert "AWS4-HMAC-SHA256" in auth_header
+    assert "us-east-1/es/aws4_request" in auth_header
+
+
 def test_run_benchmark_executes_correctly_no_auth(mocker):
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     mock = mocker.patch("subprocess.run", autospec=True)
@@ -349,7 +382,7 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
                                  " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params="
                                  "bulk_size:10,bulk_indexing_clients:1 "
-                                 "--client-options=verify_certs:false", shell=True)
+                                 "--client-options=verify_certs:false,use_ssl:true", shell=True)
 
 
 def test_run_benchmark_executes_correctly_sigv4_auth(mocker):
@@ -363,7 +396,7 @@ def test_run_benchmark_executes_correctly_sigv4_auth(mocker):
                                  " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params="
                                  "bulk_size:10,bulk_indexing_clients:1 "
-                                 "--client-options=verify_certs:false,"
+                                 "--client-options=verify_certs:false,use_ssl:true,"
                                  "amazon_aws_log_in:session,"
                                  "service:aoss,"
                                  "region:eu-west-1", shell=True)
@@ -383,7 +416,7 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
                                  " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params="
                                  "bulk_size:10,bulk_indexing_clients:1 "
-                                 "--client-options=verify_certs:false,use_ssl:true,"
+                                 "--client-options=use_ssl:true,"
                                  f"basic_auth_user:{auth_details['username']},"
                                  f"basic_auth_password:{auth_details['password']}", shell=True)
 
