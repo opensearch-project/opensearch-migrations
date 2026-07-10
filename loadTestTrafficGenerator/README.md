@@ -115,8 +115,113 @@ or override on the command line with `--env KEY=VALUE`.
   (same date format, same constants, same geo-point array format). The index is `dynamic: strict`,
   so any mismatch causes rejected documents.
 
-- **Operation mix (Phase 1).** 70% `_bulk` writes, 30% single-doc POSTs. Stateful sequences
-  (create → update → query → delete) and connection-pinning are Phase 2.
+- **Operation mix.** Phase 1: 70% `_bulk` writes, 30% single-doc POSTs. Phase 2 adds
+  stateful sequences (create → update → query → delete); the budget is redistributed using
+  `SEQUENCE_FRACTION` (default 0.15). `CONNECTION_MODE=pinned` (default) keeps all VU requests
+  on one TCP connection; `CONNECTION_MODE=spread` forces `Connection: close` per request.
+  Phase 3 adds a separate search scenario: 60% flat search, 20% aggregations, 10% partial update,
+  5% single-doc write, 5% deep paging (scroll or search_after, off by default).
+
+- **Scroll safety.** Scroll contexts are closed in a `try/finally` block — leaks cannot
+  accumulate even if a page fetch fails or k6 is interrupted mid-sequence.
+
+---
+
+## Phase 2 — Stateful Sequences
+
+### Run with sequences (pinned mode)
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
+  -e SEQUENCE_FRACTION=0.15 \
+  -e CONNECTION_MODE=pinned \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/ingest.js
+```
+
+To test spread mode (forces a new TCP connection per request — sequences may replay out of order):
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
+  -e SEQUENCE_FRACTION=0.15 \
+  -e CONNECTION_MODE=spread \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/ingest.js
+```
+
+### Validate
+
+```bash
+./scripts/validate_phase_2.sh
+./scripts/validate_phase_2.sh --with-setup
+./scripts/validate_phase_2.sh --with-setup --teardown
+```
+
+Steps 1–9 are fully automated. Step 10 (replayer ordering) requires the Traffic Replayer
+to be running separately — see the script output for exact commands.
+
+### New environment variables (Phase 2)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEQUENCE_FRACTION` | `0.15` | Share of iterations run as a create→update→query→delete sequence |
+| `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive (one stream); `spread` = `Connection: close` (one stream per request) |
+
+---
+
+## Phase 3 — Search Profile
+
+### Run the search scenario (steady, no deep paging)
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/search-steady.env | grep -v '^$' | sed 's/^/-e /') \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/search.js
+```
+
+To enable deep paging (scroll or search_after sequences for 5% of iterations):
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/search-deep-paging.env | grep -v '^$' | sed 's/^/-e /') \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/search.js
+```
+
+Switch between scroll and search_after by overriding `PAGING_MODE`:
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/search-deep-paging.env | grep -v '^$' | sed 's/^/-e /') \
+  -e PAGING_MODE=search_after \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/search.js
+```
+
+### Validate
+
+```bash
+./scripts/validate_phase_3.sh
+./scripts/validate_phase_3.sh --with-setup
+./scripts/validate_phase_3.sh --with-setup --teardown
+./scripts/validate_phase_3.sh --with-setup --deep-paging   # uses search-deep-paging.env
+```
+
+Steps 1–8 are automated. Step 9 (Replayer memory growth) requires the Traffic Replayer
+to be running separately — see the script output for guidance.
+
+### New environment variables (Phase 3)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEARCH_RATE` | `50` | Target requests/second |
+| `SEARCH_VUS` | `30` | Pre-allocated VUs |
+| `SEARCH_MAX_VUS` | `150` | Max VUs k6 may spin up |
+| `DEEP_PAGING_ENABLED` | `false` | `true` to activate scroll / search_after steps |
+| `PAGING_MODE` | `scroll` | `scroll` or `search_after` |
+| `SCROLL_PAGES` | `3` | Max pages per scroll sequence |
+| `SEARCH_AFTER_PAGES` | `3` | Max pages per search_after sequence |
+| `CONNECTION_MODE` | `pinned` | Same as Phase 2 |
+
+The `search` scenario auto-appears in the Grafana Scenario drop-down — no dashboard changes needed.
 
 ---
 
@@ -125,8 +230,8 @@ or override on the command line with `--env KEY=VALUE`.
 | Phase | Status | What it adds |
 |---|---|---|
 | 1 — Ingest baseline | **done** | `_bulk` + single-doc writes at constant rate |
-| 2 — Stateful sequences | pending | create → update → query → delete; connection pinning |
-| 3 — Search profile | pending | Queries, aggregations, deep paging (scroll / search_after) |
+| 2 — Stateful sequences | **done** | create → update → query → delete; connection pinning |
+| 3 — Search profile | **done** | Queries, aggregations, deep paging (scroll / search_after) |
 | 4 — Mixed profile | pending | Concurrent ingest + search; Redis ID registry |
 | 5 — Burst / ramp | pending | `ramping-arrival-rate` configs |
 | 6 — Chaos hooks | pending | Pause/resume/rate-change API for orchestration layer |

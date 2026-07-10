@@ -1,0 +1,37 @@
+{
+  "vendor_ids":          ["1", "2"],
+  "trip_types":          ["1", "2"],
+  "payment_types":       ["1", "2", "3", "4"],
+  "store_and_fwd_flags": ["Y", "N"],
+  "rate_code_ids":       ["1"],
+  "passenger_counts":    [1, 2, 3, 4],
+
+  "fare_amount": {
+    "min": 5.0,
+    "max": 50.0,
+    "ranges": [[5, 15], [15, 30], [30, 50]]
+  },
+
+  "total_amount": {
+    "min": 5.0,
+    "max": 50.0
+  },
+
+  "trip_distance": {
+    "min": 0.5,
+    "max": 20.0,
+    "ranges": [[0.5, 5], [5, 10], [10, 20]]
+  },
+
+  "pickup_datetime": {
+    "min": "2024-01-01 00:00:00",
+    "max": "2024-12-31 23:59:59"
+  },
+
+  "pickup_location": {
+    "lat_min": 40.63,
+    "lat_max": 40.85,
+    "lon_min": -74.05,
+    "lon_max": -73.75
+  }
+}
