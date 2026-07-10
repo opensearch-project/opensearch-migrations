@@ -1548,8 +1548,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "changeRestriction": "gated",
                       "x-change-restriction": "gated",
                       "x-effective-default": {
-                        "label": "cert-manager self-signed",
-                        "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names."
+                        "label": "cert-manager migration CA",
+                        "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured migrations-ca issuer and generated proxy service DNS names."
                       }
                     },
                     "enableMSKAuth": {
@@ -8092,8 +8092,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "changeRestriction": "gated",
                     "x-change-restriction": "gated",
                     "x-effective-default": {
-                      "label": "cert-manager self-signed",
-                      "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names."
+                      "label": "cert-manager migration CA",
+                      "description": "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured migrations-ca issuer and generated proxy service DNS names."
                     }
                   },
                   "enableMSKAuth": {

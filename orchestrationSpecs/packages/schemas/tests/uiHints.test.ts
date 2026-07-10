@@ -179,8 +179,8 @@ describe("workflow schema UI hints", () => {
 
         const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
         expect(proxyConfig.properties.tls["x-effective-default"]).toMatchObject({
-            label: "cert-manager self-signed",
-            description: expect.stringContaining("preconfigured self-signed issuer"),
+            label: "cert-manager migration CA",
+            description: expect.stringContaining("preconfigured migrations-ca issuer"),
         });
     });
 

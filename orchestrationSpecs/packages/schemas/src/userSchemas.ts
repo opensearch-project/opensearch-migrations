@@ -1125,6 +1125,18 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         renewBefore: z.string().default("360h").optional()
             .describe("How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
         clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
+    }).superRefine((value, ctx) => {
+        if (
+            value.issuerRef.name === "migrations-selfsigned-bootstrap" &&
+            (value.issuerRef.kind ?? "ClusterIssuer") === "ClusterIssuer" &&
+            (value.issuerRef.group ?? "cert-manager.io") === "cert-manager.io"
+        ) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["issuerRef", "name"],
+                message: "migrations-selfsigned-bootstrap is only for bootstrapping the migration CA and can create proxy certificates that Java rejects. Use migrations-ca for self-signed proxy TLS."
+            });
+        }
     }).describe("Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."),
     z.object({
         mode: z.literal("existingSecret")
@@ -1199,8 +1211,8 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .effectiveDefault({
-            label: "cert-manager self-signed",
-            description: "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured self-signed issuer and generated proxy service DNS names.",
+            label: "cert-manager migration CA",
+            description: "When omitted, the workflow creates a cert-manager certificate using the cluster's preconfigured migrations-ca issuer and generated proxy service DNS names.",
         })
         .changeRestriction('gated'),
     enableMSKAuth: z.boolean().default(false).optional()
