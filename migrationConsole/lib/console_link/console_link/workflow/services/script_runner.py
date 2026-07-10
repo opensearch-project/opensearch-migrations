@@ -202,6 +202,7 @@ class ScriptRunner:
         self,
         config_data: str,
         args: list[str],
+        quiet: bool = True,
     ) -> Dict[str, Any]:
         """Submit workflow using config processor submission script.
 
@@ -212,6 +213,7 @@ class ScriptRunner:
         Args:
             config_data: User configuration YAML as string
             args: Command line arguments to pass to the submission script
+            quiet: Suppress routine resource creation output from the submit script
         Returns:
             Dict with workflow_name, workflow_uid, and namespace
 
@@ -220,7 +222,11 @@ class ScriptRunner:
             subprocess.CalledProcessError: If script fails
             ValueError: If script output cannot be parsed
         """
-        logger.info(f"Submitting workflow with args: {args}")
+        submit_args = list(args)
+        if quiet and "--quiet" not in submit_args and "--verbose" not in submit_args:
+            submit_args.append("--quiet")
+
+        logger.info(f"Submitting workflow with args: {submit_args}")
 
         # Create temporary file with config data
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
@@ -234,7 +240,7 @@ class ScriptRunner:
                 raise FileNotFoundError(f"Script not found: {script_path}")
 
             result = subprocess.run(
-                [str(script_path), temp_file_path] + args,
+                [str(script_path), temp_file_path] + submit_args,
                 capture_output=True, text=True, check=True,
                 cwd=str(self.script_dir)
             )

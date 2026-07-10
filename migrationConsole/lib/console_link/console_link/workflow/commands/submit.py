@@ -118,9 +118,16 @@ def _remove_existing_workflow(workflow_name, namespace):
     help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as '
          'snapshotName downstream)'
 )
+@click.option(
+    '--verbose-submit-output',
+    is_flag=True,
+    default=False,
+    help='Show detailed Kubernetes resource output from the submit script.'
+)
 @click.pass_context
 def submit_command(
-        ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
+        ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce,
+        verbose_submit_output):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -165,6 +172,7 @@ def submit_command(
                     "--workflow-name", workflow_name,
                     "--unique-run-nonce", unique_run_nonce
                 ],
+                quiet=not verbose_submit_output,
             )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')

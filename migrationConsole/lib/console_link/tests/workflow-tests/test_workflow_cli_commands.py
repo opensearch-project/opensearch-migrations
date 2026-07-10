@@ -199,11 +199,46 @@ class TestWorkflowCLICommands:
         assert 'test-workflow-' in result.output
         assert "--workflow-name" in mock_subprocess.call_args[0][0]
         assert "migration-workflow" in mock_subprocess.call_args[0][0]
+        assert "--quiet" in mock_subprocess.call_args[0][0]
         assert mock_subprocess.call_count == 1
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
         _mock_verify_secrets.assert_called_once()
+
+    @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
+    @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
+    def test_submit_command_can_show_verbose_submit_output(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        _mock_stop,
+        _mock_delete,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+    ):
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
+        )
+        mock_exists.return_value = False
+
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.load_config.return_value = WorkflowConfig({'parameters': {'message': 'test'}})
+
+        result = CliRunner().invoke(workflow_cli, ['submit', '--verbose-submit-output'])
+
+        assert result.exit_code == 0
+        assert "--quiet" not in mock_subprocess.call_args[0][0]
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
