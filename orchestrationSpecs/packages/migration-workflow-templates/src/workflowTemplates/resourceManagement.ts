@@ -1041,6 +1041,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -1061,6 +1062,43 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.equals(c.tryApply.status, "Succeeded"),
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
+            )
+            // VAP-retry recovery loop, matching the other reconciles. DataSnapshot has no gated
+            // fields today, so this does not fire during normal reconfiguration; it is the recovery
+            // path for a rejected apply (e.g. lock-on-complete on a re-apply of a Completed CR, or a
+            // future gated field). Without it, a VAP-rejected DataSnapshot apply is a silent dead end:
+            // the step fails, continueOn swallows it, and the user cannot recover within the run.
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("DataSnapshot"),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    snapshotItemConfig: b.inputs.snapshotItemConfig,
+                    sourceLabel: b.inputs.sourceLabel,
+                    configChecksum: b.inputs.configChecksum,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>

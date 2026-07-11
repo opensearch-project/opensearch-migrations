@@ -651,6 +651,18 @@ export class MigrationInitializer {
                     spec: bootstrapSpecWithoutDependsOn('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
                     status: { phase: 'Created', configChecksum: '' }
                 });
+
+                // VAP retry gate for the DataSnapshot CR reconcile, matching the other resources.
+                const dataSnapshotName = this.makeCrdName(snapshot.sourceConfig.label, item.label);
+                items.push(this.makeApprovalGateResource(
+                    ['datasnapshot', dataSnapshotName, 'vapretry'],
+                    gateLabels({
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'DataSnapshot',
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: dataSnapshotName,
+                        [MigrationInitializer.GATE_LABEL_SOURCE]: snapshot.sourceConfig.label,
+                        [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
+                    })
+                ));
             }
         }
 

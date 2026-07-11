@@ -297,6 +297,7 @@ export const FullMigration = WorkflowBuilder.create({
                     snapshotItemConfig: b.inputs.snapshotItemConfig,
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     configChecksum: b.inputs.configChecksum,
+                    retryGateName: expr.concat(expr.literal("datasnapshot."), b.inputs.resourceName, expr.literal(".vapretry")),
                 }),
             )
             .addStep("readSnapshotPhase", ResourceManagement, "readResourcePhase", c =>

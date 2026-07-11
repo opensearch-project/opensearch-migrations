@@ -114,6 +114,10 @@ describe('migration initializer CRD resource generation', () => {
             // Topic and proxy VAP retry gates
             'capturedtraffic.source-proxy-topic.vapretry',
             'captureproxy.source-proxy.vapretry',
+            // DataSnapshot CR reconcile VAP retry gate
+            'datasnapshot.source-snap1.vapretry',
+            // SnapshotMigration CR reconcile VAP retry gate
+            'snapshotmigration.source-target-snap1-migration-0.vapretry',
             // Replay VAP retry gate
             'trafficreplay.source-proxy-target-target-replay.vapretry',
         ]));

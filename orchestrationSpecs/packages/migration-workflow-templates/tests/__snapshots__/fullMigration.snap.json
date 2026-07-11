@@ -874,6 +874,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{='datasnapshot.'+inputs.parameters.resourceName+'.vapretry'}}"
                   }
                 ]
               },
