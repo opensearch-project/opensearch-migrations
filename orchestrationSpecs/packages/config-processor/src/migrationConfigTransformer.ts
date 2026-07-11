@@ -901,6 +901,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
+                    dependsOn: enrichedDeps.map(d => d.name),
                     configChecksum: cs(
                         sourceConnectionIdentity,
                         item.config,

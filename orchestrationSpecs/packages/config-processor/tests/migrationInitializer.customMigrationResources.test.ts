@@ -121,8 +121,11 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toBeUndefined();
         expect(getResource('CapturedTraffic', 'source-proxy-topic')?.spec.dependsOn).toEqual(['default']);
         expect(getResource('CaptureProxy', 'source-proxy')?.spec.dependsOn).toEqual(['source-proxy-topic']);
-        expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
-        expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toEqual(['source-snap1']);
+        // Terminal resources (DataSnapshot, SnapshotMigration) intentionally omit dependsOn from the
+        // initializer bootstrap spec: the reset-DAG edge must reflect the established graph, so the
+        // workflow's tryApply is its sole writer (see makeSnapshotMigrationManifest / upsertDataSnapshotResource).
+        expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toBeUndefined();
+        expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual([
             'source-proxy',
             'source-target-snap1-migration-0',

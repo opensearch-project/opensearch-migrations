@@ -1729,6 +1729,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           ]
                         }
                       },
+                      "dependsOn": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "configChecksum": {
                         "type": "string"
                       },
@@ -1748,6 +1754,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "semaphoreConfigMapName",
                       "semaphoreKey",
                       "dependsOnProxySetups",
+                      "dependsOn",
                       "configChecksum",
                       "resourceUid"
                     ]

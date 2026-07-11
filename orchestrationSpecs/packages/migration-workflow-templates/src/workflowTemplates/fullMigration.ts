@@ -404,6 +404,8 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.deserializeRecord(expr.recordToString(c.item)),
                             "dependsOnProxySetups"
                         ),
+                        // Resolved dependency-graph edge names written to the DataSnapshot CR spec.dependsOn.
+                        dependsOn: expr.get(c.item, "dependsOn"),
                         configChecksum: expr.get(c.item, "configChecksum"),
                         resourceUid: expr.get(c.item, "resourceUid"),
                         // Carried through for the Solr import-prepare path (absent for create items).

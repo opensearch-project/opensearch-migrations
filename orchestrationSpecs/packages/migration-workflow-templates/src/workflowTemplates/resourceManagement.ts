@@ -369,6 +369,14 @@ function makeSnapshotMigrationManifest(
             }
         },
         spec: {
+            // Written by tryApply so the live CR carries its reset-DAG edge (workflow reset reads
+            // spec.dependsOn). A SnapshotMigration depends on its DataSnapshot when one exists; an
+            // externally-managed ES/OS snapshot with no DataSnapshot has no upstream CR edge.
+            dependsOn: makeDirectTypeProxy(expr.ternary(
+                hasDataSnapshotResource,
+                expr.toArray(expr.dig(snapshotNameResolution, ["dataSnapshotResourceName"], expr.literal(""))),
+                expr.literal([])
+            )),
             migrationLabel: makeStringTypeProxy(expr.get(config, "migrationLabel")),
             sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
             sourceLabel: makeStringTypeProxy(expr.dig(sourceIdentity, ["label"], expr.literal(""))),
@@ -625,6 +633,10 @@ export const ResourceManagement = WorkflowBuilder.create({
                         }
                     },
                     spec: {
+                        // Written by tryApply so the live CR carries its reset-DAG edges (workflow reset
+                        // reads spec.dependsOn). The transformer stamps the resolved proxy-setup names as a
+                        // flat list on the item; empty when the snapshot depends on no proxy setups.
+                        dependsOn: makeDirectTypeProxy(expr.dig(snapshotItemConfig, ["dependsOn"], expr.literal([]))),
                         sourceLabel: makeStringTypeProxy(expr.dig(sourceIdentity, ["label"], b.inputs.sourceLabel)),
                         sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
                         sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),

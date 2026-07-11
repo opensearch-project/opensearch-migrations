@@ -396,6 +396,10 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
         name: z.string(),
         configChecksum: z.string(),
     })),
+    // Resolved dependency-graph edge names (the proxy-setup names) written to the DataSnapshot
+    // CR's spec.dependsOn by tryApply. Kept as a flat name list so the apply manifest does not
+    // need to map over dependsOnProxySetups; the reset CLI reads spec.dependsOn from the live CR.
+    dependsOn: z.array(z.string()),
     configChecksum: z.string(),
     resourceUid: z.string(),
     // Solr external-backup prepare only. When present, this item does NOT create
