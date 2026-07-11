@@ -26,23 +26,23 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
  * Regression test for the head-of-line offset blocking bug.
  *
- * When a request times out (CLOSED_PREMATURELY), the old code suppressed the Kafka offset
- * commit. Since OffsetLifecycleTracker uses a PriorityQueue where only the HEAD offset can
- * advance the commit pointer, a single timed-out record blocks ALL subsequent offsets on
- * that partition from ever being committed — causing infinite lag growth even though the
- * replayer is processing records successfully.
+ * When incomplete data reaches CLOSED_PREMATURELY status, suppressing the Kafka offset
+ * commit leaves it stuck at the head of OffsetLifecycleTracker's PriorityQueue, blocking
+ * all subsequent offsets on that partition from advancing.
  *
- * The fix: CLOSED_PREMATURELY records now commit their offset (they cannot succeed on retry
- * since the same incomplete fragments will time out again). Only TRAFFIC_SOURCE_READER_INTERRUPTED
- * suppresses commits (because cleanupRevokedPartitions destroys the tracker anyway).
+ * This class tests two things:
+ * 1. The accumulator correctly fires CLOSED_PREMATURELY when closed with incomplete streams.
+ * 2. OffsetLifecycleTracker's head-of-line blocking mechanism (the PriorityQueue semantics
+ *    that make the commit-on-CLOSED_PREMATURELY fix necessary).
  *
- * This test verifies that after a CLOSED_PREMATURELY expiry, the offset IS committed
- * (removeAndReturnNewHead is called), unblocking subsequent offsets.
+ * The commit-behavior itself (that CLOSED_PREMATURELY status triggers commitTrafficStream)
+ * is tested in CommitTrafficStreamsStatusTest, which exercises the actual production code path.
  */
 class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
 
@@ -52,24 +52,21 @@ class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
     }
 
     /**
-     * Simulates the production scenario:
-     * 1. A record is polled and added to OffsetLifecycleTracker
-     * 2. The record's connection times out (CLOSED_PREMATURELY)
-     * 3. Verifies the offset IS committed (not blocked)
+     * Verifies that the accumulator fires CLOSED_PREMATURELY when closed with incomplete data.
+     * This is the precondition for the offset-blocking bug: the status must actually be produced
+     * by the accumulator for it to reach commitTrafficStreams().
      *
-     * Before fix: commitTrafficStream() was never called for CLOSED_PREMATURELY,
-     * leaving the offset permanently stuck at the head of the PriorityQueue.
+     * The commit behavior for this status is tested in CommitTrafficStreamsStatusTest.
      */
     @Test
-    void closedPrematurelyStatus_commitsOffset_unblockingSubsequentRecords() {
+    @DisplayName("Accumulator closing with incomplete stream fires CLOSED_PREMATURELY")
+    void accumulatorClose_withIncompleteStream_firesClosedPrematurelyStatus() {
         var baseTime = Instant.now();
         var ts = Timestamp.newBuilder()
             .setSeconds(baseTime.getEpochSecond())
             .setNanos(baseTime.getNano())
             .build();
 
-        // Create a TrafficStream with a Read but NO end-of-message — this will trigger
-        // CLOSED_PREMATURELY when the accumulator is closed (simulating packet timeout)
         var trafficStream = TrafficStream.newBuilder()
             .setConnectionId("stuck-conn")
             .setNodeId("test-node")
@@ -80,10 +77,8 @@ class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
                         StandardCharsets.UTF_8))))
             .build();
 
-        // Track what the callback receives
         AtomicReference<RequestResponsePacketPair.ReconstructionStatus> capturedStatus = new AtomicReference<>();
         List<ITrafficStreamKey> capturedKeys = new ArrayList<>();
-        List<Boolean> commitCalls = new ArrayList<>();
 
         var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
             Duration.ofSeconds(30), null, new AccumulationCallbacks() {
@@ -104,15 +99,9 @@ class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
                 ) {
                     capturedStatus.set(status);
                     capturedKeys.addAll(trafficStreamKeysBeingHeld);
-                    // Replicate the FIXED commitTrafficStreams behavior:
-                    // CLOSED_PREMATURELY now commits (only TRAFFIC_SOURCE_READER_INTERRUPTED suppresses)
                     if (trafficStreamKeysBeingHeld != null) {
                         for (var tsk : trafficStreamKeysBeingHeld) {
                             tsk.getTrafficStreamsContext().close();
-                            // The fix: CLOSED_PREMATURELY now calls commitTrafficStream
-                            if (status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
-                                commitCalls.add(true);
-                            }
                         }
                     }
                 }
@@ -132,22 +121,12 @@ class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
             trafficStream,
             PojoTrafficStreamKeyAndContext.build(trafficStream, rootContext::createTrafficStreamContextForTest)
         ));
-        // Close the accumulator while the request is still incomplete — triggers CLOSED_PREMATURELY
         accumulator.close();
 
-        // Verify the status is CLOSED_PREMATURELY
         Assertions.assertEquals(RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
             capturedStatus.get(), "Status should be CLOSED_PREMATURELY for incomplete request");
-
-        // KEY ASSERTION: commitTrafficStream() IS called for CLOSED_PREMATURELY.
-        // Before the fix, this was suppressed, causing head-of-line blocking in
-        // OffsetLifecycleTracker's PriorityQueue — the offset sat at the head forever,
-        // preventing all subsequent offsets from being committed.
-        Assertions.assertFalse(commitCalls.isEmpty(),
-            "commitTrafficStream() MUST be called for CLOSED_PREMATURELY to unblock the " +
-            "offset commit pointer. Without this, OffsetLifecycleTracker's PriorityQueue " +
-            "holds the timed-out offset at the head indefinitely, blocking all subsequent " +
-            "offsets on that partition and causing infinite lag growth.");
+        Assertions.assertFalse(capturedKeys.isEmpty(),
+            "Traffic stream keys should be passed to the callback for commit handling");
     }
 
     /**

@@ -347,10 +347,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             // TRAFFIC_SOURCE_READER_INTERRUPTED: partition was reassigned — suppress the commit
             //   because cleanupRevokedPartitions() already destroys the OffsetLifecycleTracker
             //   and we want Kafka to re-deliver these records to the new owner.
-            // CLOSED_PREMATURELY: packet timeout expired on incomplete data. We MUST still commit
-            //   because suppressing leaves the offset stuck in OffsetLifecycleTracker's PriorityQueue
-            //   forever, blocking all subsequent offsets on that partition from advancing (head-of-line
-            //   blocking). Retrying is pointless — the same incomplete fragments will time out again.
+            // CLOSED_PREMATURELY: accumulator closed at shutdown with incomplete data. We MUST
+            //   still commit because suppressing leaves the offset stuck in OffsetLifecycleTracker's
+            //   PriorityQueue, blocking all subsequent offsets on that partition from advancing
+            //   (head-of-line blocking).
             boolean shouldCommit =
                 status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED;
             commitTrafficStreams(shouldCommit, trafficStreamKeysBeingHeld);
