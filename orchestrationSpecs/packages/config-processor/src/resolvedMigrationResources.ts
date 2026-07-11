@@ -118,6 +118,29 @@ function stableEqual(left: unknown, right: unknown): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
 }
 
+// Default-less optional string fields that the apply manifests always write with an "" default
+// (via expr.dig(..., "")), but which are absent from the resolved config when the user omits them.
+// Fill them here so the resolved-resource parameters (MigrationRun history + dry-run preview) match
+// the spec actually applied to the live CR. Keep in sync with the "" defaults in resourceManagement.ts.
+const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS = ["otelTraceCollectorEndpoint"] as const;
+const METADATA_EMPTY_STRING_DEFAULT_FIELDS =
+    ["otelTraceCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
+const DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS =
+    ["otelTraceCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
+
+function withEmptyStringDefaults(
+    value: Record<string, unknown> | undefined,
+    fields: readonly string[],
+): Record<string, unknown> {
+    const result: Record<string, unknown> = {...(value ?? {})};
+    for (const field of fields) {
+        if (result[field] === undefined) {
+            result[field] = "";
+        }
+    }
+    return result;
+}
+
 function prefixFields(prefix: string, value: Record<string, unknown> | undefined): Record<string, unknown> {
     if (!value) {
         return {};
@@ -367,7 +390,7 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
         snapshotPrefix: item.snapshotPrefix,
         mode: snapshotConfig.mode ?? "create",
         solrExternalBackupName: item.solrExternalBackupName ?? "",
-        ...snapshotConfig,
+        ...withEmptyStringDefaults(snapshotConfig, CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS),
         dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name),
     };
 }
@@ -384,8 +407,12 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
             : "";
     const repo = migration.snapshotConfig.repoConfig as Record<string, unknown>;
     return {
-        ...prefixFields("metadataMigration", migration.metadataMigrationConfig as Record<string, unknown>),
-        ...prefixFields("documentBackfill", migration.documentBackfillConfig as Record<string, unknown>),
+        ...prefixFields("metadataMigration", migration.metadataMigrationConfig
+            ? withEmptyStringDefaults(migration.metadataMigrationConfig as Record<string, unknown>, METADATA_EMPTY_STRING_DEFAULT_FIELDS)
+            : undefined),
+        ...prefixFields("documentBackfill", migration.documentBackfillConfig
+            ? withEmptyStringDefaults(migration.documentBackfillConfig as Record<string, unknown>, DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS)
+            : undefined),
         dependsOn: dataSnapshotResourceName ? [dataSnapshotResourceName] : [],
         migrationLabel: migration.migrationLabel,
         ...connectionIdentityParameters(

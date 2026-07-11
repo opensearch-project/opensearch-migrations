@@ -126,10 +126,12 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         })
         .addExpressionOutput("snapshotConfig", c =>
             expr.serialize(expr.makeDict({
-                // Import uses the external name verbatim; create uses the generated name.
+                // Import uses the external name verbatim; create uses the generated name, lowercased to
+                // match the name actually created by the createSnapshot step (see the create branch above),
+                // so this reported name can never diverge from the snapshot stored in the repo.
                 snapshotName: expr.ternary(
                     expr.isEmpty(c.inputs.solrExternalBackupName),
-                    c.steps.getSnapshotName.outputs.snapshotName,
+                    expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName),
                     c.inputs.solrExternalBackupName),
                 repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig"),
                 label: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "label")

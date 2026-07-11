@@ -215,7 +215,7 @@
             {
               "name": "snapshotConfig",
               "valueFrom": {
-                "expression": "toJSON(sprig.dict(\"snapshotName\", ((0 == len(inputs.parameters.solrExternalBackupName)) ? (steps.getSnapshotName.outputs.parameters.snapshotName) : (inputs.parameters.solrExternalBackupName)), \"repoConfig\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], \"label\", fromJSON(inputs.parameters.snapshotConfig)['label']))"
+                "expression": "toJSON(sprig.dict(\"snapshotName\", ((0 == len(inputs.parameters.solrExternalBackupName)) ? (lower(steps.getSnapshotName.outputs.parameters.snapshotName)) : (inputs.parameters.solrExternalBackupName)), \"repoConfig\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], \"label\", fromJSON(inputs.parameters.snapshotConfig)['label']))"
               }
             }
           ]

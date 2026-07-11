@@ -166,6 +166,21 @@ describe("resolved migration resources", () => {
             .toBe("broker-b:9092");
     });
 
+    it("emits empty-string defaults for default-less fields so resolved params match the applied CR spec", async () => {
+        // The apply manifests always write these default-less string fields with "" (expr.dig(..., "")).
+        // The resolved parameters must emit the same keys so MigrationRun history / the dry-run preview
+        // match the spec actually applied to the live CR, rather than silently omitting them.
+        const {singleResource} = await transformAndResolve(sampleConfig());
+
+        const dataSnapshot = singleResource("DataSnapshot");
+        expect(dataSnapshot.parameters.otelTraceCollectorEndpoint).toBe("");
+
+        const snapshotMigration = singleResource("SnapshotMigration");
+        expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationTransformerConfig).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationTransformerConfigFile).toBe("");
+    });
+
     it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {
         const config = sampleConfig();
         config.traffic!.proxies!["source-proxy"].proxyConfig.tls = {

@@ -38,4 +38,13 @@ describe("Solr external backup import workflow wiring", () => {
         expect(rendered).toContain("sourceType");
         expect(rendered).toContain("solr");
     });
+
+    it("createOrGetSnapshot reports the create-path snapshotName lowercased, matching the created name", () => {
+        const rendered = JSON.stringify(renderWorkflowTemplate(CreateOrGetSnapshot));
+
+        // The create path lowercases the name it actually creates; the template's reported
+        // snapshotConfig output must lower() the same name so the two can never diverge (an uppercase
+        // source label would otherwise report a name that does not match the stored snapshot).
+        expect(rendered).toContain("lower(steps.getSnapshotName.outputs.parameters.snapshotName)");
+    });
 });
