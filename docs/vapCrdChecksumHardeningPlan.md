@@ -4,6 +4,17 @@ This document turns the VAP/checksum coverage audit into an implementation plan.
 It is intentionally separate from [reconfiguringWorkflows.md](reconfiguringWorkflows.md),
 which describes the broader state-aware workflow model.
 
+> **Follow-up:** A focused cleanup of the gaps found while reviewing this plan's
+> implementation is tracked in
+> [migrationResourceContractCleanupPlan.md](migrationResourceContractCleanupPlan.md). That
+> work implements the "write all projected DataSnapshot/SnapshotMigration fields in the apply
+> manifest" item below (via `spec.dependsOn` written by `tryApply`), moves the Solr-only
+> `solrCollections` off the user schema, adds the DataSnapshot VAP-retry recovery loop, and
+> aligns resolved parameters with the applied CR spec. The projection⟷apply parity test this
+> plan proposed is superseded by the "generate apply manifests from the projection table"
+> follow-on described in that document (which makes the drift structurally impossible), rather
+> than added as a standalone test.
+
 ## Summary
 
 The current implementation generally protects workflow dependency freshness with
