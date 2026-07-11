@@ -187,7 +187,12 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "SnapshotMigration", specPath: ["targetAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["targetAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["snapshotLabel"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["snapshotSourceType"], schema: z.enum(["dataSnapshot", "external", "externalPrepared"]), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotSourceType"], schema: z.enum(["dataSnapshot", "external", "externalPrepared"]).describe(
+        "How this migration obtains its snapshot. 'dataSnapshot': a workflow-generated snapshot represented by a " +
+        "DataSnapshot dependency (ES/OS or Solr create-backup). 'external': an externally-managed ES/OS snapshot used " +
+        "directly with no workflow preparation. 'externalPrepared': a Solr externally-managed backup that still needs " +
+        "schema upload — a DataSnapshot CR exists (import-prepare) but the resolved name is the external backup name."
+    ), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["dataSnapshotResourceName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["externalSnapshotName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoName"], schema: z.string(), changeRestriction: "impossible"},

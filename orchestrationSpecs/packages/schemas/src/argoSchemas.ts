@@ -175,6 +175,10 @@ export const COMPLETE_SNAPSHOT_CONFIG =
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).extend({
         mode: z.enum(["create", "import"]).default("create").optional()
+            .describe("Workflow-internal snapshot/backup mode. 'create' (default) produces a new snapshot or " +
+                "backup of the source. 'import' is used only for Solr external-backup prepare: it runs " +
+                "CreateSnapshot --mode import to upload the source schema into an externally-managed backup's " +
+                "repository without creating a new backup. Not user-configurable; set by the config transformer.")
     })
 );
 export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
