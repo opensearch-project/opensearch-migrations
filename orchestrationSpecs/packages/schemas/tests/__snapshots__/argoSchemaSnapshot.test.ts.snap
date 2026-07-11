@@ -340,15 +340,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                 "default": "http://otel-collector:4317",
                                                 "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                               },
-                                              "solrCollections": {
-                                                "type": "array",
-                                                "items": {
-                                                  "type": "string"
-                                                },
-                                                "default": [],
-                                                "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.",
-                                                "changeRestriction": "impossible"
-                                              },
                                               "indexAllowlist": {
                                                 "type": "array",
                                                 "items": {
@@ -1643,13 +1634,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": "http://otel-collector:4317",
                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                           },
-                          "solrCollections": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
                           "indexAllowlist": {
                             "type": "array",
                             "items": {
@@ -1676,6 +1660,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "import"
                             ],
                             "default": "create"
+                          },
+                          "solrCollections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
                           }
                         }
                       },
@@ -3816,15 +3807,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       ],
                                       "default": "http://otel-collector:4317",
                                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
-                                    },
-                                    "solrCollections": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      },
-                                      "default": [],
-                                      "description": "Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.",
-                                      "changeRestriction": "impossible"
                                     },
                                     "indexAllowlist": {
                                       "type": "array",

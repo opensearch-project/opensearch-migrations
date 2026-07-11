@@ -784,10 +784,14 @@ export const USER_REPLAYER_OPTIONS = z.object({
     }
 });
 
-const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional()
-    .describe("Solr collection/core names to include when creating a Solr snapshot or preparing an externally-managed Solr backup. " +
-        "When omitted, CreateSnapshot auto-discovers all live Solr collections/cores. " +
-        "For externally-managed Solr backups, set this when the backup contains only a subset of the live source collections.");
+// Internal (glue-layer) field: the config transformer folds the user-facing Solr
+// `collectionAllowlist` into this on the shared create-snapshot config. It is NOT a
+// user-facing option — ES/OS users use `indexAllowlist`, Solr users use
+// `collectionAllowlist`. Lives on ARGO_CREATE_SNAPSHOT_OPTIONS, not the user schema.
+export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional()
+    .describe("Internal: Solr collection/core names for a Solr snapshot/backup, populated by the config " +
+        "transformer from the user-facing collectionAllowlist. When empty, CreateSnapshot auto-discovers all " +
+        "live Solr collections/cores. Not user-configurable.");
 
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
@@ -807,8 +811,6 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    solrCollections: SOLR_COLLECTIONS_OPTION
-        .changeRestriction('impossible'),
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +

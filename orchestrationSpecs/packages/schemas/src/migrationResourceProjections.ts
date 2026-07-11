@@ -165,6 +165,10 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "DataSnapshot", specPath: ["repoUseLocalStack"], schema: z.boolean(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["mode"], schema: z.enum(["create", "import"]), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["solrExternalBackupName"], schema: z.string(), changeRestriction: "impossible"},
+    // solrCollections is a Solr-only field on ARGO_CREATE_SNAPSHOT_OPTIONS (not the user schema),
+    // so it is projected here as an internal field rather than via the USER_CREATE_SNAPSHOT_OPTIONS
+    // schema projection. Kept impossible to match its prior restriction and the other artifact-scope fields.
+    {resourceKind: "DataSnapshot", specPath: ["solrCollections"], schema: z.array(z.string()), changeRestriction: "impossible"},
 
     {resourceKind: "SnapshotMigration", specPath: ["migrationLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},

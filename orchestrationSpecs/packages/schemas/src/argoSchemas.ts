@@ -9,6 +9,7 @@ import {
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
+    SOLR_COLLECTIONS_OPTION,
     SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG,
     USER_CREATE_SNAPSHOT_OPTIONS,
@@ -178,7 +179,12 @@ export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
             .describe("Workflow-internal snapshot/backup mode. 'create' (default) produces a new snapshot or " +
                 "backup of the source. 'import' is used only for Solr external-backup prepare: it runs " +
                 "CreateSnapshot --mode import to upload the source schema into an externally-managed backup's " +
-                "repository without creating a new backup. Not user-configurable; set by the config transformer.")
+                "repository without creating a new backup. Not user-configurable; set by the config transformer."),
+        // Solr-only, glue-layer field. The config transformer folds the user-facing Solr
+        // `collectionAllowlist` into this on the shared create-snapshot config. It lives here rather
+        // than in USER_CREATE_SNAPSHOT_OPTIONS so the user-facing ES/OS snapshot schema does not
+        // expose a Solr-only field (ES/OS users use indexAllowlist; Solr users use collectionAllowlist).
+        solrCollections: SOLR_COLLECTIONS_OPTION.changeRestriction('impossible'),
     })
 );
 export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
