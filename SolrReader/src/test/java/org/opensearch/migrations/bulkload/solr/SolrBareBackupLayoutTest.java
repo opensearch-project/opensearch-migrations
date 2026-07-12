@@ -84,7 +84,7 @@ class SolrBareBackupLayoutTest {
     void solrCloud7BareLayout_classifiedAsCloud_nameFromBackupProperties() throws IOException {
         var root = buildSolrCloud7Backup(COLLECTION);
 
-        var layout = SolrBackupLayout.classifyBareBackup(root, null);
+        var layout = SolrBackupLayout.classifyBareBackup(root);
 
         assertThat(layout, notNullValue());
         assertThat("SolrCloud markers (zk_backup/backup.properties) => CLOUD",
@@ -100,20 +100,10 @@ class SolrBareBackupLayoutTest {
     void solrCloud7BareLayout_shardsCountedAsOneCollection_notSeparateCollections() throws IOException {
         var root = buildSolrCloud7Backup(COLLECTION);
 
-        var layout = SolrBackupLayout.classifyBareBackup(root, null);
+        var layout = SolrBackupLayout.classifyBareBackup(root);
 
         // The two snapshot.shardN dirs are shards of ONE collection, not two collections.
         assertThat(SolrBackupLayout.countShards(layout.resolveFrom(root)), equalTo(2));
-    }
-
-    @Test
-    void solrCloud7BareLayout_nameOverrideWins() throws IOException {
-        var root = buildSolrCloud7Backup(COLLECTION);
-
-        var layout = SolrBackupLayout.classifyBareBackup(root, "custom_index");
-
-        assertThat(layout.mode(), equalTo(SolrBackupMode.CLOUD));
-        assertThat(layout.collectionName(), equalTo("custom_index"));
     }
 
     // ---- Standalone 7 ----
@@ -122,7 +112,7 @@ class SolrBareBackupLayoutTest {
     void standalone7Layout_classifiedAsStandalone_nameStrippedFromSnapshotDir() throws IOException {
         var root = buildStandalone7Backup(COLLECTION);
 
-        var layout = SolrBackupLayout.classifyBareBackup(root, null);
+        var layout = SolrBackupLayout.classifyBareBackup(root);
 
         assertThat(layout, notNullValue());
         assertThat("no SolrCloud markers => STANDALONE",
@@ -138,20 +128,9 @@ class SolrBareBackupLayoutTest {
     void standalone7Layout_singleShard() throws IOException {
         var root = buildStandalone7Backup(COLLECTION);
 
-        var layout = SolrBackupLayout.classifyBareBackup(root, null);
+        var layout = SolrBackupLayout.classifyBareBackup(root);
 
         assertThat(SolrBackupLayout.countShards(layout.resolveFrom(root)), equalTo(1));
-    }
-
-    @Test
-    void standalone7Layout_nameOverrideWins() throws IOException {
-        // The backup name need not match the desired index name; the override covers that.
-        var root = buildStandalone7Backup("backup_2024_01_15");
-
-        var layout = SolrBackupLayout.classifyBareBackup(root, COLLECTION);
-
-        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
-        assertThat(layout.collectionName(), equalTo(COLLECTION));
     }
 
     // ---- the discriminator: both shapes fed side-by-side, must be told apart ----
@@ -161,8 +140,8 @@ class SolrBareBackupLayoutTest {
         var cloudRoot = buildSolrCloud7Backup(COLLECTION);
         var standaloneRoot = buildStandalone7Backup(COLLECTION);
 
-        var cloud = SolrBackupLayout.classifyBareBackup(cloudRoot, null);
-        var standalone = SolrBackupLayout.classifyBareBackup(standaloneRoot, null);
+        var cloud = SolrBackupLayout.classifyBareBackup(cloudRoot);
+        var standalone = SolrBackupLayout.classifyBareBackup(standaloneRoot);
 
         // Same collection name, both use snapshot.* directories — only the markers tell them apart.
         assertThat(cloud.mode(), equalTo(SolrBackupMode.CLOUD));
@@ -184,11 +163,11 @@ class SolrBareBackupLayoutTest {
         Files.createDirectories(root.resolve(COLLECTION + "/zk_backup_0/configs/cfg"));
         Files.createDirectories(root.resolve(COLLECTION + "/index"));
 
-        assertThat(SolrBackupLayout.classifyBareBackup(root, null), nullValue());
+        assertThat(SolrBackupLayout.classifyBareBackup(root), nullValue());
     }
 
     @Test
     void nonExistentRoot_returnsNull() {
-        assertThat(SolrBackupLayout.classifyBareBackup(tempDir.resolve("does_not_exist"), null), nullValue());
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir.resolve("does_not_exist")), nullValue());
     }
 }

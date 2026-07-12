@@ -58,44 +58,40 @@ public class SolrBackupDiscovery {
         }
     }
 
-    public static SolrBackupDiscovery discover(S3Repo s3Repo, Path backupDir, String nameOverride,
+    public static SolrBackupDiscovery discover(S3Repo s3Repo, Path backupDir,
                                                List<String> indexAllowlist) throws IOException {
-        return new SolrBackupDiscovery(s3Repo, backupDir, detectBareLayout(s3Repo, backupDir, nameOverride),
+        return new SolrBackupDiscovery(s3Repo, backupDir, detectBareLayout(s3Repo, backupDir),
             indexAllowlist);
     }
 
-    static SolrBackupLayout.BareBackupLayout detectBareLayout(S3Repo s3Repo, Path backupDir, String nameOverride) {
+    static SolrBackupLayout.BareBackupLayout detectBareLayout(S3Repo s3Repo, Path backupDir) {
         return s3Repo != null
-            ? detectBareSolrLayoutInS3(s3Repo, nameOverride)
-            : SolrBackupLayout.classifyBareBackup(backupDir, nameOverride);
+            ? detectBareSolrLayoutInS3(s3Repo)
+            : SolrBackupLayout.classifyBareBackup(backupDir);
     }
 
-    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
+    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo) {
         var subDirs = s3Repo.listTopLevelDirectories();
         var bare = SolrBackupLayout.detectBareLayoutFromListing(subDirs);
         if (bare == null) {
             // A flat-root standalone index has no sub-directories at all; only then probe the root files.
-            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo, nameOverride) : null;
+            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo) : null;
         }
         if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
-            var name = nameOverride;
-            if (name == null) {
-                try {
-                    s3Repo.downloadFile("backup.properties");
-                    name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
-                } catch (RuntimeException e) {
-                    log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
-                }
+            String name = null;
+            try {
+                s3Repo.downloadFile("backup.properties");
+                name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
+            } catch (RuntimeException e) {
+                log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
             }
             return new SolrBackupLayout.BareBackupLayout(SolrBackupLayout.SolrBackupMode.CLOUD, name, bare.dataPath());
         }
-        return nameOverride != null
-            ? new SolrBackupLayout.BareBackupLayout(bare.mode(), nameOverride, bare.dataPath())
-            : bare;
+        return bare;
     }
 
     /** Standalone core whose flat Lucene index is at the S3 root (segments_N, no snapshot.<name>/ wrapper). */
-    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo, String nameOverride) {
+    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo) {
         final List<String> rootFiles;
         try {
             rootFiles = s3Repo.listFilesInS3Root();
@@ -103,8 +99,7 @@ public class SolrBackupDiscovery {
             log.atDebug().setMessage("No flat-root standalone index at S3 root: {}").addArgument(e.getMessage()).log();
             return null;
         }
-        var rootName = nameOverride == null ? s3Repo.getS3RepoUri().key : null;
-        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, rootName, nameOverride);
+        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, s3Repo.getS3RepoUri().key);
         if (bare != null) {
             log.atInfo().setMessage("Detected flat-root standalone Solr backup in S3 (core='{}')")
                 .addArgument(bare.collectionName()).log();

@@ -349,22 +349,22 @@ public final class SolrBackupLayout {
      * from being confused.
      *
      * @param backupRoot   the directory the backup was written to / uploaded from
-     * @param nameOverride explicit collection/core name; when non-null it wins over any recovered/derived name
      * @return the bare layout descriptor, or {@code null} if the root is not a bare single-collection backup
      */
-    public static BareBackupLayout classifyBareBackup(Path backupRoot, String nameOverride) {
+    public static BareBackupLayout classifyBareBackup(Path backupRoot) {
         if (backupRoot == null || !Files.isDirectory(backupRoot)) {
             return null;
         }
         if (hasCloudMarkersAtRoot(backupRoot)) {
-            var name = nameOverride != null ? nameOverride : readCollectionNameFromBackupProperties(backupRoot);
+            var name = readCollectionNameFromBackupProperties(backupRoot);
             log.info("Classified bare SolrCloud backup at {} (collection={})", backupRoot, name);
             return new BareBackupLayout(SolrBackupMode.CLOUD, name, "");
         }
         // Standalone replication backup: a flat Lucene index, either directly at the root...
         if (containsSegmentsFile(backupRoot)) {
-            var name = nameOverride != null ? nameOverride
-                : stripSnapshotPrefix(backupRoot.getFileName().toString());
+            var rootName = backupRoot.getFileName();
+            var name = requireDerivedStandaloneName(
+                rootName == null ? "" : stripSnapshotPrefix(rootName.toString()), backupRoot.toString());
             log.info("Classified bare standalone backup (flat root) at {} (core={})", backupRoot, name);
             return new BareBackupLayout(SolrBackupMode.STANDALONE, name, "");
         }
@@ -372,11 +372,27 @@ public final class SolrBackupLayout {
         var snapshotDir = findStandaloneSnapshotDir(backupRoot);
         if (snapshotDir != null) {
             var dirName = snapshotDir.getFileName().toString();
-            var name = nameOverride != null ? nameOverride : stripSnapshotPrefix(dirName);
+            var name = stripSnapshotPrefix(dirName);
             log.info("Classified bare standalone backup at {}/{} (core={})", backupRoot, dirName, name);
             return new BareBackupLayout(SolrBackupMode.STANDALONE, name, dirName);
         }
         return null;
+    }
+
+    /**
+     * A standalone backup records no core name, so the target index name is derived from the
+     * backup's final path segment. When that segment is empty — e.g. a flat Lucene index sitting
+     * directly at the S3 bucket root or the filesystem root — there is nothing to derive from, so
+     * the backup is rejected rather than migrated into a blank index name.
+     */
+    private static String requireDerivedStandaloneName(String derived, String location) {
+        if (derived == null || derived.isBlank()) {
+            throw new SolrBackupReadException(
+                "Cannot derive a target index name for the standalone Solr backup at '" + location
+                    + "': it sits at the bucket/filesystem root with no path segment to name it after. "
+                    + "Store the backup under a prefix (e.g. s3://bucket/<name>/) or provide a snapshot name.");
+        }
+        return derived;
     }
 
     private static boolean hasCloudMarkersAtRoot(Path root) {
@@ -495,16 +511,13 @@ public final class SolrBackupLayout {
      *
      * @param rootFiles    top-level file names under the backup root (from an S3 listing)
      * @param rootName     the final path segment of the backup root's S3 key (e.g. {@code snapshot.<name>})
-     * @param nameOverride explicit core name; wins over the name derived from {@code rootName}
      * @return a STANDALONE layout with {@code dataPath == ""}, or {@code null} if no root segments file exists
      */
-    public static BareBackupLayout detectFlatRootStandaloneFromS3(
-        List<String> rootFiles, String rootName, String nameOverride
-    ) {
+    public static BareBackupLayout detectFlatRootStandaloneFromS3(List<String> rootFiles, String rootName) {
         if (rootFiles.stream().noneMatch(n -> n.startsWith("segments_"))) {
             return null;
         }
-        var name = nameOverride != null ? nameOverride : stripSnapshotPrefix(lastPathSegment(rootName));
+        var name = requireDerivedStandaloneName(stripSnapshotPrefix(lastPathSegment(rootName)), rootName);
         return new BareBackupLayout(SolrBackupMode.STANDALONE, name, "");
     }
 

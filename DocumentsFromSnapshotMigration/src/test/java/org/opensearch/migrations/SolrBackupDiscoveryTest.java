@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.solr.SolrBackupReadException;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
 
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -48,23 +49,12 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("zk_backup", "snapshot.shard1"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.collections(), contains("nyc_taxis"));
         assertThat(discovery.dataDirByCollection().get("nyc_taxis"), equalTo(""));
         assertThat(discovery.shardPreparationNeeded(), is(true));
         verify(s3Repo).downloadFile("backup.properties");
-    }
-
-    @Test
-    void s3CloudBare_nameOverrideWins_andSkipsPropertiesDownload() throws Exception {
-        var s3Repo = s3Repo();
-        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("zk_backup"));
-
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, "override_idx", List.of());
-
-        assertThat(discovery.collections(), contains("override_idx"));
-        verify(s3Repo, never()).downloadFile(anyString());
     }
 
     @Test
@@ -74,7 +64,7 @@ class SolrBackupDiscoveryTest {
         when(s3Repo.downloadFile("backup.properties")).thenThrow(new RuntimeException("boom"));
 
         // CLOUD with null name is not a single-collection bare backup; falls back to the listing.
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.dataDirByCollection().isEmpty(), is(true));
         assertThat(discovery.collections(), contains("zk_backup"));
@@ -85,7 +75,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("snapshot.products"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.collections(), contains("products"));
         assertThat(discovery.dataDirByCollection().get("products"), equalTo("snapshot.products"));
@@ -99,23 +89,11 @@ class SolrBackupDiscoveryTest {
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2", "_0.si", "_0.fdt"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/backups/standalone/snapshot.nyc_taxis_7"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.collections(), contains("nyc_taxis_7"));
         assertThat(discovery.dataDirByCollection().get("nyc_taxis_7"), equalTo(""));
         assertThat(discovery.shardPreparationNeeded(), is(false));
-    }
-
-    @Test
-    void s3StandaloneFlatRoot_nameOverrideWins() throws Exception {
-        var s3Repo = s3Repo();
-        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
-        when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
-
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, "my_index", List.of());
-
-        assertThat(discovery.collections(), contains("my_index"));
-        assertThat(discovery.dataDirByCollection().get("my_index"), equalTo(""));
     }
 
     @Test
@@ -124,7 +102,7 @@ class SolrBackupDiscoveryTest {
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/snapshot.catalog"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareCollection("catalog");
 
@@ -132,17 +110,16 @@ class SolrBackupDiscoveryTest {
     }
 
     @Test
-    void s3StandaloneFlatRoot_atBucketRoot_emptyKeyYieldsEmptyDerivedName() throws Exception {
+    void s3StandaloneFlatRoot_atBucketRoot_emptyKeyRejected() {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
-
-        // Empty repo key -> empty derived core name (defensive guard in lastPathSegment).
-        assertThat(discovery.collections(), contains(""));
-        assertThat(discovery.dataDirByCollection().get(""), equalTo(""));
+        // A flat standalone index at the bucket root has no path segment to name the index after;
+        // it is rejected rather than migrated into a blank index name.
+        assertThrows(SolrBackupReadException.class,
+            () -> SolrBackupDiscovery.discover(s3Repo, backupDir, List.of()));
     }
 
     @Test
@@ -152,7 +129,7 @@ class SolrBackupDiscoveryTest {
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("random.txt"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/whatever"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.collections().isEmpty(), is(true));
     }
@@ -163,7 +140,7 @@ class SolrBackupDiscoveryTest {
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
         when(s3Repo.listFilesInS3Root()).thenThrow(new RuntimeException("cannot list root"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         assertThat(discovery.collections().isEmpty(), is(true));
     }
@@ -173,7 +150,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a", "col_b", "col_c"));
 
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of("col_a", "col_c"));
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of("col_a", "col_c"));
 
         assertThat(discovery.collections(), containsInAnyOrder("col_a", "col_c"));
         assertThat(discovery.dataDirByCollection().isEmpty(), is(true));
@@ -185,7 +162,7 @@ class SolrBackupDiscoveryTest {
         Files.createDirectories(snapshotDir);
         Files.createFile(snapshotDir.resolve("segments_1"));
 
-        var discovery = SolrBackupDiscovery.discover(null, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(null, backupDir, List.of());
 
         assertThat(discovery.collections(), contains("catalog"));
         assertThat(discovery.dataDirByCollection().get("catalog"), equalTo("snapshot.catalog"));
@@ -197,7 +174,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a", "col_b"));
 
-        assertThat(SolrBackupDiscovery.detectBareLayout(s3Repo, backupDir, null), nullValue());
+        assertThat(SolrBackupDiscovery.detectBareLayout(s3Repo, backupDir), nullValue());
     }
 
     // ---- collection preparation (lazy S3 downloads) ----
@@ -206,7 +183,7 @@ class SolrBackupDiscoveryTest {
     void prepareCollection_standalone_downloadsWholeDataDir() throws Exception {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("snapshot.products"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareCollection("products");
 
@@ -219,7 +196,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("zk_backup", "snapshot.shard1"));
         when(s3Repo.listSubDirectories("")).thenReturn(List.of("zk_backup", "snapshot.shard1"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareCollection("events");
 
@@ -233,7 +210,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a"));
         when(s3Repo.listSubDirectories("col_a")).thenReturn(List.of("zk_backup_0"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareCollection("col_a");
 
@@ -247,7 +224,7 @@ class SolrBackupDiscoveryTest {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a"));
         when(s3Repo.listSubDirectories("col_a")).thenReturn(List.of());
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareCollection("col_a");
 
@@ -259,7 +236,7 @@ class SolrBackupDiscoveryTest {
         var snapshotDir = backupDir.resolve("snapshot.catalog");
         Files.createDirectories(snapshotDir);
         Files.createFile(snapshotDir.resolve("segments_1"));
-        var discovery = SolrBackupDiscovery.discover(null, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(null, backupDir, List.of());
 
         // No S3 repo, so this only resolves+parses the (empty) schema without throwing.
         discovery.prepareCollection("catalog");
@@ -273,7 +250,7 @@ class SolrBackupDiscoveryTest {
     void prepareShard_withFileNameMapping_downloadsEachMappedFile() throws Exception {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareShard(new SolrShardPartition("col_a", "shard1", null, Map.of("_0.cfs", "uuid-1")));
 
@@ -284,7 +261,7 @@ class SolrBackupDiscoveryTest {
     void prepareShard_noMapping_snapshotShard_downloadsSnapshotPrefix() throws Exception {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareShard(new SolrShardPartition("col_a", "snapshot.shard1"));
 
@@ -295,7 +272,7 @@ class SolrBackupDiscoveryTest {
     void prepareShard_noMapping_plainShard_downloadsIndexPrefix() throws Exception {
         var s3Repo = s3Repo();
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a"));
-        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, null, List.of());
+        var discovery = SolrBackupDiscovery.discover(s3Repo, backupDir, List.of());
 
         discovery.prepareShard(new SolrShardPartition("col_a", "shard1"));
 
@@ -304,7 +281,7 @@ class SolrBackupDiscoveryTest {
 
     @Test
     void shardPreparationNeeded_falseForFilesystem() throws Exception {
-        var discovery = SolrBackupDiscovery.discover(null, backupDir, "idx", List.of());
+        var discovery = SolrBackupDiscovery.discover(null, backupDir, List.of());
         assertThat(discovery.shardPreparationNeeded(), is(false));
     }
 }

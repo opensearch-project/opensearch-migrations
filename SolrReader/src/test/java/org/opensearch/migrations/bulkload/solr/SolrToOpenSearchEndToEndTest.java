@@ -1189,7 +1189,7 @@ public class SolrToOpenSearchEndToEndTest {
             assertTrue(Files.exists(backupRoot.resolve("backup.properties")),
                 "Real Solr " + solrVersion + " BACKUP should write backup.properties at the root");
 
-            var layout = SolrBackupLayout.classifyBareBackup(backupRoot, null);
+            var layout = SolrBackupLayout.classifyBareBackup(backupRoot);
             assertThat("real bare SolrCloud backup should be classified", layout, notNullValue());
             assertThat(layout.mode(), equalTo(SolrBackupLayout.SolrBackupMode.CLOUD));
             // The whole point: name recovered from the REAL backup.properties matches the collection.
@@ -1201,10 +1201,10 @@ public class SolrToOpenSearchEndToEndTest {
     }
 
     /**
-     * Issue #3147 — proves a real standalone Solr 7 replication backup is classified as STANDALONE.
-     * The core name is not stored anywhere in the backup, so it is supplied via the name override
-     * (the "derive with override" decision); here we assert the override is honored and the index is
-     * read as a single shard.
+     * Proves a real standalone Solr 7 replication backup is classified as STANDALONE. The core name
+     * is not stored anywhere in the backup, so the target index name is derived from the backup
+     * root's final path segment; here we assert that derivation and that the index reads as a single
+     * shard.
      */
     @ParameterizedTest(name = "standalone Solr classifies from real backup: {0}")
     @MethodSource("solr6And7ToOpenSearch")
@@ -1220,11 +1220,12 @@ public class SolrToOpenSearchEndToEndTest {
             populateSolrDocuments(solr, core, 5);
             var backupRoot = createAndCopyBackup(solr, core, "standalone_backup");
 
-            var layout = SolrBackupLayout.classifyBareBackup(backupRoot, core);
+            var layout = SolrBackupLayout.classifyBareBackup(backupRoot);
             assertThat("real standalone backup should be classified", layout, notNullValue());
             assertThat("no SolrCloud markers => STANDALONE",
                 layout.mode(), equalTo(SolrBackupLayout.SolrBackupMode.STANDALONE));
-            assertThat("core name comes from the override", layout.collectionName(), equalTo(core));
+            assertThat("core name derived from the backup root directory name",
+                layout.collectionName(), equalTo(backupRoot.getFileName().toString()));
             assertThat("standalone backup is a single shard",
                 SolrBackupLayout.countShards(layout.resolveFrom(backupRoot)), equalTo(1));
         }

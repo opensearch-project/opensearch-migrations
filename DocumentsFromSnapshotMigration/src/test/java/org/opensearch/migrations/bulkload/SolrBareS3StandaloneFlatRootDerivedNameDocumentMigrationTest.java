@@ -39,9 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Migrates a standalone Solr 6/8/9 backup whose flat Lucene index sits directly at the S3 repo prefix
  * (segments_N at the root, no {@code snapshot.<name>/} wrapper) through the {@code RfsMigrateDocuments}
- * S3 path. With no {@code backup.properties} and no {@code --solr-collection-name} override, the target
- * index name is derived from the {@code snapshot.<name>} prefix. Covers both multi-segment and
- * force-merged single-segment indexes.
+ * S3 path. With no {@code backup.properties} to name it, the target index name is derived from the
+ * {@code snapshot.<name>} prefix. Covers both multi-segment and force-merged single-segment indexes.
  */
 @Slf4j
 @Tag("isolatedTest")

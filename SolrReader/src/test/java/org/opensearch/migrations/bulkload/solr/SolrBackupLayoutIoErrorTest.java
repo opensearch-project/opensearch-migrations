@@ -32,7 +32,7 @@ class SolrBackupLayoutIoErrorTest {
 
             // hasCloudMarkersAtRoot, containsSegmentsFile and findStandaloneSnapshotDir each hit their
             // IOException catch and report "not found", so classification yields null.
-            assertThat(SolrBackupLayout.classifyBareBackup(DIR, null), nullValue());
+            assertThat(SolrBackupLayout.classifyBareBackup(DIR), nullValue());
         }
     }
 

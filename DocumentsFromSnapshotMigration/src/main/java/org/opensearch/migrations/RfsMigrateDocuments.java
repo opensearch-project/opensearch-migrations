@@ -159,13 +159,6 @@ public class RfsMigrateDocuments {
         public String repoUri = null;
 
         @Parameter(required = false,
-            names = { "--solr-collection-name", "--solrCollectionName" },
-            description = ("Target index name for a bare Solr backup. Optional for SolrCloud (the collection "
-                + "name is read from backup.properties); recommended for standalone backups, whose core name is "
-                + "not recorded in the backup. Ignored for wrapped multi-collection layouts."))
-        public String solrCollectionName = null;
-
-        @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
                 "Required for s3:// and gs:// repos."))
@@ -1169,7 +1162,7 @@ public class RfsMigrateDocuments {
     static SolrMultiCollectionSource buildSolrDocumentSource(Args arguments, Path backupDir, S3Repo s3Repo)
         throws IOException {
         var discovery = SolrBackupDiscovery.discover(
-            s3Repo, backupDir, arguments.solrCollectionName, arguments.indexAllowlist);
+            s3Repo, backupDir, arguments.indexAllowlist);
         var schemas = discovery.schemas();
         var dataDirByCollection = discovery.dataDirByCollection();
 

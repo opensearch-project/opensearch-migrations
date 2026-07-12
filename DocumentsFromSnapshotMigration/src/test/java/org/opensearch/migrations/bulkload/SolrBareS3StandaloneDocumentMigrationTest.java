@@ -38,8 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Migrates a standalone Solr backup uploaded to S3 verbatim through the {@code RfsMigrateDocuments}
  * S3 path, for Solr 7, 8, and 9. A standalone replication-handler backup is a flat
  * {@code snapshot.<name>/} Lucene index with no {@code zk_backup}/{@code backup.properties} and no
- * recorded core name, so the target index name is supplied via {@code --solr-collection-name}. The
- * {@code snapshot.<name>/} wrapper is preserved on S3, exercising the wrapped STANDALONE branch of
+ * recorded core name, so the target index name is derived from the {@code snapshot.<name>} wrapper.
+ * The {@code snapshot.<name>/} wrapper is preserved on S3, exercising the wrapped STANDALONE branch of
  * the S3 discovery (distinct from the flat-root branch).
  */
 @Slf4j
@@ -92,11 +92,14 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("versions")
     @Timeout(value = 8, unit = TimeUnit.MINUTES)
-    void wrappedStandaloneInS3MigratesToOverriddenIndexName(
+    void wrappedStandaloneInS3MigratesToDerivedIndexName(
         SolrClusterContainer.SolrVersion version
     ) throws Exception {
-        var index = "standalone_solr" + version.major();
-        var snapshotName = "snapshot_" + index;
+        // The wrapped standalone layout records no core name; the target index name is derived from
+        // the snapshot.<name> wrapper, i.e. BACKUP_NAME. The snapshot name stays per-version so the
+        // three parametrized runs don't collide in the shared S3 bucket.
+        var index = BACKUP_NAME;
+        var snapshotName = "snapshot_standalone_solr" + version.major();
 
         try (var solr = new SolrClusterContainer(version)) {
             solr.start();
@@ -125,9 +128,9 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
                 targetOps.get("/" + index + "/_refresh");
                 var countResp = targetOps.get("/" + index + "/_count");
                 assertEquals(200, countResp.getKey(),
-                    "target index '" + index + "' (from --solr-collection-name) should exist");
+                    "target index '" + index + "' (derived from the snapshot.<name> wrapper) should exist");
                 var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
-                assertEquals(DOC_COUNT, count, "all docs should be migrated into the overridden index name");
+                assertEquals(DOC_COUNT, count, "all docs should be migrated into the derived index name");
             }
         }
     }
@@ -222,7 +225,6 @@ public class SolrBareS3StandaloneDocumentMigrationTest {
         var args = new ArrayList<>(List.of(
             "--snapshot-name", snapshotName,
             "--source-version", "SOLR_" + version.tag(),
-            "--solr-collection-name", index,
             "--s3-repo-uri", "s3://" + BUCKET_NAME,
             "--s3-region", REGION,
             "--s3-local-dir", s3LocalDir.toString(),

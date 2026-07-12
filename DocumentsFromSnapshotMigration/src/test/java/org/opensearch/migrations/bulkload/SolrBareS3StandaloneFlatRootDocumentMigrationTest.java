@@ -51,6 +51,8 @@ public class SolrBareS3StandaloneFlatRootDocumentMigrationTest {
     private static final String BACKUP_NAME = "standalone_backup";
     // The flat index is uploaded directly under this snapshot prefix (no snapshot.<name>/ wrapper).
     private static final String SNAPSHOT_NAME = "snapshot.nyc_taxis_7";
+    // With no override, the target index name is derived from the snapshot prefix's last segment.
+    private static final String DERIVED_INDEX = SNAPSHOT_NAME.replaceFirst("^snapshot\\.", "");
     private static final int DOC_COUNT = 20;
 
     static {
@@ -87,7 +89,7 @@ public class SolrBareS3StandaloneFlatRootDocumentMigrationTest {
 
     @Test
     @Timeout(value = 8, unit = TimeUnit.MINUTES)
-    void bareStandaloneSolr7FlatRootInS3MigratesToOverriddenIndexName() throws Exception {
+    void bareStandaloneSolr7FlatRootInS3MigratesToDerivedIndexName() throws Exception {
         createCore();
         indexDocuments(DOC_COUNT);
         var localIndex = backupAndCopyIndexToHost();
@@ -109,12 +111,12 @@ public class SolrBareS3StandaloneFlatRootDocumentMigrationTest {
             }
 
             var targetOps = new ClusterOperations(target);
-            targetOps.get("/" + CORE + "/_refresh");
-            var countResp = targetOps.get("/" + CORE + "/_count");
+            targetOps.get("/" + DERIVED_INDEX + "/_refresh");
+            var countResp = targetOps.get("/" + DERIVED_INDEX + "/_count");
             assertEquals(200, countResp.getKey(),
-                "target index '" + CORE + "' (from --solr-collection-name) should exist");
+                "target index '" + DERIVED_INDEX + "' (derived from the snapshot prefix) should exist");
             var count = MAPPER.readTree(countResp.getValue()).path("count").asInt();
-            assertEquals(DOC_COUNT, count, "all docs should be migrated into the overridden index name");
+            assertEquals(DOC_COUNT, count, "all docs should be migrated into the derived index name");
         }
     }
 
@@ -205,14 +207,13 @@ public class SolrBareS3StandaloneFlatRootDocumentMigrationTest {
         var args = new ArrayList<>(List.of(
             "--snapshot-name", SNAPSHOT_NAME,
             "--source-version", "SOLR_" + SolrClusterContainer.SOLR_7.tag(),
-            "--solr-collection-name", CORE,
             "--s3-repo-uri", "s3://" + BUCKET_NAME,
             "--s3-region", REGION,
             "--s3-local-dir", s3LocalDir.toString(),
             "--s3-endpoint", LOCAL_STACK.getEndpoint().toString(),
             "--target-host", targetUrl,
             "--coordinator-host", targetUrl,
-            "--index-allowlist", CORE,
+            "--index-allowlist", DERIVED_INDEX,
             "--documents-per-bulk-request", "10",
             "--max-connections", "1",
             "--initial-lease-duration", "PT10M"

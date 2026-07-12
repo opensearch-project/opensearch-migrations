@@ -98,7 +98,7 @@ public class ClusterReaderExtractor {
         switch (parsedUri) {
             case RepoUri.FileRepoUri f -> {
                 backupDir = Path.of(f.path());
-                var bare = SolrBackupLayout.classifyBareBackup(backupDir, arguments.solrCollectionName);
+                var bare = SolrBackupLayout.classifyBareBackup(backupDir);
                 if (bare != null && bare.collectionName() != null) {
                     collectionNames = List.of(bare.collectionName());
                     dataDirByCollection.put(bare.collectionName(), bare.dataPath());
@@ -109,7 +109,7 @@ public class ClusterReaderExtractor {
             case RepoUri.S3RepoUri s -> {
                 var s3Repo = createSolrS3Repo(s);
                 backupDir = s3Repo.getRepoRootDir();
-                var bare = detectBareSolrLayoutInS3(s3Repo, arguments.solrCollectionName);
+                var bare = detectBareSolrLayoutInS3(s3Repo);
                 if (bare != null && bare.collectionName() != null) {
                     collectionNames = List.of(bare.collectionName());
                     dataDirByCollection.put(bare.collectionName(), bare.dataPath());
@@ -175,32 +175,28 @@ public class ClusterReaderExtractor {
         s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkName));
     }
 
-    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo, String nameOverride) {
+    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo) {
         var subDirs = s3Repo.listTopLevelDirectories();
         var bare = SolrBackupLayout.detectBareLayoutFromListing(subDirs);
         if (bare == null) {
             // A flat-root standalone index has no sub-directories at all; only then probe the root files.
-            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo, nameOverride) : null;
+            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo) : null;
         }
         if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
-            var name = nameOverride;
-            if (name == null) {
-                try {
-                    s3Repo.downloadFile("backup.properties");
-                    name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
-                } catch (RuntimeException e) {
-                    log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
-                }
+            String name = null;
+            try {
+                s3Repo.downloadFile("backup.properties");
+                name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
+            } catch (RuntimeException e) {
+                log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
             }
             return new SolrBackupLayout.BareBackupLayout(SolrBackupLayout.SolrBackupMode.CLOUD, name, bare.dataPath());
         }
-        return nameOverride != null
-            ? new SolrBackupLayout.BareBackupLayout(bare.mode(), nameOverride, bare.dataPath())
-            : bare;
+        return bare;
     }
 
     /** Standalone core whose flat Lucene index is at the S3 root (segments_N, no snapshot.<name>/ wrapper). */
-    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo, String nameOverride) {
+    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo) {
         final List<String> rootFiles;
         try {
             rootFiles = s3Repo.listFilesInS3Root();
@@ -208,8 +204,7 @@ public class ClusterReaderExtractor {
             log.atDebug().setMessage("No flat-root standalone index at S3 root: {}").addArgument(e.getMessage()).log();
             return null;
         }
-        var rootName = nameOverride == null ? s3Repo.getS3RepoUri().key : null;
-        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, rootName, nameOverride);
+        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, s3Repo.getS3RepoUri().key);
         if (bare != null) {
             log.atInfo().setMessage("Detected flat-root standalone Solr backup in S3 (core='{}')")
                 .addArgument(bare.collectionName()).log();

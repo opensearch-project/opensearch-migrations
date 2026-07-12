@@ -10,6 +10,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout.SolrBackupMode;
+import org.opensearch.migrations.bulkload.solr.SolrBackupReadException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,6 +19,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -86,22 +88,11 @@ class SolrClusterReaderExtractorTest {
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("zk_backup"));
         when(s3Repo.getRepoRootDir()).thenReturn(tempDir);
 
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null);
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo);
 
         assertThat(bare.mode(), equalTo(SolrBackupMode.CLOUD));
         assertThat(bare.collectionName(), equalTo("events"));
         verify(s3Repo).downloadFile("backup.properties");
-    }
-
-    @Test
-    void detectBareSolrLayoutInS3_cloudOverrideWins() {
-        var s3Repo = mock(S3Repo.class);
-        when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("zk_backup"));
-
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, "override_idx");
-
-        assertThat(bare.collectionName(), equalTo("override_idx"));
-        verify(s3Repo, never()).downloadFile(anyString());
     }
 
     @Test
@@ -111,7 +102,7 @@ class SolrClusterReaderExtractorTest {
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2", "_0.si"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/backups/standalone/snapshot.nyc_taxis_7"));
 
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null);
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo);
 
         assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
         assertThat(bare.collectionName(), equalTo("nyc_taxis_7"));
@@ -119,15 +110,14 @@ class SolrClusterReaderExtractorTest {
     }
 
     @Test
-    void detectBareSolrLayoutInS3_flatRootStandaloneOverrideWins() {
+    void detectBareSolrLayoutInS3_atBucketRoot_emptyKeyRejected() {
         var s3Repo = mock(S3Repo.class);
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("segments_2"));
+        when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket"));
 
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, "override_idx");
-
-        assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
-        assertThat(bare.collectionName(), equalTo("override_idx"));
+        assertThrows(SolrBackupReadException.class,
+            () -> ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo));
     }
 
     @Test
@@ -137,7 +127,7 @@ class SolrClusterReaderExtractorTest {
         when(s3Repo.listFilesInS3Root()).thenReturn(List.of("notes.txt"));
         when(s3Repo.getS3RepoUri()).thenReturn(new S3Uri("s3://bucket/empty"));
 
-        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null), nullValue());
+        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo), nullValue());
     }
 
     @Test
@@ -146,7 +136,7 @@ class SolrClusterReaderExtractorTest {
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of());
         when(s3Repo.listFilesInS3Root()).thenThrow(new RuntimeException("cannot list root"));
 
-        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null), nullValue());
+        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo), nullValue());
     }
 
     @Test
@@ -154,7 +144,7 @@ class SolrClusterReaderExtractorTest {
         var s3Repo = mock(S3Repo.class);
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("snapshot.products"));
 
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null);
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo);
 
         assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
         assertThat(bare.collectionName(), equalTo("products"));
@@ -166,7 +156,7 @@ class SolrClusterReaderExtractorTest {
         var s3Repo = mock(S3Repo.class);
         when(s3Repo.listTopLevelDirectories()).thenReturn(List.of("col_a", "col_b"));
 
-        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null), nullValue());
+        assertThat(ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo), nullValue());
     }
 
     @Test
@@ -176,7 +166,7 @@ class SolrClusterReaderExtractorTest {
         when(s3Repo.downloadFile("backup.properties")).thenThrow(new RuntimeException("boom"));
         when(s3Repo.getRepoRootDir()).thenReturn(tempDir);
 
-        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo, null);
+        var bare = ClusterReaderExtractor.detectBareSolrLayoutInS3(s3Repo);
 
         assertThat(bare.mode(), equalTo(SolrBackupMode.CLOUD));
         assertThat(bare.collectionName(), nullValue());

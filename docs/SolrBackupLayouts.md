@@ -36,8 +36,9 @@ A standalone backup is a single flat Lucene index inside a `snapshot.<name>/` di
     └── ...
 ```
 
-A standalone backup does **not** record the core name, so supply the target index name (see
-[Setting the target index name](#setting-the-target-index-name)).
+A standalone backup does **not** record the core name, so the target index name is derived from the
+`snapshot.<name>` directory (see
+[How the target index name is determined](#how-the-target-index-name-is-determined)).
 
 ## Pointing the migration at a backup
 
@@ -50,37 +51,33 @@ backup location:
   `--snapshot-name <snapshotName>`. Upload the backup verbatim so its contents land directly under
   `s3://<bucket>[/<subpath>]/<snapshotName>/`.
 
-## Setting the target index name
+### What `--snapshot-name` means for Solr
 
-Both the document migration and the metadata migration let you set the target index name for a
-backup. Whether it is required depends on the layout:
+Unlike Elasticsearch/OpenSearch, where `--snapshot-name` is a **required** key looked up in the
+snapshot repository's metadata, Solr backups have no such registry. Here the flag is just a **path
+segment** appended to the repo URI (`s3://<bucket>/[<subpath>/]<snapshotName>`) to locate the
+backup — **optional**, and **S3-only** (ignored for local-disk backups, where the path you pass
+*is* the backup directory). For a flat-root standalone backup it also names the target index (the
+final path segment, `snapshot.` prefix stripped). Because it only composes a path, it can't rescue a
+backup sitting at the bare bucket root — that just reads an empty location; the backup must live
+under a prefix.
 
-| Layout | Required? | Behavior when omitted |
-| --- | --- | --- |
-| Standalone — wrapped (`<snapshotName>/snapshot.<name>/…`) | **Required** | Fails — no index name is recorded in the backup. |
-| Standalone — flat-root (`snapshot.<name>/` at the repo root) | Optional | Derived by stripping the `snapshot.` prefix from the directory name. |
-| SolrCloud (bare or incremental) | Optional | Recovered from `backup.properties` / the backup metadata. |
-| Wrapped multi-collection layouts | Ignored | Each collection keeps its own directory name. |
+## How the target index name is determined
 
-For the optional cases the value acts purely as an override. If you are unsure which standalone
-sub-layout you have, setting it is always safe.
+The target index name is determined automatically from the backup itself — there is no override to
+set. How it is resolved depends on the layout:
 
-**CLI:** pass `--solr-collection-name <index>`.
+| Layout | Target index name |
+| --- | --- |
+| SolrCloud (bare or incremental) | Recovered from `backup.properties` / the backup metadata. |
+| Standalone — wrapped (`<snapshotName>/snapshot.<name>/…`) | The inner `snapshot.<name>` directory with the `snapshot.` prefix stripped. |
+| Standalone — flat-root (`segments_N` directly at the repo root, no `snapshot.<name>/` wrapper) | The repo's final path segment — the snapshot name — with any `snapshot.` prefix stripped. |
+| Wrapped multi-collection layouts | Each collection keeps its own directory name. |
 
-**Orchestration workflow:** set `solrCollectionName` in the snapshot's document-backfill options:
-
-```json
-{
-  "snapshotMigrationConfigs": [{
-    "fromSource": "solrSource",
-    "toTarget": "osTarget",
-    "perSnapshotConfig": {
-      "myBackup": [{
-        "documentBackfillConfig": {
-          "solrCollectionName": "my_target_index"
-        }
-      }]
-    }
-  }]
-}
-```
+Because a standalone name is derived from the backup's final path segment, the backup must live
+**under a prefix** — a flat standalone index sitting directly at the S3 bucket root (an empty repo
+key with no snapshot name) has no segment to name the index after and is rejected with an error. The
+fix is to store the backup under a named prefix (e.g. `s3://<bucket>/<name>/`) and point the reader
+at it — via a repo subpath and/or `--snapshot-name <name>`. Note that `--snapshot-name` only changes
+where the reader looks; it does not relocate the data, so it cannot rescue a backup whose segments
+genuinely sit at the bucket root.

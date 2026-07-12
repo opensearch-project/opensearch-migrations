@@ -17,6 +17,7 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Direct unit tests for the pure {@link SolrBackupLayout} helpers (listing/prefix/properties logic)
@@ -158,38 +159,30 @@ class SolrBackupLayoutHelpersTest {
     @Test
     void detectFlatRootStandaloneFromS3_derivesNameFromKeyLastSegment() {
         var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
-            List.of("segments_2", "_0.si"), "backups/standalone/snapshot.nyc_taxis_7", null);
+            List.of("segments_2", "_0.si"), "backups/standalone/snapshot.nyc_taxis_7");
         assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
         assertThat(layout.collectionName(), equalTo("nyc_taxis_7"));
         assertThat(layout.dataPath(), equalTo(""));
     }
 
     @Test
-    void detectFlatRootStandaloneFromS3_overrideWins() {
-        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
-            List.of("segments_2"), "snapshot.nyc_taxis_7", "my_index");
-        assertThat(layout.collectionName(), equalTo("my_index"));
-        assertThat(layout.dataPath(), equalTo(""));
-    }
-
-    @Test
     void detectFlatRootStandaloneFromS3_stripsPrefixlessKeySegment() {
         var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(
-            List.of("segments_2"), "my_core/", null);
+            List.of("segments_2"), "my_core/");
         assertThat(layout.collectionName(), equalTo("my_core"));
     }
 
     @Test
-    void detectFlatRootStandaloneFromS3_emptyKeyYieldsEmptyName() {
-        var layout = SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("segments_2"), "", null);
-        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
-        assertThat(layout.collectionName(), equalTo(""));
+    void detectFlatRootStandaloneFromS3_emptyKeyRejected() {
+        // A flat index at the bucket root has no path segment to name the index after; rejected.
+        assertThrows(SolrBackupReadException.class,
+            () -> SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("segments_2"), ""));
     }
 
     @Test
     void detectFlatRootStandaloneFromS3_nullWhenNoSegmentsFile() {
         assertThat(
-            SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("_0.si", "random.txt"), "snapshot.x", null),
+            SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("_0.si", "random.txt"), "snapshot.x"),
             nullValue());
     }
 
@@ -231,7 +224,7 @@ class SolrBackupLayoutHelpersTest {
     void classifyBareBackup_standaloneFlatRoot_segmentsDirectlyAtRoot() throws IOException {
         Files.createFile(tempDir.resolve("segments_1"));
 
-        var layout = SolrBackupLayout.classifyBareBackup(tempDir, null);
+        var layout = SolrBackupLayout.classifyBareBackup(tempDir);
 
         assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
         assertThat(layout.dataPath(), equalTo(""));
@@ -241,21 +234,21 @@ class SolrBackupLayoutHelpersTest {
     void classifyBareBackup_cloudFromNumberedZkBackupMarker() throws IOException {
         Files.createDirectories(tempDir.resolve("zk_backup_0"));
 
-        assertThat(SolrBackupLayout.classifyBareBackup(tempDir, null).mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir).mode(), equalTo(SolrBackupMode.CLOUD));
     }
 
     @Test
     void classifyBareBackup_cloudFromShardBackupMetadataMarker() throws IOException {
         Files.createDirectories(tempDir.resolve("shard_backup_metadata"));
 
-        assertThat(SolrBackupLayout.classifyBareBackup(tempDir, null).mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir).mode(), equalTo(SolrBackupMode.CLOUD));
     }
 
     @Test
     void classifyBareBackup_cloudFromNumberedBackupPropertiesMarker() throws IOException {
         Files.writeString(tempDir.resolve("backup_0.properties"), "collection=events\n");
 
-        var layout = SolrBackupLayout.classifyBareBackup(tempDir, null);
+        var layout = SolrBackupLayout.classifyBareBackup(tempDir);
 
         assertThat(layout.mode(), equalTo(SolrBackupMode.CLOUD));
         assertThat(layout.collectionName(), equalTo("events"));
@@ -263,7 +256,7 @@ class SolrBackupLayoutHelpersTest {
 
     @Test
     void classifyBareBackup_nullForNonExistentRoot() {
-        assertThat(SolrBackupLayout.classifyBareBackup(tempDir.resolve("missing"), null), nullValue());
+        assertThat(SolrBackupLayout.classifyBareBackup(tempDir.resolve("missing")), nullValue());
     }
 
     // ---- resolveCollectionDataDir ----
