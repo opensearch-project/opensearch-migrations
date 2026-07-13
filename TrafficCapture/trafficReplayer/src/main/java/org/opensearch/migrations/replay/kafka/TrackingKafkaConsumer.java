@@ -340,14 +340,35 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             .collect(Collectors.toList());
     }
 
+    private static final Duration STALE_HEAD_THRESHOLD = Duration.ofMinutes(5);
+
     public <T> Stream<T> getNextBatchOfRecords(
         ITrafficSourceContexts.IReadChunkContext context,
         BiFunction<KafkaCommitOffsetData, ConsumerRecord<String, byte[]>, T> builder
     ) {
+        reapStaleHeads();
         safeCommit(context::createCommitContext);
         var records = safePollWithSwallowedRuntimeExceptions(context);
         safeCommit(context::createCommitContext);
         return applyBuilder(builder, records);
+    }
+
+    private void reapStaleHeads() {
+        synchronized (commitDataLock) {
+            for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
+                var partition = entry.getKey();
+                var tracker = entry.getValue();
+                var newHead = tracker.reapStaleHead(STALE_HEAD_THRESHOLD);
+                newHead.ifPresent(offset -> {
+                    var tp = new TopicPartition(topic, partition);
+                    var v = new OffsetAndMetadata(offset);
+                    log.atWarn().setMessage("Stale head reaped for partition {}, advancing commit to {}")
+                        .addArgument(partition).addArgument(offset).log();
+                    nextSetOfCommitsMap.put(tp, v);
+                    kafkaRecordsReadyToCommit.set(true);
+                });
+            }
+        }
     }
 
     private <T> Stream<T> applyBuilder(

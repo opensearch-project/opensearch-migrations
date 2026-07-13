@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -95,6 +96,38 @@ class OffsetLifecycleTracker {
                     .log();
                 return Optional.empty();
             }
+        }
+    }
+
+    /**
+     * Force-remove offsets stuck at the head of the queue for longer than the given threshold.
+     * This breaks head-of-line blocking when stale connections pin the commit pointer.
+     * Returns the new commit offset if the head was reaped (enabling a Kafka commit),
+     * or empty if nothing was reaped.
+     */
+    Optional<Long> reapStaleHead(Duration staleThreshold) {
+        synchronized (pQueue) {
+            var head = pQueue.peek();
+            if (head == null) {
+                return Optional.empty();
+            }
+            var meta = offsetMetadataMap.get(head);
+            if (meta == null) {
+                return Optional.empty();
+            }
+            var age = Duration.between(meta.addedAt, clock.instant());
+            if (age.compareTo(staleThreshold) <= 0) {
+                return Optional.empty();
+            }
+            log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
+                .addArgument(head)
+                .addArgument(meta.connectionId)
+                .addArgument(age)
+                .log();
+            pQueue.remove(head);
+            offsetMetadataMap.remove(head);
+            var newHead = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1);
+            return Optional.of(newHead);
         }
     }
 
