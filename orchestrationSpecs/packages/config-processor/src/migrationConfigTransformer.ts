@@ -24,6 +24,7 @@ import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaph
 import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
+import {buildKafkaClientPropertiesFileContent} from "./kafkaClientProperties";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -553,7 +554,7 @@ function buildKafkaClientConfig(
     }
     if ('existing' in cluster) {
         const auth = cluster.existing.auth ?? {type: "none" as const};
-        return {
+        const config = {
             enableMSKAuth: cluster.existing.enableMSKAuth,
             kafkaConnection: cluster.existing.kafkaConnection,
             kafkaTopic: topic || cluster.existing.kafkaTopic,
@@ -566,12 +567,27 @@ function buildKafkaClientConfig(
             topicSpecOverrides: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
             label: kafkaClusterKey
         };
+        return {
+            ...config,
+            producerClientProperties: buildKafkaClientPropertiesFileContent({
+                role: "producer",
+                clusterKey: kafkaClusterKey,
+                kafkaConfig: config,
+                userProperties: cluster.existing.clientProperties?.producer,
+            }),
+            consumerClientProperties: buildKafkaClientPropertiesFileContent({
+                role: "consumer",
+                clusterKey: kafkaClusterKey,
+                kafkaConfig: config,
+                userProperties: cluster.existing.clientProperties?.consumer,
+            }),
+        };
     }
     const auth = resolveWorkflowManagedKafkaAuth(cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>});
     const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
     const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
     // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
-    return {
+    const config = {
         enableMSKAuth: false,
         kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:${listenerPort}`,
         kafkaTopic: topic,
@@ -583,6 +599,19 @@ function buildKafkaClientConfig(
         kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         topicSpecOverrides: cluster.autoCreate.topicSpecOverrides,
         label: kafkaClusterKey
+    };
+    return {
+        ...config,
+        producerClientProperties: buildKafkaClientPropertiesFileContent({
+            role: "producer",
+            clusterKey: kafkaClusterKey,
+            kafkaConfig: config,
+        }),
+        consumerClientProperties: buildKafkaClientPropertiesFileContent({
+            role: "consumer",
+            clusterKey: kafkaClusterKey,
+            kafkaConfig: config,
+        }),
     };
 }
 

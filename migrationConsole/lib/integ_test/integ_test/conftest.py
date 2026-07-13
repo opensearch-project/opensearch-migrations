@@ -30,6 +30,7 @@ from .test_cases.cdc_tests import *
 from .test_cases.cdc_pem_env_var_tests import *
 from .test_cases.cdc_generate_data_tests import *
 from .test_cases.cdc_mixed_operations_tests import *
+from .test_cases.cdc_external_kafka_tests import *
 from .test_cases.cdc_simple_bulk_e2e_tests import *
 from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *

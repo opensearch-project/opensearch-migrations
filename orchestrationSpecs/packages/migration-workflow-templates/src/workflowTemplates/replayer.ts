@@ -4,6 +4,9 @@ import {
     ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, ARGO_REPLAYER_WORKFLOW_OPTION_KEYS, KAFKA_CLIENT_CONFIG,
     ARGO_FILE_SOURCE_VOLUME,
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
+    KAFKA_AUTH_CONFIG_FILE_PATH,
+    KAFKA_AUTH_CONFIG_MOUNT_PATH,
+    KAFKA_CA_MOUNT_PATH,
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression, Deployment,
@@ -41,9 +44,6 @@ import {
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
 
-const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
-const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
-const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const REPLAYER_APP_LABEL = "replayer";
 const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
 
@@ -116,7 +116,10 @@ function makeReplayerParamsDict(
     );
     const effectiveKafkaSecretName = expr.getLoose(deserializedKafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(deserializedKafkaConfig, "kafkaUserName");
-    const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const shouldUseKafkaPropertyFile = expr.not(expr.equals(
+        expr.dig(deserializedKafkaConfig, ["consumerClientProperties"], ""),
+        expr.literal("")
+    ));
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
@@ -133,7 +136,7 @@ function makeReplayerParamsDict(
                 kafkaTrafficUserName: effectiveKafkaUserName,
             }),
             expr.ternary(
-                shouldUseScram,
+                shouldUseKafkaPropertyFile,
                 expr.makeDict({
                     kafkaTrafficPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
                 }),
@@ -143,16 +146,16 @@ function makeReplayerParamsDict(
     );
 }
 
-function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
+function makeKafkaClientPropertiesConfigMap(
+    name: BaseExpression<string>,
+    clientProperties: BaseExpression<string>
+) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name},
         data: {
-            "client.properties": [
-                "ssl.truststore.type=PEM",
-                `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
-            ].join("\n")
+            "client.properties": makeStringTypeProxy(clientProperties)
         }
     };
 }
@@ -401,11 +404,12 @@ export const Replayer = replayerBaseBuilder
   .addTemplate("createKafkaClientPropertiesConfigMap", (t) =>
     t
       .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("clientProperties", typeToken<string>())
       .addResourceTask((b) =>
         b.setDefinition({
           action: "apply",
           setOwnerReference: false,
-          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
+          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name, b.inputs.clientProperties)
         }),
       )
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY),
@@ -461,6 +465,7 @@ export const Replayer = replayerBaseBuilder
             (c) =>
               c.register({
                 name: kafkaAuthConfigMapName,
+                clientProperties: expr.dig(kafkaConfig, ["consumerClientProperties"], ""),
               }),
           )
           .addStep("waitForKafkaAuthSecret", ResourceManagement, "waitForSecretKey", (c) =>

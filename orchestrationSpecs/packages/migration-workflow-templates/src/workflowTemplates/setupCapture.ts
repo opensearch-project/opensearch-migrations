@@ -17,6 +17,9 @@ import {
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
+    KAFKA_AUTH_CONFIG_FILE_PATH,
+    KAFKA_AUTH_CONFIG_MOUNT_PATH,
+    KAFKA_CA_MOUNT_PATH,
     PROXY_TLS_CONFIG,
     ResourceRequirementsType,
 } from "@opensearch-migrations/schemas";
@@ -40,9 +43,6 @@ import {
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
 
-const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
-const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
-const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM";
 
 function makeOwnerReferences(
@@ -118,7 +118,10 @@ function makeProxyParamsDict(
     );
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
-    const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const shouldUseKafkaPropertyFile = expr.not(expr.equals(
+        expr.dig(kafkaConfig, ["producerClientProperties"], ""),
+        expr.literal("")
+    ));
     return expr.mergeDicts(
         expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
@@ -139,7 +142,7 @@ function makeProxyParamsDict(
                     kafkaUserName: effectiveKafkaUserName,
                 }),
                 expr.ternary(
-                    shouldUseScram,
+                    shouldUseKafkaPropertyFile,
                     expr.makeDict({
                         kafkaPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
                     }),
@@ -150,16 +153,16 @@ function makeProxyParamsDict(
     );
 }
 
-function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
+function makeKafkaClientPropertiesConfigMap(
+    name: BaseExpression<string>,
+    clientProperties: BaseExpression<string>
+) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name},
         data: {
-            "client.properties": [
-                "ssl.truststore.type=PEM",
-                `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
-            ].join("\n")
+            "client.properties": makeStringTypeProxy(clientProperties)
         }
     };
 }
@@ -497,11 +500,12 @@ export const SetupCapture = WorkflowBuilder.create({
 
     .addTemplate("createKafkaClientPropertiesConfigMap", t => t
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("clientProperties", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
+                manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name, b.inputs.clientProperties)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -626,7 +630,8 @@ export const SetupCapture = WorkflowBuilder.create({
             return b
                 .addStep("createKafkaClientConfig", INTERNAL, "createKafkaClientPropertiesConfigMap", c =>
                     c.register({
-                        name: kafkaAuthConfigMapName
+                        name: kafkaAuthConfigMapName,
+                        clientProperties: expr.dig(kafkaConfig, ["producerClientProperties"], ""),
                     })
                 )
                 .addStepGroup(g => g

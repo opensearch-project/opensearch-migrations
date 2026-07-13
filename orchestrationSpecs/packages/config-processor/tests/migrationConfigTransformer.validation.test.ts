@@ -151,6 +151,180 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
+    it('renders external Kafka producer and consumer client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092,broker2:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "max.request.size": 8388608,
+                            "compression.type": "lz4",
+                            "delivery.timeout.ms": 30000,
+                        },
+                        consumer: {
+                            "fetch.max.bytes": 8388608,
+                            "max.partition.fetch.bytes": 8388608,
+                            "allow.auto.create.topics": false,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.producerClientProperties).toBe([
+            "compression.type=lz4",
+            "delivery.timeout.ms=30000",
+            "max.request.size=8388608",
+            "",
+        ].join("\n"));
+        expect(result.trafficReplays[0].kafkaConfig.consumerClientProperties).toBe([
+            "allow.auto.create.topics=false",
+            "fetch.max.bytes=8388608",
+            "max.partition.fetch.bytes=8388608",
+            "",
+        ].join("\n"));
+    });
+
+    it('merges external Kafka SCRAM TLS properties with user client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9093",
+                    kafkaTopic: "",
+                    auth: {
+                        type: "scram-sha-512",
+                        secretName: "external-kafka-user",
+                        caSecretName: "external-kafka-ca",
+                        kafkaUserName: "migration-app",
+                    },
+                    clientProperties: {
+                        producer: {
+                            "max.request.size": 8388608,
+                        },
+                        consumer: {
+                            "fetch.max.bytes": 8388608,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.producerClientProperties).toBe([
+            "max.request.size=8388608",
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n"));
+        expect(result.trafficReplays[0].kafkaConfig.consumerClientProperties).toBe([
+            "fetch.max.bytes=8388608",
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n"));
+    });
+
+    it('rejects workflow-owned Kafka producer client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "bootstrap.servers": "other-broker:9092",
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /kafkaClusterConfiguration\.default\.existing\.clientProperties\.producer\.bootstrap\.servers.*kafkaConnection/
+        );
+    });
+
+    it('rejects workflow-owned Kafka consumer and auth client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9093",
+                    kafkaTopic: "",
+                    auth: {
+                        type: "scram-sha-512",
+                        secretName: "external-kafka-user",
+                        caSecretName: "external-kafka-ca",
+                    },
+                    clientProperties: {
+                        consumer: {
+                            "partition.assignment.strategy": "org.apache.kafka.clients.consumer.RangeAssignor",
+                            "ssl.truststore.location": "/tmp/other.crt",
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /kafkaClusterConfiguration\.default\.existing\.clientProperties\.consumer\.partition\.assignment\.strategy.*traffic replayer partition assignment strategy/
+        );
+    });
+
+    it('rejects nested Kafka client property values during preprocessing', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "max.request.size": {value: 8388608},
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /flat string, number, or boolean|Unrecognized keys/
+        );
+    });
+
+    it('rejects empty Kafka client property names during preprocessing', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        consumer: {
+                            "": "bad",
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /empty Kafka client property name|Unrecognized keys/
+        );
+    });
+
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
         const result = await transformer.processFromObject(baseConfig);
         const m = result.snapshotMigrations[0];

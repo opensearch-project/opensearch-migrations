@@ -286,11 +286,14 @@
           "parameters": [
             {
               "name": "name"
+            },
+            {
+              "name": "clientProperties"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\ndata:\n  client.properties: |-\n    ssl.truststore.type=PEM\n    ssl.truststore.location=/config/kafka-ca/ca.crt\n",
+          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\ndata:\n  client.properties: {{=toJSON(inputs.parameters.clientProperties)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -552,6 +555,10 @@
                   {
                     "name": "name",
                     "value": "{{=inputs.parameters.proxyName+'-kafka-auth'}}"
+                  },
+                  {
+                    "name": "clientProperties",
+                    "value": "{{=sprig.dig('producerClientProperties', '', fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
                   }
                 ]
               },
@@ -766,7 +773,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'minPodReplicas', 'resources', 'tls', 'sslTrustCertPem', 'fileSourceVolumes', 'fileSourceVolumeMounts'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'minPodReplicas', 'resources', 'tls', 'sslTrustCertPem', 'fileSourceVolumes', 'fileSourceVolumeMounts'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((!(sprig.dig('producerClientProperties', '', fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']) == '')) ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))))}}"
                   }
                 ]
               },
@@ -843,7 +850,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'minPodReplicas', 'resources', 'tls', 'sslTrustCertPem', 'fileSourceVolumes', 'fileSourceVolumeMounts'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'minPodReplicas', 'resources', 'tls', 'sslTrustCertPem', 'fileSourceVolumes', 'fileSourceVolumeMounts'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((!(sprig.dig('producerClientProperties', '', fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']) == '')) ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
                   }
                 ]
               },
