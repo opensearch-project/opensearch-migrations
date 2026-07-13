@@ -355,20 +355,26 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     void reapStaleHeads() {
-        synchronized (commitDataLock) {
-            for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
-                var partition = entry.getKey();
-                var tracker = entry.getValue();
-                var newHead = tracker.reapStaleHead(STALE_HEAD_THRESHOLD);
-                newHead.ifPresent(offset -> {
-                    var tp = new TopicPartition(topic, partition);
-                    var v = new OffsetAndMetadata(offset);
-                    log.atWarn().setMessage("Stale head reaped for partition {}, advancing commit to {}")
-                        .addArgument(partition).addArgument(offset).log();
-                    nextSetOfCommitsMap.put(tp, v);
-                    kafkaRecordsReadyToCommit.set(true);
-                });
+        try {
+            synchronized (commitDataLock) {
+                for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
+                    var partition = entry.getKey();
+                    var tracker = entry.getValue();
+                    var newHead = tracker.reapStaleHead(STALE_HEAD_THRESHOLD);
+                    newHead.ifPresent(offset -> {
+                        var tp = new TopicPartition(topic, partition);
+                        var v = new OffsetAndMetadata(offset);
+                        log.atWarn().setMessage("Stale head reaped for partition {}, advancing commit to {}")
+                            .addArgument(partition).addArgument(offset).log();
+                        nextSetOfCommitsMap.put(tp, v);
+                        kafkaRecordsReadyToCommit.set(true);
+                    });
+                }
             }
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                .setMessage("Stale head reaping failed — skipping this sweep to avoid disrupting record consumption")
+                .log();
         }
     }
 

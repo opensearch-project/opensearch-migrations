@@ -76,8 +76,8 @@ class OffsetLifecycleTracker {
             }
             var didRemove = pQueue.remove(offsetToRemove);
             if (!didRemove) {
-                log.atDebug().setMessage("Offset {} already removed (reaped by watchdog)")
-                    .addArgument(offsetToRemove).log();
+                log.atWarn().setMessage("Offset {} not found in queue (size={}, head={}), likely reaped by watchdog")
+                    .addArgument(offsetToRemove).addArgument(pQueue.size()).addArgument(topCursor).log();
                 return Optional.empty();
             }
             offsetMetadataMap.remove(offsetToRemove);
@@ -116,7 +116,11 @@ class OffsetLifecycleTracker {
                 }
                 var meta = offsetMetadataMap.get(head);
                 if (meta == null) {
-                    break;
+                    log.atError().setMessage("Offset {} in queue has no metadata — data structure inconsistency, removing orphan")
+                        .addArgument(head).log();
+                    pQueue.remove(head);
+                    reaped++;
+                    continue;
                 }
                 var age = Duration.between(meta.addedAt, clock.instant());
                 if (age.compareTo(staleThreshold) <= 0) {
