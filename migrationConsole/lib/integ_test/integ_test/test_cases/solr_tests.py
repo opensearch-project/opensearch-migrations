@@ -25,6 +25,8 @@ from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
 
+SOLR_MIGRATION_COMPLETION_TIMEOUT_SECONDS = 45 * 60
+
 SOLR_ALLOW_COMBINATIONS = [
     (SolrV9_X, OpensearchV2_X),
     (SolrV9_X, OpensearchV3_X),
@@ -79,6 +81,9 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
         # Dotted-field collection — exercises Solr field names containing '.'.
         self.dotted_collection = f"dotted_{self._suffix}"
         self.dotted_doc_id = "dotted_doc_0001"
+
+    def workflow_perform_migrations(self, timeout_seconds: int = SOLR_MIGRATION_COMPLETION_TIMEOUT_SECONDS):
+        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
 
     def prepare_clusters(self):
         # (1) Pre-existing 'dummy' collection — single smoke document.
