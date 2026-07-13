@@ -1969,27 +1969,37 @@ spec:
                           # Since Solr 6 and 7 do not bring a s3 backup implementation, we simulate this 
                           # with file sync for now (might change later to variant without s3 involvement).
                           AWS_LOC=$(which aws)
-                          cat > /tmp/sync_script.sh << EOF
-                          
-                          NEEDS_SYNC=0
-                          
-                          run_sync() {
-                              flock -n /tmp/s3_sync.lock bash -c "
-                                  echo 'Running backup sync job to s3'
-                                  $AWS_LOC s3 sync /var/solr/data/${SUFFIX} s3://${S3_BUCKET_NAME}/${SUFFIX} \
-                                      --endpoint-url '${S3_ENDPOINT}' \
-                                      --region '${S3_REGION:-us-east-2}' \
-                                      --no-verify-ssl
-                              " && NEEDS_SYNC=0 || NEEDS_SYNC=1
-                          }
-                        
-                          while inotifywait -r -q -e modify,create,move /var/solr/data/${SUFFIX}; do
-                              run_sync
-                              if [ \$NEEDS_SYNC -eq 1 ]; then
-                                  echo "Changes detected during sync, re-syncing..."
-                                  run_sync
+                          export AWS_LOC SUFFIX
+                          cat > /tmp/sync_script.sh << 'EOF'
+                          SYNC_REQUEST=/tmp/s3_sync_requested
+                          touch "$SYNC_REQUEST"
+
+                          inotifywait -m -r -q -e modify,create,move,close_write \
+                              "/var/solr/data/${SUFFIX}" |
+                              while read -r _; do
+                                  touch "$SYNC_REQUEST"
+                              done &
+
+                          while true; do
+                              if [ ! -f "$SYNC_REQUEST" ]; then
+                                  sleep 1
+                                  continue
                               fi
-                          done >> /proc/1/fd/1 2>&1 &
+
+                              rm -f "$SYNC_REQUEST"
+                              echo "Running backup sync job to s3"
+                              if "$AWS_LOC" s3 sync "/var/solr/data/${SUFFIX}" \
+                                  "s3://${S3_BUCKET_NAME}/${SUFFIX}" \
+                                  --endpoint-url "${S3_ENDPOINT}" \
+                                  --region "${S3_REGION:-us-east-2}" \
+                                  --no-verify-ssl; then
+                                  echo "Backup sync job completed"
+                              else
+                                  echo "Backup sync job failed; scheduling retry" >&2
+                                  touch "$SYNC_REQUEST"
+                                  sleep 1
+                              fi
+                          done
                           EOF
                           echo "Backup sync script to s3 localstack"
                           cat /tmp/sync_script.sh
@@ -2285,27 +2295,37 @@ spec:
                           # Since Solr 6 and 7 do not bring a s3 backup implementation, we simulate this 
                           # with file sync for now (might change later to variant without s3 involvement).
                           AWS_LOC=$(which aws)
-                          cat > /tmp/sync_script.sh << EOF
-                          
-                          NEEDS_SYNC=0
-                          
-                          run_sync() {
-                              flock -n /tmp/s3_sync.lock bash -c "
-                                  echo 'Running backup sync job to s3'
-                                  $AWS_LOC s3 sync /var/solr/data/${SUFFIX} s3://${S3_BUCKET_NAME}/${SUFFIX} \
-                                      --endpoint-url '${S3_ENDPOINT}' \
-                                      --region '${S3_REGION:-us-east-2}' \
-                                      --no-verify-ssl
-                              " && NEEDS_SYNC=0 || NEEDS_SYNC=1
-                          }
-                        
-                          while inotifywait -r -q -e modify,create,move /var/solr/data/${SUFFIX}; do
-                              run_sync
-                              if [ \$NEEDS_SYNC -eq 1 ]; then
-                                  echo "Changes detected during sync, re-syncing..."
-                                  run_sync
+                          export AWS_LOC SUFFIX
+                          cat > /tmp/sync_script.sh << 'EOF'
+                          SYNC_REQUEST=/tmp/s3_sync_requested
+                          touch "$SYNC_REQUEST"
+
+                          inotifywait -m -r -q -e modify,create,move,close_write \
+                              "/var/solr/data/${SUFFIX}" |
+                              while read -r _; do
+                                  touch "$SYNC_REQUEST"
+                              done &
+
+                          while true; do
+                              if [ ! -f "$SYNC_REQUEST" ]; then
+                                  sleep 1
+                                  continue
                               fi
-                          done >> /proc/1/fd/1 2>&1 &
+
+                              rm -f "$SYNC_REQUEST"
+                              echo "Running backup sync job to s3"
+                              if "$AWS_LOC" s3 sync "/var/solr/data/${SUFFIX}" \
+                                  "s3://${S3_BUCKET_NAME}/${SUFFIX}" \
+                                  --endpoint-url "${S3_ENDPOINT}" \
+                                  --region "${S3_REGION:-us-east-2}" \
+                                  --no-verify-ssl; then
+                                  echo "Backup sync job completed"
+                              else
+                                  echo "Backup sync job failed; scheduling retry" >&2
+                                  touch "$SYNC_REQUEST"
+                                  sleep 1
+                              fi
+                          done
                           EOF
                           echo "Backup sync script to s3 localstack"
                           cat /tmp/sync_script.sh
