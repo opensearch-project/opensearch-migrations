@@ -16,11 +16,9 @@ import org.junit.jupiter.api.Test;
  * Tests for {@link ExpiringTrafficStreamMap#expireByWallClock()} — the watchdog that
  * breaks the deadlock where blocked polls prevent event-driven expiry from firing.
  *
- * The deadlock scenario: connections are registered in the map, the queue head advances,
- * and then NO further events arrive. The event-driven expiry (triggered inside
- * expireOldEntries) never runs again, so stale connections are never swept.
- * expireByWallClock uses the queue's lastKey as reference and sweeps without needing
- * a new event.
+ * The wall-clock watchdog uses real elapsed time (via Accumulation.lastWallClockUpdateMillis)
+ * to identify connections that haven't received new data for longer than the configured
+ * timeout, regardless of source-time relationships.
  */
 class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
 
@@ -54,7 +52,6 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
             }
         });
 
-        // Place connections at T=100 and T=105
         var tsk1 = makeTsk("conn1");
         var accum1 = map.getOrCreateWithoutExpiration(tsk1, k -> new Accumulation(tsk1, 0));
         map.expireOldEntries(tsk1, accum1, Instant.ofEpochSecond(100));
@@ -63,18 +60,13 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
         var accum2 = map.getOrCreateWithoutExpiration(tsk2, k -> new Accumulation(tsk2, 0));
         map.expireOldEntries(tsk2, accum2, Instant.ofEpochSecond(105));
 
-        // Queue head at T=105, threshold = 105-10=95
-        // Both connections (T=100, T=105) are >= 95, so neither should be expired
-        expired.clear();
+        // Both connections were just touched (wall-clock is recent), should NOT be expired
         Assertions.assertEquals(0, map.expireByWallClock());
         Assertions.assertTrue(expired.isEmpty());
     }
 
     @Test
-    void expiresStaleConnectionWhenNoNewEventsArrive() {
-        // This is THE deadlock scenario test.
-        // Setup: multiple connections registered, queue head advances,
-        // then NO MORE EVENTS ARRIVE. expireByWallClock must sweep the stale ones.
+    void expiresConnectionStaleInWallClockTime() {
         var expired = new ArrayList<String>();
         var map = new ExpiringTrafficStreamMap(TIMEOUT, GRANULARITY, new BehavioralPolicy() {
             @Override
@@ -83,78 +75,31 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
             }
         });
 
-        // Place staleConn at T=100
+        // Create a connection and register it normally
         var tskStale = makeTsk("staleConn");
         var accumStale = map.getOrCreateWithoutExpiration(tskStale, k -> new Accumulation(tskStale, 0));
         map.expireOldEntries(tskStale, accumStale, Instant.ofEpochSecond(100));
 
-        // Place freshConn at T=108 — within timeout window of staleConn (108-10=98 < 100)
+        // Create a fresh connection
         var tskFresh = makeTsk("freshConn");
         var accumFresh = map.getOrCreateWithoutExpiration(tskFresh, k -> new Accumulation(tskFresh, 0));
-        map.expireOldEntries(tskFresh, accumFresh, Instant.ofEpochSecond(108));
+        map.expireOldEntries(tskFresh, accumFresh, Instant.ofEpochSecond(105));
 
-        // At this point: event-driven sweep ran with T=108, threshold=98. staleConn at 100 > 98: survives.
-        Assertions.assertTrue(expired.isEmpty(),
-            "staleConn should NOT be expired by event-driven sweep — within timeout");
+        // Simulate: staleConn hasn't been updated in wall-clock time for > TIMEOUT (10s)
+        // Set its lastWallClockUpdateMillis to 11 seconds ago
+        accumStale.lastWallClockUpdateMillis.set(System.currentTimeMillis() - 11_000);
 
-        // Queue head is now at T=108.
-        // expireByWallClock: lastKey=108, threshold=108-10=98. staleConn at 100 > 98: survives.
-        Assertions.assertEquals(0, map.expireByWallClock());
-
-        // NOW: a new event arrives at T=115 which advances the queue head.
-        // In the real deadlock, this event would never arrive. But we need to advance the
-        // queue head SOMEHOW for expireByWallClock to detect staleness.
-        // In production, the queue head was advanced by PRIOR events before the deadlock began.
-        var tskAdvancer = makeTsk("advancerConn");
-        var accumAdvancer = map.getOrCreateWithoutExpiration(tskAdvancer, k -> new Accumulation(tskAdvancer, 0));
-        map.expireOldEntries(tskAdvancer, accumAdvancer, Instant.ofEpochSecond(115));
-
-        // Event-driven sweep at T=115: threshold=115-10=105.
-        // staleConn (100) < 105 → expired by event-driven.
-        // freshConn (108) >= 105 → survives.
-        Assertions.assertTrue(expired.contains("staleConn"),
-            "staleConn should be expired by event-driven sweep at T=115");
-        Assertions.assertFalse(expired.contains("freshConn"),
-            "freshConn should NOT be expired");
-        expired.clear();
-
-        // DEADLOCK BEGINS HERE: no more events arrive after T=115.
-        // Queue head stays at T=115. freshConn (T=108) is still in the map.
-        // threshold = 115-10=105. freshConn at 108 >= 105: survives expireByWallClock.
-        Assertions.assertEquals(0, map.expireByWallClock(),
-            "freshConn still within timeout — should not be expired");
-
-        // Simulate time passing: we manually adjust freshConn's timestamp to make it appear stale.
-        // In production, the queue head would have been advanced by prior events and freshConn
-        // would naturally be old. We can't advance the queue without calling expireOldEntries
-        // (which would trigger event-driven expiry), so instead we create a scenario where
-        // the connection's newestPacketTimestamp is old relative to the queue's lastKey.
-        //
-        // Place another connection at T=120 to advance the queue head further.
-        var tskFinal = makeTsk("finalConn");
-        var accumFinal = map.getOrCreateWithoutExpiration(tskFinal, k -> new Accumulation(tskFinal, 0));
-        map.expireOldEntries(tskFinal, accumFinal, Instant.ofEpochSecond(120));
-
-        // Event-driven sweep at T=120: threshold=120-10=110.
-        // freshConn (108) < 110 → expired by event-driven!
-        // advancerConn (115) >= 110 → survives.
-        Assertions.assertTrue(expired.contains("freshConn"),
-            "freshConn should be expired by event-driven sweep at T=120");
-        expired.clear();
-
-        // After all event-driven expiry: only advancerConn (T=115) and finalConn (T=120) remain.
-        // expireByWallClock with lastKey=120, threshold=110:
-        // advancerConn (115) >= 110 → survives
-        // finalConn (120) >= 110 → survives
-        Assertions.assertEquals(0, map.expireByWallClock());
+        // freshConn was just touched, so it should survive
+        int count = map.expireByWallClock();
+        Assertions.assertEquals(1, count);
+        Assertions.assertTrue(expired.contains("staleConn"));
+        Assertions.assertFalse(expired.contains("freshConn"));
     }
 
     @Test
     void expiresConnectionThatEventDrivenMissed() {
-        // The critical test: a connection is added to the map via getOrCreateWithoutExpiration
-        // (which does NOT trigger expiry), and its timestamp is set to be old relative to
-        // the queue head. This simulates a stale connection from a prior run that holds permits.
-        // Only expireByWallClock can clean it up.
+        // The critical deadlock scenario: source timestamps are close together but
+        // wall-clock time reveals the connection is actually stale (no new data arriving).
         var expired = new ArrayList<String>();
         var map = new ExpiringTrafficStreamMap(TIMEOUT, GRANULARITY, new BehavioralPolicy() {
             @Override
@@ -163,36 +108,31 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
             }
         });
 
-        // First, establish the queue head at T=200 via a normal event
+        // Establish a connection via getOrCreateWithoutExpiration (bypasses event-driven expiry)
+        var tskStale = makeTsk("staleFromPriorRun");
+        var accumStale = map.getOrCreateWithoutExpiration(tskStale, k -> new Accumulation(tskStale, 0));
+        // Source-time is T=192 (close to queue head of 200 — within source-time timeout)
+        accumStale.getNewestPacketTimestampInMillisReference().set(
+            Instant.ofEpochSecond(192).toEpochMilli()
+        );
+        // But in wall-clock time, this connection hasn't been updated for 15 seconds (> 10s timeout)
+        accumStale.lastWallClockUpdateMillis.set(System.currentTimeMillis() - 15_000);
+
+        // Establish queue head at T=200 (source-time)
         var tskHead = makeTsk("headConn");
         var accumHead = map.getOrCreateWithoutExpiration(tskHead, k -> new Accumulation(tskHead, 0));
         map.expireOldEntries(tskHead, accumHead, Instant.ofEpochSecond(200));
 
-        // Now manually insert a "stale" connection using getOrCreateWithoutExpiration
-        // and set its timestamp via the AtomicLong directly — simulating a connection
-        // that was registered long ago and whose timestamp is far below the queue head.
-        var tskStale = makeTsk("staleFromPriorRun");
-        var accumStale = map.getOrCreateWithoutExpiration(tskStale, k -> new Accumulation(tskStale, 0));
-        // Manually set its lastPacketTimestamp to T=180 (which is below threshold 200-10=190)
-        accumStale.getNewestPacketTimestampInMillisReference().set(
-            Instant.ofEpochSecond(180).toEpochMilli()
-        );
+        // In source-time: staleFromPriorRun (T=192) is within threshold (200-10=190), survives.
+        // In wall-clock: 15 seconds idle > 10 second timeout → EXPIRED.
+        Assertions.assertTrue(expired.isEmpty(), "event-driven should not expire it (source-time is fresh)");
 
-        // Event-driven expiry will NOT fire for staleFromPriorRun because no new event
-        // references it (it was just inserted via getOrCreateWithoutExpiration).
-        // The only way it gets expired is via expireByWallClock.
-        Assertions.assertTrue(expired.isEmpty(), "Nothing should be expired yet");
-
-        // Call expireByWallClock: lastKey=200, threshold=200-10=190.
-        // staleFromPriorRun at T=180 < 190 → EXPIRED!
-        // headConn at T=200 >= 190 → survives.
         int wallClockExpired = map.expireByWallClock();
-
         Assertions.assertEquals(1, wallClockExpired);
         Assertions.assertTrue(expired.contains("staleFromPriorRun"),
             "staleFromPriorRun should be expired by wall-clock watchdog");
         Assertions.assertFalse(expired.contains("headConn"),
-            "headConn should NOT be expired — it's fresh");
+            "headConn should NOT be expired — it was just touched");
     }
 
     @Test
@@ -210,12 +150,15 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
         var accumHead = map.getOrCreateWithoutExpiration(tskHead, k -> new Accumulation(tskHead, 0));
         map.expireOldEntries(tskHead, accumHead, Instant.ofEpochSecond(200));
 
-        // Insert a connection without setting its timestamp (newestPacketTs stays at 0)
-        var tskNew = makeTsk("newConn");
-        map.getOrCreateWithoutExpiration(tskNew, k -> new Accumulation(tskNew, 0));
+        // Insert a connection that is old in wall-clock time but was never given source-time data.
+        // The watchdog should still expire it since wall-clock time has exceeded the threshold.
+        var tskNew = makeTsk("noDataConn");
+        var accumNew = map.getOrCreateWithoutExpiration(tskNew, k -> new Accumulation(tskNew, 0));
+        // Set wall clock to be stale
+        accumNew.lastWallClockUpdateMillis.set(System.currentTimeMillis() - 15_000);
 
-        // expireByWallClock should skip connections with timestamp <= 0
-        Assertions.assertEquals(0, map.expireByWallClock());
-        Assertions.assertTrue(expired.isEmpty());
+        int count = map.expireByWallClock();
+        Assertions.assertEquals(1, count);
+        Assertions.assertTrue(expired.contains("noDataConn"));
     }
 }
