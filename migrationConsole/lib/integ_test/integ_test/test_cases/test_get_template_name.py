@@ -102,6 +102,26 @@ def test_template_names_exist_in_cluster_workflows():
                 f"Target template {get_template_name(tgt)} not declared in clusterWorkflows.yaml"
 
 
+@pytest.mark.parametrize("template_name", [
+    "solr-6-6-single-node",
+    "solr-7-7-single-node",
+])
+def test_legacy_solr_s3_sync_does_not_drop_events(template_name):
+    import pathlib
+    import yaml
+
+    yaml_path = pathlib.Path(__file__).parents[2] / "testWorkflows/clusterWorkflows.yaml"
+    doc = yaml.safe_load(yaml_path.read_text())
+    template = next(t for t in doc["spec"]["templates"] if t["name"] == template_name)
+    startup_script = template["container"]["args"][0]
+
+    assert "inotifywait -m -r" in startup_script
+    assert 'touch "$SYNC_REQUEST"' in startup_script
+    assert 'rm -f "$SYNC_REQUEST"' in startup_script
+    assert "Backup sync job failed; scheduling retry" in startup_script
+    assert "while inotifywait" not in startup_script
+
+
 def test_workflow_perform_migrations_uses_default_completion_timeout():
     test_case = MATestBase.__new__(MATestBase)
     test_case.workflow_name = "test-workflow"
