@@ -202,6 +202,51 @@ public class ExpiringTrafficStreamMap {
         return connectionAccumulationMap.values().stream();
     }
 
+    /**
+     * Sweep stale connections using the latest source timestamp as reference, independent of
+     * the event-driven expiry loop. This breaks the deadlock where the main thread is blocked
+     * in the backpressure gate (BlockingTrafficSource.blockIfNeeded) because no responses complete —
+     * expiring stale connections triggers commits which release the read gate.
+     *
+     * Thread safety: when this fires during the deadlock, the main thread is blocked in
+     * blockIfNeeded (not in accept()), so there is no concurrent Accumulation mutation.
+     * The ConcurrentHashMap.remove() is atomic; if the main thread resumes and calls
+     * getOrCreateWithoutExpiration for an expired key, it simply creates a fresh Accumulation.
+     *
+     * @return the number of connections expired by this sweep
+     */
+    public int expireByWallClock() {
+        var lastKeyEntry = expiringBucketQueue.lastEntry();
+        if (lastKeyEntry == null) {
+            return 0;
+        }
+        var latestSourceTimestampMs = lastKeyEntry.getKey().millis;
+        if (latestSourceTimestampMs <= ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL) {
+            return 0;
+        }
+        var expiryThresholdMs = latestSourceTimestampMs - minimumGuaranteedLifetime.toMillis();
+        int expiredCount = 0;
+        for (var accum : connectionAccumulationMap.values()) {
+            var lastPacketMs = accum.getNewestPacketTimestampInMillisReference().get();
+            if (lastPacketMs <= 0) {
+                continue;
+            }
+            if (lastPacketMs < expiryThresholdMs) {
+                var key = new ScopedConnectionIdKey(
+                    accum.trafficChannelKey.getNodeId(),
+                    accum.trafficChannelKey.getConnectionId()
+                );
+                var removed = connectionAccumulationMap.remove(key);
+                if (removed != null) {
+                    removed.expire();
+                    behavioralPolicy.onExpireAccumulation(key.nodeId, removed);
+                    expiredCount++;
+                }
+            }
+        }
+        return expiredCount;
+    }
+
     public void clear() {
         expiringBucketQueue.clear();
         // leave everything else fall aside, like we do for remove()
