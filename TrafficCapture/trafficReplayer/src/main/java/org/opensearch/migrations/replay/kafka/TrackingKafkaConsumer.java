@@ -265,6 +265,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
         try (var touchCtx = context.createNewTouchContext()) {
             log.trace("touch() called.");
+            reapStaleHeads();
             pause();
             try (var pollCtx = touchCtx.createNewPollContext()) {
                 var records = kafkaConsumer.poll(Duration.ZERO);

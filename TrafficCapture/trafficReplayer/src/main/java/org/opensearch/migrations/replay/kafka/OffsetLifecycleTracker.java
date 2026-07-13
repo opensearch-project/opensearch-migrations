@@ -108,25 +108,38 @@ class OffsetLifecycleTracker {
      */
     Optional<Long> reapStaleHead(Duration staleThreshold) {
         synchronized (pQueue) {
-            var head = pQueue.peek();
-            if (head == null) {
+            int reaped = 0;
+            while (true) {
+                var head = pQueue.peek();
+                if (head == null) {
+                    break;
+                }
+                var meta = offsetMetadataMap.get(head);
+                if (meta == null) {
+                    break;
+                }
+                var age = Duration.between(meta.addedAt, clock.instant());
+                if (age.compareTo(staleThreshold) <= 0) {
+                    break;
+                }
+                if (reaped == 0) {
+                    log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
+                        .addArgument(head)
+                        .addArgument(meta.connectionId)
+                        .addArgument(age)
+                        .log();
+                }
+                pQueue.remove(head);
+                offsetMetadataMap.remove(head);
+                reaped++;
+            }
+            if (reaped == 0) {
                 return Optional.empty();
             }
-            var meta = offsetMetadataMap.get(head);
-            if (meta == null) {
-                return Optional.empty();
+            if (reaped > 1) {
+                log.atWarn().setMessage("Reaped {} total stale offsets in this sweep")
+                    .addArgument(reaped).log();
             }
-            var age = Duration.between(meta.addedAt, clock.instant());
-            if (age.compareTo(staleThreshold) <= 0) {
-                return Optional.empty();
-            }
-            log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
-                .addArgument(head)
-                .addArgument(meta.connectionId)
-                .addArgument(age)
-                .log();
-            pQueue.remove(head);
-            offsetMetadataMap.remove(head);
             var newHead = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1);
             return Optional.of(newHead);
         }
