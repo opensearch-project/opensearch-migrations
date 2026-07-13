@@ -354,7 +354,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return applyBuilder(builder, records);
     }
 
-    private void reapStaleHeads() {
+    void reapStaleHeads() {
         synchronized (commitDataLock) {
             for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
                 var partition = entry.getKey();

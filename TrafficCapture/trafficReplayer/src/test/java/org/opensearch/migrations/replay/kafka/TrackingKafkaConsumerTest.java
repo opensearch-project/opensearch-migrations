@@ -204,16 +204,18 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         // Before threshold — no reap
         mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
+        consumer.reapStaleHeads();
         Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty(),
             "No commits staged before stale threshold");
 
-        // After threshold — reap should stage a commit
+        // After threshold — reapStaleHeads should stage a commit in nextSetOfCommitsMap
         mutableClock.set(baseTime.plus(Duration.ofMinutes(6)));
-        // Call getNextBatchOfRecords which internally calls reapStaleHeads
-        // We can't easily call getNextBatchOfRecords without a context, so test via the tracker directly
-        var reapResult = tracker.reapStaleHead(Duration.ofMinutes(5));
-        Assertions.assertTrue(reapResult.isPresent());
-        Assertions.assertEquals(103L, reapResult.get(),
+        consumer.reapStaleHeads();
+        Assertions.assertFalse(consumer.nextSetOfCommitsMap.isEmpty(),
+            "Commit should be staged after stale threshold exceeded");
+        var committed = consumer.nextSetOfCommitsMap.get(tp);
+        Assertions.assertNotNull(committed, "Commit entry must exist for partition 0");
+        Assertions.assertEquals(103L, committed.offset(),
             "Should advance to cursorHighWatermark+1 after reaping all stale offsets");
         Assertions.assertEquals(0, tracker.size(),
             "All stale offsets should be removed");
