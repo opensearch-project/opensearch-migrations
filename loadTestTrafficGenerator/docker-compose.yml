@@ -150,13 +150,32 @@ services:
       - prometheus
 
   # ── Redis ───────────────────────────────────────────────────────────────
-  # Placeholder for Phase 4 (Mixed profile shared ID registry).
-  # Running now so the stack is consistent across phases.
+  # Backend store for the Phase 4 ID ring buffer.
+  # k6 does not connect to Redis directly — all access is via Webdis below.
   redis:
     image: redis:7-alpine
     networks: [load-test]
+
+  # ── Webdis ──────────────────────────────────────────────────────────────
+  # HTTP-to-Redis proxy. Exposes the full Redis command set over plain HTTP
+  # (GET /COMMAND/arg → {"COMMAND": result}) so k6 can use its built-in http
+  # module instead of requiring a custom k6 build with xk6-redis.
+  # Config: webdis.json (mounted below) points it at the redis service.
+  webdis:
+    image: anapsix/webdis
+    networks: [load-test]
     ports:
-      - "6379:6379"
+      - "7379:7379"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7379/PING | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # ── k6 ──────────────────────────────────────────────────────────────────
   # One-shot runner: use `docker-compose run --rm k6 run ...` rather than `up`.
@@ -180,11 +199,15 @@ services:
       - DURATION=5m
       - BULK_BATCH_SIZE=20
       - SEED_DOC_COUNT=100000
+      # Phase 4 ID registry — used by scenarios/mixed.js only
+      - WEBDIS_URL=http://webdis:7379
     depends_on:
       capture-proxy:
         condition: service_healthy
       prometheus:
         condition: service_started
+      webdis:
+        condition: service_healthy
 
 networks:
   load-test:
