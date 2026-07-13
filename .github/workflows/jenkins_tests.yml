@@ -32,7 +32,7 @@ jobs:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -52,7 +52,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch1x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -72,7 +72,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch2x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -92,7 +92,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch5x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -112,7 +112,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch6x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -132,7 +132,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch7x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -152,7 +152,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-elasticsearch8x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -172,7 +172,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-opensearch1x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -192,7 +192,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-solr8x-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -212,7 +212,7 @@ jobs:
       group: ${{ github.workflow }}-k8s-local-solr-other-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -232,7 +232,7 @@ jobs:
       group: ${{ github.workflow }}-docker-compose-e2e-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -256,7 +256,7 @@ jobs:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -280,7 +280,7 @@ jobs:
       group: ${{ github.workflow }}-eks-aoss-search-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -304,7 +304,7 @@ jobs:
       group: ${{ github.workflow }}-eks-aoss-timeseries-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -328,7 +328,7 @@ jobs:
       group: ${{ github.workflow }}-eks-aoss-vector-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -352,7 +352,7 @@ jobs:
       group: ${{ github.workflow }}-eks-byos-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -376,7 +376,7 @@ jobs:
       group: ${{ github.workflow }}-eks-cdc-full-e2e-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -400,7 +400,7 @@ jobs:
       group: ${{ github.workflow }}-eks-cdc-aoss-e2e-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -424,7 +424,7 @@ jobs:
       group: ${{ github.workflow }}-eks-cfn-create-vpc-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -448,7 +448,7 @@ jobs:
       group: ${{ github.workflow }}-eks-cfn-import-vpc-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -472,7 +472,7 @@ jobs:
       group: ${{ github.workflow }}-eks-full-e2e-isolated-vpc-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
