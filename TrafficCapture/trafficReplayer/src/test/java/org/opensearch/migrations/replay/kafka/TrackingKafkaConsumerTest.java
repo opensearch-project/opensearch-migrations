@@ -16,7 +16,6 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.MockConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
