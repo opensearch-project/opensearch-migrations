@@ -3,8 +3,6 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,7 +10,6 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
-import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -155,7 +152,8 @@ class NettyScanningHttpProxyTest {
             inMemoryInstrumentationBundle.openTelemetrySdk,
             IContextTracker.DO_NOTHING_TRACKER
         );
-        var sslEngineSupplier = makeServerSslEngineSupplier();
+        var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+        var sslEngineSupplier = makeServerSslEngineSupplier(sslContext);
 
         try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
              var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
@@ -163,7 +161,7 @@ class NettyScanningHttpProxyTest {
 
             assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
 
-            var responseBody = makeTestRequestViaInsecureHttpsClient(servers.proxyEndpoint());
+            var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
             Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
         }
     }
@@ -209,10 +207,9 @@ class NettyScanningHttpProxyTest {
         return responseBody;
     }
 
-    private static String makeTestRequestViaInsecureHttpsClient(URI endpoint) throws Exception {
+    private static String makeTestRequestViaHttpsClient(URI endpoint, SSLContext sslContext) throws Exception {
         var connection = (HttpsURLConnection) endpoint.toURL().openConnection();
-        connection.setSSLSocketFactory(makeTrustAllSslContext().getSocketFactory());
-        connection.setHostnameVerifier((hostname, session) -> true);
+        connection.setSSLSocketFactory(sslContext.getSocketFactory());
         connection.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
         connection.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
         return new String(connection.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -278,33 +275,12 @@ class NettyScanningHttpProxyTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    private static java.util.function.Supplier<SSLEngine> makeServerSslEngineSupplier() throws Exception {
-        SSLContext sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+    private static java.util.function.Supplier<SSLEngine> makeServerSslEngineSupplier(SSLContext sslContext) {
         return () -> {
             var engine = sslContext.createSSLEngine();
             engine.setUseClientMode(false);
             return engine;
         };
-    }
-
-    private static SSLContext makeTrustAllSslContext() throws Exception {
-        TrustManager[] trustAllManagers = new TrustManager[] {
-            new X509TrustManager() {
-                @Override
-                public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-
-                @Override
-                public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-
-                @Override
-                public X509Certificate[] getAcceptedIssuers() {
-                    return new X509Certificate[0];
-                }
-            }
-        };
-        var sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, trustAllManagers, null);
-        return sslContext;
     }
 
     private static void sendPlaintextToTlsEndpoint(int port) throws IOException {
