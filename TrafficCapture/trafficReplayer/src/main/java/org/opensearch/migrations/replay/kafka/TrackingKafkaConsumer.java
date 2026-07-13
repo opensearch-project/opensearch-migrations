@@ -227,7 +227,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             newPartitions.forEach(
                 p -> partitionToOffsetLifecycleTrackerMap.computeIfAbsent(
                     p.partition(),
-                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get())
+                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get(), clock)
                 )
             );
             log.atInfo()

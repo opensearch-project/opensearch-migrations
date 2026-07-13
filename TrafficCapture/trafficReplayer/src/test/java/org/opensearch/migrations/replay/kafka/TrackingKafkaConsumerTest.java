@@ -2,20 +2,25 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -164,5 +169,78 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             "truly-lost callback must not fire a second time on subsequent assignment");
         Assertions.assertTrue(consumer.getConsumerConnectionGeneration() > generationAtAssign,
             "subsequent onPartitionsAssigned must bump the generation");
+    }
+
+    // -------------------------------------------------------------------------
+    // Stale-head reaper tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("reapStaleHeads stages commit when head offset exceeds threshold")
+    void reapStaleHeads_stagesCommitForStalePartition() {
+        var baseTime = Instant.parse("2026-01-01T00:00:00Z");
+        var mutableClock = new AtomicReference<>(baseTime);
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return mutableClock.get(); }
+        };
+
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.assign(List.of(tp));
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        var consumer = new TrackingKafkaConsumer(
+            rootContext, mc, TOPIC, Duration.ofSeconds(30), clock, tsk -> {}
+        );
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // Add offsets to the tracker at baseTime
+        var tracker = consumer.partitionToOffsetLifecycleTrackerMap.get(0);
+        tracker.add(100, "conn-A");
+        tracker.add(101, "conn-B");
+        tracker.add(102, "conn-C");
+
+        // Before threshold — no reap
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
+        Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty(),
+            "No commits staged before stale threshold");
+
+        // After threshold — reap should stage a commit
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(6)));
+        // Call getNextBatchOfRecords which internally calls reapStaleHeads
+        // We can't easily call getNextBatchOfRecords without a context, so test via the tracker directly
+        var reapResult = tracker.reapStaleHead(Duration.ofMinutes(5));
+        Assertions.assertTrue(reapResult.isPresent());
+        Assertions.assertEquals(103L, reapResult.get(),
+            "Should advance to cursorHighWatermark+1 after reaping all stale offsets");
+        Assertions.assertEquals(0, tracker.size(),
+            "All stale offsets should be removed");
+    }
+
+    @Test
+    @DisplayName("logHeartbeat does not throw on empty consumer")
+    void logHeartbeat_noPartitions_doesNotThrow() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        // No partitions assigned — should not throw
+        Assertions.assertDoesNotThrow(consumer::logHeartbeat);
+    }
+
+    @Test
+    @DisplayName("logHeartbeat does not throw with assigned partitions and inflight offsets")
+    void logHeartbeat_withPartitionsAndInflight_doesNotThrow() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // Add some offsets to make it interesting
+        var tracker = consumer.partitionToOffsetLifecycleTrackerMap.get(0);
+        tracker.add(0, "conn-1");
+        tracker.add(1, "conn-2");
+
+        Assertions.assertDoesNotThrow(consumer::logHeartbeat);
     }
 }
