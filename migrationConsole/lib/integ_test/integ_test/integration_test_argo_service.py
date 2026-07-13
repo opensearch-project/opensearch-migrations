@@ -75,6 +75,21 @@ def _format_node_summaries(nodes: List[Dict[str, str]], max_nodes: int = 8) -> s
     return "[" + "; ".join(formatted_nodes) + "]"
 
 
+def _format_workflow_timeout_status_details(status_info: Dict[str, Any]) -> List[str]:
+    phase = status_info.get("phase", "<unknown>")
+    workflow_message = status_info.get("message") or ""
+    details = [
+        f"phase={phase}",
+        f"suspended_nodes={_format_node_summaries(status_info.get('suspended_nodes', []))}",
+        f"running_nodes={_format_node_summaries(status_info.get('running_nodes', []))}",
+        f"pending_nodes={_format_node_summaries(status_info.get('pending_nodes', []))}",
+        f"unsuccessful_nodes={_format_node_summaries(status_info.get('unsuccessful_nodes', []))}",
+    ]
+    if workflow_message:
+        details.append(f"message={workflow_message}")
+    return details
+
+
 class WorkflowEndedBeforeSuspend(Exception):
     def __init__(self, workflow_name: str, phase: str):
         super().__init__(f"The workflow '{workflow_name}' reached ending phase of {phase} before reaching "
@@ -591,34 +606,49 @@ class IntegrationTestArgoService:
         if not status_info:
             return f"{message}; no workflow status was observed"
 
-        phase = status_info.get("phase", "<unknown>")
-        workflow_message = status_info.get("message") or ""
-        details = [
-            f"phase={phase}",
-            f"suspended_nodes={_format_node_summaries(status_info.get('suspended_nodes', []))}",
-            f"running_nodes={_format_node_summaries(status_info.get('running_nodes', []))}",
-            f"pending_nodes={_format_node_summaries(status_info.get('pending_nodes', []))}",
-            f"unsuccessful_nodes={_format_node_summaries(status_info.get('unsuccessful_nodes', []))}",
-        ]
-        if workflow_message:
-            details.append(f"message={workflow_message}")
+        details = _format_workflow_timeout_status_details(status_info)
         return f"{message}; last status: " + ", ".join(details)
 
     def wait_for_ending_phase(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
         start_time = time.time()
+        last_status_info: Optional[Dict[str, Any]] = None
 
         while time.time() - start_time < timeout_seconds:
             status_result = self.get_workflow_status(workflow_name)
             if not status_result.success:
                 raise ValueError(f"Failed to get workflow status: {status_result}")
 
-            phase = status_result.value.get("phase", "")
+            status_info = status_result.value
+            last_status_info = status_info
+            phase = status_info.get("phase", "")
             if phase in ENDING_ARGO_PHASES:
                 return CommandResult(success=True, value=f"Workflow {workflow_name} has reached an ending phase of "
                                                          f"{phase}")
             time.sleep(interval)
 
-        raise TimeoutError(f"Workflow did not reach ending state in timeout of {timeout_seconds} seconds")
+        error_message = self._format_ending_timeout_message(workflow_name, timeout_seconds, last_status_info)
+        try:
+            diagnostics = self.collect_namespace_diagnostics(
+                workflow_name=workflow_name,
+                include_all_workflow_output_artifacts=True,
+            )
+            logger.error("%s\n%s", error_message, diagnostics)
+        except Exception as e:
+            logger.error("%s\nFailed to collect namespace diagnostics: %s", error_message, e)
+        raise TimeoutError(error_message)
+
+    @staticmethod
+    def _format_ending_timeout_message(
+        workflow_name: str,
+        timeout_seconds: int,
+        status_info: Optional[Dict[str, Any]],
+    ) -> str:
+        message = f"Workflow {workflow_name} did not reach ending state in timeout of {timeout_seconds} seconds"
+        if not status_info:
+            return f"{message}; no workflow status was observed"
+
+        details = _format_workflow_timeout_status_details(status_info)
+        return f"{message}; last status: " + ", ".join(details)
 
     def get_cluster_from_configmap(self, configmap_name_prefix: str,
                                    config_key: str = "cluster-config") -> Optional[Cluster]:

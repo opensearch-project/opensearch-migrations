@@ -365,17 +365,33 @@ def test_wait_for_ending_phase_success(mock_get_status, argo_service):
 
 @patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 @patch('time.sleep')
-def test_wait_for_ending_phase_timeout(mock_sleep, mock_get_status, argo_service):
+@patch('time.time')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.collect_namespace_diagnostics')
+def test_wait_for_ending_phase_timeout(mock_collect_diagnostics, mock_time, mock_sleep, mock_get_status, argo_service):
     """Test wait for ending phase timeout."""
+    mock_time.side_effect = itertools.chain([0, 0, 2], itertools.repeat(2))
     mock_get_status.return_value = CommandResult(
         success=True,
-        value={"phase": "Running", "has_suspended_nodes": False}
+        value={
+            "phase": "Running",
+            "has_suspended_nodes": False,
+            "suspended_nodes": [],
+            "running_nodes": [{"displayName": "wait-for-snapshot", "type": "Pod", "phase": "Running"}],
+            "pending_nodes": [],
+            "unsuccessful_nodes": [],
+        }
     )
+    mock_collect_diagnostics.return_value = "namespace diagnostics"
 
     with pytest.raises(TimeoutError) as exc_info:
         argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
 
     assert "did not reach ending state" in str(exc_info.value)
+    assert "wait-for-snapshot" in str(exc_info.value)
+    mock_collect_diagnostics.assert_called_once_with(
+        workflow_name="test-workflow",
+        include_all_workflow_output_artifacts=True,
+    )
 
 
 @patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
