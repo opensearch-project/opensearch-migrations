@@ -1,10 +1,13 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.AbstractMap;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -12,6 +15,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator.DocumentModificationResult;
+import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator.UnexpectedWorkCoordinationResponseException;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import lombok.AllArgsConstructor;
@@ -28,6 +32,8 @@ import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 class OpenSearchWorkCoodinatorTest {
 
     public static final String THROTTLE_RESULT_VALUE = "slow your roll, dude";
+    public static final String CLOCK_DRIFT_REASON =
+        "The current times indicated between the client and server are too different.";
     public static List<Version> testedVersions = SupportedClusters.supportedTargets(true)
                     .stream()
                     .map(ContainerVersion::getVersion)
@@ -44,6 +50,24 @@ class OpenSearchWorkCoodinatorTest {
         @Override
         public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload) {
             return response;
+        }
+    }
+
+    public static class SequenceMockHttpClient implements AbstractedHttpClient {
+        Queue<AbstractHttpResponse> responses;
+        int requestCount;
+
+        public SequenceMockHttpClient(AbstractHttpResponse... responses) {
+            this.responses = new ArrayDeque<>(List.of(responses));
+        }
+
+        @Override
+        public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload) {
+            requestCount++;
+            if (responses.size() > 1) {
+                return responses.remove();
+            }
+            return responses.peek();
         }
     }
 
@@ -110,6 +134,26 @@ class OpenSearchWorkCoodinatorTest {
         return new TestResponse(429, "THROTTLED", new ObjectMapper().writeValueAsString(resultJson));
     }
 
+    private static TestResponse getClockDriftResponse() {
+        return new TestResponse(
+            400,
+            "Bad Request",
+            "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"failed to execute script\","
+                + "\"caused_by\":{\"type\":\"script_exception\",\"reason\":\"runtime error\","
+                + "\"caused_by\":{\"type\":\"illegal_argument_exception\",\"reason\":\""
+                + CLOCK_DRIFT_REASON
+                + "\"}}},\"status\":400}"
+        );
+    }
+
+    private static TestResponse getCreatedResponse() {
+        return new TestResponse(
+            201,
+            "Created",
+            "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"created\"}"
+        );
+    }
+
     @ParameterizedTest
     @MethodSource("provideTestedVersions")
     public void testWhenGetResultAndErrorThenLogged(Version version) throws Exception {
@@ -121,9 +165,56 @@ class OpenSearchWorkCoodinatorTest {
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getLoggerName()))
         {
             log.atInfo().log(workCoordinator.getClass().getName());
-            Assertions.assertThrows(IllegalArgumentException.class, () -> workCoordinator.getResult(response));
+            var exception = Assertions.assertThrows(
+                UnexpectedWorkCoordinationResponseException.class,
+                () -> workCoordinator.getResult(response)
+            );
+            Assertions.assertTrue(exception.getMessage().contains("429 THROTTLED"));
+            Assertions.assertFalse(exception.getMessage().contains("Unknown result"));
             log.atDebug().setMessage("Logged events: {}").addArgument(closeableLogSetup::getLogEvents).log();
             Assertions.assertTrue(closeableLogSetup.getLogEvents().stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testWhenGetResultWithClockDriftThenReasonIsSpecific(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var response = getClockDriftResponse();
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker")) {
+            var exception = Assertions.assertThrows(
+                UnexpectedWorkCoordinationResponseException.class,
+                () -> workCoordinator.getResult(response)
+            );
+            Assertions.assertTrue(exception.getMessage().contains(CLOCK_DRIFT_REASON));
+            Assertions.assertFalse(exception.getMessage().contains("Unknown result null"));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testCreateOrUpdateLeaseRetriesUnexpectedCoordinatorResponse(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var client = new SequenceMockHttpClient(getClockDriftResponse(), getCreatedResponse());
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+
+        try (var workCoordinator = factory.get(client, 2, "testWorker")) {
+            var result = workCoordinator.createOrUpdateLeaseForWorkItem(workItem, Duration.ofMinutes(5), () -> null);
+            Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, result);
+            Assertions.assertEquals(2, client.requestCount);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testCreateUnassignedWorkItemRetriesUnexpectedCoordinatorResponse(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var client = new SequenceMockHttpClient(getClockDriftResponse(), getCreatedResponse());
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+
+        try (var workCoordinator = factory.get(client, 2, "testWorker")) {
+            Assertions.assertTrue(workCoordinator.createUnassignedWorkItem(workItem, () -> null));
+            Assertions.assertEquals(2, client.requestCount);
         }
     }
 
@@ -132,9 +223,9 @@ class OpenSearchWorkCoodinatorTest {
 
 
         var functions = List.<Function<IWorkCoordinator, Exception>>of(
-            wc -> Assertions.assertThrows(Exception.class,
+            wc -> Assertions.assertThrows(IOException.class,
                 () -> wc.createUnassignedWorkItem(workItem, () -> null)),
-            wc -> Assertions.assertThrows(Exception.class,
+            wc -> Assertions.assertThrows(IOException.class,
                 () -> wc.createOrUpdateLeaseForWorkItem(workItem, Duration.ZERO, () -> null))
         );
     
@@ -150,7 +241,9 @@ class OpenSearchWorkCoodinatorTest {
         try (var workCoordinator = factory.get(new MockHttpClient(getThrottleResponse()), 2, "t");
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getLoggerName()))
         {
-            worker.apply(workCoordinator);
+            var exception = worker.apply(workCoordinator);
+            Assertions.assertTrue(exception.getMessage().contains("failed after"));
+            Assertions.assertFalse(exception.getMessage().contains("Unknown result"));
             log.atDebug().setMessage("Logged events: {}").addArgument(()->closeableLogSetup.getLogEvents()).log();
             var logEvents = closeableLogSetup.getLogEvents();
             Assertions.assertTrue(logEvents.stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
