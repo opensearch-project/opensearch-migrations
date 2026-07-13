@@ -178,7 +178,7 @@ services:
       retries: 10
 
   # ── k6 ──────────────────────────────────────────────────────────────────
-  # One-shot runner: use `docker-compose run --rm k6 run ...` rather than `up`.
+  # One-shot runner: use `docker compose run --rm k6 run ...` rather than `up`.
   # The entire POC folder is mounted at /scripts.
   # k6 pushes metrics to Prometheus via remote write; no custom k6 image needed.
   k6:

@@ -24,7 +24,7 @@ cd -
 
 ```bash
 cd loadTestTrafficGenerator
-docker-compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
 ```
 
 ### Run the ingest scenario
@@ -74,7 +74,7 @@ The Grafana datasource (Prometheus) and the dashboard are provisioned automatica
 ### Tear down
 
 ```bash
-docker-compose down -v
+docker compose down -v
 ```
 
 ---
@@ -124,6 +124,13 @@ or override on the command line with `--env KEY=VALUE`.
 
 - **Scroll safety.** Scroll contexts are closed in a `try/finally` block — leaks cannot
   accumulate even if a page fetch fails or k6 is interrupted mid-sequence.
+
+- **ID registry (Phase 4).** Cross-VU shared state (ingest → search write-then-read) is
+  implemented via a Redis list accessed through a Webdis HTTP proxy (`anapsix/webdis`).
+  k6 uses its built-in `http` module to call Webdis over HTTP (`GET /LPUSH/key/val`, etc.) —
+  no custom k6 build or xk6 extension required. This avoids the native Redis client modules
+  (`k6/experimental/redis` was removed from k6; `k6/x/redis` requires a custom binary build
+  and exposes only a subset of Redis commands).
 
 ---
 
@@ -225,6 +232,61 @@ The `search` scenario auto-appears in the Grafana Scenario drop-down — no dash
 
 ---
 
+## Phase 4 — Mixed Profile
+
+Runs the ingest and search streams concurrently. A Redis ring buffer (accessed via Webdis)
+lets ingest VUs register newly-created document IDs so that `CONSISTENCY_FRACTION` of search
+VUs can query those exact documents — exercising write-then-read ordering through the pipeline.
+
+### Start the stack
+
+```bash
+docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana redis webdis
+```
+
+### Run the mixed scenario
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/mixed-steady.env | grep -v '^$' | sed 's/^/-e /') \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/mixed.js
+```
+
+To dial the streams independently:
+
+```bash
+docker compose run --rm \
+  $(grep -v '^[[:space:]]*#' k6-config/mixed-steady.env | grep -v '^$' | sed 's/^/-e /') \
+  -e INGEST_RATE=50 -e SEARCH_RATE=10 \
+  k6 run --out=experimental-prometheus-rw /scripts/scenarios/mixed.js
+```
+
+### Validate
+
+```bash
+./scripts/validate_phase_4.sh
+./scripts/validate_phase_4.sh --with-setup
+./scripts/validate_phase_4.sh --with-setup --teardown
+```
+
+### New environment variables (Phase 4)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `INGEST_RATE` | `30` | Ingest stream target requests/second |
+| `SEARCH_RATE` | `20` | Search stream target requests/second |
+| `INGEST_VUS` | `15` | Pre-allocated ingest VUs |
+| `INGEST_MAX_VUS` | `75` | Max ingest VUs |
+| `SEARCH_VUS` | `15` | Pre-allocated search VUs |
+| `SEARCH_MAX_VUS` | `75` | Max search VUs |
+| `SEQUENCE_FRACTION` | `0.15` | Fraction of ingest iterations run as create→update→query→delete |
+| `CONSISTENCY_FRACTION` | `0.10` | Fraction of search iterations that query a recently-ingested doc |
+| `WEBDIS_URL` | `http://webdis:7379` | Webdis HTTP-to-Redis proxy URL |
+
+The `mixed_ingest` and `mixed_search` scenarios auto-appear in the Grafana Scenario drop-down.
+
+---
+
 ## Phases
 
 | Phase | Status | What it adds |
@@ -232,6 +294,6 @@ The `search` scenario auto-appears in the Grafana Scenario drop-down — no dash
 | 1 — Ingest baseline | **done** | `_bulk` + single-doc writes at constant rate |
 | 2 — Stateful sequences | **done** | create → update → query → delete; connection pinning |
 | 3 — Search profile | **done** | Queries, aggregations, deep paging (scroll / search_after) |
-| 4 — Mixed profile | pending | Concurrent ingest + search; Redis ID registry |
+| 4 — Mixed profile | **done** | Concurrent ingest + search; Webdis ID registry |
 | 5 — Burst / ramp | pending | `ramping-arrival-rate` configs |
 | 6 — Chaos hooks | pending | Pause/resume/rate-change API for orchestration layer |
