@@ -55,13 +55,17 @@ def test_combinations_resolve_to_templates():
     from integ_test.test_cases.solr_tests import (
         SOLR_ALLOW_COMBINATIONS, SOLR_IMPORT_ALLOW_COMBINATIONS
     )
-    all_versions = {v for combos in (
-        RFS_MIGRATION_COMBINATIONS,
-        CDC_MIGRATION_COMBINATIONS,
-        SOLR_ALLOW_COMBINATIONS,
-        SOLR_IMPORT_ALLOW_COMBINATIONS,
-    )
-                    for pair in combos for v in pair}
+    all_versions = {
+        v
+        for combos in (
+            RFS_MIGRATION_COMBINATIONS,
+            CDC_MIGRATION_COMBINATIONS,
+            SOLR_ALLOW_COMBINATIONS,
+            SOLR_IMPORT_ALLOW_COMBINATIONS,
+        )
+        for pair in combos
+        for v in pair
+    }
     for v in all_versions:
         get_template_name(v)  # raises ValueError if unmapped
 
