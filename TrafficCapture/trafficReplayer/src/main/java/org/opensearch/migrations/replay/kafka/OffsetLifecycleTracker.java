@@ -70,14 +70,15 @@ class OffsetLifecycleTracker {
         synchronized (pQueue) {
             var topCursor = pQueue.peek();
             if (topCursor == null) {
-                throw new IllegalStateException(
-                    "pQueue looks to have been empty by the time we tried to remove " + offsetToRemove
-                );
+                log.atWarn().setMessage("Offset {} already reaped (queue empty)")
+                    .addArgument(offsetToRemove).log();
+                return Optional.empty();
             }
             var didRemove = pQueue.remove(offsetToRemove);
             if (!didRemove) {
-                throw new IllegalStateException(
-                    "Expected all live records to have an entry and for them to be removed only once");
+                log.atDebug().setMessage("Offset {} already removed (reaped by watchdog)")
+                    .addArgument(offsetToRemove).log();
+                return Optional.empty();
             }
             offsetMetadataMap.remove(offsetToRemove);
 
