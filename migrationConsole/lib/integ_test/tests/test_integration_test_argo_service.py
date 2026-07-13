@@ -1,3 +1,4 @@
+import itertools
 import json
 from subprocess import CompletedProcess
 from unittest.mock import Mock, patch, mock_open
@@ -38,8 +39,12 @@ def mock_success_result():
 def create_mock_workflow_data(phase="Running", has_suspend_node=False):
     """Create mock workflow data for testing."""
     nodes = {
-        "node1": {"phase": "Running", "type": "Suspend" if has_suspend_node else "Container"},
-        "node2": {"phase": "Succeeded", "type": "Container"}
+        "node1": {
+            "displayName": "node1",
+            "phase": "Running",
+            "type": "Suspend" if has_suspend_node else "Container",
+        },
+        "node2": {"displayName": "node2", "phase": "Succeeded", "type": "Container"}
     }
     return {
         "status": {
@@ -213,6 +218,8 @@ def test_get_workflow_status_with_suspended_nodes(mock_get_json, argo_service):
     assert result.success is True
     assert result.value["phase"] == "Running"
     assert result.value["has_suspended_nodes"] is True
+    assert result.value["suspended_nodes"][0]["displayName"] == "node1"
+    assert result.value["suspended_nodes"][0]["type"] == "Suspend"
 
 
 @patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
@@ -237,6 +244,37 @@ def test_get_workflow_status_completed(mock_get_json, argo_service):
     assert result.success is True
     assert result.value["phase"] == "Succeeded"
     assert result.value["has_suspended_nodes"] is False
+
+
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
+def test_get_workflow_status_summarizes_pending_and_failed_nodes(mock_get_json, argo_service):
+    """Test workflow status captures actionable node state for timeout diagnostics."""
+    mock_get_json.return_value = {
+        "status": {
+            "phase": "Running",
+            "nodes": {
+                "node1": {
+                    "displayName": "wait-for-snapshot",
+                    "type": "Pod",
+                    "phase": "Pending",
+                    "message": "pod has unbound immediate PersistentVolumeClaims",
+                },
+                "node2": {
+                    "displayName": "create-snapshot",
+                    "type": "Pod",
+                    "phase": "Failed",
+                    "message": "container exited with code 1",
+                },
+            },
+        },
+    }
+
+    result = argo_service.get_workflow_status("test-workflow")
+
+    assert result.value["pending_nodes"][0]["displayName"] == "wait-for-snapshot"
+    assert "PersistentVolumeClaims" in result.value["pending_nodes"][0]["message"]
+    assert result.value["unsuccessful_nodes"][0]["displayName"] == "create-snapshot"
+    assert "code 1" in result.value["unsuccessful_nodes"][0]["message"]
 
 
 # Workflow waiting tests
@@ -271,17 +309,33 @@ def test_wait_for_suspend_workflow_ended(mock_get_status, argo_service):
 
 @patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 @patch('time.sleep')
-def test_wait_for_suspend_timeout(mock_sleep, mock_get_status, argo_service):
+@patch('time.time')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.collect_namespace_diagnostics')
+def test_wait_for_suspend_timeout(mock_collect_diagnostics, mock_time, mock_sleep, mock_get_status, argo_service):
     """Test wait for suspend timeout."""
+    mock_time.side_effect = itertools.chain([0, 0, 2], itertools.repeat(2))
     mock_get_status.return_value = CommandResult(
         success=True,
-        value={"phase": "Running", "has_suspended_nodes": False}
+        value={
+            "phase": "Running",
+            "has_suspended_nodes": False,
+            "suspended_nodes": [],
+            "running_nodes": [{"displayName": "wait-for-snapshot", "type": "Pod", "phase": "Running"}],
+            "pending_nodes": [],
+            "unsuccessful_nodes": [],
+        }
     )
+    mock_collect_diagnostics.return_value = "namespace diagnostics"
 
     with pytest.raises(TimeoutError) as exc_info:
         argo_service.wait_for_suspend("test-workflow", timeout_seconds=1, interval=0.1)
 
     assert "did not reach suspended state" in str(exc_info.value)
+    assert "wait-for-snapshot" in str(exc_info.value)
+    mock_collect_diagnostics.assert_called_once_with(
+        workflow_name="test-workflow",
+        include_all_workflow_output_artifacts=True,
+    )
 
 
 @patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')

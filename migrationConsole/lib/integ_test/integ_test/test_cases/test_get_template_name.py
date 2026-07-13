@@ -90,3 +90,23 @@ def test_workflow_perform_migrations_uses_default_completion_timeout():
         workflow_name="test-workflow",
         timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
     )
+
+
+def test_solr_workflow_perform_migrations_uses_extended_completion_timeout():
+    from integ_test.test_cases.solr_tests import (
+        SOLR_MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+        TestSolr0001SingleDocumentBackfill,
+    )
+
+    test_case = TestSolr0001SingleDocumentBackfill.__new__(TestSolr0001SingleDocumentBackfill)
+    test_case.workflow_name = "test-workflow"
+    test_case.imported_clusters = False
+    test_case.argo_service = Mock()
+
+    test_case.workflow_perform_migrations()
+
+    test_case.argo_service.resume_workflow.assert_called_once_with(workflow_name="test-workflow")
+    test_case.argo_service.wait_for_suspend.assert_called_once_with(
+        workflow_name="test-workflow",
+        timeout_seconds=SOLR_MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+    )
