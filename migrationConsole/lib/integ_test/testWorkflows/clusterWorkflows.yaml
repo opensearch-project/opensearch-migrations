@@ -662,8 +662,6 @@ spec:
                       volumeMounts:
                         - name: elasticsearch-keystore
                           mountPath: /shared
-                        - name: gcs-test-credentials
-                          mountPath: /gcs-credentials
                   containers:
                     - name: elasticsearch
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
@@ -715,13 +713,6 @@ spec:
                       emptyDir: {}
                     - name: elasticsearch-keystore
                       emptyDir: {}
-                    # Optional: present only for local GCS testing (gcs-test-credentials
-                    # ConfigMap is created by the gcs helm templates when fake-gcs-server
-                    # is enabled). optional:true so non-GCS clusters start without it.
-                    - name: gcs-test-credentials
-                      configMap:
-                        name: gcs-test-credentials
-                        optional: true
             ---
             apiVersion: v1
             kind: Service
