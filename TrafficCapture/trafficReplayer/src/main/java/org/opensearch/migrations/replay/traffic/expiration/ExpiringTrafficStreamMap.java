@@ -232,8 +232,14 @@ public class ExpiringTrafficStreamMap {
                 );
                 var removed = connectionAccumulationMap.remove(key);
                 if (removed != null) {
-                    removed.expire();
-                    behavioralPolicy.onExpireAccumulation(key.nodeId, removed);
+                    try {
+                        removed.expire();
+                        behavioralPolicy.onExpireAccumulation(key.nodeId, removed);
+                    } catch (Exception e) {
+                        log.atError().setCause(e)
+                            .setMessage("Wall-clock expiry callback failed for connection {}")
+                            .addArgument(key).log();
+                    }
                     expiredCount++;
                 }
             }

@@ -187,7 +187,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .addArgument(expired).log();
             }
         } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage("Wall-clock expiry watchdog encountered an error").log();
+            log.atError().setCause(e).setMessage("Wall-clock expiry watchdog failed — deadlock-breaking is impaired").log();
         }
     }
 
@@ -665,6 +665,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public void close() {
         expiryWatchdogFuture.cancel(false);
         expiryWatchdog.shutdownNow();
+        try {
+            expiryWatchdog.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
             fireAccumulationsCallbacksAndClose(

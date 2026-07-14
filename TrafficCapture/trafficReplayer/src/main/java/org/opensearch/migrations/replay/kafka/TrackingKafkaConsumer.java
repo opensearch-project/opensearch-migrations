@@ -249,7 +249,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public Optional<Instant> getNextRequiredTouch() {
         var lastTouchTime = lastTouchTimeRef.get();
         Optional<Instant> r;
-        if (partitionToOffsetLifecycleTrackerMap.isEmpty() && kafkaRecordsLeftToCommitEventually.get() == 0) {
+        boolean hasPartitions;
+        synchronized (commitDataLock) {
+            hasPartitions = !partitionToOffsetLifecycleTrackerMap.isEmpty();
+        }
+        if (!hasPartitions && kafkaRecordsLeftToCommitEventually.get() == 0) {
             r = Optional.empty();
         }
         else {
@@ -366,7 +370,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                         var v = new OffsetAndMetadata(offset);
                         log.atWarn().setMessage("Stale head reaped for partition {}, advancing commit to {}")
                             .addArgument(partition).addArgument(offset).log();
-                        nextSetOfCommitsMap.put(tp, v);
+                        nextSetOfCommitsMap.merge(tp, v, (existing, incoming) ->
+                            existing.offset() >= incoming.offset() ? existing : incoming);
                         kafkaRecordsReadyToCommit.set(true);
                     });
                 }
@@ -533,7 +538,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atDebug().setMessage("Adding new commit {}->{} to map").addArgument(k).addArgument(v).log();
             synchronized (commitDataLock) {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
-                nextSetOfCommitsMap.put(k, v);
+                nextSetOfCommitsMap.merge(k, v, (existing, incoming) ->
+                    existing.offset() >= incoming.offset() ? existing : incoming);
             }
             kafkaRecordsReadyToCommit.set(true);
             return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
@@ -627,6 +633,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         PriorityQueue<OrderedKeyHolder> orderedKeyHolders,
         long upToOffset
     ) {
+        if (orderedKeyHolders == null) {
+            return;
+        }
         for (var nextKeyHolder = orderedKeyHolders.peek(); nextKeyHolder != null
             && nextKeyHolder.offset <= upToOffset; nextKeyHolder = orderedKeyHolders.peek()) {
             onCommitKeyCallback.accept(nextKeyHolder.tsk);
