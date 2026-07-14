@@ -49,6 +49,10 @@ _WILDCARD_TEMPLATE_MAP = {
     ("opensearch", 1): 3,
     ("opensearch", 2): 19,
     ("opensearch", 3): 1,
+    ("solr", 6): 6,
+    ("solr", 7): 7,
+    ("solr", 8): 11,
+    ("solr", 9): 8,
 }
 
 CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
