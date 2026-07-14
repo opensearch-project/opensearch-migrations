@@ -167,6 +167,17 @@ Kafka ──→ Proxy (CapturedTraffic) ──→ DataSnapshot ──→ Snapsho
 
 Each arrow represents a "waits for" relationship. Downstream waiters check a **per-dependency checksum** on the upstream resource — not a single monolithic hash.
 
+Separately from checksum propagation, each CR records its dependency-graph edges in
+`spec.dependsOn`. The `workflow reset` CLI reads `spec.dependsOn` off the live CRs to build a
+deletion DAG (see [WorkflowCrdDesign.md](WorkflowCrdDesign.md)). This field is written by the
+workflow's `tryApply` step — **not** the initializer — for every resource including the terminal
+`DataSnapshot` and `SnapshotMigration`. Writing it only from `tryApply` keeps `spec.dependsOn`
+reflecting the *established* graph: the initializer must not advertise an edge before the workflow
+has actually wired it up, or a mid-run reset could order deletions around a dependency that does
+not yet exist. For terminal resources the value is derived from the resolved dependency set
+(DataSnapshot: its proxy setups; SnapshotMigration: its DataSnapshot, or none for an
+externally-managed ES/OS snapshot).
+
 #### Schema annotations as the source of truth
 
 Checksum materiality and change restriction categories are encoded directly on the Zod schema using `.meta()`:
@@ -294,6 +305,14 @@ This transitions to `Completed`.
 Lock-on-Complete freezes the entire spec once done.
 All fields here are impossible to edit.  If a user wanted to change a snapshot
 in-progress, they would need to delete the existing snapshot and redrive.
+
+Like the other root-CR reconciles, `reconcileDataSnapshotResource` implements the
+`tryApply → waitForFix → patchApproval → resetGate → retryLoop` recovery loop against a
+`datasnapshot.<name>.vapretry` `ApprovalGate`. DataSnapshot has no `gated` fields today, so
+this loop does not fire during normal reconfiguration; it is the recovery path for a
+VAP-rejected apply (for example, `lock-on-complete` rejecting a re-apply of a `Completed`
+CR after an in-place upgrade, or any future `gated` field). Without it a rejected apply
+would be a silent dead end.
 
 Downstream dependencies that consume the snapshot's checksum:
 - **SnapshotMigration** — waits for the snapshot to be Completed before running metadata migration and/or document backfill
