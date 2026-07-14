@@ -734,8 +734,23 @@ class WorkflowTreeApp(App):
         resource_path = node['resource_path']
         with self.suspend():
             os.system('clear')
-            cmd = f"workflow log resource {resource_path} | less -R"
-            os.system(cmd)
+            os.system(self._resource_log_command(resource_path))
+
+    def action_tail_resource_logs(self) -> None:
+        """Tail logs for a migration resource via the workflow log CLI."""
+        node = self.current_node_data
+        if not node or not node.get('resource_path'):
+            return
+        resource_path = node['resource_path']
+        with self.suspend():
+            os.system('clear')
+            os.system(self._resource_log_command(resource_path, follow=True))
+
+    @staticmethod
+    def _resource_log_command(resource_path: str, follow: bool = False) -> str:
+        follow_arg = " -f" if follow else ""
+        pager_args = " -R +F" if follow else " -R"
+        return f"workflow log resource {shlex.quote(resource_path)}{follow_arg} | less{pager_args}"
 
     def action_reset_resource(self) -> None:
         """Reset the selected migration resource via the workflow reset command."""
@@ -1157,6 +1172,7 @@ class WorkflowTreeApp(App):
 
         if node_id.startswith(RESOURCE_ID_PREFIX):
             self.bind("l", "view_resource_logs", description="View Logs")
+            self.bind("t", "tail_resource_logs", description="Tail Logs")
             if self._approval_node_for_action(node):
                 self.bind("a", "approve_step", description="Approve")
             if output_available:
@@ -1167,11 +1183,13 @@ class WorkflowTreeApp(App):
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
             if node.get('phase') == PHASE_RUNNING:
                 self.bind("f", "follow_logs", description="Follow Logs")
+                self.bind("t", "follow_logs", description="Tail Logs")
             self.bind("c", "copy_pod_name", description="Copy Pod Name")
         elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
             self.bind("a", "approve_step", description="Approve")
         elif node.get('resource_path'):
             self.bind("l", "view_resource_logs", description="View Logs")
+            self.bind("t", "tail_resource_logs", description="Tail Logs")
         elif output_available:
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 

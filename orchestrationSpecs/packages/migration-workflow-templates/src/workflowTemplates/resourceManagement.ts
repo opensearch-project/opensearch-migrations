@@ -103,6 +103,31 @@ function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: Bas
     return new UnquotedTypeWrapper<T>(jsonExpression, "yaml-safe-json") as never;
 }
 
+type TryApplyStepScope = {
+    tryApply: {
+        status: string;
+        outputs: {
+            parameters: Record<string, string>;
+        };
+    };
+};
+
+function markPendingWhenTryApplyChecksumDiffers(
+    configChecksum: AllowLiteralOrExpression<string>
+): BaseExpression<boolean, "complicatedExpression"> {
+    const steps = expr.scopeRoot<TryApplyStepScope>("steps");
+    return expr.and(
+        expr.equals(
+            expr.dig(steps, ["tryApply", "status"], expr.literal("")),
+            expr.literal("Succeeded")
+        ),
+        expr.not(expr.equals(
+            expr.dig(steps, ["tryApply", "outputs", "parameters", "currentConfigChecksum"], expr.literal("")),
+            configChecksum
+        ))
+    );
+}
+
 function buildPatchStatusTemplate<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
     ExtraFields extends NonReservedStringStatusFields = {}
@@ -660,10 +685,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -738,10 +760,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: b.inputs.topicCrName,
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -812,10 +831,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -879,10 +895,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
@@ -913,10 +926,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -996,10 +1006,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     resourceName: b.inputs.name,
                     phase: expr.literal("Pending"),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: () => ({templateExp: markPendingWhenTryApplyChecksumDiffers(b.inputs.configChecksum)})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({

@@ -12,6 +12,7 @@ import {
     InfixExpression,
     LiteralExpression,
     RecordFieldSelectExpression, RecordGetExpression, UnquotedTypeWrapper,
+    ScopeRootExpression,
     TaskDataExpression,
     TemplateReplacementExpression,
     TernaryExpression,
@@ -215,6 +216,11 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeTyp
         return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
+    if (isScopeRoot(expr)) {
+        const e = expr as ScopeRootExpression<any>;
+        return formattedResult(e.name, false);
+    }
+
     if (isSpecialStripQuotesDirective(expr)) {
         const e = expr as UnquotedTypeWrapper<any>;
         return formatExpression(e.value, useIdentifierMarkers, scopeType); // skip right by here
@@ -279,6 +285,10 @@ export function isGetExpression(e: AnyExpr): e is RecordGetExpression<any, any, 
 
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> {
     return e.kind === "task_data";
+}
+
+export function isScopeRoot(e: AnyExpr): e is ScopeRootExpression<any> {
+    return e.kind === "scope_root";
 }
 
 export function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression {

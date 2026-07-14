@@ -646,7 +646,7 @@
           [
             {
               "template": "patchkafkaclusterpending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -856,7 +856,7 @@
           [
             {
               "template": "patchcapturedtrafficpending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1054,7 +1054,7 @@
           [
             {
               "template": "patchcaptureproxypending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1225,7 +1225,7 @@
           [
             {
               "template": "patchdatasnapshotpending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1300,7 +1300,7 @@
           [
             {
               "template": "patchsnapshotmigrationpending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1496,7 +1496,7 @@
           [
             {
               "template": "patchtrafficreplaypending",
-              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {

@@ -5914,12 +5914,28 @@ async def test_resource_view_resource_log_binding_uses_resource_log_command():
             tree.move_cursor(find_tree_node_by_id(tree.root, "resource:cap"))
             await pilot.pause()
             assert binding_descriptions(app, "l") == ["View Logs"]
+            assert binding_descriptions(app, "t") == ["Tail Logs"]
 
-            with patch.object(app._logs, "show_in_pager") as pager, patch.object(app, "action_view_resource_logs") as resource_logs:
+            with patch.object(app._logs, "show_in_pager") as pager, \
+                    patch.object(app, "action_view_resource_logs") as resource_logs, \
+                    patch.object(app, "action_tail_resource_logs") as tail_logs:
                 await pilot.press("l")
                 await pilot.pause()
                 resource_logs.assert_called_once_with()
                 pager.assert_not_called()
+
+                await pilot.press("t")
+                await pilot.pause()
+                tail_logs.assert_called_once_with()
+
+
+def test_resource_log_command_can_tail_with_follow():
+    assert WorkflowTreeApp._resource_log_command("captureproxy.cap") == (
+        "workflow log resource captureproxy.cap | less -R"
+    )
+    assert WorkflowTreeApp._resource_log_command("captureproxy.cap", follow=True) == (
+        "workflow log resource captureproxy.cap -f | less -R +F"
+    )
 
 
 @pytest.mark.asyncio
