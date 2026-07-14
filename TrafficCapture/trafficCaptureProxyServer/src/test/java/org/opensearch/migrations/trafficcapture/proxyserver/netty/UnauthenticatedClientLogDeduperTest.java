@@ -15,17 +15,17 @@ class UnauthenticatedClientLogDeduperTest {
         var nowNanos = new AtomicLong(0);
         var deduper = new UnauthenticatedClientLogDeduper(Duration.ofSeconds(1), nowNanos::get);
 
-        var firstDecision = deduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+        var firstDecision = deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
         Assertions.assertTrue(firstDecision.shouldLog());
         Assertions.assertEquals(0, firstDecision.getSuppressedCountSinceLastLog());
 
-        var secondDecision = deduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
-        var thirdDecision = deduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+        var secondDecision = deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+        var thirdDecision = deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
         Assertions.assertFalse(secondDecision.shouldLog());
         Assertions.assertFalse(thirdDecision.shouldLog());
 
         nowNanos.set(Duration.ofSeconds(1).toNanos());
-        var afterWindowDecision = deduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+        var afterWindowDecision = deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
         Assertions.assertTrue(afterWindowDecision.shouldLog());
         Assertions.assertEquals(2, afterWindowDecision.getSuppressedCountSinceLastLog());
     }
@@ -36,7 +36,7 @@ class UnauthenticatedClientLogDeduperTest {
         var knownEventCount = deduper.knownEventCount();
 
         for (int i = 0; i < 100; i++) {
-            deduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+            deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
         }
 
         Assertions.assertEquals(KnownEvent.values().length, knownEventCount);

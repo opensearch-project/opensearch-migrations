@@ -30,7 +30,7 @@ class UnauthenticatedClientLogDeduper {
         }
     }
 
-    synchronized LogDecision record(KnownEvent knownEvent) {
+    synchronized LogDecision recordOccurrence(KnownEvent knownEvent) {
         var eventState = eventStates.get(Objects.requireNonNull(knownEvent));
         var now = nanoTimeSupplier.getAsLong();
         if (now < eventState.nextLogAfterNanos) {

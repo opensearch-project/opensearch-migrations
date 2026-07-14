@@ -14,8 +14,8 @@ import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingCo
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.UnauthenticatedClientLogDeduper.KnownEvent;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
@@ -97,7 +97,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                 return;
             }
 
-            var logDecision = unauthenticatedClientLogDeduper.record(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+            var logDecision = unauthenticatedClientLogDeduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
             if (logDecision.shouldLog()) {
                 logTlsHandshakeFailure(ctx, cause, logDecision.getSuppressedCountSinceLastLog());
             }
