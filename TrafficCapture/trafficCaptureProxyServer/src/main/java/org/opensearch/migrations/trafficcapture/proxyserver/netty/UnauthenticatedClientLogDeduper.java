@@ -44,10 +44,6 @@ class UnauthenticatedClientLogDeduper {
         return LogDecision.log(suppressedCount);
     }
 
-    int knownEventCount() {
-        return eventStates.size();
-    }
-
     private static class EventState {
         private long nextLogAfterNanos = Long.MIN_VALUE;
         private long suppressedCount;

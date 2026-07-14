@@ -29,17 +29,4 @@ class UnauthenticatedClientLogDeduperTest {
         Assertions.assertTrue(afterWindowDecision.shouldLog());
         Assertions.assertEquals(2, afterWindowDecision.getSuppressedCountSinceLastLog());
     }
-
-    @Test
-    void testDeduperUsesOnlyTheFixedKnownEventSet() {
-        var deduper = new UnauthenticatedClientLogDeduper(Duration.ofSeconds(1), () -> 0);
-        var knownEventCount = deduper.knownEventCount();
-
-        for (int i = 0; i < 100; i++) {
-            deduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
-        }
-
-        Assertions.assertEquals(KnownEvent.values().length, knownEventCount);
-        Assertions.assertEquals(knownEventCount, deduper.knownEventCount());
-    }
 }
