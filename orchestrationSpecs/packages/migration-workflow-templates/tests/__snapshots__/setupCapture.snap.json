@@ -22,10 +22,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -503,6 +499,10 @@
               "name": "listenPort"
             },
             {
+              "name": "skipApproval",
+              "value": "false"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -890,6 +890,24 @@
           [
             {
               "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "!({{inputs.parameters.skipApproval}})",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{='captureproxysetup.'+inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "approveProxySetup"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "patchcaptureproxyready",
                 "name": "resource-management"
               },
@@ -982,6 +1000,10 @@
             },
             {
               "name": "listenPort"
+            },
+            {
+              "name": "skipApproval",
+              "value": "false"
             },
             {
               "name": "podReplicas"
@@ -1300,6 +1322,10 @@
                     "value": "{{inputs.parameters.listenPort}}"
                   },
                   {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
+                  },
+                  {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
@@ -1384,6 +1410,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
                   },
                   {
                     "name": "podReplicas",

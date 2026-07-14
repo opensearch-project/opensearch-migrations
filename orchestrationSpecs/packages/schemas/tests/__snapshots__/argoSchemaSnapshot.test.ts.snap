@@ -1969,6 +1969,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "checksumForReplayer": {
                   "type": "string"
                 },
+                "skipApproval": {
+                  "type": "boolean",
+                  "default": false
+                },
                 "resourceUid": {
                   "type": "string"
                 }
@@ -2678,6 +2682,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "skipEvaluateApproval": {
+                      "type": "boolean",
+                      "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
+                    },
+                    "skipMigrateApproval": {
+                      "type": "boolean",
+                      "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
+                    },
                     "componentTemplateAllowlist": {
                       "type": "array",
                       "items": {
@@ -2888,6 +2900,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "skipApproval": {
+                      "type": "boolean",
+                      "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
                     },
                     "useTargetClusterForWorkCoordination": {
                       "type": "boolean",
@@ -4441,7 +4457,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "skipApprovals": {
       "type": "boolean",
       "default": false,
-      "description": "Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."
+      "description": "Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."
     },
     "sourceClusters": {
       "type": "object",
@@ -5349,7 +5365,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "skipApprovals": {
             "type": "boolean",
-            "default": false,
             "description": "When true, skips all manual approval gates for migrations in this configuration block."
           },
           "fromSource": {
@@ -5474,12 +5489,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "skipEvaluateApproval": {
                         "type": "boolean",
-                        "default": false,
                         "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
                       },
                       "skipMigrateApproval": {
                         "type": "boolean",
-                        "default": false,
                         "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
                       },
                       "componentTemplateAllowlist": {
@@ -6437,7 +6450,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "skipApproval": {
                         "type": "boolean",
-                        "default": false,
                         "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
                       },
                       "useTargetClusterForWorkCoordination": {
@@ -7874,6 +7886,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   ],
                   "message": "Choose one source cluster from sourceClusters."
                 }
+              },
+              "skipApproval": {
+                "type": "boolean",
+                "description": "When true, skips the manual approval gate after this proxy is configured and ready."
               },
               "proxyConfig": {
                 "type": "object",

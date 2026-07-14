@@ -662,6 +662,65 @@ class TestWorkflowCLICommands:
         assert args[:3] == ('ma', 'migration-workflow', 'step')
         assert kwargs == {'pre_approve': True, 'include_completed': True}
 
+    @patch('console_link.workflow.commands.approve._gather_gates')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_step_list_json(self, mock_k8s, mock_gather):
+        runner = CliRunner()
+        mock_gather.return_value = [
+            self._make_gate('gate-one', status='waiting', k='v')
+        ]
+
+        result = runner.invoke(workflow_cli, ['approve', 'step', '--list', '--output', 'json'])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == [{
+            'category': 'step',
+            'displayName': 'gate-one',
+            'labels': {'k': 'v'},
+            'name': 'gate-one',
+            'prerequisite': None,
+            'reason': None,
+            'resourceKind': None,
+            'resourceName': None,
+            'status': 'waiting',
+        }]
+
+    @patch('console_link.workflow.commands.approve._gather_gates')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_retry_list_json_includes_prerequisite(self, mock_k8s, mock_gather):
+        runner = CliRunner()
+        labels = {
+            'migrations.opensearch.org/resource-kind': 'CaptureProxy',
+            'migrations.opensearch.org/resource-name': 'capture-proxy',
+        }
+        mock_gather.return_value = [
+            self._make_gate(
+                'captureproxy.capture-proxy.vapretry',
+                category='retry',
+                **labels,
+            )
+        ]
+
+        result = runner.invoke(workflow_cli, ['approve', 'retry', '--list', '--output', 'json'])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == [{
+            'category': 'retry',
+            'displayName': 'captureproxy.capture-proxy',
+            'labels': labels,
+            'name': 'captureproxy.capture-proxy.vapretry',
+            'prerequisite': {
+                'command': 'workflow reset capture-proxy',
+                'description': 'Reset the CaptureProxy so the workflow can recreate it',
+            },
+            'reason': None,
+            'resourceKind': 'CaptureProxy',
+            'resourceName': 'capture-proxy',
+            'status': 'waiting',
+        }]
+
     @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
     @patch('console_link.workflow.commands.approve._list_all_gates')
     def test_gather_gates_excludes_completed_by_default(

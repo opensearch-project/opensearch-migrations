@@ -214,21 +214,20 @@ export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_METADATA_OPTIONS).omit({
-        skipEvaluateApproval: true,
-        skipMigrateApproval: true,
         metadataTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "skipEvaluateApproval",
+    "skipMigrateApproval",
     "fileSourceVolumes",
     "fileSourceVolumeMounts",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
-        skipApproval: true,
         documentTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
@@ -237,6 +236,7 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "minPodReplicas",
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "skipApproval",
     "useTargetClusterForWorkCoordination",
     "resources",
     "fileSourceVolumes",
@@ -393,7 +393,15 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     topicConfigChecksum: z.string(),
     checksumForSnapshot: z.string(),
     checksumForReplayer: z.string(),
+    // When true, the proxy-setup approval gate is auto-skipped. The config
+    // processor resolves this from proxy-level skipApproval first, then global
+    // skipApprovals, then false.
+    skipApproval: z.boolean().default(false),
     resourceUid: z.string(),
+});
+
+export const DENORMALIZED_PROXY_SETUP_CONFIG = DENORMALIZED_PROXY_CONFIG.omit({
+    skipApproval: true,
 });
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({

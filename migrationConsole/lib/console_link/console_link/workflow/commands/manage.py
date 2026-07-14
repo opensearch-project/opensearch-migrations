@@ -14,6 +14,7 @@ from textual_serve.server import Server
 # Internal imports
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
+from .hints import hint_after_manage
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, WaiterInterface
 from ..tui.workflow_manage_app import WorkflowTreeApp, reset_terminal_mouse_reporting
@@ -173,6 +174,7 @@ def _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view,
                    serve, serve_host, serve_port, serve_public_url, serve_debug):
     _configure_file_logging()  # Configure logging when command actually runs
+    app = None
     try:
         if serve:
             _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
@@ -186,3 +188,6 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
     finally:
         if not serve and not _running_under_textual_web_driver():
             reset_terminal_mouse_reporting(sys.stdout)
+
+    if app is not None:
+        hint_after_manage(app.last_known_phase)

@@ -4,12 +4,13 @@ set -eo pipefail
 
 if minikube status >/dev/null 2>&1; then
     echo "minikube already running"
+    export HOST_IP_FROM_WITHIN_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')
 else
   INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
 
   # we startup minikube once to see under which IP the host appears cause we need to access the host's registry
   minikube start
-  HOST_IP_FROM_WITHIN_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')
+  export HOST_IP_FROM_WITHIN_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')
   minikube stop
   minikube delete
 
