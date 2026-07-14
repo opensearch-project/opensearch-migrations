@@ -82,6 +82,26 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
     } as any;
 }
 
+async function transformAndResolve(config: z.infer<typeof OVERALL_MIGRATION_CONFIG>) {
+    const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+    const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");
+    const resource = (kind: string, name: string) => {
+        const match = resolvedMigrationResources.resources.find(r => r.kind === kind && r.name === name);
+        if (!match) {
+            throw new Error(`Resource ${kind}/${name} not found`);
+        }
+        return match;
+    };
+    const singleResource = (kind: string) => {
+        const matches = resolvedMigrationResources.resources.filter(r => r.kind === kind);
+        if (matches.length !== 1) {
+            throw new Error(`Expected one ${kind} resource, found ${matches.length}`);
+        }
+        return matches[0];
+    };
+    return {workflowConfig, resolvedMigrationResources, resource, singleResource};
+}
+
 describe("resolved migration resources", () => {
     it("extracts resolved resource parameters from transformed workflow config", async () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());
@@ -92,6 +112,73 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.resources.every(resource =>
             resource.parameterPolicies === undefined
         )).toBe(true);
+    });
+
+    it("makes source, target, and Kafka identity checksum changes visible in resolved CR specs", async () => {
+        const sourceBefore = await transformAndResolve(sampleConfig());
+        const sourceConfigAfter = sampleConfig();
+        sourceConfigAfter.sourceClusters.source.endpoint = "https://source-b.example.com";
+        const sourceAfter = await transformAndResolve(sourceConfigAfter);
+
+        expect(sourceBefore.workflowConfig.proxies[0].configChecksum)
+            .not.toBe(sourceAfter.workflowConfig.proxies[0].configChecksum);
+        expect(sourceBefore.resource("CaptureProxy", "source-proxy").parameters.sourceEndpoint)
+            .toBe("https://source.example.com");
+        expect(sourceAfter.resource("CaptureProxy", "source-proxy").parameters.sourceEndpoint)
+            .toBe("https://source-b.example.com");
+
+        const targetBefore = await transformAndResolve(sampleConfig());
+        const targetConfigAfter = sampleConfig();
+        targetConfigAfter.targetClusters.target.endpoint = "https://target-b.example.com";
+        const targetAfter = await transformAndResolve(targetConfigAfter);
+
+        expect(targetBefore.workflowConfig.snapshotMigrations[0].configChecksum)
+            .not.toBe(targetAfter.workflowConfig.snapshotMigrations[0].configChecksum);
+        expect(targetBefore.workflowConfig.trafficReplays[0].configChecksum)
+            .not.toBe(targetAfter.workflowConfig.trafficReplays[0].configChecksum);
+        expect(targetBefore.singleResource("SnapshotMigration").parameters.targetEndpoint)
+            .toBe("https://target.example.com");
+        expect(targetAfter.singleResource("SnapshotMigration").parameters.targetEndpoint)
+            .toBe("https://target-b.example.com");
+        expect(targetBefore.resource("TrafficReplay", "source-proxy-target-replay").parameters.targetEndpoint)
+            .toBe("https://target.example.com");
+        expect(targetAfter.resource("TrafficReplay", "source-proxy-target-replay").parameters.targetEndpoint)
+            .toBe("https://target-b.example.com");
+
+        const kafkaConfigBefore = sampleConfig();
+        kafkaConfigBefore.kafkaClusterConfiguration = {
+            default: {existing: {kafkaConnection: "broker-a:9092"}},
+        } as any;
+        const kafkaBefore = await transformAndResolve(kafkaConfigBefore);
+        const kafkaConfigAfter = sampleConfig();
+        kafkaConfigAfter.kafkaClusterConfiguration = {
+            default: {existing: {kafkaConnection: "broker-b:9092"}},
+        } as any;
+        const kafkaAfter = await transformAndResolve(kafkaConfigAfter);
+
+        expect(kafkaBefore.workflowConfig.proxies[0].topicConfigChecksum)
+            .not.toBe(kafkaAfter.workflowConfig.proxies[0].topicConfigChecksum);
+        expect(kafkaBefore.workflowConfig.trafficReplays[0].fromCapturedTrafficConfigChecksum)
+            .not.toBe(kafkaAfter.workflowConfig.trafficReplays[0].fromCapturedTrafficConfigChecksum);
+        expect(kafkaBefore.resource("CapturedTraffic", "source-proxy-topic").parameters.kafkaBrokers)
+            .toBe("broker-a:9092");
+        expect(kafkaAfter.resource("CapturedTraffic", "source-proxy-topic").parameters.kafkaBrokers)
+            .toBe("broker-b:9092");
+    });
+
+    it("emits empty-string defaults for default-less fields so resolved params match the applied CR spec", async () => {
+        // The apply manifests always write these default-less string fields with "" (expr.dig(..., "")).
+        // The resolved parameters must emit the same keys so MigrationRun history / the dry-run preview
+        // match the spec actually applied to the live CR, rather than silently omitting them.
+        const {singleResource} = await transformAndResolve(sampleConfig());
+
+        const dataSnapshot = singleResource("DataSnapshot");
+        expect(dataSnapshot.parameters.otelTraceCollectorEndpoint).toBe("");
+
+        const snapshotMigration = singleResource("SnapshotMigration");
+        expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationTransformerConfig).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationTransformerConfigFile).toBe("");
     });
 
     it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {

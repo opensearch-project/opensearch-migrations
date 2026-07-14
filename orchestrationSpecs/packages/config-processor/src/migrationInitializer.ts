@@ -465,6 +465,15 @@ export class MigrationInitializer {
         );
         const resourceFor = (kind: string, name: string) => resourcesByKey.get(`${kind}:${name}`);
         const specFor = (kind: string, name: string) => resourceFor(kind, name)?.parameters ?? {};
+        // Terminal-resource bootstrap spec: strip dependsOn so the initializer never advertises a
+        // dependency-graph edge before the workflow has actually established it. workflow reset reads
+        // spec.dependsOn from live CRs; for DataSnapshot/SnapshotMigration the edge must reflect the
+        // established graph, so tryApply (which re-applies with the resolved dependsOn) is its sole
+        // writer. The four long-running resources keep their initializer-stamped dependsOn.
+        const bootstrapSpecWithoutDependsOn = (kind: string, name: string) => {
+            const {dependsOn: _dependsOn, ...rest} = specFor(kind, name) as Record<string, unknown>;
+            return rest;
+        };
         const annotationsFor = (kind: string, name: string) => resourceFor(kind, name)?.annotations;
 
         // KafkaCluster resources from workflow-managed Kafka clusters
@@ -610,9 +619,21 @@ export class MigrationInitializer {
                             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
                         }
                     },
-                    spec: specFor('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
+                    spec: bootstrapSpecWithoutDependsOn('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
                     status: { phase: 'Created', configChecksum: '' }
                 });
+
+                // VAP retry gate for the DataSnapshot CR reconcile, matching the other resources.
+                const dataSnapshotName = this.makeCrdName(snapshot.sourceConfig.label, item.label);
+                items.push(this.makeApprovalGateResource(
+                    ['datasnapshot', dataSnapshotName, 'vapretry'],
+                    gateLabels({
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'DataSnapshot',
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: dataSnapshotName,
+                        [MigrationInitializer.GATE_LABEL_SOURCE]: snapshot.sourceConfig.label,
+                        [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
+                    })
+                ));
             }
         }
 
@@ -634,7 +655,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_MIGRATION]: migration.migrationLabel,
                     }
                 },
-                spec: specFor('SnapshotMigration', snapshotMigrationName),
+                spec: bootstrapSpecWithoutDependsOn('SnapshotMigration', snapshotMigrationName),
                 status: { phase: 'Created', configChecksum: '' }
             });
 
@@ -883,7 +904,11 @@ export class MigrationInitializer {
                 sourceVersion,
                 sourceCluster.snapshotInfo?.serializeSnapshotCreation
             );
-            for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
+            const snapshotNames = [
+                ...Object.keys(sourceCluster.snapshotInfo?.snapshots || {}),
+                ...Object.keys(sourceCluster.snapshotInfo?.backups || {}),
+            ];
+            for (const snapshotName of snapshotNames) {
                 const key = generateSemaphoreKey(serialize, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);

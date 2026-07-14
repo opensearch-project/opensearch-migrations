@@ -230,83 +230,306 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
                     "snapshotInfo": {
-                      "type": "object",
-                      "properties": {
-                        "repos": {
+                      "anyOf": [
+                        {
                           "type": "object",
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "repoPathUri": {
-                                "type": "string",
-                                "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "properties": {
+                            "repos": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "repoPathUri": {
+                                    "type": "string",
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                  },
+                                  "awsRegion": {
+                                    "type": "string",
+                                    "default": "",
+                                    "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                                  },
+                                  "endpoint": {
+                                    "type": "string",
+                                    "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                                    "default": "",
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                  },
+                                  "s3RoleArn": {
+                                    "type": "string",
+                                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "default": "",
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  }
+                                },
+                                "required": [
+                                  "repoPathUri"
+                                ],
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                               },
-                              "awsRegion": {
-                                "type": "string",
-                                "default": "",
-                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
-                              },
-                              "endpoint": {
-                                "type": "string",
-                                "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
-                                "default": "",
-                                "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
-                              },
-                              "s3RoleArn": {
-                                "type": "string",
-                                "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                                "default": "",
-                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-                              }
+                              "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                             },
-                            "required": [
-                              "repoPathUri"
-                            ],
-                            "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                            "snapshots": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "config": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "externallyManagedSnapshotName": {
+                                            "type": "string",
+                                            "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                          }
+                                        },
+                                        "required": [
+                                          "externallyManagedSnapshotName"
+                                        ],
+                                        "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "createSnapshotConfig": {
+                                            "type": "object",
+                                            "properties": {
+                                              "snapshotPrefix": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "jvmArgs": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                              },
+                                              "loggingConfigurationOverrideConfigMap": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                              },
+                                              "otelTraceCollectorEndpoint": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      ""
+                                                    ]
+                                                  },
+                                                  {
+                                                    "type": "string"
+                                                  }
+                                                ],
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                              },
+                                              "otelMetricsCollectorEndpoint": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      ""
+                                                    ]
+                                                  },
+                                                  {
+                                                    "type": "string"
+                                                  }
+                                                ],
+                                                "default": "http://otel-collector:4317",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                              },
+                                              "indexAllowlist": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                },
+                                                "default": [],
+                                                "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "maxSnapshotRateMbPerNode": {
+                                                "type": "number",
+                                                "default": 0,
+                                                "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                                              },
+                                              "compressionEnabled": {
+                                                "type": "boolean",
+                                                "default": false,
+                                                "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "includeGlobalState": {
+                                                "type": "boolean",
+                                                "default": true,
+                                                "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                                "changeRestriction": "impossible"
+                                              }
+                                            },
+                                            "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
+                                          }
+                                        },
+                                        "required": [
+                                          "createSnapshotConfig"
+                                        ],
+                                        "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
+                                      }
+                                    ],
+                                    "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                                  },
+                                  "repoName": {
+                                    "type": "string",
+                                    "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                  }
+                                },
+                                "required": [
+                                  "config",
+                                  "repoName"
+                                ],
+                                "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
+                              },
+                              "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
+                            },
+                            "serializeSnapshotCreation": {
+                              "type": "boolean",
+                              "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                            }
                           },
-                          "description": "S3 snapshot repositories registered with the source cluster."
+                          "required": [
+                            "snapshots"
+                          ],
+                          "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
                         },
-                        "snapshots": {
+                        {
                           "type": "object",
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "config": {
+                          "properties": {
+                            "repos": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "repoPathUri": {
+                                    "type": "string",
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                  },
+                                  "awsRegion": {
+                                    "type": "string",
+                                    "default": "",
+                                    "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                                  },
+                                  "endpoint": {
+                                    "type": "string",
+                                    "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                                    "default": "",
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                  },
+                                  "s3RoleArn": {
+                                    "type": "string",
+                                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "default": "",
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  }
+                                },
+                                "required": [
+                                  "repoPathUri"
+                                ],
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                              },
+                              "description": "Solr backup repositories registered with the source cluster."
+                            },
+                            "backups": {
+                              "type": "object",
+                              "additionalProperties": {
                                 "anyOf": [
                                   {
                                     "type": "object",
                                     "properties": {
-                                      "externallyManagedSnapshotName": {
+                                      "externalBackupName": {
                                         "type": "string",
-                                        "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                        "description": "Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."
+                                      },
+                                      "repoName": {
+                                        "type": "string",
+                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                      },
+                                      "collectionAllowlist": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "default": [],
+                                        "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                      },
+                                      "otelTraceCollectorEndpoint": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              ""
+                                            ]
+                                          },
+                                          {
+                                            "type": "string"
+                                          }
+                                        ],
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                      },
+                                      "otelMetricsCollectorEndpoint": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              ""
+                                            ]
+                                          },
+                                          {
+                                            "type": "string"
+                                          }
+                                        ],
+                                        "default": "http://otel-collector:4317",
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                      },
+                                      "jvmArgs": {
+                                        "type": "string",
+                                        "default": "",
+                                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                      },
+                                      "loggingConfigurationOverrideConfigMap": {
+                                        "type": "string",
+                                        "default": "",
+                                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                       }
                                     },
                                     "required": [
-                                      "externallyManagedSnapshotName"
+                                      "externalBackupName",
+                                      "repoName"
                                     ],
-                                    "description": "Reference to a snapshot that was created outside of this migration workflow."
+                                    "description": "Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate."
                                   },
                                   {
                                     "type": "object",
                                     "properties": {
-                                      "createSnapshotConfig": {
+                                      "repoName": {
+                                        "type": "string",
+                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                      },
+                                      "createBackupConfig": {
                                         "type": "object",
                                         "properties": {
                                           "snapshotPrefix": {
                                             "type": "string",
                                             "default": "",
-                                            "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
+                                            "description": "Prefix for auto-generated Solr backup names. When set, the backup name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
                                           },
-                                          "jvmArgs": {
-                                            "type": "string",
-                                            "default": "",
-                                            "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
-                                          },
-                                          "loggingConfigurationOverrideConfigMap": {
-                                            "type": "string",
-                                            "default": "",
-                                            "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                          "collectionAllowlist": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "default": [],
+                                            "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                           },
                                           "otelTraceCollectorEndpoint": {
                                             "anyOf": [
@@ -337,63 +560,43 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": "http://otel-collector:4317",
                                             "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                           },
-                                          "indexAllowlist": {
-                                            "type": "array",
-                                            "items": {
-                                              "type": "string"
-                                            },
-                                            "default": [],
-                                            "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                          "jvmArgs": {
+                                            "type": "string",
+                                            "default": "",
+                                            "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                                           },
-                                          "maxSnapshotRateMbPerNode": {
-                                            "type": "number",
-                                            "default": 0,
-                                            "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
-                                          },
-                                          "compressionEnabled": {
-                                            "type": "boolean",
-                                            "default": false,
-                                            "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
-                                          },
-                                          "includeGlobalState": {
-                                            "type": "boolean",
-                                            "default": true,
-                                            "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                          "loggingConfigurationOverrideConfigMap": {
+                                            "type": "string",
+                                            "default": "",
+                                            "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                           }
                                         },
-                                        "description": "Configuration for creating a new snapshot of the source cluster."
+                                        "description": "Configuration for creating a new Solr backup of the source cluster."
                                       }
                                     },
                                     "required": [
-                                      "createSnapshotConfig"
+                                      "repoName",
+                                      "createBackupConfig"
                                     ],
-                                    "description": "Configuration to create a new snapshot of the source cluster as part of the migration workflow."
+                                    "description": "Configuration to create a new Solr backup of the source cluster as part of the migration workflow."
                                   }
                                 ],
-                                "description": "Snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                                "description": "Solr backup source: either reference an existing backup or configure creation of a new one."
                               },
-                              "repoName": {
-                                "type": "string",
-                                "description": "Name of the S3 snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
-                              }
+                              "description": "Solr backups to use or create for this source cluster."
                             },
-                            "required": [
-                              "config",
-                              "repoName"
-                            ],
-                            "description": "A snapshot configuration bound to a specific repository."
+                            "serializeSnapshotCreation": {
+                              "type": "boolean",
+                              "description": "Controls whether Solr backup creation or prepare/validation steps for this source run one-at-a-time or in parallel. When omitted, defaults are version-based."
+                            }
                           },
-                          "description": "Snapshots to use or create for this source cluster."
-                        },
-                        "serializeSnapshotCreation": {
-                          "type": "boolean",
-                          "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                          "required": [
+                            "backups"
+                          ],
+                          "description": "Solr backup repository and backup configuration for a source cluster."
                         }
-                      },
-                      "required": [
-                        "snapshots"
                       ],
-                      "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source."
+                      "description": "Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source."
                     },
                     "label": {
                       "type": "string"
@@ -422,6 +625,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "required": [
                     "version",
                     "label"
+                  ]
+                },
+                "sourceConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
                   ]
                 },
                 "kafkaConfig": {
@@ -1123,6 +1373,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "sourceConfig",
+                "sourceConnectionIdentity",
                 "kafkaConfig",
                 "proxyConfig",
                 "configChecksum",
@@ -1300,6 +1551,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "snapshotPrefix": {
                         "type": "string"
                       },
+                      "sourceConnectionIdentity": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "endpoint": {
+                            "type": "string"
+                          },
+                          "allowInsecure": {
+                            "type": "boolean"
+                          },
+                          "authType": {
+                            "type": "string"
+                          },
+                          "authBasicSecretName": {
+                            "type": "string"
+                          },
+                          "authSigv4Region": {
+                            "type": "string"
+                          },
+                          "authSigv4Service": {
+                            "type": "string"
+                          },
+                          "authMtlsClientSecretName": {
+                            "type": "string"
+                          },
+                          "authMtlsCaCertHash": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "version",
+                          "endpoint",
+                          "allowInsecure",
+                          "authType",
+                          "authBasicSecretName",
+                          "authSigv4Region",
+                          "authSigv4Service",
+                          "authMtlsClientSecretName",
+                          "authMtlsCaCertHash"
+                        ]
+                      },
                       "config": {
                         "type": "object",
                         "properties": {
@@ -1358,6 +1656,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "includeGlobalState": {
                             "type": "boolean",
                             "default": true
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "create",
+                              "import"
+                            ],
+                            "default": "create"
+                          },
+                          "solrCollections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
                           }
                         }
                       },
@@ -1420,21 +1733,32 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           ]
                         }
                       },
+                      "dependsOn": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "configChecksum": {
                         "type": "string"
                       },
                       "resourceUid": {
+                        "type": "string"
+                      },
+                      "solrExternalBackupName": {
                         "type": "string"
                       }
                     },
                     "required": [
                       "label",
                       "snapshotPrefix",
+                      "sourceConnectionIdentity",
                       "config",
                       "repo",
                       "semaphoreConfigMapName",
                       "semaphoreKey",
                       "dependsOnProxySetups",
+                      "dependsOn",
                       "configChecksum",
                       "resourceUid"
                     ]
@@ -1590,13 +1914,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     {
                       "type": "object",
                       "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        },
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName",
+                        "externalSnapshotName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
                         "externalSnapshotName": {
                           "type": "string"
                         }
                       },
                       "required": [
                         "externalSnapshotName"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -1607,7 +1948,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "required": [
                         "dataSnapshotResourceName"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -2144,6 +2486,100 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   }
                 },
+                "sourceConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
+                "targetConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
                 "sourceVersion": {
                   "type": "string"
                 },
@@ -2335,6 +2771,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "migrationLabel",
                 "snapshotNameResolution",
                 "snapshotConfigChecksum",
+                "sourceConnectionIdentity",
+                "targetConnectionIdentity",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
@@ -2376,7 +2814,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "snapshot": {
                         "type": "string",
-                        "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                        "description": "Name of the snapshot or backup. Must match a key in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups."
                       },
                       "migrationLabel": {
                         "type": "string"
@@ -2942,6 +3380,53 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label"
                   ]
                 },
+                "targetConnectionIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean"
+                    },
+                    "authType": {
+                      "type": "string"
+                    },
+                    "authBasicSecretName": {
+                      "type": "string"
+                    },
+                    "authSigv4Region": {
+                      "type": "string"
+                    },
+                    "authSigv4Service": {
+                      "type": "string"
+                    },
+                    "authMtlsClientSecretName": {
+                      "type": "string"
+                    },
+                    "authMtlsCaCertHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "version",
+                    "endpoint",
+                    "allowInsecure",
+                    "authType",
+                    "authBasicSecretName",
+                    "authSigv4Region",
+                    "authSigv4Service",
+                    "authMtlsClientSecretName",
+                    "authMtlsCaCertHash"
+                  ]
+                },
                 "configChecksum": {
                   "type": "string"
                 },
@@ -2961,6 +3446,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "kafkaConfig",
                 "replayerConfig",
                 "toTarget",
+                "targetConnectionIdentity",
                 "configChecksum",
                 "resourceUid"
               ]
@@ -3235,83 +3721,306 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
           },
           "snapshotInfo": {
-            "type": "object",
-            "properties": {
-              "repos": {
+            "anyOf": [
+              {
                 "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "repoPathUri": {
-                      "type": "string",
-                      "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                "properties": {
+                  "repos": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "repoPathUri": {
+                          "type": "string",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
+                        "awsRegion": {
+                          "type": "string",
+                          "default": "",
+                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                          "default": "",
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": "",
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                        }
+                      },
+                      "required": [
+                        "repoPathUri"
+                      ],
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                     },
-                    "awsRegion": {
-                      "type": "string",
-                      "default": "",
-                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
-                    },
-                    "endpoint": {
-                      "type": "string",
-                      "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
-                      "default": "",
-                      "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
-                    },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                      "default": "",
-                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-                    }
+                    "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                   },
-                  "required": [
-                    "repoPathUri"
-                  ],
-                  "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                  "snapshots": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "config": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "externallyManagedSnapshotName": {
+                                  "type": "string",
+                                  "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                }
+                              },
+                              "required": [
+                                "externallyManagedSnapshotName"
+                              ],
+                              "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "createSnapshotConfig": {
+                                  "type": "object",
+                                  "properties": {
+                                    "snapshotPrefix": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "jvmArgs": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                    },
+                                    "loggingConfigurationOverrideConfigMap": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                    },
+                                    "otelTraceCollectorEndpoint": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            ""
+                                          ]
+                                        },
+                                        {
+                                          "type": "string"
+                                        }
+                                      ],
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                    },
+                                    "otelMetricsCollectorEndpoint": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            ""
+                                          ]
+                                        },
+                                        {
+                                          "type": "string"
+                                        }
+                                      ],
+                                      "default": "http://otel-collector:4317",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                    },
+                                    "indexAllowlist": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "default": [],
+                                      "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "maxSnapshotRateMbPerNode": {
+                                      "type": "number",
+                                      "default": 0,
+                                      "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                                    },
+                                    "compressionEnabled": {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "includeGlobalState": {
+                                      "type": "boolean",
+                                      "default": true,
+                                      "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                      "changeRestriction": "impossible"
+                                    }
+                                  },
+                                  "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
+                                }
+                              },
+                              "required": [
+                                "createSnapshotConfig"
+                              ],
+                              "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
+                            }
+                          ],
+                          "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                        },
+                        "repoName": {
+                          "type": "string",
+                          "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                        }
+                      },
+                      "required": [
+                        "config",
+                        "repoName"
+                      ],
+                      "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
+                    },
+                    "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
+                  },
+                  "serializeSnapshotCreation": {
+                    "type": "boolean",
+                    "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                  }
                 },
-                "description": "S3 snapshot repositories registered with the source cluster."
+                "required": [
+                  "snapshots"
+                ],
+                "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
               },
-              "snapshots": {
+              {
                 "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "config": {
+                "properties": {
+                  "repos": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "repoPathUri": {
+                          "type": "string",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
+                        "awsRegion": {
+                          "type": "string",
+                          "default": "",
+                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                          "default": "",
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": "",
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                        }
+                      },
+                      "required": [
+                        "repoPathUri"
+                      ],
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                    },
+                    "description": "Solr backup repositories registered with the source cluster."
+                  },
+                  "backups": {
+                    "type": "object",
+                    "additionalProperties": {
                       "anyOf": [
                         {
                           "type": "object",
                           "properties": {
-                            "externallyManagedSnapshotName": {
+                            "externalBackupName": {
                               "type": "string",
-                              "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                              "description": "Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."
+                            },
+                            "repoName": {
+                              "type": "string",
+                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                            },
+                            "collectionAllowlist": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "default": [],
+                              "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                            },
+                            "otelTraceCollectorEndpoint": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    ""
+                                  ]
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ],
+                              "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                            },
+                            "otelMetricsCollectorEndpoint": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    ""
+                                  ]
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ],
+                              "default": "http://otel-collector:4317",
+                              "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                            },
+                            "jvmArgs": {
+                              "type": "string",
+                              "default": "",
+                              "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                            },
+                            "loggingConfigurationOverrideConfigMap": {
+                              "type": "string",
+                              "default": "",
+                              "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                             }
                           },
                           "required": [
-                            "externallyManagedSnapshotName"
+                            "externalBackupName",
+                            "repoName"
                           ],
-                          "description": "Reference to a snapshot that was created outside of this migration workflow."
+                          "description": "Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate."
                         },
                         {
                           "type": "object",
                           "properties": {
-                            "createSnapshotConfig": {
+                            "repoName": {
+                              "type": "string",
+                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                            },
+                            "createBackupConfig": {
                               "type": "object",
                               "properties": {
                                 "snapshotPrefix": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
+                                  "description": "Prefix for auto-generated Solr backup names. When set, the backup name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
                                 },
-                                "jvmArgs": {
-                                  "type": "string",
-                                  "default": "",
-                                  "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
-                                },
-                                "loggingConfigurationOverrideConfigMap": {
-                                  "type": "string",
-                                  "default": "",
-                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                "collectionAllowlist": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "default": [],
+                                  "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                 },
                                 "otelTraceCollectorEndpoint": {
                                   "anyOf": [
@@ -3342,63 +4051,43 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "default": "http://otel-collector:4317",
                                   "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                                 },
-                                "indexAllowlist": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  },
-                                  "default": [],
-                                  "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": "",
+                                  "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                                 },
-                                "maxSnapshotRateMbPerNode": {
-                                  "type": "number",
-                                  "default": 0,
-                                  "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
-                                },
-                                "compressionEnabled": {
-                                  "type": "boolean",
-                                  "default": false,
-                                  "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
-                                },
-                                "includeGlobalState": {
-                                  "type": "boolean",
-                                  "default": true,
-                                  "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                                "loggingConfigurationOverrideConfigMap": {
+                                  "type": "string",
+                                  "default": "",
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                 }
                               },
-                              "description": "Configuration for creating a new snapshot of the source cluster."
+                              "description": "Configuration for creating a new Solr backup of the source cluster."
                             }
                           },
                           "required": [
-                            "createSnapshotConfig"
+                            "repoName",
+                            "createBackupConfig"
                           ],
-                          "description": "Configuration to create a new snapshot of the source cluster as part of the migration workflow."
+                          "description": "Configuration to create a new Solr backup of the source cluster as part of the migration workflow."
                         }
                       ],
-                      "description": "Snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                      "description": "Solr backup source: either reference an existing backup or configure creation of a new one."
                     },
-                    "repoName": {
-                      "type": "string",
-                      "description": "Name of the S3 snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
-                    }
+                    "description": "Solr backups to use or create for this source cluster."
                   },
-                  "required": [
-                    "config",
-                    "repoName"
-                  ],
-                  "description": "A snapshot configuration bound to a specific repository."
+                  "serializeSnapshotCreation": {
+                    "type": "boolean",
+                    "description": "Controls whether Solr backup creation or prepare/validation steps for this source run one-at-a-time or in parallel. When omitted, defaults are version-based."
+                  }
                 },
-                "description": "Snapshots to use or create for this source cluster."
-              },
-              "serializeSnapshotCreation": {
-                "type": "boolean",
-                "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                "required": [
+                  "backups"
+                ],
+                "description": "Solr backup repository and backup configuration for a source cluster."
               }
-            },
-            "required": [
-              "snapshots"
             ],
-            "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source."
+            "description": "Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source."
           }
         },
         "required": [
@@ -5228,7 +5917,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "snapshot": {
                       "type": "string",
-                      "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                      "description": "Name of the snapshot or backup. Must match a key in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups."
                     }
                   },
                   "required": [
