@@ -45,7 +45,7 @@ public class Accumulation {
     private RequestResponsePacketPairWithCallback rrPairWithCallback;
     AtomicLong newestPacketTimestampInMillis;
     final AtomicLong lastWallClockUpdateMillis;
-    State state;
+    volatile State state;
     AtomicInteger numberOfResets;
     int startingSourceRequestIndex;
     private volatile boolean hasBeenExpired;
