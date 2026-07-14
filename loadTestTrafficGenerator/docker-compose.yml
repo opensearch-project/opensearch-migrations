@@ -121,6 +121,7 @@ services:
       - "4317:4317"    # OTLP gRPC receiver
       - "4318:4318"    # OTLP HTTP receiver
       - "8889:8889"    # Prometheus scrape endpoint
+      - "9090:9090"    # Prometheus remote write receiver (k6)
 
   # ── Prometheus ──────────────────────────────────────────────────────────
   # Scrapes otel-collector for pipeline metrics.
@@ -193,7 +194,7 @@ services:
       - .:/scripts
     environment:
       # Prometheus remote write: k6 metrics land alongside pipeline metrics
-      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
+      - K6_PROMETHEUS_RW_SERVER_URL=http://otel-collector:9090/api/v1/write
       - K6_PROMETHEUS_RW_TREND_STATS=p(50),p(90),p(95),p(99),max
       # Scenario config (see available .env files for the different scenarios)
       - CAPTURE_PROXY_URL=https://capture-proxy:9200

@@ -12,6 +12,8 @@ receivers:
       - brokers
       - topics
       - consumers
+  prometheusremotewrite:
+    endpoint: 0.0.0.0:9090
 
 processors:
   batch:
@@ -31,7 +33,7 @@ exporters:
 service:
   pipelines:
     metrics:
-      receivers: [otlp, kafkametrics]
+      receivers: [otlp, kafkametrics, prometheusremotewrite]
       processors: [batch]
       exporters: [prometheus, debug]
     traces:
