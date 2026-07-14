@@ -177,6 +177,7 @@ kubectl patch capturedtraffic "$CT_NAME" \\
                 c.register({
                     topicCrName: b.inputs.topicCrName,
                     kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaConfig: expr.serialize(expr.get(loaderCfg, "kafkaConfig")),
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,
