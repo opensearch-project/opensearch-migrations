@@ -1,9 +1,9 @@
 /**
- * Mixed scenario — Phase 4 (Profile 3)
+ * Mixed scenario — Phases 4 & 5 (Profile 3)
  *
  * Two independent k6 scenarios share one test run:
- *   mixed_ingest  — constant-arrival-rate ingest (Profile 1 operation mix)
- *   mixed_search  — constant-arrival-rate search (Profile 2 operation mix)
+ *   mixed_ingest  — ingest stream (Profile 1 operation mix)
+ *   mixed_search  — search stream (Profile 2 operation mix)
  *
  * Shared ID registry: ingest VUs write newly-created doc IDs to a Redis ring
  * buffer. CONSISTENCY_FRACTION of search iterations draw an ID from the ring
@@ -13,19 +13,29 @@
  * Key environment variables (see k6-config/mixed-steady.env for defaults):
  *   CAPTURE_PROXY_URL       — HTTPS endpoint of the Capture Proxy
  *   INDEX_NAME              — target OpenSearch index
- *   INGEST_RATE             — target ingest requests/second
- *   SEARCH_RATE             — target search requests/second
+ *   INGEST_RATE             — target ingest requests/second (constant) or max stage target
+ *   SEARCH_RATE             — target search requests/second (constant) or max stage target
  *   INGEST_VUS              — pre-allocated ingest VUs
  *   INGEST_MAX_VUS          — max ingest VUs k6 may spin up
  *   SEARCH_VUS              — pre-allocated search VUs
  *   SEARCH_MAX_VUS          — max search VUs k6 may spin up
- *   DURATION                — test duration for both streams (e.g. "5m")
+ *   DURATION                — test duration for both streams; ignored when ramping (stages define it)
  *   BULK_BATCH_SIZE         — documents per _bulk call
  *   SEQUENCE_FRACTION       — fraction of ingest iterations run as create→update→query→delete
  *   CONSISTENCY_FRACTION    — fraction of search iterations that query a recently-ingested doc
  *   CONNECTION_MODE         — "pinned" (default, keep-alive) or "spread" (Connection: close)
  *   SEED_DOC_COUNT          — expected document count (informs seed sampling in setup)
  *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
+ *   EXECUTOR                — "constant-arrival-rate" (default) or "ramping-arrival-rate"
+ *   INGEST_RAMP_STAGES      — JSON stage array for the ingest stream when EXECUTOR=ramping-arrival-rate
+ *                             e.g. '[{"duration":"2m","target":80},{"duration":"1m","target":0}]'
+ *   SEARCH_RAMP_STAGES      — JSON stage array for the search stream when EXECUTOR=ramping-arrival-rate
+ *   MIN_RING_FILL           — minimum number of IDs the ring must contain before search VUs start;
+ *                             converted to a startTime delay using the estimated single-doc ID rate
+ *                             (INGEST_RATE × (1−SEQUENCE_FRACTION) × 0.3); default 0 (no delay)
+ *   CONTROL_ENABLED         — "true" to enable mid-test pause/resume/rate control via Webdis;
+ *                             defaults to "false" (no-op). See lib/control.js and DESIGN.md §11.
+ *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
  */
 
 import http from 'k6/http';
@@ -36,6 +46,7 @@ import { runSequence } from '../lib/sequences.js';
 import { flatSearch, aggSearch } from '../lib/queries.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
+import { checkControl } from '../lib/control.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends type suffixes; names here must NOT include them.
@@ -70,6 +81,25 @@ const BATCH_SIZE           = parseInt(__ENV.BULK_BATCH_SIZE  || '20');
 const SEQ_FRACTION         = parseFloat(__ENV.SEQUENCE_FRACTION     || '0.15');
 const CONSISTENCY_FRACTION = parseFloat(__ENV.CONSISTENCY_FRACTION  || '0.10');
 const CONNECTION_MODE      = __ENV.CONNECTION_MODE          || 'pinned';
+const EXECUTOR             = __ENV.EXECUTOR                 || 'constant-arrival-rate';
+const INGEST_RAMP_STAGES   = __ENV.INGEST_RAMP_STAGES
+  ? JSON.parse(__ENV.INGEST_RAMP_STAGES)
+  : [{ duration: DURATION, target: INGEST_RATE }];
+const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
+  ? JSON.parse(__ENV.SEARCH_RAMP_STAGES)
+  : [{ duration: DURATION, target: SEARCH_RATE }];
+
+// ── Ring fill delay ────────────────────────────────────────────────────────
+// Single-doc writes (the only operations that register IDs to the ring) occur
+// at INGEST_RATE × (1 − SEQ_FRACTION) × 0.3 per second. MIN_RING_FILL converts
+// a desired ID count into an estimated startTime delay for the search scenario,
+// so search VUs don't begin until the ring has enough entries to hit consistently.
+const MIN_RING_FILL     = parseInt(__ENV.MIN_RING_FILL || '0');
+const EST_ID_RATE       = INGEST_RATE * (1 - SEQ_FRACTION) * 0.3;
+const RING_FILL_DELAY_S = MIN_RING_FILL > 0 && EST_ID_RATE > 0
+  ? Math.ceil(MIN_RING_FILL / EST_ID_RATE)
+  : 0;
+const SEARCH_START_TIME = RING_FILL_DELAY_S > 0 ? `${RING_FILL_DELAY_S}s` : undefined;
 
 // ── Static data (loaded once in init context) ──────────────────────────────
 const fieldValues   = JSON.parse(open('../data/field-value-sample.json'));
@@ -78,12 +108,18 @@ const INDEX_MAPPING = open('../data/nyc_taxis_mapping.json');
 // ── Connection params (resolved once in init context) ──────────────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
 
-// ── k6 options ─────────────────────────────────────────────────────────────
-export const options = {
-  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
-
-  scenarios: {
-    mixed_ingest: {
+// ── Scenario configs (built at init time from EXECUTOR env var) ────────────
+const mixedIngestScenario = EXECUTOR === 'ramping-arrival-rate'
+  ? {
+      executor: 'ramping-arrival-rate',
+      exec: 'ingestVU',
+      startRate: 0,
+      timeUnit: '1s',
+      preAllocatedVUs: INGEST_VUS,
+      maxVUs: INGEST_MAX_VUS,
+      stages: INGEST_RAMP_STAGES,
+    }
+  : {
       executor: 'constant-arrival-rate',
       exec: 'ingestVU',
       rate: INGEST_RATE,
@@ -91,8 +127,20 @@ export const options = {
       duration: DURATION,
       preAllocatedVUs: INGEST_VUS,
       maxVUs: INGEST_MAX_VUS,
-    },
-    mixed_search: {
+    };
+
+const mixedSearchScenario = EXECUTOR === 'ramping-arrival-rate'
+  ? {
+      executor: 'ramping-arrival-rate',
+      exec: 'searchVU',
+      startRate: 0,
+      timeUnit: '1s',
+      preAllocatedVUs: SEARCH_VUS,
+      maxVUs: SEARCH_MAX_VUS,
+      stages: SEARCH_RAMP_STAGES,
+      ...(SEARCH_START_TIME !== undefined ? { startTime: SEARCH_START_TIME } : {}),
+    }
+  : {
       executor: 'constant-arrival-rate',
       exec: 'searchVU',
       rate: SEARCH_RATE,
@@ -100,7 +148,16 @@ export const options = {
       duration: DURATION,
       preAllocatedVUs: SEARCH_VUS,
       maxVUs: SEARCH_MAX_VUS,
-    },
+      ...(SEARCH_START_TIME !== undefined ? { startTime: SEARCH_START_TIME } : {}),
+    };
+
+// ── k6 options ─────────────────────────────────────────────────────────────
+export const options = {
+  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
+
+  scenarios: {
+    mixed_ingest: mixedIngestScenario,
+    mixed_search: mixedSearchScenario,
   },
 
   thresholds: {
@@ -165,6 +222,12 @@ export function setup() {
   // Flush the ID ring so the test does not draw from a previous run's IDs.
   registryFlush();
   console.log('setup: flushed ID ring (recent_ids)');
+  if (RING_FILL_DELAY_S > 0) {
+    console.log(
+      `setup: search VUs delayed by ${RING_FILL_DELAY_S}s ` +
+      `(MIN_RING_FILL=${MIN_RING_FILL} IDs ÷ est. ${EST_ID_RATE.toFixed(1)} IDs/s from single-doc ingest)`
+    );
+  }
 
   // Sample seed doc IDs for the search stream's partial-update operation.
   const sampleRes = http.post(
@@ -197,6 +260,8 @@ export function setup() {
 // Dispatch: SEQ_FRACTION → sequence (ephemeral, no registry)
 //           remaining budget → 70% bulk / 30% single-doc with registry
 export function ingestVU() {
+  if (!checkControl(INGEST_RATE)) return;
+
   const r = Math.random();
   if (r < SEQ_FRACTION) {
     doSequence();
@@ -211,6 +276,8 @@ export function ingestVU() {
 // CONSISTENCY_FRACTION of iterations draw a recently-ingested ID from Redis.
 // The remaining iterations run the standard Profile 2 mix.
 export function searchVU(data) {
+  if (!checkControl(SEARCH_RATE)) return;
+
   const { seedDocIds } = data;
 
   if (Math.random() < CONSISTENCY_FRACTION) {

@@ -1,21 +1,31 @@
 /**
- * Ingest scenario — Phases 1 & 2 (Profile 1)
+ * Ingest scenario — Phases 1, 2 & 5 (Profile 1)
  *
  * Phase 1 (SEQUENCE_FRACTION=0): 70% _bulk, 30% single-doc writes.
  * Phase 2 (SEQUENCE_FRACTION>0): remaining budget split 70/30 between bulk and single-doc.
  *   Default: 15% stateful sequence, 59.5% bulk, 25.5% single-doc.
+ * Phase 5 (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
  *
  * Key environment variables (see k6-config/ingest-steady.env for defaults):
  *   CAPTURE_PROXY_URL  — HTTPS endpoint of the Capture Proxy
  *   INDEX_NAME         — target OpenSearch index
- *   INGEST_RATE        — target requests/second (arrival rate)
+ *   INGEST_RATE        — target requests/second for constant-arrival-rate executor;
+ *                        also used as stage target when RAMP_STAGES is not set
  *   INGEST_VUS         — pre-allocated VUs (= concurrent connections in pinned mode)
  *   INGEST_MAX_VUS     — max VUs k6 may spin up to meet the rate
- *   DURATION           — test duration (e.g. "5m", "30s")
+ *   DURATION           — test duration for constant-arrival-rate executor;
+ *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
  *   BULK_BATCH_SIZE    — documents per _bulk call
  *   SEQUENCE_FRACTION  — share of iterations run as a create→update→query→delete sequence
  *                        (0.0 = Phase 1 behavior; default 0.15)
  *   CONNECTION_MODE    — "pinned" (default, keep-alive) or "spread" (Connection: close)
+ *   EXECUTOR           — "constant-arrival-rate" (default) or "ramping-arrival-rate"
+ *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
+ *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
+ *                        Omit to use a single hold-at-INGEST_RATE-for-DURATION stage.
+ *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Webdis;
+ *                        defaults to "false" (no-op). See lib/control.js and DESIGN.md §11.
+ *   CONTROL_CMD_KEY    — Redis key polled for control commands (default: "control_cmd")
  */
 
 import http from 'k6/http';
@@ -24,6 +34,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 import { randomDocument, randomBulkBatch } from '../lib/documents.js';
 import { runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
+import { checkControl } from '../lib/control.js';
 
 // ── Custom metrics ─────────────────────────────────────────────────────────
 // k6 remote-write appends its own type suffix; names here must NOT include suffixes.
@@ -45,6 +56,10 @@ const DURATION        = __ENV.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(__ENV.BULK_BATCH_SIZE     || '20');
 const SEQ_FRACTION    = parseFloat(__ENV.SEQUENCE_FRACTION || '0.15');
 const CONNECTION_MODE = __ENV.CONNECTION_MODE     || 'pinned';
+const EXECUTOR        = __ENV.EXECUTOR            || 'constant-arrival-rate';
+const RAMP_STAGES     = __ENV.RAMP_STAGES
+  ? JSON.parse(__ENV.RAMP_STAGES)
+  : [{ duration: DURATION, target: RATE }];
 
 // ── Index mapping (read once in init context) ──────────────────────────────
 const INDEX_MAPPING = open('../data/nyc_taxis_mapping.json');
@@ -52,19 +67,31 @@ const INDEX_MAPPING = open('../data/nyc_taxis_mapping.json');
 // ── Connection params (resolved once per VU in init context) ───────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
 
-// ── k6 options ─────────────────────────────────────────────────────────────
-export const options = {
-  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert (generateSelfSignedCerts task)
-
-  scenarios: {
-    ingest: {
+// ── Scenario config (built at init time from EXECUTOR env var) ─────────────
+const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
+  ? {
+      executor: 'ramping-arrival-rate',
+      startRate: 0,
+      timeUnit: '1s',
+      preAllocatedVUs: VUS,
+      maxVUs: MAX_VUS,
+      stages: RAMP_STAGES,
+    }
+  : {
       executor: 'constant-arrival-rate',
       rate: RATE,
       timeUnit: '1s',
       duration: DURATION,
       preAllocatedVUs: VUS,
       maxVUs: MAX_VUS,
-    },
+    };
+
+// ── k6 options ─────────────────────────────────────────────────────────────
+export const options = {
+  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert (generateSelfSignedCerts task)
+
+  scenarios: {
+    ingest: ingestScenario,
   },
 
   thresholds: {
@@ -102,6 +129,8 @@ export function setup() {
 // ── VU function ────────────────────────────────────────────────────────────
 // Dispatch: SEQ_FRACTION → sequence; remaining budget → 70% bulk / 30% single-doc.
 export default function () {
+  if (!checkControl(RATE)) return;
+
   const r = Math.random();
   if (r < SEQ_FRACTION) {
     doSequence();
