@@ -109,33 +109,29 @@ class OffsetLifecycleTracker {
     Optional<Long> reapStaleHead(Duration staleThreshold) {
         synchronized (pQueue) {
             int reaped = 0;
-            while (true) {
-                var head = pQueue.peek();
-                if (head == null) {
-                    break;
-                }
+            for (var head = pQueue.peek(); head != null; head = pQueue.peek()) {
                 var meta = offsetMetadataMap.get(head);
                 if (meta == null) {
                     log.atError().setMessage("Offset {} in queue has no metadata — data structure inconsistency, removing orphan")
                         .addArgument(head).log();
-                    pQueue.remove(head);
+                    pQueue.poll();
                     reaped++;
-                    continue;
+                } else {
+                    var age = Duration.between(meta.addedAt, clock.instant());
+                    if (age.compareTo(staleThreshold) <= 0) {
+                        break;
+                    }
+                    if (reaped == 0) {
+                        log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
+                            .addArgument(head)
+                            .addArgument(meta.connectionId)
+                            .addArgument(age)
+                            .log();
+                    }
+                    pQueue.poll();
+                    offsetMetadataMap.remove(head);
+                    reaped++;
                 }
-                var age = Duration.between(meta.addedAt, clock.instant());
-                if (age.compareTo(staleThreshold) <= 0) {
-                    break;
-                }
-                if (reaped == 0) {
-                    log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
-                        .addArgument(head)
-                        .addArgument(meta.connectionId)
-                        .addArgument(age)
-                        .log();
-                }
-                pQueue.remove(head);
-                offsetMetadataMap.remove(head);
-                reaped++;
             }
             if (reaped == 0) {
                 return Optional.empty();

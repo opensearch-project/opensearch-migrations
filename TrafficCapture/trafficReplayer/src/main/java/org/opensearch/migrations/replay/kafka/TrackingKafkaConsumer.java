@@ -249,7 +249,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public Optional<Instant> getNextRequiredTouch() {
         var lastTouchTime = lastTouchTimeRef.get();
         Optional<Instant> r;
-        if (kafkaRecordsLeftToCommitEventually.get() == 0) {
+        if (partitionToOffsetLifecycleTrackerMap.isEmpty() && kafkaRecordsLeftToCommitEventually.get() == 0) {
             r = Optional.empty();
         }
         else {
@@ -372,8 +372,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 }
             }
         } catch (RuntimeException e) {
-            log.atWarn().setCause(e)
-                .setMessage("Stale head reaping failed — skipping this sweep to avoid disrupting record consumption")
+            log.atError().setCause(e)
+                .setMessage("Stale head reaping failed — if persistent, stale offsets will block commit advancement")
                 .log();
         }
     }
