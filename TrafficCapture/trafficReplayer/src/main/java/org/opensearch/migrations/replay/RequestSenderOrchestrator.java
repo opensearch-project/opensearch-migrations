@@ -123,10 +123,10 @@ public class RequestSenderOrchestrator {
         // less likely to cause a connection timeout.
         var timerFuture = bindNettyScheduleToCompletableFuture(
             connectionSession.eventLoop, timestamp);
-        connectionSession.pendingTransformationTimers.add(timerFuture.future);
+        connectionSession.addPendingTransformationTimer(timerFuture.future);
         timerFuture.future.whenComplete((v, t) -> {
             if (t == null) {
-                connectionSession.pendingTransformationTimers.remove(timerFuture.future);
+                connectionSession.removePendingTransformationTimer(timerFuture.future);
             }
         });
         return timerFuture

@@ -279,7 +279,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         // Wait for event loop to process the timer scheduling
         session.eventLoop.submit(() -> {}).sync();
 
-        Assertions.assertFalse(session.pendingTransformationTimers.isEmpty(),
+        Assertions.assertTrue(session.hasPendingTransformationTimers(),
             "Transformation timer should be tracked before cancel");
         Assertions.assertEquals(PERMIT_COUNT - 1,
             limiter.liveTrafficStreamCostGate.availablePermits(),
