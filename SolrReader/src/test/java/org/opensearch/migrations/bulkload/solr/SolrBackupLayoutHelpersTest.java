@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout.SolrBackupMode;
@@ -184,6 +185,85 @@ class SolrBackupLayoutHelpersTest {
         assertThat(
             SolrBackupLayout.detectFlatRootStandaloneFromS3(List.of("_0.si", "random.txt"), "snapshot.x"),
             nullValue());
+    }
+
+    // ---- detectBareLayout (lambda-driven composition) ----
+
+    private static Supplier<List<String>> noSubDirs() {
+        return List::of;
+    }
+
+    private static <T> Supplier<T> mustNotBeCalled(String why) {
+        return () -> {
+            throw new AssertionError(why);
+        };
+    }
+
+    @Test
+    void detectBareLayout_cloudRecoversNameViaDownloadLambda() throws IOException {
+        Files.writeString(tempDir.resolve("backup.properties"), "collection=events\n");
+
+        var layout = SolrBackupLayout.detectBareLayout(
+            () -> List.of("zk_backup"),
+            mustNotBeCalled("root files must not be listed for a cloud sub-dir layout"),
+            () -> tempDir,
+            mustNotBeCalled("root key must not be read for a cloud sub-dir layout"));
+
+        assertThat(layout.mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(layout.collectionName(), equalTo("events"));
+    }
+
+    @Test
+    void detectBareLayout_cloudNameNullWhenDownloadThrows() {
+        Supplier<Path> failingDownload = () -> {
+            throw new RuntimeException("download failed");
+        };
+
+        var layout = SolrBackupLayout.detectBareLayout(
+            () -> List.of("zk_backup"),
+            mustNotBeCalled("no root files for a cloud layout"),
+            failingDownload,
+            mustNotBeCalled("no root key for a cloud layout"));
+
+        assertThat(layout.mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(layout.collectionName(), nullValue());
+    }
+
+    @Test
+    void detectBareLayout_flatRootStandaloneUsesRootFilesAndKey() {
+        var layout = SolrBackupLayout.detectBareLayout(
+            noSubDirs(),
+            () -> List.of("segments_2"),
+            mustNotBeCalled("backup.properties must not be downloaded for a standalone index"),
+            () -> "backups/snapshot.catalog");
+
+        assertThat(layout.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(layout.collectionName(), equalTo("catalog"));
+        assertThat(layout.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void detectBareLayout_nullForWrappedWithoutProbingRootFilesOrKey() {
+        var layout = SolrBackupLayout.detectBareLayout(
+            () -> List.of("col_a", "col_b"),
+            mustNotBeCalled("root files must not be listed for a wrapped layout"),
+            mustNotBeCalled("no download for a wrapped layout"),
+            mustNotBeCalled("no root key for a wrapped layout"));
+
+        assertThat(layout, nullValue());
+    }
+
+    @Test
+    void detectBareLayout_nullWhenRootListingThrows() {
+        var layout = SolrBackupLayout.detectBareLayout(
+            noSubDirs(),
+            () -> {
+                throw new RuntimeException("cannot list root");
+            },
+            mustNotBeCalled("no download when root listing fails"),
+            () -> "backups/x");
+
+        assertThat(layout, nullValue());
     }
 
     // ---- readCollectionNameFromBackupProperties ----

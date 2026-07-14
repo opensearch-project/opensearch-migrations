@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -519,6 +520,75 @@ public final class SolrBackupLayout {
         }
         var name = requireDerivedStandaloneName(stripSnapshotPrefix(lastPathSegment(rootName)), rootName);
         return new BareBackupLayout(SolrBackupMode.STANDALONE, name, "");
+    }
+
+    /**
+     * Repository-agnostic composition of the bare-backup detection primitives, driven by listing and
+     * download lambdas rather than a concrete repository type. This lets callers backed by different
+     * repositories — {@code S3Repo} in {@code ClusterReaderExtractor}, or a raw {@code S3Client} in the
+     * CreateSnapshot prepare step — share one detection path without a common module dependency.
+     *
+     * <p>Mirrors the branch order of the listing-based S3 detection: sub-directory listing first, then a
+     * root-file probe for a flat standalone index (only when there are no sub-directories), and finally a
+     * {@code backup.properties} download to recover a CLOUD collection name the listing alone can't supply.
+     *
+     * <p>All inputs are lazy: {@code listRootFiles} and {@code rootKey} are consulted only on the flat-root
+     * branch, and {@code downloadBackupPropertiesDir} only when a CLOUD layout has no name in the listing.
+     * Callers may therefore leave the corresponding operations unimplemented for layouts that never reach
+     * those branches.
+     *
+     * @param listSubDirectories          returns the immediate sub-directory names under the backup root
+     * @param listRootFiles               returns the top-level file names under the backup root; may throw
+     *                                    if the root cannot be listed, in which case no flat-root standalone
+     *                                    is reported
+     * @param downloadBackupPropertiesDir downloads {@code backup.properties} under the backup root and
+     *                                    returns the local directory to read it from; may throw, in which
+     *                                    case the CLOUD name is left {@code null}
+     * @param rootKey                     supplies the backup root's key/path, used to derive a standalone
+     *                                    core name from its final segment
+     * @return the bare layout descriptor, or {@code null} if the root is not a bare single-collection backup
+     */
+    public static BareBackupLayout detectBareLayout(
+        Supplier<List<String>> listSubDirectories,
+        Supplier<List<String>> listRootFiles,
+        Supplier<Path> downloadBackupPropertiesDir,
+        Supplier<String> rootKey
+    ) {
+        var subDirs = listSubDirectories.get();
+        var bare = detectBareLayoutFromListing(subDirs);
+        if (bare == null) {
+            // A flat-root standalone index has no sub-directories at all; only then probe the root files.
+            return subDirs.isEmpty() ? detectFlatRootStandalone(listRootFiles, rootKey) : null;
+        }
+        if (bare.mode() == SolrBackupMode.CLOUD && bare.collectionName() == null) {
+            String name = null;
+            try {
+                name = readCollectionNameFromBackupProperties(downloadBackupPropertiesDir.get());
+            } catch (RuntimeException e) {
+                log.warn("Could not recover collection name from backup.properties: {}", e.getMessage());
+            }
+            return new BareBackupLayout(SolrBackupMode.CLOUD, name, bare.dataPath());
+        }
+        return bare;
+    }
+
+    private static BareBackupLayout detectFlatRootStandalone(
+        Supplier<List<String>> listRootFiles, Supplier<String> rootKey
+    ) {
+        final List<String> rootFiles;
+        try {
+            rootFiles = listRootFiles.get();
+        } catch (RuntimeException e) {
+            log.atDebug().setMessage("No flat-root standalone index at backup root: {}")
+                .addArgument(e.getMessage()).log();
+            return null;
+        }
+        var bare = detectFlatRootStandaloneFromS3(rootFiles, rootKey.get());
+        if (bare != null) {
+            log.atInfo().setMessage("Detected flat-root standalone Solr backup (core='{}')")
+                .addArgument(bare.collectionName()).log();
+        }
+        return bare;
     }
 
     private static String lastPathSegment(String key) {

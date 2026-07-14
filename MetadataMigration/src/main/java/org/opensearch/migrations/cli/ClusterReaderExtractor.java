@@ -176,40 +176,15 @@ public class ClusterReaderExtractor {
     }
 
     static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo) {
-        var subDirs = s3Repo.listTopLevelDirectories();
-        var bare = SolrBackupLayout.detectBareLayoutFromListing(subDirs);
-        if (bare == null) {
-            // A flat-root standalone index has no sub-directories at all; only then probe the root files.
-            return subDirs.isEmpty() ? detectFlatRootStandaloneInS3(s3Repo) : null;
-        }
-        if (bare.mode() == SolrBackupLayout.SolrBackupMode.CLOUD && bare.collectionName() == null) {
-            String name = null;
-            try {
+        return SolrBackupLayout.detectBareLayout(
+            s3Repo::listTopLevelDirectories,
+            s3Repo::listFilesInS3Root,
+            () -> {
                 s3Repo.downloadFile("backup.properties");
-                name = SolrBackupLayout.readCollectionNameFromBackupProperties(s3Repo.getRepoRootDir());
-            } catch (RuntimeException e) {
-                log.warn("Could not recover collection name from S3 backup.properties: {}", e.getMessage());
-            }
-            return new SolrBackupLayout.BareBackupLayout(SolrBackupLayout.SolrBackupMode.CLOUD, name, bare.dataPath());
-        }
-        return bare;
-    }
-
-    /** Standalone core whose flat Lucene index is at the S3 root (segments_N, no snapshot.<name>/ wrapper). */
-    private static SolrBackupLayout.BareBackupLayout detectFlatRootStandaloneInS3(S3Repo s3Repo) {
-        final List<String> rootFiles;
-        try {
-            rootFiles = s3Repo.listFilesInS3Root();
-        } catch (RuntimeException e) {
-            log.atDebug().setMessage("No flat-root standalone index at S3 root: {}").addArgument(e.getMessage()).log();
-            return null;
-        }
-        var bare = SolrBackupLayout.detectFlatRootStandaloneFromS3(rootFiles, s3Repo.getS3RepoUri().key);
-        if (bare != null) {
-            log.atInfo().setMessage("Detected flat-root standalone Solr backup in S3 (core='{}')")
-                .addArgument(bare.collectionName()).log();
-        }
-        return bare;
+                return s3Repo.getRepoRootDir();
+            },
+            () -> s3Repo.getS3RepoUri().key
+        );
     }
 
     private ClusterReader buildSolrSnapshotReader(
