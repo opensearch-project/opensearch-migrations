@@ -1,6 +1,5 @@
 from enum import Enum
 import logging
-import subprocess
 import time
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
