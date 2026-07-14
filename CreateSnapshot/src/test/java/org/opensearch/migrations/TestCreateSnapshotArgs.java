@@ -83,10 +83,9 @@ public class TestCreateSnapshotArgs {
         args.snapshotRepoName = "repo";
         args.repoUri = "gs://bucket/path";
 
-        var strategy = new SolrBackupStrategy(args);
         // Guard must fire before any Solr network call, so this fails fast rather
         // than discovering collections against a (non-existent) Solr at localhost.
-        var ex = assertThrows(ParameterException.class, strategy::run);
+        var ex = assertThrows(ParameterException.class, () -> new SolrBackupStrategy(args));
         assertThat(ex.getMessage(), containsString("gs://"));
     }
 }

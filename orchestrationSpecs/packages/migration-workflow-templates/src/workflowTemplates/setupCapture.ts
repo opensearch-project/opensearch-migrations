@@ -825,6 +825,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 c.register({
                     topicCrName: b.inputs.topicCrName,
                     kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaConfig: expr.serialize(expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig")),
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,

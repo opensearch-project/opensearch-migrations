@@ -1055,6 +1055,10 @@
                     "value": "{{inputs.parameters.kafkaClusterName}}"
                   },
                   {
+                    "name": "kafkaConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                  },
+                  {
                     "name": "kafkaTopicName",
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },

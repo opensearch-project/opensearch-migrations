@@ -15,6 +15,7 @@ is packed into a single test that exercises:
   - Full doc-count equivalence + sampled document retrieval on the target
 """
 import logging
+import time
 import uuid
 
 import requests
@@ -26,6 +27,7 @@ from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 logger = logging.getLogger(__name__)
 
 SOLR_MIGRATION_COMPLETION_TIMEOUT_SECONDS = 45 * 60
+SOLR_EXTERNAL_IMPORT_TIMEOUT_SECONDS = 3600
 
 SOLR_ALLOW_COMBINATIONS = [
     (SolrV9_X, OpensearchV2_X),
@@ -38,8 +40,15 @@ SOLR_ALLOW_COMBINATIONS = [
     (SolrV6_X, OpensearchV3_X)
 ]
 
+SOLR_IMPORT_ALLOW_COMBINATIONS = [
+    (SolrV9_X, OpensearchV2_X),
+    (SolrV9_X, OpensearchV3_X),
+    (SolrV8_X, OpensearchV2_X),
+    (SolrV8_X, OpensearchV3_X),
+]
 
-class TestSolr0001SingleDocumentBackfill(MATestBase):
+
+class Test0071SolrCreateBackupBackfill(MATestBase):
     """Realistic customer Solr-to-OpenSearch backfill — multiple collections, multi-shard, real data.
 
     Scenarios exercised (all in one Argo workflow to keep wall-clock reasonable):
@@ -262,3 +271,159 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
         extra = f"\n  Hint: {regression_hint}" if regression_hint else ""
         raise AssertionError(
             f"Doc count mismatch in target '{collection}': expected {expected}, got {actual}.{extra}")
+
+
+class Test0070SolrExternalBackupImport(MATestBase):
+    """Solr externally-managed backup import path through the normal Solr k8s-local flow."""
+
+    def __init__(self, user_args: MATestUserArguments):
+        super().__init__(
+            user_args=user_args,
+            description=("Solr externally-managed backup import: --mode import uploads the live "
+                         "source schema into a pre-existing backup, then metadata + backfill run."),
+            migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
+            allow_source_target_combinations=SOLR_IMPORT_ALLOW_COMBINATIONS,
+        )
+        self._suffix = f"{self.unique_id}-{uuid.uuid4().hex[:4]}".replace("-", "_").lower()
+        self.collection = f"imported_{self._suffix}"
+        self.backup_name = f"external_{self._suffix}"
+        self.doc_id = "solr_0070_doc"
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        self.workflow_snapshot_and_migration_config = [{
+            "snapshotConfig": {
+                "solrBackupConfig": {
+                    "externalBackupName": self.backup_name,
+                    "collectionAllowlist": [self.collection]
+                }
+            },
+            "migrations": [{
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": {
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
+                }
+            }]
+        }]
+
+    def prepare_clusters(self):
+        logger.info(f"Creating Solr collection '{self.collection}' for external import test")
+        self.source_operations.create_index(
+            cluster=self.source_cluster, index_name=self.collection,
+            num_shards=1, replication_factor=1)
+        self.source_operations.create_document(
+            cluster=self.source_cluster, index_name=self.collection,
+            doc_id=self.doc_id,
+            data={
+                "title": "External Solr backup import",
+                "content": "Document created before an externally-managed Solr backup."
+            })
+        self._assert_source_count(self.collection, 1)
+        self._create_external_solr_backup()
+
+    def workflow_perform_migrations(self, timeout_seconds: int = SOLR_EXTERNAL_IMPORT_TIMEOUT_SECONDS):
+        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
+
+    def _create_external_solr_backup(self):
+        workflow_uid = self.argo_service.get_workflow_uid(self.workflow_name)
+        repo_prefix = workflow_uid[:8]
+        backup_location = f"/{repo_prefix}/{self.backup_name}"
+        async_id = f"{self.backup_name}_{self.collection}"
+
+        self._ensure_s3_directory_markers(repo_prefix)
+
+        logger.info(
+            f"Creating external Solr backup '{self.backup_name}' for collection "
+            f"'{self.collection}' at location '{backup_location}'")
+        response = requests.get(
+            f"{self.source_cluster.endpoint}/solr/admin/collections",
+            params={
+                "action": "BACKUP",
+                "name": self.collection,
+                "collection": self.collection,
+                "repository": "default",
+                "location": backup_location,
+                "async": async_id,
+                "wt": "json",
+            },
+            timeout=60)
+        response.raise_for_status()
+        payload = response.json()
+        status = payload.get("responseHeader", {}).get("status", -1)
+        if status != 0:
+            raise AssertionError(f"Failed to start Solr backup: {payload}")
+
+        self._wait_for_solr_backup(async_id)
+
+    def _ensure_s3_directory_markers(self, repo_prefix: str):
+        import boto3
+
+        s3_config = self.argo_service.get_configmap_data("migrations-default-s3-config")
+        bucket = s3_config["BUCKET_NAME"]
+        region = s3_config["AWS_REGION"]
+        endpoint = s3_config.get("ENDPOINT_HTTP") or None
+
+        client_kwargs = {"region_name": region}
+        if endpoint:
+            client_kwargs.update({
+                "endpoint_url": endpoint,
+                "aws_access_key_id": "test",
+                "aws_secret_access_key": "test",
+            })
+
+        client = boto3.client("s3", **client_kwargs)
+        for key in (f"{repo_prefix}/", f"{repo_prefix}/{self.backup_name}/"):
+            logger.info(f"Ensuring S3 directory marker s3://{bucket}/{key}")
+            client.put_object(Bucket=bucket, Key=key, Body=b"", ContentType="application/x-directory")
+
+    def _wait_for_solr_backup(self, async_id: str):
+        for attempt in range(1, 61):
+            response = requests.get(
+                f"{self.source_cluster.endpoint}/solr/admin/collections",
+                params={"action": "REQUESTSTATUS", "requestid": async_id, "wt": "json"},
+                timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            state = payload.get("status", {}).get("state", "").lower()
+            if state == "completed":
+                logger.info(f"External Solr backup '{self.backup_name}' completed")
+                return
+            if state in ("failed", "notfound"):
+                raise AssertionError(f"Solr backup '{self.backup_name}' failed: {payload}")
+            logger.info(f"Attempt {attempt}/60: Solr backup state is '{state}', waiting...")
+            time.sleep(2)
+        raise AssertionError(f"Timed out waiting for Solr backup '{self.backup_name}'")
+
+    def _assert_source_count(self, collection: str, expected: int):
+        actual = self.source_operations.get_doc_count(
+            cluster=self.source_cluster, index_name=collection)
+        assert actual == expected, (
+            f"Expected {expected} docs in source '{collection}' after indexing, got {actual}")
+
+    def _assert_target_count(self, collection: str, expected: int):
+        actual = 0
+        for attempt in range(1, 31):
+            try:
+                count_response = execute_api_call(
+                    cluster=self.target_cluster,
+                    path=f"/{collection}/_count?format=json")
+                actual = count_response.json().get("count", 0)
+            except Exception:
+                actual = 0
+            if actual == expected:
+                logger.info(f"Verified target collection '{collection}': {actual} docs OK")
+                return
+            logger.info(f"Attempt {attempt}/30: target '{collection}' has {actual}/{expected} docs, "
+                        f"retrying...")
+            time.sleep(3)
+        raise AssertionError(
+            f"Doc count mismatch in target '{collection}': expected {expected}, got {actual}.")
+
+    def verify_clusters(self):
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.collection,
+            doc_id=self.doc_id, max_attempts=20, delay=3.0)
+        self._assert_target_count(self.collection, 1)
