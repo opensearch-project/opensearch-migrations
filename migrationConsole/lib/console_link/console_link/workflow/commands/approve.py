@@ -473,6 +473,17 @@ def _retry_prerequisite(gate):
             f"workflow reset {name}")
 
 
+def _prerequisite_to_json(gate):
+    prereq = _retry_prerequisite(gate) if gate.category == 'retry' else None
+    if prereq is None:
+        return None
+    description, command = prereq
+    return {
+        "description": description,
+        "command": command,
+    }
+
+
 def _resource_still_exists(namespace, kind, name):
     """Check if a migration CRD still exists."""
     plural = _KIND_TO_PLURAL.get(kind)
@@ -634,6 +645,7 @@ def _gate_to_json(gate):
         "resourceName": gate.resource_name,
         "labels": gate.labels,
         "reason": gate.reason,
+        "prerequisite": _prerequisite_to_json(gate),
     }
 
 

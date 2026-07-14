@@ -302,6 +302,12 @@ spec:
             AWS_REGION='{{inputs.parameters.awsRegion}}'
 
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].snapshotConfig.snapshotNameConfig // {"createSnapshotConfig": {}}
+            ')
+            SOLR_BACKUP_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].snapshotConfig.solrBackupConfig // {"createBackupConfig": {}}
+            ')
 
             # Build snapshot repo config from the full URI (s3://... or gs://...)
             SNAPSHOT_REPO=$(jq -n \
@@ -317,17 +323,26 @@ spec:
               + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)
               + (if $region != "" then {"awsRegion": $region} else {} end)')
             
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
-              # Add snapshotInfo with repo and snapshot definition
-              . + {"snapshotInfo": {
-                "repos": {"default": $repo},
-                "snapshots": {
-                  "testsnapshot": {
-                    "repoName": "default",
-                    "config": {"createSnapshotConfig": {}}
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" --argjson snapshotNameConfig "$SNAPSHOT_NAME_CONFIG" --argjson solrBackupConfig "$SOLR_BACKUP_CONFIG" '
+              # Add source-specific snapshotInfo with repo and snapshot/backup definition
+              if ((.version // "" | gsub("_"; " ")) | startswith("SOLR ")) then
+                . + {"snapshotInfo": {
+                  "repos": {"default": $repo},
+                  "backups": {
+                    "testsnapshot": ($solrBackupConfig + {"repoName": "default"})
                   }
-                }
-              }}
+                }}
+              else
+                . + {"snapshotInfo": {
+                  "repos": {"default": $repo},
+                  "snapshots": {
+                    "testsnapshot": {
+                      "repoName": "default",
+                      "config": $snapshotNameConfig
+                    }
+                  }
+                }}
+              end
             ')
             
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '

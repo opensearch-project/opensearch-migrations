@@ -56,6 +56,10 @@
               "value": "snapshot"
             },
             {
+              "name": "sourceType",
+              "value": ""
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -111,7 +115,7 @@
           },
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"noWait\", true))), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"snapshotRepoName\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), ((0 == len(sprig.dig('awsRegion', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Region\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))), sprig.dict(\"repoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['repoPathUri'])))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"noWait\", true))), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"snapshotRepoName\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), ((0 == len(sprig.dig('awsRegion', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Region\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))), sprig.dict(\"repoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['repoPathUri'])))), ((inputs.parameters.sourceType == '') ? (sprig.dict()) : (sprig.dict(\"sourceType\", inputs.parameters.sourceType)))))}}"
           ],
           "volumeMounts": [
             {
@@ -328,6 +332,10 @@
               "name": "dataSnapshotUid"
             },
             {
+              "name": "sourceType",
+              "value": ""
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -339,6 +347,7 @@
           [
             {
               "template": "runcreatesnapshot",
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -352,6 +361,10 @@
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "sourceType",
+                    "value": "{{inputs.parameters.sourceType}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -398,6 +411,7 @@
           [
             {
               "template": "applysnapshotdonecronjob",
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -443,10 +457,92 @@
           ],
           [
             {
+              "template": "runcreatesnapshot",
+              "when": "{{=sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "sourceType",
+                    "value": "{{inputs.parameters.sourceType}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "snapshot-import"
+                  }
+                ]
+              },
+              "name": "runImport"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchdatasnapshotcompleted",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.dataSnapshotName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Completed"
+                  },
+                  {
+                    "name": "snapshotName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshotMigration",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  }
+                ]
+              },
+              "name": "markSnapshotImported"
+            }
+          ],
+          [
+            {
               "templateRef": {
                 "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
+              "when": "{{=!(sprig.dig('mode', 'create', fromJSON(inputs.parameters.createSnapshotConfig)) == 'import')}}",
               "arguments": {
                 "parameters": [
                   {

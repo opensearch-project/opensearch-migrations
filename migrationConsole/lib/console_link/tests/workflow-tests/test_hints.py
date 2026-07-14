@@ -681,8 +681,8 @@ class TestManageHints:
             patch("console_link.workflow.commands.manage.make_k8s_pod_scraper", return_value=Mock()),
             patch("console_link.workflow.commands.manage.WaiterInterface"),
             patch("console_link.workflow.commands.manage.WorkflowTreeApp") as mock_app_cls,
-            patch("console_link.workflow.commands.manage.get_workflow", return_value=workflow_data),
         ):
+            mock_app_cls.return_value.last_known_phase = (workflow_data or {}).get('status', {}).get('phase', '')
             mock_app_cls.return_value.run.return_value = None
             return CliRunner().invoke(workflow_cli, ["manage"])
 
@@ -703,7 +703,7 @@ class TestManageHints:
         assert result.exit_code == 0
         assert HINT_PREFIX not in result.output
 
-    def test_get_workflow_exception_no_hint(self):
+    def test_tui_exits_without_workflow_phase_no_hint(self):
         with (
             patch("console_link.workflow.commands.manage._configure_file_logging"),
             patch("console_link.workflow.commands.manage._initialize_k8s_client", return_value=Mock()),
@@ -711,9 +711,8 @@ class TestManageHints:
             patch("console_link.workflow.commands.manage.make_k8s_pod_scraper", return_value=Mock()),
             patch("console_link.workflow.commands.manage.WaiterInterface"),
             patch("console_link.workflow.commands.manage.WorkflowTreeApp") as mock_app_cls,
-            patch("console_link.workflow.commands.manage.get_workflow",
-                  side_effect=Exception("k8s unavailable")),
         ):
+            mock_app_cls.return_value.last_known_phase = ""
             mock_app_cls.return_value.run.return_value = None
             result = CliRunner().invoke(workflow_cli, ["manage"])
 
