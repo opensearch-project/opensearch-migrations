@@ -202,13 +202,13 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         tracker.add(102, "conn-C");
 
         // Before threshold — no reap
-        mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(2)));
         consumer.reapStaleHeads();
         Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty(),
             "No commits staged before stale threshold");
 
         // After threshold — reapStaleHeads should stage a commit in nextSetOfCommitsMap
-        mutableClock.set(baseTime.plus(Duration.ofMinutes(6)));
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
         consumer.reapStaleHeads();
         Assertions.assertFalse(consumer.nextSetOfCommitsMap.isEmpty(),
             "Commit should be staged after stale threshold exceeded");

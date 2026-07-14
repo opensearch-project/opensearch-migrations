@@ -341,7 +341,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             .collect(Collectors.toList());
     }
 
-    private static final Duration STALE_HEAD_THRESHOLD = Duration.ofMinutes(5);
+    private static final Duration STALE_HEAD_THRESHOLD = Duration.ofMinutes(3);
 
     public <T> Stream<T> getNextBatchOfRecords(
         ITrafficSourceContexts.IReadChunkContext context,
