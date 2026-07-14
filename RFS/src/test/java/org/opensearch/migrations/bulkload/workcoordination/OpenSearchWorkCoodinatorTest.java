@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.AbstractMap;
@@ -156,6 +157,64 @@ class OpenSearchWorkCoodinatorTest {
 
     @ParameterizedTest
     @MethodSource("provideTestedVersions")
+    public void testWhenGetResultWithMissingPayloadThenLoggedAndRethrown(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var response = new TestResponse(500, "Internal Server Error", (byte[]) null);
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker");
+             var closeableLogSetup = new CloseableLogSetup(workCoordinator.getLoggerName()))
+        {
+            var exception = Assertions.assertThrows(
+                UnexpectedWorkCoordinationResponseException.class,
+                () -> workCoordinator.getResult(response)
+            );
+            Assertions.assertTrue(exception.getMessage().contains("did not contain a payload"));
+            Assertions.assertTrue(exception.getMessage().contains("500 Internal Server Error"));
+            Assertions.assertNull(exception.getCause());
+
+            log.atDebug().setMessage("Logged events: {}").addArgument(closeableLogSetup::getLogEvents).log();
+            Assertions.assertTrue(closeableLogSetup.getLogEvents().stream()
+                .anyMatch(e -> e.contains("EXCEPTION: while trying to display response bytes")));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testWhenGetResultWithMalformedJsonThenWrapped(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var response = new TestResponse(200, "OK", "{not-json");
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker")) {
+            var exception = Assertions.assertThrows(
+                UnexpectedWorkCoordinationResponseException.class,
+                () -> workCoordinator.getResult(response)
+            );
+            Assertions.assertTrue(exception.getMessage().contains("not parseable JSON"));
+            Assertions.assertTrue(exception.getMessage().contains("200 OK"));
+            Assertions.assertInstanceOf(IOException.class, exception.getCause());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testWhenGetResultWithUnexpectedResultFieldThenWrapped(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var response = new TestResponse(
+            200,
+            "OK",
+            "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"" + THROTTLE_RESULT_VALUE + "\"}"
+        );
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker")) {
+            var exception = Assertions.assertThrows(
+                UnexpectedWorkCoordinationResponseException.class,
+                () -> workCoordinator.getResult(response)
+            );
+            Assertions.assertTrue(exception.getMessage().contains("did not contain an expected result field"));
+            Assertions.assertTrue(exception.getMessage().contains(THROTTLE_RESULT_VALUE));
+            Assertions.assertNotNull(exception.getCause());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
     public void testWhenGetResultAndErrorThenLogged(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var response = getThrottleResponse();
@@ -215,6 +274,27 @@ class OpenSearchWorkCoodinatorTest {
         try (var workCoordinator = factory.get(client, 2, "testWorker")) {
             Assertions.assertTrue(workCoordinator.createUnassignedWorkItem(workItem, () -> null));
             Assertions.assertEquals(2, client.requestCount);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
+    public void testCreateUnassignedWorkItemConvertsInterruptedRetryToInterruptedIOException(Version version) throws Exception {
+        var factory = new WorkCoordinatorFactory(version);
+        var client = new MockHttpClient(getClockDriftResponse());
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+
+        try (var workCoordinator = factory.get(client, 2, "testWorker")) {
+            Thread.currentThread().interrupt();
+            var exception = Assertions.assertThrows(
+                InterruptedIOException.class,
+                () -> workCoordinator.createUnassignedWorkItem(workItem, () -> null)
+            );
+            Assertions.assertTrue(exception.getMessage().contains("Interrupted while retrying createUnassignedWorkItem"));
+            Assertions.assertInstanceOf(InterruptedException.class, exception.getCause());
+            Assertions.assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
         }
     }
 
