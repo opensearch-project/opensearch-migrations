@@ -7,8 +7,6 @@ import {z} from "zod";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
 import * as path from "path";
-import {scrapeApprovals} from "./formatApprovals";
-import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import { crdName } from './crdNaming';
 import {
@@ -93,8 +91,6 @@ export class MigrationInitializer {
         if (migrationRunOptions?.runNumber === undefined) {
             throw new Error("Migration run number is required when generating migration resources.");
         }
-        // Generate ConfigMaps
-        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
         const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
         const customMigrationResources = this.generateCustomMigrationResources(
@@ -108,7 +104,6 @@ export class MigrationInitializer {
         return {
             workflows,
             resolvedMigrationResources,
-            approvalConfigMaps,
             concurrencyConfigMaps,
             customMigrationResources,
             warnings
@@ -134,10 +129,7 @@ export class MigrationInitializer {
         await fs.mkdir(resourcesDir, { recursive: true });
 
         const allItems = bundle.customMigrationResources.items || [];
-        const configMapItems = [
-            ...(bundle.approvalConfigMaps.items || []),
-            ...(bundle.concurrencyConfigMaps.items || []),
-        ];
+        const configMapItems = bundle.concurrencyConfigMaps.items || [];
 
         type ResourceEntry = {
             file: string;
@@ -286,36 +278,6 @@ export class MigrationInitializer {
         const plural = `${pluralName}.${group}`;
         const patch = JSON.stringify({ status: item.status });
         return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
-    }
-
-    private generateApprovalConfigMaps(userConfig: any) {
-        if (!userConfig) {
-            return { 
-                apiVersion: 'v1',
-                kind: 'List',
-                items: [] 
-            };
-        }
-
-        const approvals = scrapeApprovals(setNamesInUserConfig(userConfig));
-        
-        return {
-            apiVersion: 'v1',
-            kind: 'List',
-            items: [{
-                apiVersion: 'v1',
-                kind: 'ConfigMap',
-                metadata: {
-                    name: 'approval-config',
-                    labels: {
-                        'workflows.argoproj.io/configmap-type': 'Parameter'
-                    }
-                },
-                data: {
-                    'autoApprove': JSON.stringify(approvals)
-                }
-            }]
-        };
     }
 
     private generateConcurrencyConfigMaps(userConfig: any) {

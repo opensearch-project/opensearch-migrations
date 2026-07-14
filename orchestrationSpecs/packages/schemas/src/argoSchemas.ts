@@ -212,21 +212,20 @@ export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_METADATA_OPTIONS).omit({
-        skipEvaluateApproval: true,
-        skipMigrateApproval: true,
         metadataTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "skipEvaluateApproval",
+    "skipMigrateApproval",
     "fileSourceVolumes",
     "fileSourceVolumeMounts",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
-        skipApproval: true,
         documentTransforms: true,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
@@ -235,6 +234,7 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "minPodReplicas",
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "skipApproval",
     "useTargetClusterForWorkCoordination",
     "resources",
     "fileSourceVolumes",

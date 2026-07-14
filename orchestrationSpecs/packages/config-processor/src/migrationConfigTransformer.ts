@@ -403,7 +403,8 @@ function lowerFileBackedContextValues(
 }
 
 function prepareMetadataConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -414,13 +415,16 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
+        skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
 
 function prepareDocumentBackfillConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -431,6 +435,7 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
@@ -1207,6 +1212,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
+            const skipApprovals = mc.skipApprovals ?? userConfig.skipApprovals ?? false;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
@@ -1278,10 +1284,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         label: toTarget,
                     });
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist)
+                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist)
+                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     results.push({
                         label: snapshotName,
