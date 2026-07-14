@@ -16,6 +16,7 @@
 import {
     CLUSTER_CONFIG,
     CAPTURE_CONFIG,
+    ELASTICSEARCH_SNAPSHOT_INFO,
     KAFKA_CLUSTER_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
@@ -24,7 +25,7 @@ import {
     PROXY_TLS_CONFIG,
     REPLAYER_CONFIG,
     S3_CAPTURED_TRAFFIC_SOURCE,
-    SNAPSHOT_INFO,
+    SOLR_SNAPSHOT_INFO,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTER_CONFIG,
@@ -359,22 +360,29 @@ function applySnapshotRepoReferenceOptions(children: EditNode[], path: string[],
     }
 }
 
-function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
+function sourceVersionIsSolr(version: unknown): boolean {
+    return typeof version === "string" && version.startsWith("SOLR ");
+}
+
+function snapshotInfoNode(path: string[], snapshotInfo: unknown, sourceVersion?: unknown): EditNode {
     const info = snapshotInfo && typeof snapshotInfo === "object" ? snapshotInfo as any : {};
+    const isSolrSnapshotInfo = sourceVersionIsSolr(sourceVersion)
+        || (isPlainObject(info) && "backups" in info && !("snapshots" in info));
+    const schema = isSolrSnapshotInfo ? SOLR_SNAPSHOT_INFO : ELASTICSEARCH_SNAPSHOT_INFO;
     const repos = Object.keys(info.repos ?? {}).length;
     const snapshots = Object.keys(info.snapshots ?? {}).length;
+    const backups = Object.keys(info.backups ?? {}).length;
     const present = snapshotInfo !== undefined && snapshotInfo !== null;
-    const children = schemaFieldNodes(SNAPSHOT_INFO, path, info, [
-        "repos",
-        "snapshots",
-        "serializeSnapshotCreation",
-    ]);
+    const fields = isSolrSnapshotInfo
+        ? ["repos", "backups", "serializeSnapshotCreation"]
+        : ["repos", "snapshots", "serializeSnapshotCreation"];
+    const children = schemaFieldNodes(schema, path, info, fields);
     for (const child of children) {
         const childKey = child.path[child.path.length - 1];
-        if (childKey === "repos" || childKey === "snapshots") {
+        if (childKey === "repos" || childKey === "snapshots" || childKey === "backups") {
             child.essential = true;
         }
-        if (!present && childKey === "snapshots") {
+        if (!present && (childKey === "snapshots" || childKey === "backups")) {
             child.presence = "optional";
             child.required = false;
             child.status = "ok";
@@ -387,7 +395,7 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
         id: `edit:${path.join(".")}`,
         path,
         label: present
-            ? `snapshotInfo: repos ${repos}, snapshots ${snapshots}`
+            ? `snapshotInfo: repos ${repos}, ${isSolrSnapshotInfo ? `backups ${backups}` : `snapshots ${snapshots}`}`
             : "snapshotInfo: <unset>",
         value: snapshotInfo,
         valueKind: "object",
@@ -851,7 +859,7 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
     ]);
     children.push(authNode([...rootPath, "authConfig"], value?.authConfig));
     if (kind === "source") {
-        children.push(snapshotInfoNode([...rootPath, "snapshotInfo"], value?.snapshotInfo));
+        children.push(snapshotInfoNode([...rootPath, "snapshotInfo"], value?.snapshotInfo, value?.version));
     }
 
     return finalizeNode({

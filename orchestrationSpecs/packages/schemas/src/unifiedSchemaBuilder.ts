@@ -264,7 +264,7 @@ function readStrimziOpenApiFromCluster() {
         "get",
         "--raw",
         STRIMZI_OPENAPI_API_PATH,
-    ], {encoding: "utf-8"});
+    ], {encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"]});
     return JSON.parse(output);
 }
 

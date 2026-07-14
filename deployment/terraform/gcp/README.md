@@ -162,9 +162,11 @@ To switch it from "create-and-migrate" to BYOS, set:
   name of the snapshot inside that repo (for the bundled test snapshot, this
   is `rfs-snapshot`).
 
-When `externallyManagedSnapshotName` is set, the workflow **skips snapshot
-creation** and goes directly to metadata + reindex-from-snapshot using the
-provided repo URI.
+When `externallyManagedSnapshotName` is set for Elasticsearch/OpenSearch, the
+workflow **skips snapshot creation** and goes directly to metadata +
+reindex-from-snapshot using the provided repo URI. Solr external backups use
+the Solr `snapshotInfo.backups` shape and run a lightweight prepare/validation
+step before metadata + reindex-from-snapshot.
 
 ### Caveats
 

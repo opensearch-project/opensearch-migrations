@@ -37,6 +37,8 @@ STATUS_EXIT_CODE=$?
 set -e
 echo "Status output:"
 echo "$STATUS_OUTPUT"
+mkdir -p /tmp/outputs
+echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
 
 # If the command failed (e.g., connection error), retry
 if [ $STATUS_EXIT_CODE -ne 0 ]; then
@@ -52,6 +54,4 @@ fi
 
 # All other states are terminal (Succeeded, Failed, Suspended, Error, etc.)
 echo "Workflow is in terminal state"
-mkdir -p /tmp/outputs
-echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
 exit 0
