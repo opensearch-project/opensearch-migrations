@@ -1,4 +1,4 @@
-# Load Test Traffic Generator — Phase 1: Ingest Baseline
+# Load Test Traffic Generator
 #
 # Pre-requisite: build the capture proxy image from the repo root:
 #   cd TrafficCapture/dockerSolution && ../../gradlew buildDockerImages
@@ -6,12 +6,17 @@
 # migrations/capture_proxy:latest.
 #
 # Start the stack (wait for capture proxy to be healthy before running k6):
-#   docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+#   docker-compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
 #
 # Run the ingest scenario:
-#   docker compose run --rm --env-file k6-config/ingest-steady.env k6 \
-#     run --out=experimental-prometheus-rw /scripts/scenarios/ingest.js
-#
+#  env_flags=()
+#  while IFS= read -r line || [[ -n "$line" ]]; do
+#   [ [ -z "$line" || "$line" =~ ^[ [ :space: ] ]*# ] ] && continue
+#   env_flags+=(-e "$line")
+#  done < k6-config/ingest-burst.env
+#  docker compose run --rm "${env_flags[@]}" \
+#  k6 run --out=experimental-prometheus-rw /scripts/scenarios/ingest.js
+
 # View metrics: http://localhost:3000 (Grafana, admin/admin)
 # Prometheus:   http://localhost:19090  (19090 avoids conflict with the main TrafficCapture stack)
 # Kafka:        localhost:9092
@@ -150,7 +155,7 @@ services:
       - prometheus
 
   # ── Redis ───────────────────────────────────────────────────────────────
-  # Backend store for the Phase 4 ID ring buffer.
+  # Backend store for the ID ring buffer.
   # k6 does not connect to Redis directly — all access is via Webdis below.
   redis:
     image: redis:7-alpine
@@ -190,7 +195,7 @@ services:
       # Prometheus remote write: k6 metrics land alongside pipeline metrics
       - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
       - K6_PROMETHEUS_RW_TREND_STATS=p(50),p(90),p(95),p(99),max
-      # Scenario config — override via --env-file k6-config/ingest-steady.env
+      # Scenario config (see available .env files for the different scenarios)
       - CAPTURE_PROXY_URL=https://capture-proxy:9200
       - INDEX_NAME=nyc_taxis
       - INGEST_RATE=50
@@ -199,7 +204,7 @@ services:
       - DURATION=5m
       - BULK_BATCH_SIZE=20
       - SEED_DOC_COUNT=100000
-      # Phase 4 ID registry — used by scenarios/mixed.js only
+      # (optional) )D registry — used by scenarios/mixed.js only
       - WEBDIS_URL=http://webdis:7379
     depends_on:
       capture-proxy:

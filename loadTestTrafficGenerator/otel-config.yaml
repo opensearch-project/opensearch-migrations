@@ -5,6 +5,13 @@ receivers:
         endpoint: :4317
       http:
         endpoint: :4318
+  kafkametrics:
+    brokers: ["kafka:9092"]
+    protocol_version: 3.0.0
+    scrapers:
+      - brokers
+      - topics
+      - consumers
 
 processors:
   batch:
@@ -24,7 +31,7 @@ exporters:
 service:
   pipelines:
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, kafkametrics]
       processors: [batch]
       exporters: [prometheus, debug]
     traces:
