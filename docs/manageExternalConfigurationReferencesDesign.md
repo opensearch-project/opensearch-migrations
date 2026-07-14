@@ -666,9 +666,9 @@ Cluster `authConfig.mtls` remains schema-only for now. Manage should not offer a
 
 | YAML path | Resource | Expected format | Picker | Create flow |
 | --- | --- | --- | --- | --- |
-| `kafkaClusterConfiguration.<kafka>.existing.auth.secretName` | Secret | key `password`; type `Opaque` or any Secret with the key | List Secrets with `password` | Kafka SCRAM Password Secret |
-| `kafkaClusterConfiguration.<kafka>.existing.auth.caSecretName` | Secret | key `ca.crt`; PEM certificate chain | List Secrets with `ca.crt` | Kafka CA Secret |
-| `kafkaClusterConfiguration.<kafka>.existing.auth.kafkaUserName` | Scalar | Kubernetes-name-like principal | Not external | Text field |
+| `traffic.kafkaClusters.<kafka>.existing.auth.secretName` | Secret | key `password`; type `Opaque` or any Secret with the key | List Secrets with `password` | Kafka SCRAM Password Secret |
+| `traffic.kafkaClusters.<kafka>.existing.auth.caSecretName` | Secret | key `ca.crt`; PEM certificate chain | List Secrets with `ca.crt` | Kafka CA Secret |
+| `traffic.kafkaClusters.<kafka>.existing.auth.kafkaUserName` | Scalar | Kubernetes-name-like principal | Not external | Text field |
 
 The schema keeps Kafka username separate from the Secret. The picker should offer to set `kafkaUserName` from the create form, but it should not require a `username` key in the Secret because the workflow does not read one.
 

@@ -57,6 +57,11 @@ describe("unifiedSchemaValidator", () => {
             }
         ],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {}
+                }
+            },
             proxies: {
                 proxy1: {
                     source: "source1",
@@ -71,25 +76,23 @@ describe("unifiedSchemaValidator", () => {
                     toTarget: "target1"
                 }
             }
-        },
-        kafkaClusterConfiguration: {
-            default: {
-                autoCreate: {}
-            }
         }
     };
 
     it("suppresses union noise when a more specific Kafka broker config error exists", () => {
         const configWithBogusKafkaKey = {
             ...baseUnifiedValidationInput,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        clusterSpecOverrides: {
-                            kafka: {
-                                config: {
-                                    "auto.create.topics.enable": false,
-                                    "bogus.inner.key": true,
+            traffic: {
+                ...baseUnifiedValidationInput.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            clusterSpecOverrides: {
+                                kafka: {
+                                    config: {
+                                        "auto.create.topics.enable": false,
+                                        "bogus.inner.key": true,
+                                    }
                                 }
                             }
                         }
@@ -109,22 +112,22 @@ describe("unifiedSchemaValidator", () => {
         const fakeAjvErrors: ErrorObject[] = [
             {
                 keyword: "required",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf/0/required",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf/0/required",
                 params: {missingProperty: "autoCreate"},
                 message: "must have required property 'autoCreate'",
             } as ErrorObject,
             {
                 keyword: "required",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf/1/required",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf/1/required",
                 params: {missingProperty: "existing"},
                 message: "must have required property 'existing'",
             } as ErrorObject,
             {
                 keyword: "anyOf",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf",
                 params: {},
                 message: "must match a schema in anyOf",
             } as ErrorObject,

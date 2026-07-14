@@ -14,10 +14,6 @@ WORKFLOW_CONFIGURATION_SECTION = "Workflow Configuration"
 SNAPSHOT_MIGRATION_SECTION = "Snapshot Migration"
 LIVE_TRAFFIC_MIGRATION_SECTION = "Live Traffic Migration"
 
-# This root is for Kafka connection profiles that do not have a first-class
-# migration resource. Workflow-managed Kafka clusters are rendered as
-# KafkaCluster resources under Live Traffic Migration > Buffer.
-KAFKA_CLIENTS_GROUP = "External Kafka Connections"
 SOURCES_GROUP = "Sources"
 TARGETS_GROUP = "Targets"
 SNAPSHOT_GROUP = "Snapshot"
@@ -34,10 +30,9 @@ RESOURCE_SECTIONS: List[Tuple[str, List[Tuple[List[str], str]]]] = [
         (["datasnapshots"], SNAPSHOT_GROUP),
         (["snapshotmigrations"], BACKFILL_GROUP),
     ]),
-    (KAFKA_CLIENTS_GROUP, [(["kafkaconfigs"], KAFKA_CLIENTS_GROUP)]),
     (LIVE_TRAFFIC_MIGRATION_SECTION, [
+        (["kafkaconfigs", "kafkaclusters", "capturedtraffics"], BUFFER_GROUP),
         (["captureproxies"], CAPTURE_GROUP),
-        (["kafkaclusters", "capturedtraffics"], BUFFER_GROUP),
         (["trafficreplays"], REPLAY_GROUP),
     ]),
 ]
@@ -59,20 +54,19 @@ EDIT_ID_BY_TREE_ID: Dict[str, str] = {
     f"section:{WORKFLOW_CONFIGURATION_SECTION}": "edit:workflowConfiguration",
     f"section:{SNAPSHOT_MIGRATION_SECTION}": "edit:snapshotMigration",
     f"section:{LIVE_TRAFFIC_MIGRATION_SECTION}": "edit:traffic",
-    f"group:{KAFKA_CLIENTS_GROUP}": "edit:kafkaClusterConfiguration",
     f"group:{SOURCES_GROUP}": "edit:sourceClusters",
     f"group:{TARGETS_GROUP}": "edit:targetClusters",
     f"group:{BACKFILL_GROUP}": "edit:snapshotMigrationConfigs",
     f"group:{CAPTURE_GROUP}": "edit:traffic.proxies",
-    f"group:{BUFFER_GROUP}": "edit:traffic.s3Sources",
+    f"group:{BUFFER_GROUP}": "edit:traffic.buffer",
     f"group:{REPLAY_GROUP}": "edit:traffic.replayers",
 }
 
 EDIT_RESOURCE_COLLECTION_PATHS: Tuple[Tuple[str, ...], ...] = (
-    ("kafkaClusterConfiguration",),
     ("sourceClusters",),
     ("targetClusters",),
     ("snapshotMigrationConfigs",),
+    ("traffic", "kafkaClusters"),
     ("traffic", "proxies"),
     ("traffic", "s3Sources"),
     ("traffic", "replayers"),

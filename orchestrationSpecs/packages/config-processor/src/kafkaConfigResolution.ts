@@ -53,15 +53,15 @@ function addReferencedKafkaClusters(
     }
 }
 
-/** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
+/** Resolve traffic.kafkaClusters, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
 export function resolveKafkaClusters(userConfig: {
-    kafkaClusterConfiguration?: Record<string, KafkaClusterConfig>,
     traffic?: {
+        kafkaClusters?: Record<string, KafkaClusterConfig>,
         proxies?: Record<string, {kafka?: string | null | undefined}>,
         s3Sources?: Record<string, {kafka?: string | null | undefined}>,
     },
 }): Record<string, KafkaClusterConfig> {
-    const explicit = userConfig.kafkaClusterConfiguration ?? {};
+    const explicit = userConfig.traffic?.kafkaClusters ?? {};
     if (Object.keys(explicit).length > 0) {
         return explicit;
     }
@@ -93,12 +93,12 @@ function asString(value: unknown): string | undefined {
 }
 
 export function looseKafkaEntriesForConfig(config: Record<string, unknown>): [string, Record<string, unknown>][] {
-    const explicit = recordEntries(config.kafkaClusterConfiguration);
+    const traffic = asRecord(config.traffic);
+    const explicit = recordEntries(traffic.kafkaClusters);
     if (explicit.length > 0) {
         return explicit;
     }
 
-    const traffic = asRecord(config.traffic);
     const names = new Set<string>();
     for (const [, proxy] of recordEntries(traffic.proxies)) {
         names.add(kafkaClusterNameForReference({kafka: asString(proxy.kafka)}));

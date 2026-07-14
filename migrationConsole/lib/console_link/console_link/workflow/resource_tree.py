@@ -47,7 +47,7 @@ TERMINAL_DEPENDENCY_PHASES = {'Ready', 'Completed', 'Succeeded'}
 # fall back to their full spec below.
 SPEC_DISPLAY_FIELDS = {
     'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
-    'capturedtraffics': ['topicName', 'partitions', 'replicas'],
+    'capturedtraffics': ['kafkaClusterName', 'kafkaBrokers', 'topicName', 'partitions', 'replicas'],
     'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
     'datasnapshots': ['snapshotPrefix', 'indexAllowlist'],
     'snapshotmigrations': [
@@ -67,6 +67,16 @@ RESOURCE_KIND_TO_PLURAL = {
     'DataSnapshot': 'datasnapshots',
     'SnapshotMigration': 'snapshotmigrations',
     'TrafficReplay': 'trafficreplays',
+}
+APPROVAL_GATE_PREFIX_TO_PLURAL = {
+    'kafkacluster': 'kafkaclusters',
+    'capturedtraffic': 'capturedtraffics',
+    'captureproxy': 'captureproxies',
+    'datasnapshot': 'datasnapshots',
+    'snapshotmigration': 'snapshotmigrations',
+    'trafficreplay': 'trafficreplays',
+    'evaluatemetadata': 'snapshotmigrations',
+    'migratemetadata': 'snapshotmigrations',
 }
 
 VIRTUAL_CONFIG_PLURALS = {'sourceconfigs', 'targetconfigs', 'kafkaconfigs'}
@@ -247,7 +257,6 @@ def apply_config_overlays(
             deployed,
         )
         _add_virtual_resource(sections, virtual)
-    _nest_topics_under_kafka_sections(sections)
 
 
 def resource_visible_in_config_mode(resource: ResourceNode, value_mode: str) -> bool:
@@ -351,8 +360,26 @@ def active_approval_node(resource: ResourceNode) -> Optional[Dict[str, Any]]:
     """Return the first running approval gate node attached to a resource."""
     for step in _iter_nodes(resource.workflow_progress or []):
         if is_approval_node(step) and get_node_phase(step) == 'Running':
+            target = approval_target_ref(step)
+            if target and target != (resource.plural, resource.name):
+                continue
             return step
     return None
+
+
+def approval_target_ref(node: Dict[str, Any]) -> Optional[tuple[str, str]]:
+    """Infer the resource plural/name targeted by an approval gate node."""
+    gate_name = get_node_input_parameter(node, 'resourceName') or get_node_input_parameter(node, 'name')
+    if not gate_name:
+        return None
+    parts = str(gate_name).split('.')
+    if len(parts) < 2:
+        return None
+    plural = APPROVAL_GATE_PREFIX_TO_PLURAL.get(parts[0].lower())
+    if not plural:
+        return None
+    name = '.'.join(parts[1:-1]) if parts[-1] == 'vapretry' else '.'.join(parts[1:])
+    return (plural, name) if name else None
 
 
 def format_approval_gate_line(resource: ResourceNode) -> Optional[str]:
@@ -392,8 +419,6 @@ def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceS
                         status=item.get('status', {}),
                         created_at=item.get('metadata', {}).get('creationTimestamp'),
                     ))
-            # Nest captured traffics under their parent kafka cluster
-            _nest_topics_under_kafka(resources)
             groups.append(ResourceGroup(plural=plurals[0], display_name=display_name, resources=resources))
         sections.append(ResourceSection(name=section_name, groups=groups))
     _attach_dependency_states(sections)
@@ -414,36 +439,6 @@ def _attach_dependency_states(sections: List[ResourceSection]) -> None:
             for dep in resource.depends_on
             if dep in by_name
         ]
-
-
-def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
-    """Move CapturedTraffic resources under their parent KafkaCluster."""
-    kafka_by_name = {r.name: r for r in resources if r.plural == 'kafkaclusters'}
-    topics_to_remove = []
-    for resource in resources:
-        if resource.plural == 'capturedtraffics':
-            parent_name = _captured_traffic_kafka_parent_name(resource)
-            if parent_name in kafka_by_name:
-                kafka_by_name[parent_name].children.append(resource)
-                topics_to_remove.append(resource)
-    for topic in topics_to_remove:
-        resources.remove(topic)
-
-
-def _nest_topics_under_kafka_sections(sections: List[ResourceSection]) -> None:
-    """Apply Kafka/CapturedTraffic nesting after virtual overlay resources are added."""
-    for section in sections:
-        for group in section.groups:
-            if {'kafkaclusters', 'capturedtraffics'}.issubset(set(group_plurals_for(group.plural))):
-                _nest_topics_under_kafka(group.resources)
-
-
-def _captured_traffic_kafka_parent_name(resource: ResourceNode) -> str:
-    return (
-        resource.spec.get('kafkaClusterName')
-        or _pending_field_value(resource.config_diff, 'kafkaClusterName')
-        or ''
-    )
 
 
 def _iter_resource_nodes(sections: List[ResourceSection]):
@@ -526,16 +521,6 @@ def _add_virtual_resource(sections: List[ResourceSection], resource: ResourceNod
         for group in section.groups:
             group_plurals = group_plurals_for(group.plural)
             if resource.plural in group_plurals:
-                if resource.plural == 'capturedtraffics':
-                    parent_name = resource.spec.get('kafkaClusterName') or _pending_field_value(
-                        resource.config_diff,
-                        'kafkaClusterName',
-                    )
-                    parent = next((item for item in group.resources if item.name == parent_name), None)
-                    if parent:
-                        group.not_configured = False
-                        parent.children.append(resource)
-                        return
                 group.not_configured = False
                 group.resources.append(resource)
                 return
@@ -802,7 +787,7 @@ def _diagnostic_parameter_path(
     prefixes = {
         'sourceconfigs': ['sourceClusters', resource_name],
         'targetconfigs': ['targetClusters', resource_name],
-        'kafkaconfigs': ['kafkaClusterConfiguration', resource_name],
+        'kafkaconfigs': ['traffic', 'kafkaClusters', resource_name],
         'captureproxies': ['traffic', 'proxies', resource_name],
         'capturedtraffics': ['traffic', 's3Sources', resource_name],
         'trafficreplays': ['traffic', 'replayers', resource_name],
@@ -829,8 +814,10 @@ def _source_config_label(source_path: List[Any], fallback: str) -> str:
     if not isinstance(source_path, list) or not source_path:
         return fallback
     parts = [str(part) for part in source_path]
-    if parts[0] in {'sourceClusters', 'targetClusters', 'kafkaClusterConfiguration'} and len(parts) > 2:
+    if parts[0] in {'sourceClusters', 'targetClusters'} and len(parts) > 2:
         parts = parts[2:]
+    elif parts[:2] == ['traffic', 'kafkaClusters'] and len(parts) > 3:
+        parts = parts[3:]
     elif parts[0] == 'traffic' and len(parts) > 3 and parts[1] in {'proxies', 's3Sources', 'replayers'}:
         parts = parts[3:]
     elif parts[0] == 'snapshotMigrationConfigs' and len(parts) > 2:
@@ -956,7 +943,7 @@ def _mark_not_configured_from_filtered(sections: List[ResourceSection], filtered
 
     # Map skipped display names to resource group plurals
     skip_map = {
-        'createKafka': 'kafkaclusters',
+        'createKafka': 'kafkaconfigs',
         'createProxy': 'captureproxies',
         'createTrafficReplayer': 'trafficreplays',
     }

@@ -59,13 +59,14 @@ from ..commands.artifact_store import ArtifactStoreError
 from ..commands.crd_utils import RESETTABLE_PLURALS, parse_resource_path, resource_display_name
 from ..resource_tree import (
     CONFIG_MODE_LABELS,
+    approval_target_ref,
     apply_config_overlays,
     resource_config_change_summary,
 )
 from ..manage_tree_schema import EDIT_ID_BY_TREE_ID, EDIT_RESOURCE_COLLECTION_PATHS
 from ..manage_tree_status import STATUS_PRIORITY, same_value_state, strip_status_badge
 from ..commands.show import read_managed_output
-from ..tree_utils import is_approval_node
+from ..tree_utils import get_node_phase, is_approval_node
 
 logger = logging.getLogger(__name__)
 
@@ -367,15 +368,43 @@ class WorkflowTreeApp(App):
     @staticmethod
     def _assign_workflow_progress(sections, steps):
         """Attach workflow step subtrees to matching resource nodes."""
-        for resource in (
-            r for section in sections for group in section.groups
-            for r in group.resources
-        ):
+        resources = [
+            resource
+            for section in sections
+            for group in section.groups
+            for resource in WorkflowTreeApp._iter_resource_nodes(group.resources)
+        ]
+        by_ref = {(resource.plural, resource.name): resource for resource in resources}
+        for resource in resources:
             if resource.name in steps:
                 resource.workflow_progress = steps[resource.name]
-            for child in resource.children:
-                if child.name in steps:
-                    child.workflow_progress = steps[child.name]
+        for resource in resources:
+            for approval in WorkflowTreeApp._iter_running_approval_nodes(resource.workflow_progress or []):
+                target = approval_target_ref(approval)
+                if not target or target == (resource.plural, resource.name):
+                    continue
+                target_resource = by_ref.get(target)
+                if not target_resource:
+                    continue
+                existing = {step.get('id') for step in target_resource.workflow_progress or []}
+                if approval.get('id') not in existing:
+                    target_resource.workflow_progress = [
+                        *(target_resource.workflow_progress or []),
+                        approval,
+                    ]
+
+    @staticmethod
+    def _iter_resource_nodes(resources):
+        for resource in resources:
+            yield resource
+            yield from WorkflowTreeApp._iter_resource_nodes(resource.children)
+
+    @staticmethod
+    def _iter_running_approval_nodes(steps):
+        for step in steps:
+            if is_approval_node(step) and get_node_phase(step) == PHASE_RUNNING:
+                yield step
+            yield from WorkflowTreeApp._iter_running_approval_nodes(step.get('children', []))
 
     def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
         """Handle pre-built resource sections on the main thread."""
@@ -1580,6 +1609,13 @@ class WorkflowTreeApp(App):
             return None
 
         root = path[0]
+        if root == "traffic" and len(path) >= 3 and path[1] == "kafkaClusters":
+            return cls._kafka_console_value_state(
+                console_config,
+                str(path[2]),
+                [str(part) for part in path[3:]],
+            )
+
         name = str(path[1])
         relative_path = [str(part) for part in path[2:]]
         if root == "sourceClusters":
@@ -1598,8 +1634,6 @@ class WorkflowTreeApp(App):
                 relative_path,
                 node,
             )
-        if root == "kafkaClusterConfiguration":
-            return cls._kafka_console_value_state(console_config, name, relative_path)
         return None
 
     @classmethod
@@ -3013,7 +3047,7 @@ class WorkflowTreeApp(App):
     @staticmethod
     def _rename_config_validation(path: list[str]) -> Optional[Dict[str, str]]:
         if (
-            (len(path) == 2 and path[0] == "kafkaClusterConfiguration")
+            (len(path) == 3 and path[:2] == ["traffic", "kafkaClusters"])
             or (len(path) == 3 and path[:2] in (
                 ["traffic", "proxies"],
                 ["traffic", "s3Sources"],
@@ -3037,11 +3071,11 @@ class WorkflowTreeApp(App):
         if len(path) == 2 and path[0] in (
             "sourceClusters",
             "targetClusters",
-            "kafkaClusterConfiguration",
             "snapshotMigrationConfigs",
         ):
             return True
         return len(path) == 3 and path[:2] in (
+            ["traffic", "kafkaClusters"],
             ["traffic", "proxies"],
             ["traffic", "replayers"],
         )
@@ -3051,10 +3085,10 @@ class WorkflowTreeApp(App):
         if len(path) == 2 and path[0] in (
             "sourceClusters",
             "targetClusters",
-            "kafkaClusterConfiguration",
         ):
             return True
         if len(path) == 3 and path[:2] in (
+            ["traffic", "kafkaClusters"],
             ["traffic", "proxies"],
             ["traffic", "s3Sources"],
             ["traffic", "replayers"],
@@ -3493,14 +3527,14 @@ class WorkflowTreeApp(App):
             if source:
                 add(proxy_path, [*proxy_path, "source"], ["sourceClusters", source], f"source={source}")
             kafka = str(proxy.get("kafka") or "default")
-            add(proxy_path, [*proxy_path, "kafka"], ["kafkaClusterConfiguration", kafka], f"kafka={kafka}")
+            add(proxy_path, [*proxy_path, "kafka"], ["traffic", "kafkaClusters", kafka], f"kafka={kafka}")
 
         for s3_name, s3_source in s3_sources.items():
             if not isinstance(s3_source, dict):
                 continue
             s3_path = ["traffic", "s3Sources", str(s3_name)]
             kafka = str(s3_source.get("kafka") or "default")
-            add(s3_path, [*s3_path, "kafka"], ["kafkaClusterConfiguration", kafka], f"kafka={kafka}")
+            add(s3_path, [*s3_path, "kafka"], ["traffic", "kafkaClusters", kafka], f"kafka={kafka}")
 
         for replayer_name, replayer in replayers.items():
             if not isinstance(replayer, dict):

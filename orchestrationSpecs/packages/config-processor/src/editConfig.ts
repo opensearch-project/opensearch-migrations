@@ -118,6 +118,7 @@ const S3_CAPTURED_TRAFFIC_DESCRIPTION = descriptionOf(S3_CAPTURED_TRAFFIC_SOURCE
 const KAFKA_RECORD_HINT = uiHintOf(KAFKA_CLUSTERS_MAP);
 const SOURCE_RECORD_HINT = uiHintOf(SOURCE_CLUSTERS_MAP);
 const TARGET_RECORD_HINT = uiHintOf(TARGET_CLUSTERS_MAP);
+const TRAFFIC_KAFKA_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["kafkaClusters"]) ?? KAFKA_RECORD_HINT;
 const TRAFFIC_PROXIES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["proxies"]);
 const TRAFFIC_S3_SOURCES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["s3Sources"]);
 const TRAFFIC_REPLAYERS_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["replayers"]);
@@ -137,7 +138,7 @@ const DEFAULT_CONFIG_FACTORIES: Record<string, () => Record<string, unknown>> = 
         endpoint: "",
         allowInsecure: false,
     }),
-    kafkaClusterConfiguration: () => ({autoCreate: {}}),
+    "traffic.kafkaClusters": () => ({autoCreate: {}}),
     "traffic.proxies": () => ({source: "", proxyConfig: {}}),
     "traffic.s3Sources": () => ({s3Uri: "", awsRegion: "", sourceLabel: ""}),
     "traffic.replayers": () => ({fromCapturedTraffic: "", toTarget: ""}),
@@ -164,6 +165,7 @@ interface RecordGroupSpec {
     description?: string;
     inputHint?: EditInputHint;
     expert?: boolean;
+    essential?: boolean;
     config: Record<string, any> | undefined;
     itemNode: (name: string, value: any) => EditNode;
     addLabel: string;
@@ -195,6 +197,7 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
         valueKind: "record",
         description: spec.description,
         expert: spec.expert ?? false,
+        essential: spec.essential ?? false,
         inputHint: spec.inputHint,
         status: "ok",
         children,
@@ -412,7 +415,7 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown, sourceVersion?:
 }
 
 function kafkaClusterNode(name: string, value: any): EditNode {
-    const rootPath = ["kafkaClusterConfiguration", name];
+    const rootPath = ["traffic", "kafkaClusters", name];
     const {modeNode, branchChildren} = singleKeyUnionMode(
         rootPath,
         "mode",
@@ -433,17 +436,18 @@ function kafkaClusterNode(name: string, value: any): EditNode {
 }
 
 function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
-    const path = ["kafkaClusterConfiguration"];
+    const path = ["traffic", "kafkaClusters"];
     return recordGroupNode({
         path,
         label: "Kafka Clusters",
         description: KAFKA_CLUSTERS_DESCRIPTION,
-        inputHint: KAFKA_RECORD_HINT,
+        inputHint: TRAFFIC_KAFKA_RECORD_HINT,
+        essential: true,
         config,
         itemNode: kafkaClusterNode,
         addLabel: "Kafka cluster",
         addDescription: "Create a Kafka cluster configuration in pending workflow YAML.",
-        addInputHint: recordKeyHint(KAFKA_RECORD_HINT),
+        addInputHint: recordKeyHint(TRAFFIC_KAFKA_RECORD_HINT),
     });
 }
 
@@ -569,6 +573,33 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
 }
 
 function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
+    const bufferNode = finalizeNode({
+        id: "edit:traffic.buffer",
+        path: ["traffic", "buffer"],
+        label: "Buffer",
+        valueKind: "object",
+        description: "Kafka clusters and optional pre-recorded traffic sources used as live-traffic buffers.",
+        status: "ok",
+        children: [
+            kafkaGroupNode(traffic?.kafkaClusters),
+            recordGroupNode({
+                path: ["traffic", "s3Sources"],
+                label: "S3 Captured Traffic Sources",
+                description: schemaFieldDescription(
+                    TRAFFIC_CONFIG,
+                    "s3Sources",
+                    "Optional S3 archives loaded into Kafka for replay when you already have captured traffic and do not need a live capture proxy.",
+                ),
+                inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
+                expert: true,
+                config: traffic?.s3Sources,
+                itemNode: (name, value) => s3CapturedTrafficSourceNode(name, value, ctx),
+                addLabel: "optional S3 archive source (no capture proxy)",
+                addDescription: "Create an optional pre-recorded traffic source from an S3 archive instead of configuring a live capture proxy.",
+                addInputHint: recordKeyHint(TRAFFIC_S3_SOURCES_RECORD_HINT),
+            }),
+        ],
+    });
     return finalizeNode({
         id: "edit:traffic",
         path: ["traffic"],
@@ -577,6 +608,7 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
         description: TRAFFIC_DESCRIPTION,
         status: "ok",
         children: [
+            bufferNode,
             recordGroupNode({
                 path: ["traffic", "proxies"],
                 label: "Capture",
@@ -591,22 +623,6 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 addLabel: "capture proxy",
                 addDescription: "Create a capture proxy configuration in pending workflow YAML.",
                 addInputHint: recordKeyHint(TRAFFIC_PROXIES_RECORD_HINT),
-            }),
-            recordGroupNode({
-                path: ["traffic", "s3Sources"],
-                label: "Buffer",
-                description: schemaFieldDescription(
-                    TRAFFIC_CONFIG,
-                    "s3Sources",
-                    "Optional S3 archives loaded into Kafka for replay when you already have captured traffic and do not need a live capture proxy.",
-                ),
-                inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
-                expert: true,
-                config: traffic?.s3Sources,
-                itemNode: (name, value) => s3CapturedTrafficSourceNode(name, value, ctx),
-                addLabel: "optional S3 archive source (no capture proxy)",
-                addDescription: "Create an optional pre-recorded traffic source from an S3 archive instead of configuring a live capture proxy.",
-                addInputHint: recordKeyHint(TRAFFIC_S3_SOURCES_RECORD_HINT),
             }),
             recordGroupNode({
                 path: ["traffic", "replayers"],
@@ -909,7 +925,6 @@ function workflowConfigurationNode(config: any): EditNode {
         "Workflow Configuration",
         "Shared workflow configuration used by migration resources.",
         [
-            kafkaGroupNode(config?.kafkaClusterConfiguration),
             clusterGroupNode("source", config?.sourceClusters),
             clusterGroupNode("target", config?.targetClusters),
         ],
@@ -1090,8 +1105,8 @@ function schemaForConfigPath(path: string[]): any | undefined {
     if (path[0] === "targetClusters" && path.length >= 2) {
         return childSchemaAtPath(TARGET_CLUSTER_CONFIG, path.slice(2));
     }
-    if (path[0] === "kafkaClusterConfiguration" && path.length >= 2) {
-        return childSchemaAtPath(KAFKA_CLUSTER_CONFIG, path.slice(2));
+    if (path[0] === "traffic" && path[1] === "kafkaClusters" && path.length >= 3) {
+        return childSchemaAtPath(KAFKA_CLUSTER_CONFIG, path.slice(3));
     }
     if (path[0] === "traffic" && path[1] === "proxies" && path.length >= 3) {
         return childSchemaAtPath(CAPTURE_CONFIG, path.slice(3));
@@ -1267,7 +1282,7 @@ function buildConfigDependencyGraph(config: any): ConfigReferenceEdge[] {
             edges,
             proxyPath,
             [...proxyPath, "kafka"],
-            ["kafkaClusterConfiguration", kafka],
+            ["traffic", "kafkaClusters", kafka],
             `kafka=${kafka}`,
         );
     }
@@ -1282,7 +1297,7 @@ function buildConfigDependencyGraph(config: any): ConfigReferenceEdge[] {
             edges,
             s3Path,
             [...s3Path, "kafka"],
-            ["kafkaClusterConfiguration", kafka],
+            ["traffic", "kafkaClusters", kafka],
             `kafka=${kafka}`,
         );
     }
@@ -1417,7 +1432,10 @@ function removeSourceClusterReferences(config: any, sourceName: string): void {
 }
 
 function renameableConfigPath(path: string[]): boolean {
-    if (path.length === 2 && ["sourceClusters", "targetClusters", "kafkaClusterConfiguration"].includes(path[0])) {
+    if (path.length === 2 && ["sourceClusters", "targetClusters"].includes(path[0])) {
+        return true;
+    }
+    if (path.length === 3 && path[0] === "traffic" && path[1] === "kafkaClusters") {
         return true;
     }
     if (
@@ -1539,7 +1557,7 @@ function setAtPath(config: any, path: string[], value: unknown): void {
         }
         return;
     }
-    if (key === "mode" && path.length === 3 && path[0] === "kafkaClusterConfiguration") {
+    if (key === "mode" && path.length === 4 && path[0] === "traffic" && path[1] === "kafkaClusters") {
         const replacement = singleKeyUnionValueForVariant(KAFKA_CLUSTER_CONFIG, parent, value);
         for (const existingKey of Object.keys(parent)) {
             delete parent[existingKey];

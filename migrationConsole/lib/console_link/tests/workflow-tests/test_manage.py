@@ -17,6 +17,7 @@ from console_link.workflow.resource_tree import (
     ResourceSection,
     _build_tree_from_raw,
     apply_config_overlays,
+    format_approval_gate_line,
     format_config_diff_fields,
 )
 from console_link.workflow.manage_tree_schema import RESOURCE_SECTIONS
@@ -1634,8 +1635,8 @@ def edit_state_with_kafka_override_leaf():
         "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
         "nodes": [
             {
-                "id": "edit:kafkaClusterConfiguration",
-                "path": ["kafkaClusterConfiguration"],
+                "id": "edit:traffic.kafkaClusters",
+                "path": ["traffic", "kafkaClusters"],
                 "label": "[OK] Kafka Clusters",
                 "valueKind": "record",
                 "description": "Kafka cluster configurations.",
@@ -1643,8 +1644,8 @@ def edit_state_with_kafka_override_leaf():
                 "statusCounts": {},
                 "children": [
                     {
-                        "id": "edit:kafkaClusterConfiguration.kafka",
-                        "path": ["kafkaClusterConfiguration", "kafka"],
+                        "id": "edit:traffic.kafkaClusters.kafka",
+                        "path": ["traffic", "kafkaClusters", "kafka"],
                         "label": "[OK] kafka",
                         "valueKind": "object",
                         "description": "Kafka cluster configuration.",
@@ -1652,9 +1653,10 @@ def edit_state_with_kafka_override_leaf():
                         "statusCounts": {},
                         "children": [
                             {
-                                "id": "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                                "id": "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
                                 "path": [
-                                    "kafkaClusterConfiguration",
+                                    "traffic",
+                                    "kafkaClusters",
                                     "kafka",
                                     "autoCreate",
                                     "clusterSpecOverrides",
@@ -1684,8 +1686,8 @@ def edit_state_with_unset_kafka_override_children():
         "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
         "nodes": [
             {
-                "id": "edit:kafkaClusterConfiguration",
-                "path": ["kafkaClusterConfiguration"],
+                "id": "edit:traffic.kafkaClusters",
+                "path": ["traffic", "kafkaClusters"],
                 "label": "Kafka Clusters",
                 "valueKind": "record",
                 "description": "Kafka cluster configurations.",
@@ -1693,8 +1695,8 @@ def edit_state_with_unset_kafka_override_children():
                 "statusCounts": {},
                 "children": [
                     {
-                        "id": "edit:kafkaClusterConfiguration.kafka",
-                        "path": ["kafkaClusterConfiguration", "kafka"],
+                        "id": "edit:traffic.kafkaClusters.kafka",
+                        "path": ["traffic", "kafkaClusters", "kafka"],
                         "label": "kafka",
                         "valueKind": "object",
                         "description": "Kafka cluster configuration.",
@@ -1702,9 +1704,10 @@ def edit_state_with_unset_kafka_override_children():
                         "statusCounts": {},
                         "children": [
                             {
-                                "id": "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                                "id": "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
                                 "path": [
-                                    "kafkaClusterConfiguration",
+                                    "traffic",
+                                    "kafkaClusters",
                                     "kafka",
                                     "autoCreate",
                                     "clusterSpecOverrides",
@@ -1718,11 +1721,12 @@ def edit_state_with_unset_kafka_override_children():
                                 "children": [
                                     {
                                         "id": (
-                                            "edit:kafkaClusterConfiguration.kafka.autoCreate"
+                                            "edit:traffic.kafkaClusters.kafka.autoCreate"
                                             ".clusterSpecOverrides.kafka"
                                         ),
                                         "path": [
-                                            "kafkaClusterConfiguration",
+                                            "traffic",
+                                            "kafkaClusters",
                                             "kafka",
                                             "autoCreate",
                                             "clusterSpecOverrides",
@@ -1737,11 +1741,12 @@ def edit_state_with_unset_kafka_override_children():
                                         "children": [
                                             {
                                                 "id": (
-                                                    "edit:kafkaClusterConfiguration.kafka.autoCreate"
+                                                    "edit:traffic.kafkaClusters.kafka.autoCreate"
                                                     ".clusterSpecOverrides.kafka.replicas"
                                                 ),
                                                 "path": [
-                                                    "kafkaClusterConfiguration",
+                                                    "traffic",
+                                                    "kafkaClusters",
                                                     "kafka",
                                                     "autoCreate",
                                                     "clusterSpecOverrides",
@@ -1778,42 +1783,53 @@ def edit_state_with_workflow_config_kafka():
         "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
         "nodes": [
             {
-                "id": "edit:workflowConfiguration",
-                "path": ["workflowConfiguration"],
-                "label": "Workflow Configuration",
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
                 "valueKind": "object",
-                "description": "Shared workflow configuration.",
+                "description": "Live traffic capture and replay configuration.",
                 "status": "ok",
                 "statusCounts": {},
                 "children": [
                     {
-                        "id": "edit:kafkaClusterConfiguration",
-                        "path": ["kafkaClusterConfiguration"],
-                        "label": "Kafka Clusters",
-                        "valueKind": "record",
-                        "description": "Kafka cluster configurations.",
+                        "id": "edit:traffic.buffer",
+                        "path": ["traffic", "buffer"],
+                        "label": "Buffer",
+                        "valueKind": "object",
+                        "description": "Kafka clusters and captured traffic sources.",
                         "status": "ok",
                         "statusCounts": {},
                         "children": [
                             {
-                                "id": "edit:kafkaClusterConfiguration.kafka",
-                                "path": ["kafkaClusterConfiguration", "kafka"],
-                                "label": "kafka",
-                                "valueKind": "object",
-                                "description": "Kafka cluster configuration.",
+                                "id": "edit:traffic.kafkaClusters",
+                                "path": ["traffic", "kafkaClusters"],
+                                "label": "Kafka Clusters",
+                                "valueKind": "record",
+                                "description": "Kafka cluster configurations.",
                                 "status": "ok",
                                 "statusCounts": {},
                                 "children": [
                                     {
-                                        "id": "edit:kafkaClusterConfiguration.kafka.mode",
-                                        "path": ["kafkaClusterConfiguration", "kafka", "mode"],
-                                        "label": "mode: < autoCreate >",
-                                        "value": "autoCreate",
-                                        "valueKind": "union",
-                                        "description": "Kafka cluster mode.",
+                                        "id": "edit:traffic.kafkaClusters.kafka",
+                                        "path": ["traffic", "kafkaClusters", "kafka"],
+                                        "label": "kafka",
+                                        "valueKind": "object",
+                                        "description": "Kafka cluster configuration.",
                                         "status": "ok",
                                         "statusCounts": {},
-                                        "variants": [{"label": "autoCreate", "value": "autoCreate"}],
+                                        "children": [
+                                            {
+                                                "id": "edit:traffic.kafkaClusters.kafka.mode",
+                                                "path": ["traffic", "kafkaClusters", "kafka", "mode"],
+                                                "label": "mode: < autoCreate >",
+                                                "value": "autoCreate",
+                                                "valueKind": "union",
+                                                "description": "Kafka cluster mode.",
+                                                "status": "ok",
+                                                "statusCounts": {},
+                                                "variants": [{"label": "autoCreate", "value": "autoCreate"}],
+                                            },
+                                        ],
                                     },
                                 ],
                             },
@@ -2486,7 +2502,6 @@ def test_manage_tree_schema_orders_roots_like_workflow_config():
         "Sources",
         "Targets",
         "Snapshot Migration",
-        "External Kafka Connections",
         "Live Traffic Migration",
     ]
 
@@ -3418,6 +3433,62 @@ def test_required_parent_group_reveals_repair_children_in_essential_mode():
         "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem",
         "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.consoleClientSecretName",
     ]
+
+
+def test_empty_kafka_clusters_group_stays_visible_in_essential_mode():
+    """The core Kafka cluster group must still expose its add row for old/no-Kafka configs."""
+    edit_state = {
+        "nodes": [
+            {
+                "id": "edit:traffic",
+                "path": ["traffic"],
+                "label": "Live Traffic Migration",
+                "valueKind": "object",
+                "status": "ok",
+                "children": [
+                    {
+                        "id": "edit:traffic.buffer",
+                        "path": ["traffic", "buffer"],
+                        "label": "Buffer",
+                        "valueKind": "object",
+                        "status": "ok",
+                        "children": [
+                            {
+                                "id": "edit:traffic.kafkaClusters",
+                                "path": ["traffic", "kafkaClusters"],
+                                "label": "Kafka Clusters",
+                                "valueKind": "record",
+                                "status": "ok",
+                                "essential": True,
+                                "children": [
+                                    {
+                                        "id": "edit:traffic.kafkaClusters:add",
+                                        "path": ["traffic", "kafkaClusters"],
+                                        "label": "+ Add Kafka cluster",
+                                        "valueKind": "command",
+                                        "status": "ok",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "validation": {"valid": True, "errors": []},
+    }
+
+    sections = edit_state_resource_sections(
+        edit_state,
+        EDIT_MODE_ALL,
+        EDIT_MODE_ALL,
+        FIELD_VISIBILITY_ESSENTIAL,
+    )
+
+    live_traffic = next(section for section in sections if section.name == "Live Traffic Migration")
+    buffer = next(group for group in live_traffic.groups if group.display_name == "Buffer")
+    assert [resource.tree_id for resource in buffer.resources] == ["edit:traffic.kafkaClusters"]
+    assert [child.tree_id for child in buffer.resources[0].children] == ["edit:traffic.kafkaClusters:add"]
 
 
 def test_required_parent_group_does_not_auto_target_ambiguous_repair_choices():
@@ -4657,7 +4728,7 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
     class FakeConfigEditService:
         def load_edit_session(self):
             return {
-                "raw_yaml": "kafkaClusterConfiguration:\n  kafka:\n    autoCreate: {}\n",
+                "raw_yaml": "traffic:\n  kafkaClusters:\n    kafka:\n      autoCreate: {}\n",
                 "edit_state": edit_state_with_workflow_config_kafka(),
             }
 
@@ -4669,15 +4740,15 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
     pod_scraper.fetch_pods_metadata.return_value = []
     sections = [
         ResourceSection(
-            name="External Kafka Connections",
+            name="Live Traffic Migration",
             groups=[
                 ResourceGroup(
                     plural="kafkaconfigs",
-                    display_name="External Kafka Connections",
+                    display_name="Buffer",
                     resources=[
                         ResourceNode(
                             name="kafka",
-                            plural="kafkaconfigs",
+                            plural="kafkaclusters",
                             phase="Pending Config",
                             depends_on=[],
                             spec={"type": "autoCreate"},
@@ -4710,12 +4781,12 @@ async def test_resource_view_edit_mode_preserves_matching_resource_expansion(moc
             await pilot.press("e")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
 
-            kafka_root = find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration")
+            kafka_root = find_tree_node_by_id(tree.root, "edit:traffic.kafkaClusters")
             assert kafka_root is not None
-            assert kafka_root.parent is tree.root
+            assert get_clean_text_label(kafka_root.parent) == "Buffer"
+            assert get_clean_text_label(kafka_root.parent.parent) == "Live Traffic Migration"
             assert kafka_root.is_expanded
-            assert find_tree_node_by_id(tree.root, "edit:workflowConfiguration") is None
-            assert not find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:traffic.kafkaClusters.kafka").is_expanded
 
 
 def test_resource_view_edit_mode_keeps_authored_object_config_visible():
@@ -5455,11 +5526,12 @@ async def test_resource_view_edit_mode_does_not_count_absent_kafka_override_scaf
     kafka_override = state["nodes"][0]["children"][0]["children"][0]["children"][0]
     kafka_override["children"].append({
         "id": (
-            "edit:kafkaClusterConfiguration.kafka.autoCreate"
+            "edit:traffic.kafkaClusters.kafka.autoCreate"
             ".clusterSpecOverrides.kafka.gcLoggingEnabled"
         ),
         "path": [
-            "kafkaClusterConfiguration",
+            "traffic",
+            "kafkaClusters",
             "kafka",
             "autoCreate",
             "clusterSpecOverrides",
@@ -5478,7 +5550,7 @@ async def test_resource_view_edit_mode_does_not_count_absent_kafka_override_scaf
     class FakeConfigEditService:
         def load_edit_session(self):
             return {
-                "raw_yaml": "kafkaClusterConfiguration:\n  kafka:\n    autoCreate: {}\n",
+                "raw_yaml": "traffic:\n  kafkaClusters:\n    kafka:\n      autoCreate: {}\n",
                 "edit_state": state,
             }
 
@@ -5486,8 +5558,10 @@ async def test_resource_view_edit_mode_does_not_count_absent_kafka_override_scaf
             return {
                 "submitted": {
                     "workflowConfig": {
-                        "kafkaClusterConfiguration": {
-                            "kafka": {"autoCreate": {}},
+                        "traffic": {
+                            "kafkaClusters": {
+                                "kafka": {"autoCreate": {}},
+                            },
                         },
                     },
                 },
@@ -5524,13 +5598,13 @@ async def test_resource_view_edit_mode_does_not_count_absent_kafka_override_scaf
             assert "change" not in get_clean_text_label(
                 find_tree_node_by_id(
                     tree.root,
-                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                    "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
                 )
             )
             assert "change" not in get_clean_text_label(
                 find_tree_node_by_id(
                     tree.root,
-                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka",
+                    "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides.kafka",
                 )
             )
 
@@ -5578,26 +5652,26 @@ async def test_resource_view_edit_mode_collapses_unset_blocks_one_level_at_a_tim
                 pilot,
                 lambda: find_tree_node_by_id(
                     tree.root,
-                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                    "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
                 ) is not None,
             )
 
             cluster_overrides = find_tree_node_by_id(
                 tree.root,
-                "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
             )
             kafka_overrides = find_tree_node_by_id(
                 tree.root,
-                "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka",
+                "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides.kafka",
             )
             assert cluster_overrides is not None
             assert kafka_overrides is not None
-            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration").is_expanded
-            assert find_tree_node_by_id(tree.root, "edit:kafkaClusterConfiguration.kafka").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:traffic.kafkaClusters").is_expanded
+            assert find_tree_node_by_id(tree.root, "edit:traffic.kafkaClusters.kafka").is_expanded
             assert not cluster_overrides.is_expanded
             assert not kafka_overrides.is_expanded
 
-            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._select_tree_node_by_id("edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides")
             app._update_dynamic_bindings()
             await pilot.press("enter")
             await pilot.pause()
@@ -5936,6 +6010,57 @@ def test_resource_log_command_can_tail_with_follow():
     assert WorkflowTreeApp._resource_log_command("captureproxy.cap", follow=True) == (
         "workflow log resource captureproxy.cap -f | less -R +F"
     )
+
+
+def test_assign_workflow_progress_copies_nested_approval_to_target_resource():
+    approval = {
+        "id": "gate-1",
+        "display_name": "CapturedTraffic: cap-topic",
+        "phase": "Running",
+        "type": "Pod",
+        "is_approval": True,
+        "denial_reason": "Impossible: kafkaBrokers cannot be changed.",
+        "inputs": {"parameters": [{"name": "resourceName", "value": "capturedtraffic.cap-topic.vapretry"}]},
+        "children": [],
+    }
+    topic = ResourceNode(
+        name="cap-topic",
+        plural="capturedtraffics",
+        phase="Ready",
+        depends_on=[],
+        spec={},
+        status={},
+    )
+    kafka = ResourceNode(
+        name="default",
+        plural="kafkaclusters",
+        phase="Ready",
+        depends_on=[],
+        spec={},
+        status={},
+    )
+    cap = ResourceNode(
+        name="cap",
+        plural="captureproxies",
+        phase="Ready",
+        depends_on=[],
+        spec={},
+        status={},
+    )
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(plural="kafkaconfigs", display_name="Buffer", resources=[kafka, topic]),
+                ResourceGroup(plural="captureproxies", display_name="Capture", resources=[cap]),
+            ],
+        )
+    ]
+
+    WorkflowTreeApp._assign_workflow_progress(sections, {"cap": [approval]})
+
+    assert format_approval_gate_line(cap) is None
+    assert format_approval_gate_line(topic) == "BLOCKED: Impossible: kafkaBrokers cannot be changed."
 
 
 @pytest.mark.asyncio
@@ -7176,11 +7301,11 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
                 pilot,
                 lambda: find_tree_node_by_id(
                     tree.root,
-                    "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides",
+                    "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides",
                 ) is not None,
             )
 
-            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._select_tree_node_by_id("edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides")
             app._update_dynamic_bindings()
             await pilot.pause()
 
@@ -7200,7 +7325,8 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
                 {
                     "op": "set",
                     "path": [
-                        "kafkaClusterConfiguration",
+                        "traffic",
+                        "kafkaClusters",
                         "kafka",
                         "autoCreate",
                         "clusterSpecOverrides",
@@ -7209,7 +7335,7 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
                 },
             )
 
-            app._select_tree_node_by_id("edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides")
+            app._select_tree_node_by_id("edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides")
             app._update_dynamic_bindings()
             await pilot.pause()
             await pilot.press("enter")
@@ -7224,7 +7350,8 @@ async def test_resource_view_edit_mode_edits_leaf_object_fields_as_yaml(mock_wor
                 {
                     "op": "unset",
                     "path": [
-                        "kafkaClusterConfiguration",
+                        "traffic",
+                        "kafkaClusters",
                         "kafka",
                         "autoCreate",
                         "clusterSpecOverrides",

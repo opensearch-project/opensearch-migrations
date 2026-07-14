@@ -241,31 +241,6 @@ def _upload_fixture_to_localstack():
 
 def _make_migration_config_base64() -> str:
     config_yaml = f"""
-kafkaClusterConfiguration:
-  default:
-    autoCreate:
-      auth:
-        type: "none"
-      clusterSpecOverrides:
-        kafka:
-          config:
-            offsets.topic.replication.factor: 1
-            transaction.state.log.replication.factor: 1
-            transaction.state.log.min.isr: 1
-            default.replication.factor: 1
-            min.insync.replicas: 1
-      nodePoolSpecOverrides:
-        replicas: 1
-        roles:
-          - controller
-          - broker
-        storage:
-          type: persistent-claim
-          size: 1Gi
-          deleteClaim: true
-      topicSpecOverrides:
-        partitions: 1
-        replicas: 1
 sourceClusters:
   source:
     endpoint: "https://elasticsearch-master-headless:9200"
@@ -283,6 +258,31 @@ targetClusters:
         secretName: "{TARGET_AUTH_SECRET_NAME}"
 snapshotMigrationConfigs: []
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate:
+        auth:
+          type: "none"
+        clusterSpecOverrides:
+          kafka:
+            config:
+              offsets.topic.replication.factor: 1
+              transaction.state.log.replication.factor: 1
+              transaction.state.log.min.isr: 1
+              default.replication.factor: 1
+              min.insync.replicas: 1
+        nodePoolSpecOverrides:
+          replicas: 1
+          roles:
+            - controller
+            - broker
+          storage:
+            type: persistent-claim
+            size: 1Gi
+            deleteClaim: true
+        topicSpecOverrides:
+          partitions: 1
+          replicas: 1
   s3Sources:
     byoc-put:
       s3Uri: "s3://{S3_BUCKET}/{S3_KEY}"

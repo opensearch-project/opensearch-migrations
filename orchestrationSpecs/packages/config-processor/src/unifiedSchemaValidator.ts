@@ -20,7 +20,7 @@ function isDescendantPath(path: string, parentPath: string) {
 }
 
 function isKafkaClusterUnionPath(path: string) {
-    return /^\/kafkaClusterConfiguration\/[^/]+$/.test(path);
+    return /^\/traffic\/kafkaClusters\/[^/]+$/.test(path);
 }
 
 function isKafkaClusterUnionRequiredError(error: ErrorObject) {

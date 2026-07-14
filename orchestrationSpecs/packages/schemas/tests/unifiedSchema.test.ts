@@ -13,7 +13,7 @@ import {
 const strimziFixturePath = path.resolve(__dirname, "fixtures", "strimzi", "minimal-openapi.json");
 
 function getAutoCreateProperties(schema: any) {
-    return schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf
+    return schema.properties.traffic.properties.kafkaClusters.additionalProperties.anyOf
         .find((branch: any) => branch.properties?.autoCreate)
         .properties.autoCreate.properties;
 }
@@ -31,54 +31,56 @@ const validConfig = {
         },
     },
     snapshotMigrationConfigs: [],
-    kafkaClusterConfiguration: {
-        default: {
-            autoCreate: {
-                auth: {
-                    type: "scram-sha-512",
-                },
-                clusterSpecOverrides: {
-                    kafka: {
-                        config: {
-                            "offsets.topic.replication.factor": 1,
-                            "compression.type": "producer",
-                        },
-                        listeners: [
-                            {
-                                name: "external",
-                                port: 9094,
-                                type: "loadbalancer",
-                                tls: true,
-                                authentication: {
-                                    type: "scram-sha-512",
+    traffic: {
+        kafkaClusters: {
+            default: {
+                autoCreate: {
+                    auth: {
+                        type: "scram-sha-512",
+                    },
+                    clusterSpecOverrides: {
+                        kafka: {
+                            config: {
+                                "offsets.topic.replication.factor": 1,
+                                "compression.type": "producer",
+                            },
+                            listeners: [
+                                {
+                                    name: "external",
+                                    port: 9094,
+                                    type: "loadbalancer",
+                                    tls: true,
+                                    authentication: {
+                                        type: "scram-sha-512",
+                                    },
                                 },
-                            },
-                        ],
+                            ],
+                        },
+                        entityOperator: {
+                            topicOperator: {},
+                            userOperator: {},
+                        },
                     },
-                    entityOperator: {
-                        topicOperator: {},
-                        userOperator: {},
+                    nodePoolSpecOverrides: {
+                        replicas: 3,
+                        roles: ["broker", "controller"],
+                        storage: {
+                            type: "jbod",
+                            volumes: [
+                                {
+                                    id: 0,
+                                    type: "persistent-claim",
+                                    size: "100Gi",
+                                },
+                            ],
+                        },
                     },
-                },
-                nodePoolSpecOverrides: {
-                    replicas: 3,
-                    roles: ["broker", "controller"],
-                    storage: {
-                        type: "jbod",
-                        volumes: [
-                            {
-                                id: 0,
-                                type: "persistent-claim",
-                                size: "100Gi",
-                            },
-                        ],
-                    },
-                },
-                topicSpecOverrides: {
-                    partitions: 12,
-                    replicas: 2,
-                    config: {
-                        "cleanup.policy": "compact",
+                    topicSpecOverrides: {
+                        partitions: 12,
+                        replicas: 2,
+                        config: {
+                            "cleanup.policy": "compact",
+                        },
                     },
                 },
             },
@@ -116,18 +118,21 @@ describe("unified schema builder", () => {
 
         const invalidConfig = {
             ...validConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        ...validConfig.kafkaClusterConfiguration.default.autoCreate,
-                        nodePoolSpecOverrides: {
-                            ...validConfig.kafkaClusterConfiguration.default.autoCreate.nodePoolSpecOverrides,
-                            roles: ["broker", "invalid-role"],
-                        },
-                        topicSpecOverrides: {
-                            ...validConfig.kafkaClusterConfiguration.default.autoCreate.topicSpecOverrides,
-                            config: {
-                                "cleanup.policy": "not-allowed",
+            traffic: {
+                ...validConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            ...validConfig.traffic.kafkaClusters.default.autoCreate,
+                            nodePoolSpecOverrides: {
+                                ...validConfig.traffic.kafkaClusters.default.autoCreate.nodePoolSpecOverrides,
+                                roles: ["broker", "invalid-role"],
+                            },
+                            topicSpecOverrides: {
+                                ...validConfig.traffic.kafkaClusters.default.autoCreate.topicSpecOverrides,
+                                config: {
+                                    "cleanup.policy": "not-allowed",
+                                },
                             },
                         },
                     },

@@ -128,8 +128,7 @@ describe("editConfig state", () => {
             targetClusters: {
                 target: {endpoint: "https://target.example.com:9200"},
             },
-            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {kafka: {autoCreate: {}}}, proxies: {}, s3Sources: {}, replayers: {}},
             snapshotMigrationConfigs: [{fromSource: "source", toTarget: "target"}],
         });
 
@@ -139,16 +138,18 @@ describe("editConfig state", () => {
             "Live Traffic Migration",
         ]);
         expect((state.nodes[0].children ?? []).map(cleanLabel)).toEqual([
-            "Kafka Clusters",
             "Sources",
             "Targets",
         ]);
         expect((state.nodes[1].children ?? []).map(cleanLabel)).toEqual(["Backfill"]);
         expect((state.nodes[2].children ?? []).map(cleanLabel)).toEqual([
-            "Capture",
             "Buffer",
+            "Capture",
             "Replay",
         ]);
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters")).toMatchObject({
+            essential: true,
+        });
         expect(findNode(state.nodes, "edit:traffic.s3Sources")).toMatchObject({
             expert: true,
         });
@@ -343,14 +344,14 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        auth: {type: "none"},
+            traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            auth: {type: "none"},
+                        },
                     },
                 },
-            },
-            traffic: {
                 proxies: {
                     cap: {source: "source", proxyConfig: {listenPort: 9201}},
                     c2: {source: "source", proxyConfig: {listenPort: 9202}},
@@ -494,15 +495,15 @@ describe("editConfig state", () => {
                     endpoint: "https://prod.example.com:9200",
                 },
             },
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {},
-                    existing: {
-                        kafkaConnection: "broker:9092",
+            traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {},
+                        existing: {
+                            kafkaConnection: "broker:9092",
+                        },
                     },
                 },
-            },
-            traffic: {
                 proxies: {
                     capture: {source: "legacy", proxyConfig: {listenPort: 9201}},
                 },
@@ -511,13 +512,13 @@ describe("editConfig state", () => {
             snapshotMigrationConfigs: [],
         });
 
-        const cluster = findNode(state.nodes, "edit:kafkaClusterConfiguration.default");
+        const cluster = findNode(state.nodes, "edit:traffic.kafkaClusters.default");
 
         expect(state.validation.valid).toBe(false);
         expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 severity: "error",
-                path: ["kafkaClusterConfiguration", "default"],
+                path: ["traffic", "kafkaClusters", "default"],
                 message: "Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'",
             }),
         ]));
@@ -624,7 +625,7 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            traffic: {kafkaClusters: {kafka: {autoCreate: {}}}},
             snapshotMigrationConfigs: [],
         };
 
@@ -635,7 +636,8 @@ describe("editConfig state", () => {
         const removedMissingNested = applyEditOperationToObject(parse(removedScalar.yaml), {
             op: "unset",
             path: [
-                "kafkaClusterConfiguration",
+                "traffic",
+                "kafkaClusters",
                 "kafka",
                 "autoCreate",
                 "clusterSpecOverrides",
@@ -765,12 +767,12 @@ describe("editConfig state", () => {
                 aux: {endpoint: "https://aux.example.com:9200", version: "ES 7.10.2"},
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [
                 {fromSource: "legacy", toTarget: "prod"},
                 {fromSource: "aux", toTarget: "prod"},
             ],
             traffic: {
+                kafkaClusters: {},
                 proxies: {
                     cap: {source: "legacy"},
                     auxcap: {source: "aux"},
@@ -834,7 +836,6 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {default: {autoCreate: {}}},
             snapshotMigrationConfigs: [{
                 fromSource: "legacy",
                 toTarget: "prod",
@@ -843,6 +844,7 @@ describe("editConfig state", () => {
                 },
             }],
             traffic: {
+                kafkaClusters: {default: {autoCreate: {}}},
                 proxies: {
                     cap: {source: "legacy"},
                 },
@@ -896,12 +898,12 @@ describe("editConfig state", () => {
 
         const renamedKafka = applyEditOperationToObject(config, {
             op: "renameConfig",
-            path: ["kafkaClusterConfiguration", "default"],
+            path: ["traffic", "kafkaClusters", "default"],
             newName: "kafka2",
         });
         config = parse(renamedKafka.yaml);
-        expect(config.kafkaClusterConfiguration.default).toBeUndefined();
-        expect(config.kafkaClusterConfiguration.kafka2).toBeDefined();
+        expect(config.traffic.kafkaClusters.default).toBeUndefined();
+        expect(config.traffic.kafkaClusters.kafka2).toBeDefined();
         expect(config.traffic.proxies.cap.kafka).toBe("kafka2");
         expect(config.traffic.s3Sources.archive.kafka).toBe("kafka2");
 
@@ -955,10 +957,10 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {
-                default: {autoCreate: {}},
-            },
             traffic: {
+                kafkaClusters: {
+                    default: {autoCreate: {}},
+                },
                 proxies: {
                     capture: {source: "legacy"},
                 },
@@ -976,8 +978,8 @@ describe("editConfig state", () => {
             snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
         });
 
-        expect(cleanLabel(findNode(state.nodes, "edit:kafkaClusterConfiguration.default"))).toBe("default");
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")).toMatchObject({
+        expect(cleanLabel(findNode(state.nodes, "edit:traffic.kafkaClusters.default"))).toBe("default");
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.auth")).toMatchObject({
             valueKind: "union",
             value: "unset",
             presence: "optional",
@@ -986,22 +988,22 @@ describe("editConfig state", () => {
                 label: "scram-sha-512",
             },
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.map(variant => variant.value)).toEqual([
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.auth")?.variants?.map(variant => variant.value)).toEqual([
             "unset",
             "none",
             "scram-sha-512",
         ]);
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.variants?.[0].label).toBe("default (scram-sha-512)");
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.auth")?.label).toContain("auth: < default: scram-sha-512 >");
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.clusterSpecOverrides")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.auth")?.variants?.[0].label).toBe("default (scram-sha-512)");
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.auth")?.label).toContain("auth: < default: scram-sha-512 >");
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.clusterSpecOverrides")).toMatchObject({
             valueKind: "object",
             presence: "optional",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.nodePoolSpecOverrides")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.nodePoolSpecOverrides")).toMatchObject({
             valueKind: "object",
             presence: "optional",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default.autoCreate.topicSpecOverrides")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.topicSpecOverrides")).toMatchObject({
             valueKind: "object",
             presence: "optional",
         });
@@ -1189,7 +1191,6 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [{
                 fromSource: "legacy",
                 toTarget: "prod",
@@ -1197,7 +1198,7 @@ describe("editConfig state", () => {
                     snap1: [{metadataMigrationConfig: {}, documentBackfillConfig: {}}],
                 },
             }],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         });
 
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig")).toMatchObject({
@@ -1331,9 +1332,8 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         });
 
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots")).toMatchObject({
@@ -1380,9 +1380,8 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         };
 
         const result = applyEditOperationToObject(config, {
@@ -1430,9 +1429,8 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         };
 
         const result = applyEditOperationToObject(config, {
@@ -1473,7 +1471,6 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {target: {endpoint: "https://target.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [{
                 fromSource: "source",
                 toTarget: "target",
@@ -1481,7 +1478,7 @@ describe("editConfig state", () => {
                     a: [{documentBackfillConfig: {}}],
                 },
             }],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         });
 
         const snapshotNode = findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.a");
@@ -1514,9 +1511,8 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         }, {
             op: "add",
             path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig", "all"],
@@ -1605,7 +1601,6 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [{
                 fromSource: "legacy",
                 toTarget: "prod",
@@ -1613,7 +1608,7 @@ describe("editConfig state", () => {
                     snap1: [{metadataMigrationConfig: {}}],
                 },
             }],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         }, {
             op: "set",
             path: ["snapshotMigrationConfigs", "0", "fromSource"],
@@ -1645,7 +1640,6 @@ describe("editConfig state", () => {
                 },
             },
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {},
             snapshotMigrationConfigs: [{
                 fromSource: "legacy",
                 toTarget: "prod",
@@ -1654,7 +1648,7 @@ describe("editConfig state", () => {
                     snap2: [{documentBackfillConfig: {}}],
                 },
             }],
-            traffic: {proxies: {}, s3Sources: {}, replayers: {}},
+            traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         }, {
             op: "removeConfig",
             path: ["sourceClusters", "legacy", "snapshotInfo", "snapshots", "snap1"],
@@ -1672,65 +1666,67 @@ describe("editConfig state", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},
             targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
-            kafkaClusterConfiguration: {
-                kafka: {autoCreate: {}},
+            traffic: {
+                kafkaClusters: {
+                    kafka: {autoCreate: {}},
+                },
             },
             snapshotMigrationConfigs: [],
         });
 
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides.kafka")).toMatchObject({
             valueKind: "object",
             presence: "optional",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.clusterSpecOverrides.kafka.config.min.insync.replicas")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.clusterSpecOverrides.kafka.config.min.insync.replicas")).toMatchObject({
             valueKind: "scalar",
             valueType: "number",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.storage")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.storage")).toMatchObject({
             valueKind: "union",
             value: "unset",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.topicSpecOverrides.config.cleanup.policy")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.topicSpecOverrides.config.cleanup.policy")).toMatchObject({
             valueKind: "union",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.roles")).toMatchObject({
             valueKind: "array",
             presence: "optional",
         });
-        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles:add")).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.roles:add")).toMatchObject({
             valueKind: "command",
         });
 
         const compactTopic = applyEditOperationToObject({
-            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            traffic: {kafkaClusters: {kafka: {autoCreate: {}}}},
             snapshotMigrationConfigs: [],
         }, {
             op: "set",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "topicSpecOverrides", "config", "cleanup.policy"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "topicSpecOverrides", "config", "cleanup.policy"],
             value: "compact",
         });
         const persistentStorage = applyEditOperationToObject(parse(compactTopic.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "storage"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "nodePoolSpecOverrides", "storage"],
             value: "persistent-claim",
         });
 
         expect(compactTopic.yaml).toContain("cleanup.policy: compact");
         expect(persistentStorage.yaml).toContain("type: persistent-claim");
-        expect(findNode(persistentStorage.editState.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.storage.size")).toMatchObject({
+        expect(findNode(persistentStorage.editState.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.storage.size")).toMatchObject({
             valueKind: "scalar",
             presence: "optional",
         });
 
         const addedRole = applyEditOperationToObject({
-            kafkaClusterConfiguration: {kafka: {autoCreate: {}}},
+            traffic: {kafkaClusters: {kafka: {autoCreate: {}}}},
             snapshotMigrationConfigs: [],
         }, {
             op: "add",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
             value: {},
         });
-        const roleItem = findNode(addedRole.editState.nodes, "edit:kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles.0");
+        const roleItem = findNode(addedRole.editState.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.roles.0");
         expect(roleItem).toMatchObject({
             valueKind: "union",
             status: "required",
@@ -1739,43 +1735,45 @@ describe("editConfig state", () => {
         expect(roleItem?.variants?.map(variant => variant.value)).toEqual(["broker", "controller"]);
 
         const appendedRole = applyEditOperationToObject({
-            kafkaClusterConfiguration: {
-                kafka: {
-                    autoCreate: {
-                        nodePoolSpecOverrides: {roles: ["broker"]},
+            traffic: {
+                kafkaClusters: {
+                    kafka: {
+                        autoCreate: {
+                            nodePoolSpecOverrides: {roles: ["broker"]},
+                        },
                     },
                 },
             },
             snapshotMigrationConfigs: [],
         }, {
             op: "add",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles"],
             value: {},
         });
-        expect(parse(appendedRole.yaml).kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual(["broker", ""]);
+        expect(parse(appendedRole.yaml).traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual(["broker", ""]);
 
         const setRole = applyEditOperationToObject(parse(addedRole.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
             value: "broker",
         });
         expect(setRole.yaml).toContain("- broker");
 
         const removedRole = applyEditOperationToObject(parse(setRole.yaml), {
             op: "removeConfig",
-            path: ["kafkaClusterConfiguration", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
+            path: ["traffic", "kafkaClusters", "kafka", "autoCreate", "nodePoolSpecOverrides", "roles", "0"],
         });
-        expect(parse(removedRole.yaml).kafkaClusterConfiguration.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual([]);
+        expect(parse(removedRole.yaml).traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.roles).toEqual([]);
     }));
 
     it("renders missing capture proxy options as visible required fields", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
             targetClusters: {},
-            kafkaClusterConfiguration: {
-                default: {autoCreate: {}},
-            },
             traffic: {
+                kafkaClusters: {
+                    default: {autoCreate: {}},
+                },
                 proxies: {
                     cap: {source: "source"},
                 },
@@ -1892,10 +1890,10 @@ describe("editConfig state", () => {
         const added = applyEditOperationToObject({
             sourceClusters: {source: {endpoint: "", version: "ES 7.10.2"}},
             targetClusters: {},
-            kafkaClusterConfiguration: {
-                default: {autoCreate: {}},
-            },
             traffic: {
+                kafkaClusters: {
+                    default: {autoCreate: {}},
+                },
                 proxies: {
                     cap: {source: "source", proxyConfig: {listenPort: 9201}},
                 },
@@ -2583,27 +2581,27 @@ describe("editConfig state", () => {
 
         const addedKafka = applyEditOperationToObject(config, {
             op: "add",
-            path: ["kafkaClusterConfiguration"],
+            path: ["traffic", "kafkaClusters"],
             value: {name: "default"},
         });
         const existingKafka = applyEditOperationToObject(parse(addedKafka.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "default", "mode"],
+            path: ["traffic", "kafkaClusters", "default", "mode"],
             value: "existing",
         });
         const scramKafka = applyEditOperationToObject(parse(existingKafka.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "default", "existing", "auth"],
+            path: ["traffic", "kafkaClusters", "default", "existing", "auth"],
             value: "scram-sha-512",
         });
         const defaultAuthKafka = applyEditOperationToObject(parse(addedKafka.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "default", "autoCreate", "auth"],
+            path: ["traffic", "kafkaClusters", "default", "autoCreate", "auth"],
             value: "scram-sha-512",
         });
         const resetDefaultAuthKafka = applyEditOperationToObject(parse(defaultAuthKafka.yaml), {
             op: "set",
-            path: ["kafkaClusterConfiguration", "default", "autoCreate", "auth"],
+            path: ["traffic", "kafkaClusters", "default", "autoCreate", "auth"],
             value: "unset",
         });
         const addedProxy = applyEditOperationToObject(parse(existingKafka.yaml), {
@@ -2627,20 +2625,20 @@ describe("editConfig state", () => {
         });
 
         expect(existingKafka.yaml).toContain("existing: {}");
-        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.kafkaConnection")).toMatchObject({
+        expect(findNode(existingKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.kafkaConnection")).toMatchObject({
             status: "required",
             required: true,
         });
-        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.kafkaTopic")).toMatchObject({
+        expect(findNode(existingKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.kafkaTopic")).toMatchObject({
             valueKind: "scalar",
             presence: "optional",
         });
-        expect(findNode(existingKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth")).toMatchObject({
+        expect(findNode(existingKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.auth")).toMatchObject({
             valueKind: "union",
             value: "none",
         });
         expect(scramKafka.yaml).toContain("type: scram-sha-512");
-        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.secretName")).toMatchObject({
+        expect(findNode(scramKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.auth.secretName")).toMatchObject({
             status: "required",
             required: true,
             externalRef: {
@@ -2660,7 +2658,7 @@ describe("editConfig state", () => {
                 },
             },
         });
-        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.caSecretName")).toMatchObject({
+        expect(findNode(scramKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.auth.caSecretName")).toMatchObject({
             status: "ok",
             required: false,
             presence: "optional",
@@ -2682,7 +2680,7 @@ describe("editConfig state", () => {
                 },
             },
         });
-        expect(findNode(scramKafka.editState.nodes, "edit:kafkaClusterConfiguration.default.existing.auth.kafkaUserName")).toMatchObject({
+        expect(findNode(scramKafka.editState.nodes, "edit:traffic.kafkaClusters.default.existing.auth.kafkaUserName")).toMatchObject({
             status: "required",
             required: true,
             inputHint: {

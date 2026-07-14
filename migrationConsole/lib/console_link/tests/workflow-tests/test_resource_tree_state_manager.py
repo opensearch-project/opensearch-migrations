@@ -133,6 +133,32 @@ class TestRebuild:
         labels = [str(c.label) for c in resource_node.children]
         assert any('version: to-submit=3.8.0' in ln for ln in labels)
 
+    def test_parent_resource_label_does_not_inherit_child_pending_diff(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        kafka = make_resource('default', 'kafkaclusters', phase='Ready')
+        topic = make_resource('cap-topic', 'capturedtraffics', phase='Ready')
+        topic.config_diff = {
+            'has_submitted_changes': True,
+            'has_pending_submit_changes': False,
+            'fields': [{
+                'path': 'kafkaBrokers',
+                'label': 'kafkaBrokers',
+                'values': {
+                    'deployed': {'present': False},
+                    'submitted': {'present': True, 'value': 'default-kafka-bootstrap:9093'},
+                    'pending': {'present': True, 'value': 'default-kafka-bootstrap:9093'},
+                },
+            }],
+        }
+        mgr.rebuild(make_sections({'Buffer': [kafka, topic]}))
+
+        kafka_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}default')
+        topic_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}cap-topic')
+        group_node = find_node_by_id(tree.root, 'group:Buffer')
+        assert 'pending' not in str(kafka_node.label)
+        assert 'pending' in str(topic_node.label)
+        assert 'pending' in str(group_node.label)
+
     def test_value_modes_filter_resources_by_projected_presence(self, tree_and_manager):
         tree, mgr = tree_and_manager
         delete_after_submit = make_resource('delete-after-submit', 'trafficreplays')

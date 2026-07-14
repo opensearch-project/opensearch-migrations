@@ -341,13 +341,13 @@ class ResourceTreeStateManager:
         diff = resource.config_diff or {}
         if not diff:
             return format_change_flag(
-                ResourceTreeStateManager._resource_change_summary(resource)
+                ResourceTreeStateManager._resource_own_change_summary(resource)
             )
         if diff.get('has_pending_submit_changes'):
             return ' [green](to submit)[/green]'
         if diff.get('has_submitted_changes'):
             return ' [grey50](pending)[/grey50]'
-        return format_change_flag(ResourceTreeStateManager._resource_change_summary(resource))
+        return format_change_flag(ResourceTreeStateManager._resource_own_change_summary(resource))
 
     @classmethod
     def _section_change_summary(cls, section: ResourceSection) -> Dict[str, int]:
@@ -365,6 +365,13 @@ class ResourceTreeStateManager:
 
     @classmethod
     def _resource_change_summary(cls, resource: ResourceNode) -> Dict[str, int]:
+        summary = cls._resource_own_change_summary(resource)
+        for child in resource.children:
+            cls._merge_change_summary(summary, cls._resource_change_summary(child))
+        return summary
+
+    @classmethod
+    def _resource_own_change_summary(cls, resource: ResourceNode) -> Dict[str, int]:
         summary = {'count': 0, 'pending_submit': 0}
         if resource.tree_change_summary is not None:
             cls._merge_change_summary(summary, resource.tree_change_summary)
@@ -375,8 +382,6 @@ class ResourceTreeStateManager:
             summary['count'] += field_count or 1
             if diff.get('has_pending_submit_changes') or presence_changed:
                 summary['pending_submit'] += field_count or 1
-        for child in resource.children:
-            cls._merge_change_summary(summary, cls._resource_change_summary(child))
         return summary
 
     @staticmethod

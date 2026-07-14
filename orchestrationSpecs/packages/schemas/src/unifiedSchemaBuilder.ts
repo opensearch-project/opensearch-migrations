@@ -50,7 +50,7 @@ function clone<T>(value: T): T {
 }
 
 function getAutoCreateProperties(schema: any): Record<string, unknown> {
-    const kafkaClusterBranches = schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf;
+    const kafkaClusterBranches = schema.properties.traffic.properties.kafkaClusters.additionalProperties.anyOf;
     const autoCreateBranch = kafkaClusterBranches.find((branch: any) => branch.properties?.autoCreate);
     if (!autoCreateBranch) {
         throw new Error("Kafka cluster configuration schema is missing an autoCreate branch");

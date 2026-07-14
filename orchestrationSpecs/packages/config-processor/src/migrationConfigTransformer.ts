@@ -72,9 +72,11 @@ type NormalizedSourceCluster = Omit<z.infer<typeof SOURCE_CLUSTER_CONFIG>, "snap
     snapshotInfo?: NormalizedSnapshotInfo;
 };
 type ClusterAuthConfig = z.infer<typeof SOURCE_CLUSTER_CONFIG>["authConfig"];
-export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration" | "sourceClusters"> & {
-    kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+export type NormalizedUserConfig = Omit<InputConfig, "sourceClusters" | "traffic"> & {
     sourceClusters: Record<string, NormalizedSourceCluster>;
+    traffic?: Omit<UserTrafficConfig, "kafkaClusters"> & {
+        kafkaClusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+    };
 };
 
 export {KAFKA_VERSION} from "./kafkaConfigResolution";
@@ -176,7 +178,7 @@ function kafkaClusterUnionError(path: string[]): InputValidationError {
 }
 
 function isKafkaClusterConfigPath(path: string[]): boolean {
-    return path.length === 2 && path[0] === "kafkaClusterConfiguration";
+    return path.length === 3 && path[0] === "traffic" && path[1] === "kafkaClusters";
 }
 
 function schemaDef(schema: z.ZodTypeAny): any {
@@ -696,12 +698,19 @@ function normalizeUserConfigForValidation(userConfig: InputConfig): InputConfig 
     return {
         ...namedConfig,
         traffic: normalizeTrafficConfig(namedConfig.traffic),
-        kafkaClusterConfiguration: Object.fromEntries(
-            Object.entries(namedConfig.kafkaClusterConfiguration ?? {}).map(([key, cluster]) => [
-                key,
-                normalizeKafkaClusterConfig(cluster)
-            ])
-        ),
+        ...(namedConfig.traffic
+            ? {
+                traffic: {
+                    ...normalizeTrafficConfig(namedConfig.traffic),
+                    kafkaClusters: Object.fromEntries(
+                        Object.entries(namedConfig.traffic.kafkaClusters ?? {}).map(([key, cluster]) => [
+                            key,
+                            normalizeKafkaClusterConfig(cluster)
+                        ])
+                    ),
+                },
+            }
+            : {}),
     } as InputConfig;
 }
 
@@ -709,7 +718,12 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
     const validationNormalized = normalizeUserConfigForValidation(userConfig);
     return {
         ...validationNormalized,
-        kafkaClusterConfiguration: validationNormalized.kafkaClusterConfiguration ?? {},
+        traffic: validationNormalized.traffic
+            ? {
+                ...validationNormalized.traffic,
+                kafkaClusters: validationNormalized.traffic.kafkaClusters ?? {},
+            }
+            : undefined,
         sourceClusters: normalizeSourceClusters(validationNormalized.sourceClusters),
     };
 }
@@ -722,7 +736,7 @@ function buildKafkaClientConfig(
 ) {
     const cluster = kafkaClusters[kafkaClusterKey];
     if (!cluster) {
-        throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in kafkaClusterConfiguration`);
+        throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in traffic.kafkaClusters`);
     }
     if ('existing' in cluster) {
         const auth = cluster.existing.auth ?? {type: "none" as const};

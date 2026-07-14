@@ -12,18 +12,6 @@ import {main as resolveConsoleResourcesMain} from "../src/resolveConsoleResource
 
 function multiResourceConfig() {
     return {
-        kafkaClusterConfiguration: {
-            default: {
-                autoCreate: {},
-            },
-            "my-kafka": {
-                autoCreate: {
-                    auth: {
-                        type: "none",
-                    },
-                },
-            },
-        },
         sourceClusters: {
             sourceA: {
                 endpoint: "https://source-a.example.com",
@@ -88,6 +76,18 @@ function multiResourceConfig() {
             },
         }],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                },
+                "my-kafka": {
+                    autoCreate: {
+                        auth: {
+                            type: "none",
+                        },
+                    },
+                },
+            },
             proxies: {
                 "proxy-a": {
                     source: "sourceA",
@@ -302,7 +302,7 @@ describe("console resources", () => {
 
     it("projects externally managed SCRAM Kafka credential metadata", async () => {
         const config = multiResourceConfig();
-        config.kafkaClusterConfiguration = {
+        config.traffic.kafkaClusters = {
             external: {
                 existing: {
                     kafkaConnection: "broker.example.com:9093",

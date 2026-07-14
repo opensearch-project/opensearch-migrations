@@ -31,7 +31,7 @@ describe("workflow schema UI hints", () => {
             kind: "record",
             addLabel: "target cluster",
         });
-        expect(schema.properties.kafkaClusterConfiguration["x-ui-hint"]).toMatchObject({
+        expect(schema.properties.traffic.properties.kafkaClusters["x-ui-hint"]).toMatchObject({
             kind: "record",
             addLabel: "Kafka cluster",
             keyFormat: "k8s-name",
@@ -167,7 +167,7 @@ describe("workflow schema UI hints", () => {
     });
 
     it("exports effective defaults for fields resolved outside the raw schema", () => {
-        const kafkaConfig = schema.properties.kafkaClusterConfiguration.additionalProperties;
+        const kafkaConfig = schema.properties.traffic.properties.kafkaClusters.additionalProperties;
         const autoCreate = kafkaConfig.anyOf
             .find((branch: any) => branch.properties?.autoCreate)
             .properties.autoCreate;

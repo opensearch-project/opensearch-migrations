@@ -4443,326 +4443,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "default": false,
       "description": "Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."
     },
-    "kafkaClusterConfiguration": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "existing": {
-                "type": "object",
-                "properties": {
-                  "enableMSKAuth": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "kafkaConnection": {
-                    "type": "string",
-                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
-                    "description": "Sequence of <HOSTNAME:PORT> values delimited by ','."
-                  },
-                  "kafkaTopic": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Empty defaults to the name of the target label"
-                  },
-                  "auth": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "none"
-                            ],
-                            "description": "Do not use Kafka client authentication."
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "scram-sha-512"
-                            ],
-                            "description": "Use SASL/SCRAM-SHA-512 authentication for the existing Kafka cluster."
-                          },
-                          "secretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                            "description": "Name of a Kubernetes Secret containing the Kafka SCRAM password in the 'password' key.",
-                            "x-ui-hint": {
-                              "kind": "text",
-                              "format": "k8s-name",
-                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
-                            },
-                            "x-external-ref": {
-                              "kind": "kubernetesResource",
-                              "purpose": "kafka-scram-password",
-                              "displayName": "Kafka SCRAM Password Secret",
-                              "description": "Kubernetes Secret containing the SCRAM password for an existing Kafka user. The workflow reads the 'password' key.",
-                              "matchProfiles": [
-                                "kafka-scram-password-secret"
-                              ],
-                              "selection": {
-                                "target": "scalarName"
-                              },
-                              "k8s": {
-                                "resourceTypes": [
-                                  {
-                                    "group": "",
-                                    "version": "v1",
-                                    "kind": "Secret",
-                                    "namespaced": true
-                                  }
-                                ],
-                                "match": {
-                                  "requiredKeys": [
-                                    "password"
-                                  ],
-                                  "contentValidationIds": [
-                                    "non-empty-keys"
-                                  ]
-                                }
-                              },
-                              "create": {
-                                "label": "Kafka SCRAM Password Secret",
-                                "fields": [
-                                  {
-                                    "name": "secretName",
-                                    "label": "Secret name",
-                                    "input": "name",
-                                    "required": true,
-                                    "validationIds": [
-                                      "k8s-name"
-                                    ]
-                                  },
-                                  {
-                                    "name": "password",
-                                    "label": "Password",
-                                    "input": "password",
-                                    "required": true,
-                                    "sensitive": true,
-                                    "validationIds": [
-                                      "non-empty"
-                                    ],
-                                    "confirm": true
-                                  }
-                                ],
-                                "output": {
-                                  "kind": "Secret",
-                                  "type": "Opaque",
-                                  "stringData": {
-                                    "password": {
-                                      "fromField": "password"
-                                    }
-                                  }
-                                },
-                                "apply": {
-                                  "target": "scalarName",
-                                  "nameField": "secretName"
-                                }
-                              }
-                            }
-                          },
-                          "caSecretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                            "description": "Optional Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key. Omit to use the client runtime's default trust store.",
-                            "x-ui-hint": {
-                              "kind": "text",
-                              "format": "k8s-name",
-                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
-                            },
-                            "x-external-ref": {
-                              "kind": "kubernetesResource",
-                              "purpose": "kafka-ca",
-                              "displayName": "Kafka CA Secret",
-                              "description": "Kubernetes Secret containing the Kafka cluster CA certificate. The workflow mounts the 'ca.crt' key.",
-                              "matchProfiles": [
-                                "kafka-ca-secret"
-                              ],
-                              "selection": {
-                                "target": "scalarName"
-                              },
-                              "k8s": {
-                                "resourceTypes": [
-                                  {
-                                    "group": "",
-                                    "version": "v1",
-                                    "kind": "Secret",
-                                    "namespaced": true
-                                  }
-                                ],
-                                "match": {
-                                  "requiredKeys": [
-                                    "ca.crt"
-                                  ],
-                                  "contentValidationIds": [
-                                    "pem-certificate-chain"
-                                  ]
-                                }
-                              },
-                              "create": {
-                                "label": "Kafka CA Secret",
-                                "fields": [
-                                  {
-                                    "name": "secretName",
-                                    "label": "Secret name",
-                                    "input": "name",
-                                    "required": true,
-                                    "validationIds": [
-                                      "k8s-name"
-                                    ]
-                                  },
-                                  {
-                                    "name": "certificate",
-                                    "label": "CA certificate PEM",
-                                    "input": "multilineText",
-                                    "required": true,
-                                    "validationIds": [
-                                      "non-empty",
-                                      "pem-certificate-chain"
-                                    ]
-                                  }
-                                ],
-                                "output": {
-                                  "kind": "Secret",
-                                  "type": "Opaque",
-                                  "stringData": {
-                                    "ca.crt": {
-                                      "fromField": "certificate"
-                                    }
-                                  }
-                                },
-                                "apply": {
-                                  "target": "scalarName",
-                                  "nameField": "secretName"
-                                }
-                              }
-                            }
-                          },
-                          "kafkaUserName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                            "description": "Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret.",
-                            "x-ui-hint": {
-                              "kind": "text",
-                              "format": "k8s-name",
-                              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                              "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
-                            }
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "secretName",
-                          "kafkaUserName"
-                        ]
-                      }
-                    ],
-                    "default": {
-                      "type": "none"
-                    }
-                  }
-                },
-                "required": [
-                  "kafkaConnection"
-                ]
-              }
-            },
-            "required": [
-              "existing"
-            ],
-            "description": "Use an existing Kafka cluster by providing connection details."
-          },
-          {
-            "type": "object",
-            "properties": {
-              "autoCreate": {
-                "type": "object",
-                "nullable": true,
-                "properties": {
-                  "auth": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "none"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "scram-sha-512"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      }
-                    ],
-                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
-                    "x-effective-default": {
-                      "label": "scram-sha-512",
-                      "value": {
-                        "type": "scram-sha-512"
-                      },
-                      "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
-                    }
-                  },
-                  "clusterSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaSpec",
-                    "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
-                  },
-                  "nodePoolSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-                    "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
-                  },
-                  "topicSpecOverrides": {
-                    "$ref": "#/$defs/StrimziKafkaTopicSpec",
-                    "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
-                  }
-                },
-                "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
-              }
-            },
-            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
-          }
-        ],
-        "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
-      },
-      "default": {},
-      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'.",
-      "x-ui-hint": {
-        "kind": "record",
-        "addLabel": "Kafka cluster",
-        "keyFormat": "k8s-name",
-        "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-        "message": "Use a valid Kubernetes DNS name for the Kafka cluster."
-      }
-    },
     "sourceClusters": {
       "type": "object",
       "additionalProperties": {
@@ -7832,6 +7512,326 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "traffic": {
       "type": "object",
       "properties": {
+        "kafkaClusters": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "existing": {
+                    "type": "object",
+                    "properties": {
+                      "enableMSKAuth": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "kafkaConnection": {
+                        "type": "string",
+                        "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
+                        "description": "Sequence of <HOSTNAME:PORT> values delimited by ','."
+                      },
+                      "kafkaTopic": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Empty defaults to the name of the target label"
+                      },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ],
+                                "description": "Do not use Kafka client authentication."
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "scram-sha-512"
+                                ],
+                                "description": "Use SASL/SCRAM-SHA-512 authentication for the existing Kafka cluster."
+                              },
+                              "secretName": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                "description": "Name of a Kubernetes Secret containing the Kafka SCRAM password in the 'password' key.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "format": "k8s-name",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                },
+                                "x-external-ref": {
+                                  "kind": "kubernetesResource",
+                                  "purpose": "kafka-scram-password",
+                                  "displayName": "Kafka SCRAM Password Secret",
+                                  "description": "Kubernetes Secret containing the SCRAM password for an existing Kafka user. The workflow reads the 'password' key.",
+                                  "matchProfiles": [
+                                    "kafka-scram-password-secret"
+                                  ],
+                                  "selection": {
+                                    "target": "scalarName"
+                                  },
+                                  "k8s": {
+                                    "resourceTypes": [
+                                      {
+                                        "group": "",
+                                        "version": "v1",
+                                        "kind": "Secret",
+                                        "namespaced": true
+                                      }
+                                    ],
+                                    "match": {
+                                      "requiredKeys": [
+                                        "password"
+                                      ],
+                                      "contentValidationIds": [
+                                        "non-empty-keys"
+                                      ]
+                                    }
+                                  },
+                                  "create": {
+                                    "label": "Kafka SCRAM Password Secret",
+                                    "fields": [
+                                      {
+                                        "name": "secretName",
+                                        "label": "Secret name",
+                                        "input": "name",
+                                        "required": true,
+                                        "validationIds": [
+                                          "k8s-name"
+                                        ]
+                                      },
+                                      {
+                                        "name": "password",
+                                        "label": "Password",
+                                        "input": "password",
+                                        "required": true,
+                                        "sensitive": true,
+                                        "validationIds": [
+                                          "non-empty"
+                                        ],
+                                        "confirm": true
+                                      }
+                                    ],
+                                    "output": {
+                                      "kind": "Secret",
+                                      "type": "Opaque",
+                                      "stringData": {
+                                        "password": {
+                                          "fromField": "password"
+                                        }
+                                      }
+                                    },
+                                    "apply": {
+                                      "target": "scalarName",
+                                      "nameField": "secretName"
+                                    }
+                                  }
+                                }
+                              },
+                              "caSecretName": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                "description": "Optional Kubernetes Secret containing the Kafka cluster CA certificate in the 'ca.crt' key. Omit to use the client runtime's default trust store.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "format": "k8s-name",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                },
+                                "x-external-ref": {
+                                  "kind": "kubernetesResource",
+                                  "purpose": "kafka-ca",
+                                  "displayName": "Kafka CA Secret",
+                                  "description": "Kubernetes Secret containing the Kafka cluster CA certificate. The workflow mounts the 'ca.crt' key.",
+                                  "matchProfiles": [
+                                    "kafka-ca-secret"
+                                  ],
+                                  "selection": {
+                                    "target": "scalarName"
+                                  },
+                                  "k8s": {
+                                    "resourceTypes": [
+                                      {
+                                        "group": "",
+                                        "version": "v1",
+                                        "kind": "Secret",
+                                        "namespaced": true
+                                      }
+                                    ],
+                                    "match": {
+                                      "requiredKeys": [
+                                        "ca.crt"
+                                      ],
+                                      "contentValidationIds": [
+                                        "pem-certificate-chain"
+                                      ]
+                                    }
+                                  },
+                                  "create": {
+                                    "label": "Kafka CA Secret",
+                                    "fields": [
+                                      {
+                                        "name": "secretName",
+                                        "label": "Secret name",
+                                        "input": "name",
+                                        "required": true,
+                                        "validationIds": [
+                                          "k8s-name"
+                                        ]
+                                      },
+                                      {
+                                        "name": "certificate",
+                                        "label": "CA certificate PEM",
+                                        "input": "multilineText",
+                                        "required": true,
+                                        "validationIds": [
+                                          "non-empty",
+                                          "pem-certificate-chain"
+                                        ]
+                                      }
+                                    ],
+                                    "output": {
+                                      "kind": "Secret",
+                                      "type": "Opaque",
+                                      "stringData": {
+                                        "ca.crt": {
+                                          "fromField": "certificate"
+                                        }
+                                      }
+                                    },
+                                    "apply": {
+                                      "target": "scalarName",
+                                      "nameField": "secretName"
+                                    }
+                                  }
+                                }
+                              },
+                              "kafkaUserName": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                "description": "Kafka SCRAM principal name used by migration clients. The password is read from secretName; this username is not read from the Secret.",
+                                "x-ui-hint": {
+                                  "kind": "text",
+                                  "format": "k8s-name",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "secretName",
+                              "kafkaUserName"
+                            ]
+                          }
+                        ],
+                        "default": {
+                          "type": "none"
+                        }
+                      }
+                    },
+                    "required": [
+                      "kafkaConnection"
+                    ]
+                  }
+                },
+                "required": [
+                  "existing"
+                ],
+                "description": "Use an existing Kafka cluster by providing connection details."
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "autoCreate": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "scram-sha-512"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        ],
+                        "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+                        "x-effective-default": {
+                          "label": "scram-sha-512",
+                          "value": {
+                            "type": "scram-sha-512"
+                          },
+                          "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
+                        }
+                      },
+                      "clusterSpecOverrides": {
+                        "$ref": "#/$defs/StrimziKafkaSpec",
+                        "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+                      },
+                      "nodePoolSpecOverrides": {
+                        "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
+                        "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
+                      },
+                      "topicSpecOverrides": {
+                        "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                        "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+                      }
+                    },
+                    "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                  }
+                },
+                "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
+              }
+            ],
+            "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
+          },
+          "default": {},
+          "description": "Kafka cluster configurations for live traffic capture/replay. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies and S3 captured traffic sources via 'kafka'.",
+          "x-ui-hint": {
+            "kind": "record",
+            "addLabel": "Kafka cluster",
+            "keyFormat": "k8s-name",
+            "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "message": "Use a valid Kubernetes DNS name for the Kafka cluster."
+          }
+        },
         "proxies": {
           "type": "object",
           "additionalProperties": {
@@ -7841,14 +7841,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "default",
-                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.",
+                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in traffic.kafkaClusters.",
                 "x-ui-hint": {
                   "kind": "reference",
                   "sourcePath": [
-                    "kafkaClusterConfiguration"
+                    "traffic",
+                    "kafkaClusters"
                   ],
                   "emptyMeansDefault": "default",
-                  "message": "Choose one Kafka cluster from kafkaClusterConfiguration."
+                  "message": "Choose one Kafka cluster from traffic.kafkaClusters."
                 }
               },
               "kafkaTopic": {
@@ -8991,14 +8992,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "default",
-                "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration.",
+                "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in traffic.kafkaClusters.",
                 "x-ui-hint": {
                   "kind": "reference",
                   "sourcePath": [
-                    "kafkaClusterConfiguration"
+                    "traffic",
+                    "kafkaClusters"
                   ],
                   "emptyMeansDefault": "default",
-                  "message": "Choose one Kafka cluster from kafkaClusterConfiguration."
+                  "message": "Choose one Kafka cluster from traffic.kafkaClusters."
                 }
               },
               "kafkaTopic": {

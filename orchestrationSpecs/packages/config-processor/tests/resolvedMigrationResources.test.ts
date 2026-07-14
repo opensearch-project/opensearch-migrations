@@ -147,13 +147,19 @@ describe("resolved migration resources", () => {
             .toBe("https://target-b.example.com");
 
         const kafkaConfigBefore = sampleConfig();
-        kafkaConfigBefore.kafkaClusterConfiguration = {
+        kafkaConfigBefore.traffic = {
+            ...kafkaConfigBefore.traffic,
+            kafkaClusters: {
             default: {existing: {kafkaConnection: "broker-a:9092"}},
+            },
         } as any;
         const kafkaBefore = await transformAndResolve(kafkaConfigBefore);
         const kafkaConfigAfter = sampleConfig();
-        kafkaConfigAfter.kafkaClusterConfiguration = {
+        kafkaConfigAfter.traffic = {
+            ...kafkaConfigAfter.traffic,
+            kafkaClusters: {
             default: {existing: {kafkaConnection: "broker-b:9092"}},
+            },
         } as any;
         const kafkaAfter = await transformAndResolve(kafkaConfigAfter);
 
@@ -330,7 +336,7 @@ describe("resolved migration resources", () => {
 
     it("loosely projects implicit default kafka refs without inventing a missing explicit cluster", async () => {
         const config = sampleConfig();
-        (config as any).kafkaClusterConfiguration = {
+        (config as any).traffic.kafkaClusters = {
             kafka: {autoCreate: {}},
         };
 

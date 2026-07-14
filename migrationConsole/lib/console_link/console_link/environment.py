@@ -381,7 +381,7 @@ class Environment:
 
     @classmethod
     def _get_kafka_from_workflow_config(cls, config: Dict) -> Optional[Kafka]:
-        kafka_clusters = config.get("kafkaClusterConfiguration") or {}
+        kafka_clusters = ((config.get("traffic") or {}).get("kafkaClusters") or {})
         if not kafka_clusters:
             logger.info("No kafka cluster configuration is defined in the workflow config.")
             return None
@@ -411,7 +411,7 @@ class Environment:
 
         cluster_config = kafka_clusters.get(cluster_name)
         if cluster_config is None:
-            raise ValueError(f"Kafka cluster '{cluster_name}' not found in kafkaClusterConfiguration")
+            raise ValueError(f"Kafka cluster '{cluster_name}' not found in traffic.kafkaClusters")
 
         if "existing" in cluster_config:
             existing_config = cluster_config["existing"]

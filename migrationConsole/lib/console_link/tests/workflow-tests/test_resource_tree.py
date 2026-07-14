@@ -8,8 +8,10 @@ from console_link.workflow.resource_tree import (
     ResourceGroup,
     ResourceNode,
     ResourceSection,
-    _build_tree_from_raw, _nest_topics_under_kafka,
+    _build_tree_from_raw,
+    active_approval_node,
     apply_config_overlays,
+    approval_target_ref,
     format_config_diff_fields,
     format_approval_gate_line,
     format_dependency_line,
@@ -63,7 +65,6 @@ class TestBuildTreeFromRaw:
             'Sources',
             'Targets',
             'Snapshot Migration',
-            'External Kafka Connections',
             'Live Traffic Migration',
         ]
         for s in sections:
@@ -121,25 +122,23 @@ class TestBuildTreeFromRaw:
         assert resource.phase == 'Unknown'
 
 
-# --- _nest_topics_under_kafka ---
+# --- CapturedTraffic placement ---
 
-class TestNestTopicsUnderKafka:
-    def test_topic_nested_under_parent_kafka(self):
-        kafka = ResourceNode(name='kafka-1', plural='kafkaclusters', phase='Ready',
-                             depends_on=[], spec={}, status={})
-        topic = ResourceNode(name='topic-1', plural='capturedtraffics', phase='Ready',
-                             depends_on=[], spec={'kafkaClusterName': 'kafka-1'}, status={})
-        resources = [kafka, topic]
-        _nest_topics_under_kafka(resources)
-        assert topic not in resources
-        assert topic in kafka.children
+class TestCapturedTrafficPlacement:
+    def test_topic_stays_peer_of_parent_kafka(self):
+        raw = {
+            'kafkaclusters': [make_cr('kafkaclusters', 'kafka-1')],
+            'capturedtraffics': [
+                make_cr('capturedtraffics', 'topic-1', spec={'kafkaClusterName': 'kafka-1'}),
+            ],
+        }
 
-    def test_orphan_topic_stays_at_top_level(self):
-        topic = ResourceNode(name='topic-1', plural='capturedtraffics', phase='Ready',
-                             depends_on=[], spec={'kafkaClusterName': 'nonexistent'}, status={})
-        resources = [topic]
-        _nest_topics_under_kafka(resources)
-        assert topic in resources
+        sections = _build_tree_from_raw(raw)
+        buffer_group = group_by_plural(sections, 'kafkaconfigs')
+
+        assert [resource.name for resource in buffer_group.resources] == ['kafka-1', 'topic-1']
+        assert buffer_group.resources[0].children == []
+        assert format_spec_fields(buffer_group.resources[1]) == ['kafkaClusterName: kafka-1']
 
 
 # --- format_spec_fields ---
@@ -277,7 +276,7 @@ class TestConfigOverlays:
         assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
         assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
 
-    def test_nests_virtual_captured_traffic_under_virtual_kafka_cluster(self):
+    def test_adds_virtual_captured_traffic_as_kafka_peer(self):
         sections = _build_tree_from_raw({})
         pending = {'resources': [
             {
@@ -300,9 +299,13 @@ class TestConfigOverlays:
 
         apply_config_overlays(sections, pending_resolved_config=pending)
 
-        buffer_group = group_by_plural(sections, 'kafkaclusters')
-        assert [resource.name for resource in buffer_group.resources] == ['default']
-        assert [child.name for child in buffer_group.resources[0].children] == ['cap-topic']
+        buffer_group = group_by_plural(sections, 'kafkaconfigs')
+        assert [resource.name for resource in buffer_group.resources] == ['cap-topic', 'default']
+        topic = next(resource for resource in buffer_group.resources if resource.name == 'cap-topic')
+        assert format_config_diff_fields(topic, CONFIG_MODE_PENDING_SUBMIT) == [
+            'kafkaClusterName: to-submit=default',
+            'topicName: to-submit=aa',
+        ]
 
     def test_adds_virtual_snapshot_migration_from_saved_config(self):
         sections = _build_tree_from_raw({})
@@ -507,7 +510,7 @@ class TestConfigOverlays:
             'parameters': {'auth': {'type': 'scram-sha-512'}},
             'parameterProvenance': {
                 'auth.type': {
-                    'sourcePath': ['kafkaClusterConfiguration', 'default', 'autoCreate', 'auth', 'type'],
+                    'sourcePath': ['traffic', 'kafkaClusters', 'default', 'autoCreate', 'auth', 'type'],
                     'presence': 'authored',
                 },
             },
@@ -519,8 +522,7 @@ class TestConfigOverlays:
             pending_resolved_config=pending,
         )
 
-        assert group_by_plural(sections, 'kafkaconfigs').resources == []
-        resource = group_by_plural(sections, 'kafkaclusters').resources[0]
+        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
         assert format_config_diff_fields(resource) == [
             'type: deployed=<absent> | pending=<absent> | to-submit=scram-sha-512',
         ]
@@ -709,6 +711,13 @@ class TestFormatDependencyLine:
 
 
 class TestFormatApprovalGateLine:
+    def test_approval_target_ref_parses_vapretry_gate_name(self):
+        node = {
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'capturedtraffic.cap-topic.vapretry'}]},
+        }
+
+        assert approval_target_ref(node) == ('capturedtraffics', 'cap-topic')
+
     def test_running_approval_renders_blocked_reason(self):
         resource = make_resource('captureproxies', name='cap', phase='Error')
         resource.workflow_progress = [{
@@ -723,6 +732,22 @@ class TestFormatApprovalGateLine:
         }]
 
         assert format_approval_gate_line(resource) == 'BLOCKED: Impossible: listenPort cannot be changed.'
+
+    def test_running_approval_for_different_resource_is_ignored(self):
+        resource = make_resource('captureproxies', name='cap', phase='Error')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CapturedTraffic: cap-topic',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'denial_reason': 'Impossible: kafkaBrokers cannot be changed.',
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'capturedtraffic.cap-topic.vapretry'}]},
+            'children': [],
+        }]
+
+        assert active_approval_node(resource) is None
+        assert format_approval_gate_line(resource) is None
 
     def test_running_approval_without_reason_renders_required(self):
         resource = make_resource('captureproxies', name='cap', phase='Pending')
@@ -911,9 +936,9 @@ class TestMarkNotConfiguredGroups:
             {'display_name': 'createProxy', 'phase': 'Skipped'},
         ]
         mark_not_configured_groups(sections, filtered_tree)
-        # kafkaclusters and captureproxies should be marked
+        # Buffer and captureproxies should be marked
         capture_group = group_by_plural(sections, 'captureproxies')
-        kafka_group = group_by_plural(sections, 'kafkaclusters')
+        kafka_group = group_by_plural(sections, 'kafkaconfigs')
         assert capture_group.not_configured is True
         assert kafka_group.not_configured is True
 
@@ -921,7 +946,7 @@ class TestMarkNotConfiguredGroups:
         sections = _build_tree_from_raw({})
         filtered_tree = [{'display_name': 'createKafka', 'phase': 'Running'}]
         mark_not_configured_groups(sections, filtered_tree)
-        kafka_group = group_by_plural(sections, 'kafkaclusters')
+        kafka_group = group_by_plural(sections, 'kafkaconfigs')
         assert kafka_group.not_configured is False
 
     def test_empty_filtered_tree_no_op(self):

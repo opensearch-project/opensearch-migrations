@@ -21,7 +21,7 @@ export const KAFKA_CONFIG_DISPLAY_FIELDS = [
 
 export const PROJECTED_RESOURCE_DISPLAY_FIELDS: Record<string, string[]> = {
     KafkaCluster: ["version", "auth.type", "nodePool.replicas"],
-    CapturedTraffic: ["topicName", "partitions", "replicas"],
+    CapturedTraffic: ["kafkaClusterName", "kafkaBrokers", "topicName", "partitions", "replicas"],
     CaptureProxy: ["podReplicas", "listenPort", "internetFacing", "serviceType"],
     DataSnapshot: ["snapshotPrefix", "indexAllowlist"],
     SnapshotMigration: [

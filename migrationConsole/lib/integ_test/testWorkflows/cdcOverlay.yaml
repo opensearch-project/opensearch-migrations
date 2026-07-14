@@ -70,12 +70,12 @@ spec:
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               '. + {
-              "kafkaClusterConfiguration": {
-                "default": {
-                  "autoCreate": {}
-                }
-              },
               "traffic": {
+                "kafkaClusters": {
+                  "default": {
+                    "autoCreate": {}
+                  }
+                },
                 "proxies": {
                   "capture-proxy": {
                     "source": "source1",
@@ -165,12 +165,12 @@ spec:
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
               | .snapshotMigrationConfigs = []
               | . + {
-                "kafkaClusterConfiguration": {
-                  "default": {
-                    "autoCreate": {}
-                  }
-                },
                 "traffic": {
+                  "kafkaClusters": {
+                    "default": {
+                      "autoCreate": {}
+                    }
+                  },
                   "proxies": {
                     "capture-proxy": {
                       "source": "source1",

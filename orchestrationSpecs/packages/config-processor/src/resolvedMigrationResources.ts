@@ -550,14 +550,14 @@ function kafkaClusterParameterProvenance(
         parameters,
         ["version"],
         "defaulted",
-        ["kafkaClusterConfiguration", kafkaCluster.name, "autoCreate"],
+        ["traffic", "kafkaClusters", kafkaCluster.name, "autoCreate"],
     );
     setParameterProvenance(
         result,
         parameters,
         ["auth", "type"],
         hasPath(kafka, ["autoCreate", "auth", "type"]) ? "authored" : "defaulted",
-        ["kafkaClusterConfiguration", kafkaCluster.name, "autoCreate", "auth", "type"],
+        ["traffic", "kafkaClusters", kafkaCluster.name, "autoCreate", "auth", "type"],
     );
     for (const path of [
         ["nodePool", "replicas"],
@@ -571,7 +571,7 @@ function kafkaClusterParameterProvenance(
             parameters,
             path,
             hasPath(kafka, sourcePath) ? "authored" : "defaulted",
-            ["kafkaClusterConfiguration", kafkaCluster.name, ...sourcePath],
+            ["traffic", "kafkaClusters", kafkaCluster.name, ...sourcePath],
         );
     }
     return result;
@@ -612,7 +612,7 @@ function capturedTrafficParameterProvenance(
             parameters,
             path,
             hasPath(userKafkaRecord(options, kafkaName), sourcePath) ? "authored" : "defaulted",
-            ["kafkaClusterConfiguration", kafkaName, ...sourcePath],
+            ["traffic", "kafkaClusters", kafkaName, ...sourcePath],
         );
     }
     for (const path of extraGeneratedPaths) {
@@ -1027,7 +1027,7 @@ function userS3SourceRecord(options: ResolvedMigrationResourcesOptions, sourceNa
 }
 
 function userKafkaRecord(options: ResolvedMigrationResourcesOptions, kafkaName: string): Record<string, unknown> {
-    return sourceRecordAt(options, ["kafkaClusterConfiguration", kafkaName]);
+    return sourceRecordAt(options, ["traffic", "kafkaClusters", kafkaName]);
 }
 
 function userReplayEntryFor(
@@ -1405,12 +1405,12 @@ function looseKafkaRuntimeProvenance(
             if (parameterPath[0] === "clientConfig") {
                 return {
                     presence: hasPath(kafkaConfig, ["existing", ...parameterPath.slice(1)]) ? "authored" : "defaulted",
-                    sourcePath: ["kafkaClusterConfiguration", kafkaName, "existing", ...parameterPath.slice(1)],
+                    sourcePath: ["traffic", "kafkaClusters", kafkaName, "existing", ...parameterPath.slice(1)],
                 };
             }
             return {
                 presence: hasPath(kafkaConfig, ["existing", ...parameterPath]) ? "authored" : "defaulted",
-                sourcePath: ["kafkaClusterConfiguration", kafkaName, "existing", ...parameterPath],
+                sourcePath: ["traffic", "kafkaClusters", kafkaName, "existing", ...parameterPath],
             };
         });
     }
@@ -1419,7 +1419,7 @@ function looseKafkaRuntimeProvenance(
         if (samePath(parameterPath, ["authType"])) {
             return {
                 presence: hasPath(autoCreate, ["auth", "type"]) ? "authored" : "defaulted",
-                sourcePath: ["kafkaClusterConfiguration", kafkaName, "autoCreate", "auth", "type"],
+                sourcePath: ["traffic", "kafkaClusters", kafkaName, "autoCreate", "auth", "type"],
             };
         }
         if (samePath(parameterPath, ["type"]) || samePath(parameterPath, ["clusterName"]) || samePath(parameterPath, ["listenerName"])) {
@@ -1486,7 +1486,7 @@ function looseConsoleResources(
             displayFields: [...KAFKA_CONFIG_DISPLAY_FIELDS],
             parameterProvenance: looseKafkaRuntimeProvenance(name, kafka, runtime),
             source: "config" as const,
-            diagnostics: diagnosticsForPrefixes(validation.diagnostics, [["kafkaClusterConfiguration", name]]),
+            diagnostics: diagnosticsForPrefixes(validation.diagnostics, [["traffic", "kafkaClusters", name]]),
         };
     });
 
@@ -1516,7 +1516,7 @@ function buildLooseResourceList(
                 name,
                 parameters,
                 validation,
-                [["kafkaClusterConfiguration", name]],
+                [["traffic", "kafkaClusters", name]],
                 options,
                 kafkaClusterParameterProvenance({name} as KafkaClusterConfig, parameters, options),
             ));

@@ -67,6 +67,9 @@ describe('MigrationConfigTransformer validation', () => {
             }
         ],
         traffic: {
+            kafkaClusters: {
+                "default": { "autoCreate": {} }
+            },
             proxies: {
                 "proxy1": {
                     "source": "source1",
@@ -79,9 +82,6 @@ describe('MigrationConfigTransformer validation', () => {
                     "toTarget": "target1"
                 }
             }
-        },
-        kafkaClusterConfiguration: {
-            "default": { "autoCreate": {} }
         }
     };
 
@@ -231,7 +231,7 @@ describe('MigrationConfigTransformer validation', () => {
 
     it('should reject omitted kafka refs when explicit kafka config does not include default', () => {
         const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
+        config.traffic.kafkaClusters = {
             kafka: {autoCreate: {}}
         };
         delete config.traffic.proxies.proxy1.kafka;
@@ -250,7 +250,7 @@ describe('MigrationConfigTransformer validation', () => {
 
     it('should reject kafka cluster configs that define both modes', () => {
         const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration.default = {
+        config.traffic.kafkaClusters.default = {
             autoCreate: {},
             existing: {
                 kafkaConnection: "broker:9092",
@@ -258,12 +258,12 @@ describe('MigrationConfigTransformer validation', () => {
         };
 
         expect(() => transformer.validateInput(config))
-            .toThrow(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate' at: kafkaClusterConfiguration\.default/);
+            .toThrow(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate' at: traffic\.kafkaClusters\.default/);
     });
 
     it('should transform s3 captured traffic sources without a live proxy', async () => {
         const config = cloneBaseConfig();
-        delete config.kafkaClusterConfiguration;
+        delete config.traffic.kafkaClusters;
         config.snapshotMigrationConfigs = [];
         config.traffic = {
             s3Sources: {
@@ -822,7 +822,7 @@ describe('MigrationConfigTransformer validation', () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
 
-        expect(normalized.kafkaClusterConfiguration.default).toMatchObject({
+        expect(normalized.traffic?.kafkaClusters.default).toMatchObject({
             autoCreate: {
                 auth: {
                     type: "scram-sha-512"
@@ -864,11 +864,14 @@ describe('MigrationConfigTransformer validation', () => {
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        auth: {
-                            type: "scram-sha-512"
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            auth: {
+                                type: "scram-sha-512"
+                            }
                         }
                     }
                 }
@@ -948,14 +951,17 @@ describe('MigrationConfigTransformer validation', () => {
     it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {
         const configWithInvalidExistingScramKafka = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    existing: {
-                        kafkaConnection: "broker.example.org:9093",
-                        kafkaTopic: "capture-proxy",
-                        auth: {
-                            type: "scram-sha-512",
-                            secretName: "existing-kafka-user-secret"
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        existing: {
+                            kafkaConnection: "broker.example.org:9093",
+                            kafkaTopic: "capture-proxy",
+                            auth: {
+                                type: "scram-sha-512",
+                                secretName: "existing-kafka-user-secret"
+                            }
                         }
                     }
                 }
@@ -970,14 +976,17 @@ describe('MigrationConfigTransformer validation', () => {
     it('should report an unknown Kafka broker key without union noise', () => {
         const configWithBogusKafkaKey = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        clusterSpecOverrides: {
-                            kafka: {
-                                config: {
-                                    "auto.create.topics.enable": false,
-                                    "bogus.inner.key": true,
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            clusterSpecOverrides: {
+                                kafka: {
+                                    config: {
+                                        "auto.create.topics.enable": false,
+                                        "bogus.inner.key": true,
+                                    }
                                 }
                             }
                         }
