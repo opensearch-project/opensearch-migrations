@@ -519,6 +519,10 @@
               "name": "listenPort"
             },
             {
+              "name": "skipApproval",
+              "value": "false"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -591,6 +595,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
                   },
                   {
                     "name": "podReplicas",
@@ -1272,6 +1280,17 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "skipApprovalMap",
+              "value": "{}",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.approvalConfigMapName}}",
+                  "key": "autoApprove",
+                  "optional": true
+                }
+              }
             }
           ]
         },
@@ -1336,6 +1355,10 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "skipApprovalMap",
+                    "value": "{{inputs.parameters.skipApprovalMap}}"
                   },
                   {
                     "name": "crdUid",
@@ -1426,6 +1449,24 @@
                 ]
               },
               "name": "bulkLoadDocuments"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "approvebackfill",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{='documentbackfill.'+inputs.parameters.crdName}}"
+                  }
+                ]
+              },
+              "name": "approveBackfill"
             }
           ]
         ],
@@ -2263,6 +2304,10 @@
                   {
                     "name": "proxyConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"sourceConnectionIdentity\", fromJSON(item['sourceConnectionIdentity']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{=sprig.dig('skipApproval', false, item)}}"
                   },
                   {
                     "name": "kafkaClusterName",

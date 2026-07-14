@@ -17,6 +17,7 @@ import {
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     PROXY_TLS_CONFIG,
     ResourceRequirementsType,
 } from "@opensearch-migrations/schemas";
@@ -94,7 +95,7 @@ function makeProxyServiceManifest(
 }
 
 function makeProxyParamsDict(
-    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>>,
     resolvedKafkaConnection: BaseExpression<string>,
     resolvedKafkaListenerName: BaseExpression<string>,
     resolvedKafkaAuthType: BaseExpression<string>,
@@ -580,11 +581,12 @@ export const SetupCapture = WorkflowBuilder.create({
 
 
     .addTemplate("setupProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
@@ -598,7 +600,10 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
-            // Argo evaluates step parameters before `when` guards, so tls fields must be null-safe.
+            const skipProxyApproval = b.inputs.skipApproval;
+            // Use dig for ALL tls field accesses so expressions are null-safe.
+            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
+            // so expr.get() on a nil tls block crashes even when the step is guarded.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
             const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
@@ -761,6 +766,16 @@ export const SetupCapture = WorkflowBuilder.create({
                         serviceType,
                     })
                 )
+                // Gate here, after the proxy is deployed and its endpoint is serving, so the
+                // operator can swing client traffic through the proxy and verify capture before
+                // approving. Only once approved do we patch the CaptureProxy to Ready below, which
+                // publishes checksumForSnapshot and releases the downstream snapshot/backfill flow.
+                .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({
+                        resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
+                    }),
+                    {when: expr.not(skipProxyApproval)}
+                )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({
                         resourceName: b.inputs.proxyName,
@@ -778,7 +793,7 @@ export const SetupCapture = WorkflowBuilder.create({
     )
 
     .addTemplate("reconcileCaptureTopicAndProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -789,6 +804,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -905,6 +921,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
@@ -930,6 +947,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,

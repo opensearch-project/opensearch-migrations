@@ -27,6 +27,7 @@ import {
     CLUSTER_CONNECTION_IDENTITY,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     NAMED_KAFKA_CLIENT_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
@@ -279,7 +280,7 @@ function makeCapturedTrafficManifest(
 }
 
 function makeCaptureProxyManifest(
-    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>>,
     proxyName: BaseExpression<string>,
     topicCrName: BaseExpression<string>,
 ) {
@@ -594,7 +595,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
     .addTemplate("upsertCaptureProxyResource", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("topicCrName", typeToken<string>())
         .addResourceTask(b => b
@@ -969,7 +970,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
     .addTemplate("reconcileCaptureProxyResource", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("topicCrName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())

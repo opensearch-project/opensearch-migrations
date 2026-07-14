@@ -775,6 +775,38 @@
         }
       },
       {
+        "name": "approvebackfill",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  }
+                ]
+              },
+              "name": "waitForUserApproval"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "donothing",
         "inputs": {
           "parameters": []
