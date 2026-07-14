@@ -3,12 +3,17 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
+import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -160,5 +165,75 @@ class ExpiringTrafficStreamMapWallClockExpiryTest extends InstrumentationTest {
         int count = map.expireByWallClock();
         Assertions.assertEquals(1, count);
         Assertions.assertTrue(expired.contains("noDataConn"));
+    }
+
+    @Test
+    void callbackExceptionDoesNotPreventRemainingExpiries() {
+        var expired = new ArrayList<String>();
+        var map = new ExpiringTrafficStreamMap(TIMEOUT, GRANULARITY, new BehavioralPolicy() {
+            @Override
+            public void onExpireAccumulation(String partitionId, Accumulation accumulation) {
+                expired.add(accumulation.trafficChannelKey.getConnectionId());
+                if ("failConn".equals(accumulation.trafficChannelKey.getConnectionId())) {
+                    throw new RuntimeException("simulated callback failure");
+                }
+            }
+        });
+
+        // Create two stale connections — one will throw in the callback
+        var tskFail = makeTsk("failConn");
+        var accumFail = map.getOrCreateWithoutExpiration(tskFail, k -> new Accumulation(tskFail, 0));
+        accumFail.lastWallClockUpdateMillis.set(System.currentTimeMillis() - 15_000);
+
+        var tskOk = makeTsk("okConn");
+        var accumOk = map.getOrCreateWithoutExpiration(tskOk, k -> new Accumulation(tskOk, 0));
+        accumOk.lastWallClockUpdateMillis.set(System.currentTimeMillis() - 15_000);
+
+        // Both should be expired even though failConn's callback throws
+        int count = map.expireByWallClock();
+        Assertions.assertEquals(2, count,
+            "Both connections should be counted as expired despite callback exception");
+        Assertions.assertTrue(expired.contains("failConn"));
+        Assertions.assertTrue(expired.contains("okConn"),
+            "okConn must still be expired even after failConn's callback threw");
+    }
+
+    @Test
+    void runWallClockExpiry_exercisesAccumulatorWatchdogMethod() {
+        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
+            Duration.ofSeconds(10), null, new AccumulationCallbacks() {
+                @Override
+                public Consumer<RequestResponsePacketPair> onRequestReceived(
+                    @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isResumedConnection
+                ) {
+                    return rrpp -> {};
+                }
+
+                @Override
+                public void onTrafficStreamsExpired(
+                    RequestResponsePacketPair.ReconstructionStatus status,
+                    @NonNull IReplayContexts.IChannelKeyContext ctx,
+                    @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+                ) {}
+
+                @Override
+                public void onConnectionClose(
+                    int channelInteractionNumber,
+                    @NonNull IReplayContexts.IChannelKeyContext ctx,
+                    int channelSessionNumber,
+                    RequestResponsePacketPair.ReconstructionStatus status,
+                    @NonNull Instant when,
+                    @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+                ) {}
+
+                @Override
+                public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {}
+            }
+        );
+        // Directly invoke the watchdog method — exercises the try block and the "expired == 0" path
+        accumulator.runWallClockExpiry();
+        accumulator.close();
     }
 }

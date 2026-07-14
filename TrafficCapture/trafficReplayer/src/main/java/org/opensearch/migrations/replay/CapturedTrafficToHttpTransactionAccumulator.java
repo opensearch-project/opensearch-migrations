@@ -179,7 +179,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         );
     }
 
-    private void runWallClockExpiry() {
+    void runWallClockExpiry() {
         try {
             int expired = liveStreams.expireByWallClock();
             if (expired > 0) {
