@@ -366,5 +366,3 @@ resource "helm_release" "migration_assistant" {
     google_container_node_pool.kafka
   ]
 }
-
-
