@@ -4,7 +4,7 @@ Provisions GCP infrastructure for the OpenSearch Migration Assistant.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6 (native `terraform test` is used for validation)
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated with `gcloud auth application-default login`
 - GCP project with billing enabled
 - Required APIs enabled:
@@ -69,6 +69,16 @@ terraform destroy -var="project=my-project"
 | `node_iam_roles` | `["roles/storage.admin"]` | IAM roles for the node SA |
 | `workload_identity_namespace` | `migration` | Kubernetes namespace containing Migration Assistant service accounts |
 | `additional_workload_identity_service_accounts` | `["migration-console-access-role","argo-workflow-executor","argo-workflow-controller","argo-controller"]` | Additional Kubernetes service accounts that can use the GCP migration service account |
+| `source_connectivity` | `{mode = "none"}` | Private connectivity for source cluster read traffic; `mode = "none"` (default, public internet), `"psc_consumer"` (Private Service Connect), or `"vpc_peering"` |
+| `target_connectivity` | `{mode = "none"}` | Private connectivity for target cluster write traffic; same modes as `source_connectivity` |
+| `gcs_connectivity` | `{mode = "private_google_access"}` | Private Google Access for Cloud Storage snapshot traffic; `mode = "private_google_access"` (default, private path) or `"none"` (public internet) |
+| `enable_private_endpoint` | `false` | Restrict GKE control plane to private IP only (no public endpoint); requires VPN or bastion for kubectl access |
+
+## Private networking
+
+To run a migration with no public-internet data path (private source/target connectivity,
+private Cloud Storage access, and a private control plane), see
+[Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md).
 
 ## Notes
 
@@ -175,3 +185,8 @@ step before metadata + reindex-from-snapshot.
   under 5 GiB, so a lowered `maxShardSizeBytes` of `5368709120` is sufficient.
 - The bucket region should match the GKE region for best performance;
   cross-region reads work but are slower and incur egress.
+- When the workflow **creates** the snapshot (not BYOS), the **source** cluster must
+  support GCS snapshot repositories. Elasticsearch 8.0+ and OpenSearch bundle this;
+  Elasticsearch 7.x requires the `repository-gcs` plugin on every source node, or
+  snapshot registration fails with `repository type [gcs] does not exist`. See
+  [Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md#snapshot-storage-cloud-storage).
