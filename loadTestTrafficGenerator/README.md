@@ -415,9 +415,11 @@ interface contract including the k6 native REST API alternative.
   `insecureSkipTLSVerify: true`. The source cluster behind the proxy runs plain HTTP with
   security disabled — the proxy handles all TLS termination.
 
-- **Metrics.** Pipeline metrics (Capture Proxy → OTEL collector → Prometheus scrape at `:8889`).
-  k6 metrics → Prometheus remote write at `:9090/api/v1/write`. Both land in the same Prometheus
-  instance; no custom k6 image needed.
+- **Metrics.** All metrics funnel through the OTEL collector. Capture Proxy pushes OTLP gRPC to
+  the collector (`:4317`). Kafka broker/topic/consumer metrics are scraped by the collector's
+  `kafkametricsreceiver`. k6 pushes via Prometheus remote write to the collector's
+  `prometheusremotewrite` receiver (`:9090`). The collector exposes a single Prometheus scrape
+  endpoint at `:8889`; no custom k6 image needed.
 
 - **Workload: NYC Taxis.** Mirrors the field shapes from `DataGenerator/NycTaxis.java` exactly
   (same date format, same constants, same geo-point array format). The index is `dynamic: strict`,
@@ -456,3 +458,4 @@ interface contract including the k6 native REST API alternative.
 | 4 — Mixed profile | **done** | Concurrent ingest + search; Webdis ID registry |
 | 5 — Burst / ramp | **done** | `ramping-arrival-rate` configs; ramp, burst, mixed-ramp profiles |
 | 6 — Chaos hooks | **done** | Pause/resume/rate-throttle via Webdis; opt-in `CONTROL_ENABLED` |
+| 7 — Observability consolidation | **done** | Kafka metrics via `kafkametricsreceiver`; k6 routed through otel-collector |
