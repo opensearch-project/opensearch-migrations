@@ -151,6 +151,19 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
+    it('should reject solrCollections on a user-facing ES/OS createSnapshotConfig', () => {
+        // solrCollections is a Solr-only, internal (ARGO) field. It must not be settable on the
+        // user-facing ES/OS snapshot config; ES/OS users use indexAllowlist instead.
+        const configWithSolrCollections = cloneBaseConfig();
+        configWithSolrCollections.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrCollections: ["collectionA"]
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithSolrCollections);
+        }).toThrow(/Unrecognized keys.*solrCollections/);
+    });
+
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
         const result = await transformer.processFromObject(baseConfig);
         const m = result.snapshotMigrations[0];
