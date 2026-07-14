@@ -9,6 +9,7 @@ import {
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
     DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
@@ -26,6 +27,7 @@ import {
     configMapKey,
     defineParam,
     expr,
+    FunctionExpression,
     IMAGE_PULL_POLICY,
     InputParamDef,
     INTERNAL,
@@ -43,6 +45,7 @@ import {ResourceManagement} from "./resourceManagement";
 
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {getApprovalMap, getSourceTargetPathAndSnapshotAndMigrationIndex} from "./commonUtils/configContextPathConstructors";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
 import {S3TrafficLoader} from "./s3TrafficLoader";
@@ -187,7 +190,7 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
     .addTemplate("setupSingleProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -195,6 +198,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -220,6 +224,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
@@ -460,6 +465,8 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
+        .addInputsFromRecord(
+            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
 
         .addSteps(b => b
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
@@ -484,6 +491,31 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: b.inputs.checksumForReplayer
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
+            )
+            .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
+                    }),
+                // The skip flag must be a native boolean expression here: this `when` is
+                // compound, so it renders as an expr-lang ({{=...}}) condition where a
+                // stringified input parameter cannot be negated (`!"false"` throws
+                // "interface {} is string, not bool"). Inlining the sprig.dig keeps it a
+                // real bool. (The metadata gates dodge this only because their `when` is a
+                // lone `!()` that renders in Argo's legacy templating.)
+                {when: {templateExp: expr.and(
+                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                    expr.not(new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+                        ...getSourceTargetPathAndSnapshotAndMigrationIndex(
+                            b.inputs.sourceLabel,
+                            b.inputs.targetConfig,
+                            expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                            b.inputs.migrationLabel
+                        ),
+                        expr.literal("documentBackfill"),
+                        expr.literal(false),
+                        expr.deserializeRecord(b.inputs.skipApprovalMap)
+                    ]))
+                )}}
             )
         )
     )
@@ -805,6 +837,7 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
+                    skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
