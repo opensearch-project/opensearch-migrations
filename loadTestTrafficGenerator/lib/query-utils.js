@@ -1,8 +1,10 @@
 /**
  * Shared query execution helpers used by all schema modules in lib/data/.
  *
- * Each schema module provides its own buildFlatBody / buildAggBody / sortField
- * and delegates to these functions, keeping the HTTP + check boilerplate in one place.
+ * The low-level functions (flatSearch, aggSearch, scrollSequence, searchAfterSequence)
+ * handle HTTP calls and k6 checks.  The factory functions (makeFlatSearch, makeAggSearch,
+ * makeSearchAfterSequence) build schema-bound versions of those functions from a field-name
+ * config, so schema modules only need to declare config — no query logic to repeat.
  */
 
 import http from 'k6/http';
@@ -18,7 +20,9 @@ export function pickRange(ranges) {
   return ranges[Math.floor(Math.random() * ranges.length)];
 }
 
-export function flatSearch(proxyUrl, index, buildBodyFn, fieldValues, connParams) {
+// ── Low-level executors ───────────────────────────────────────────────────────
+
+function flatSearch(proxyUrl, index, buildBodyFn, fieldValues, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
     JSON.stringify(buildBodyFn(fieldValues)),
@@ -28,7 +32,7 @@ export function flatSearch(proxyUrl, index, buildBodyFn, fieldValues, connParams
   return res;
 }
 
-export function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
+function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
     JSON.stringify(buildBodyFn()),
@@ -37,6 +41,112 @@ export function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
   check(res, { 'agg search (200)': (r) => r.status === 200 });
   return res;
 }
+
+// ── Factories ─────────────────────────────────────────────────────────────────
+
+/**
+ * Returns a flatSearch function bound to the given field config.
+ *
+ * config:
+ *   termA:  { field, key }  — term filter used in variants 0 and 3
+ *   rangeA: { field, key }  — range filter used in variant 1
+ *   termB:  { field, key }  — term filter used in variant 2
+ *   rangeB: { field, key }  — range filter used in variant 3
+ *
+ * `key` is the property name on the fieldValues object (from field-value-sample.json).
+ * For range fields, fieldValues[key].ranges must be an array of [min, max] pairs.
+ */
+export function makeFlatSearch({ termA, rangeA, termB, rangeB }) {
+  function buildBody(fieldValues) {
+    const variant = Math.floor(Math.random() * 4);
+    switch (variant) {
+      case 0:
+        return { size: 10, query: { term: { [termA.field]: pick(fieldValues[termA.key]) } } };
+      case 1: {
+        const r = pickRange(fieldValues[rangeA.key].ranges);
+        return { size: 10, query: { range: { [rangeA.field]: { gte: r[0], lte: r[1] } } } };
+      }
+      case 2:
+        return { size: 10, query: { term: { [termB.field]: pick(fieldValues[termB.key]) } } };
+      case 3: {
+        const r = pickRange(fieldValues[rangeB.key].ranges);
+        return {
+          size: 10,
+          query: {
+            bool: {
+              filter: [
+                { term: { [termA.field]: pick(fieldValues[termA.key]) } },
+                { range: { [rangeB.field]: { gte: r[0], lte: r[1] } } },
+              ],
+            },
+          },
+        };
+      }
+      default:
+        return { size: 10, query: { match_all: {} } };
+    }
+  }
+  return (proxyUrl, index, fieldValues, connParams) =>
+    flatSearch(proxyUrl, index, buildBody, fieldValues, connParams);
+}
+
+/**
+ * Returns an aggSearch function bound to the given field config.
+ *
+ * config:
+ *   dateHistogram: { field, interval, format }  — date_histogram aggregation
+ *   termsA:        string  — field for a simple terms agg
+ *   termsB:        string  — outer field for a nested terms + avg agg
+ *   avgField:      string  — inner avg field for the nested agg
+ *   termsDefault:  string  — field for the default-case terms agg
+ */
+export function makeAggSearch({ dateHistogram, termsA, termsB, avgField, termsDefault }) {
+  function buildBody() {
+    const variant = Math.floor(Math.random() * 3);
+    switch (variant) {
+      case 0:
+        return {
+          size: 0,
+          aggs: {
+            by_date: {
+              date_histogram: {
+                field:             dateHistogram.field,
+                calendar_interval: dateHistogram.interval,
+                format:            dateHistogram.format,
+              },
+            },
+          },
+        };
+      case 1:
+        return { size: 0, aggs: { by_category: { terms: { field: termsA, size: 10 } } } };
+      case 2:
+        return {
+          size: 0,
+          aggs: {
+            by_group: {
+              terms: { field: termsB, size: 10 },
+              aggs:  { avg_metric: { avg: { field: avgField } } },
+            },
+          },
+        };
+      default:
+        return { size: 0, aggs: { by_default: { terms: { field: termsDefault, size: 10 } } } };
+    }
+  }
+  return (proxyUrl, index, connParams) =>
+    aggSearch(proxyUrl, index, buildBody, connParams);
+}
+
+/**
+ * Returns a searchAfterSequence function that sorts on the given field.
+ * Each schema uses a different timestamp/datetime field as the primary sort key.
+ */
+export function makeSearchAfterSequence(sortField) {
+  return (proxyUrl, index, connParams, maxPages) =>
+    searchAfterSequence(proxyUrl, index, connParams, maxPages, sortField);
+}
+
+// ── Deep-paging ───────────────────────────────────────────────────────────────
 
 /**
  * Opens a scroll, fetches up to pageCount pages, then always closes the context.
@@ -105,12 +215,7 @@ export function scrollSequence(proxyUrl, index, connParams, pageCount) {
   return { success, pagesRead };
 }
 
-/**
- * Pages through results using search_after on sortField.
- * Each request is independent — no server-side state to clean up.
- * Returns { success: boolean, pagesRead: number }.
- */
-export function searchAfterSequence(proxyUrl, index, connParams, maxPages, sortField) {
+function searchAfterSequence(proxyUrl, index, connParams, maxPages, sortField) {
   let searchAfterKey = null;
   let pagesRead = 0;
 
