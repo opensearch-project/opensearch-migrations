@@ -324,12 +324,6 @@
           "legendFormat": "{{scenario}} HTTP err %",
           "refId": "A"
         },
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by(scenario)(rate(ingest_errors_total{scenario=~\"$scenario\"}[1m])) / sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
-          "legendFormat": "{{scenario}} ingest err %",
-          "refId": "B"
-        }
       ],
       "options": {
         "tooltip": { "mode": "multi", "sort": "desc" },
