@@ -6,22 +6,12 @@
  * Date format matches fieldDateISO(): "yyyy-MM-dd HH:mm:ss".
  */
 
+import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
+
 const TRIP_TYPES      = ['1', '2'];
 const PAYMENT_TYPES   = ['1', '2', '3', '4'];
 const STORE_FWD_FLAGS = ['Y', 'N'];
 const VENDOR_IDS      = ['1', '2'];
-
-function randomFloat(min, max) {
-  return Math.random() * (max - min) + min;
-}
-
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function randomElement(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
 
 function randomNycLocation() {
   return [
@@ -76,18 +66,8 @@ export function randomUpdateBody() {
   return { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) };
 }
 
-/**
- * Build a newline-delimited _bulk request body for the given index.
- * Returns { body: string, docCount: number }.
- */
 export function randomBulkBatch(index, batchSize) {
-  const lines = [];
-  for (let i = 0; i < batchSize; i++) {
-    lines.push(JSON.stringify({ index: { _index: index } }));
-    lines.push(JSON.stringify(randomDocument()));
-  }
-  lines.push(''); // _bulk requires a trailing newline
-  return { body: lines.join('\n'), docCount: batchSize };
+  return _randomBulkBatch(index, batchSize, randomDocument);
 }
 
 /**

@@ -6,6 +6,8 @@
  * (INFO-heavy log levels, 2xx-heavy status codes).
  */
 
+import { randomElement, randomInt, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
+
 // Weighted toward INFO to reflect typical production log volumes
 const LEVELS       = ['DEBUG', 'INFO', 'INFO', 'INFO', 'WARN', 'ERROR', 'FATAL'];
 const SERVICES     = ['api-gateway', 'auth-service', 'user-service', 'payment-service', 'notification-service'];
@@ -25,14 +27,6 @@ const MESSAGES     = [
   'Service degraded, using fallback',
   'Retrying failed downstream call',
 ];
-
-function randomElement(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 function randomTimestamp() {
   const base     = new Date('2024-01-01T00:00:00Z').getTime();
@@ -72,18 +66,8 @@ export function randomUpdateBody() {
   return { level: randomElement(LEVELS) };
 }
 
-/**
- * Build a newline-delimited _bulk request body for the given index.
- * Returns { body: string, docCount: number }.
- */
 export function randomBulkBatch(index, batchSize) {
-  const lines = [];
-  for (let i = 0; i < batchSize; i++) {
-    lines.push(JSON.stringify({ index: { _index: index } }));
-    lines.push(JSON.stringify(randomDocument()));
-  }
-  lines.push(''); // _bulk requires a trailing newline
-  return { body: lines.join('\n'), docCount: batchSize };
+  return _randomBulkBatch(index, batchSize, randomDocument);
 }
 
 /**

@@ -1,14 +1,8 @@
 /**
- * Query helpers for the Logs scenario — Phase 3.
+ * Shared query execution helpers used by all schema modules in lib/data/.
  *
- * Implements four query patterns against the logs index:
- *   flatSearch          — term / range / bool _search, 10 hits
- *   aggSearch           — date-histogram and terms aggregations, size 0
- *   scrollSequence      — open scroll → fetch pages → always close context
- *   searchAfterSequence — stateless deep-paging via search_after + sort on @timestamp
- *
- * connParams must come from pinned() or spread() in lib/connection-control.js.
- * fieldValues is the parsed data/logs_data/field-value-sample.json object.
+ * Each schema module provides its own buildFlatBody / buildAggBody / sortField
+ * and delegates to these functions, keeping the HTTP + check boilerplate in one place.
  */
 
 import http from 'k6/http';
@@ -18,101 +12,31 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function pickRange(ranges) {
+export { pick };
+
+export function pickRange(ranges) {
   return ranges[Math.floor(Math.random() * ranges.length)];
 }
 
-// ── Flat search ──────────────────────────────────────────────────────────────
-
-function buildFlatBody(fieldValues) {
-  const variant = Math.floor(Math.random() * 4);
-  switch (variant) {
-    case 0:
-      return { size: 10, query: { term: { level: pick(fieldValues.levels) } } };
-    case 1: {
-      const r = pickRange(fieldValues.duration_ms.ranges);
-      return { size: 10, query: { range: { duration_ms: { gte: r[0], lte: r[1] } } } };
-    }
-    case 2:
-      return { size: 10, query: { term: { service: pick(fieldValues.services) } } };
-    case 3: {
-      const r = pickRange(fieldValues.duration_ms.ranges);
-      return {
-        size: 10,
-        query: {
-          bool: {
-            filter: [
-              { term: { level: pick(fieldValues.levels) } },
-              { range: { duration_ms: { gte: r[0], lte: r[1] } } },
-            ],
-          },
-        },
-      };
-    }
-    default:
-      return { size: 10, query: { match_all: {} } };
-  }
-}
-
-export function flatSearch(proxyUrl, index, fieldValues, connParams) {
+export function flatSearch(proxyUrl, index, buildBodyFn, fieldValues, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
-    JSON.stringify(buildFlatBody(fieldValues)),
+    JSON.stringify(buildBodyFn(fieldValues)),
     { ...connParams, tags: { name: 'search_flat' } },
   );
   check(res, { 'flat search (200)': (r) => r.status === 200 });
   return res;
 }
 
-// ── Aggregation search ───────────────────────────────────────────────────────
-
-function buildAggBody() {
-  const variant = Math.floor(Math.random() * 3);
-  switch (variant) {
-    case 0:
-      return {
-        size: 0,
-        aggs: {
-          events_by_hour: {
-            date_histogram: {
-              field: '@timestamp',
-              calendar_interval: 'hour',
-              format: 'yyyy-MM-dd HH:mm',
-            },
-          },
-        },
-      };
-    case 1:
-      return {
-        size: 0,
-        aggs: { by_level: { terms: { field: 'level', size: 10 } } },
-      };
-    case 2:
-      return {
-        size: 0,
-        aggs: {
-          by_service: {
-            terms: { field: 'service', size: 10 },
-            aggs: { avg_duration: { avg: { field: 'duration_ms' } } },
-          },
-        },
-      };
-    default:
-      return { size: 0, aggs: { by_environment: { terms: { field: 'environment', size: 10 } } } };
-  }
-}
-
-export function aggSearch(proxyUrl, index, connParams) {
+export function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
-    JSON.stringify(buildAggBody()),
+    JSON.stringify(buildBodyFn()),
     { ...connParams, tags: { name: 'search_agg' } },
   );
   check(res, { 'agg search (200)': (r) => r.status === 200 });
   return res;
 }
-
-// ── Scroll sequence ──────────────────────────────────────────────────────────
 
 /**
  * Opens a scroll, fetches up to pageCount pages, then always closes the context.
@@ -181,21 +105,19 @@ export function scrollSequence(proxyUrl, index, connParams, pageCount) {
   return { success, pagesRead };
 }
 
-// ── search_after sequence ────────────────────────────────────────────────────
-
 /**
- * Pages through results using search_after, sorted by @timestamp + _id.
+ * Pages through results using search_after on sortField.
  * Each request is independent — no server-side state to clean up.
  * Returns { success: boolean, pagesRead: number }.
  */
-export function searchAfterSequence(proxyUrl, index, connParams, maxPages) {
+export function searchAfterSequence(proxyUrl, index, connParams, maxPages, sortField) {
   let searchAfterKey = null;
   let pagesRead = 0;
 
   for (let page = 0; page < maxPages; page++) {
     const body = {
       size: 50,
-      sort: [{ '@timestamp': 'asc' }, { _id: 'asc' }],
+      sort: [{ [sortField]: 'asc' }, { _id: 'asc' }],
       query: { match_all: {} },
     };
     if (searchAfterKey) {

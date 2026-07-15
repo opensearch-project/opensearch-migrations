@@ -7,7 +7,7 @@
  *
  * connParams must come from pinned() or spread() in lib/connection-control.js.
  * docFns must provide { randomDocument, randomUpdateBody } from the active scenario's
- * documents module (e.g. lib/nyc_taxis/documents.js or lib/logs_data/documents.js).
+ * documents module (e.g. lib/data/nyc_taxis/documents.js or lib/data/logs_data/documents.js).
  * Tags on each request correspond to unique Prometheus label values so per-step
  * latency is visible in Grafana without any dashboard changes.
  */

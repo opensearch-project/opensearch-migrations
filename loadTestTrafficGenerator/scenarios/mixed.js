@@ -42,10 +42,10 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import * as nycTaxisDocs    from '../lib/nyc_taxis/documents.js';
-import * as logsDocs         from '../lib/logs_data/documents.js';
-import * as nycTaxisQueries  from '../lib/nyc_taxis/queries.js';
-import * as logsQueries      from '../lib/logs_data/queries.js';
+import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
+import * as logsDocs         from '../lib/data/logs_data/documents.js';
+import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
+import * as logsQueries      from '../lib/data/logs_data/queries.js';
 import { runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
