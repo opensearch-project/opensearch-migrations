@@ -9,9 +9,10 @@
  *   5%  deep paging (scroll or search_after — activated by DEEP_PAGING_ENABLED=true)
  *        When disabled, these iterations run as flat searches instead.
  *
- * Key environment variables (see k6-config/search-steady.env for defaults):
+ * Key environment variables (see k6-config/search-steady.env for load-profile defaults):
+ *   SCENARIO              — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL     — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME            — target OpenSearch index
+ *   INDEX_NAME            — target OpenSearch index; defaults to the value of SCENARIO
  *   SEARCH_RATE           — target requests/second (arrival rate)
  *   SEARCH_VUS            — pre-allocated VUs
  *   SEARCH_MAX_VUS        — max VUs k6 may spin up to meet the rate
@@ -27,8 +28,10 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
-import { randomDocument } from '../lib/documents.js';
-import { flatSearch, aggSearch, scrollSequence, searchAfterSequence } from '../lib/queries.js';
+import * as nycTaxisDocs    from '../lib/nyc_taxis/documents.js';
+import * as logsDocs         from '../lib/logs_data/documents.js';
+import * as nycTaxisQueries  from '../lib/nyc_taxis/queries.js';
+import * as logsQueries      from '../lib/logs_data/queries.js';
 import { pinned, spread } from '../lib/connection-control.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
@@ -45,9 +48,27 @@ const searchAfterPages   = new Counter('search_after_pages');
 const searchErrors       = new Rate('search_errors');
 const deepPagingErrors   = new Rate('search_deep_paging_errors');
 
+// ── Scenario selection ──────────────────────────────────────────────────────
+// All open() calls must happen at init time — k6 does not allow deferred file reads.
+const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
+const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
+const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
+
+const FIELD_VALUES_MAP = {
+  nyc_taxis: JSON.parse(open('../data/nyc_taxis/field-value-sample.json')),
+  logs_data: JSON.parse(open('../data/logs_data/field-value-sample.json')),
+};
+const fieldValues = FIELD_VALUES_MAP[SCENARIO] || FIELD_VALUES_MAP['nyc_taxis'];
+
+const MAPPINGS = {
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
+};
+const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+
 // ── Config ──────────────────────────────────────────────────────────────────
 const PROXY_URL          = __ENV.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
-const INDEX              = __ENV.INDEX_NAME             || 'nyc_taxis';
+const INDEX              = __ENV.INDEX_NAME             || SCENARIO;
 const RATE               = parseInt(__ENV.SEARCH_RATE      || '50');
 const VUS                = parseInt(__ENV.SEARCH_VUS       || '30');
 const MAX_VUS            = parseInt(__ENV.SEARCH_MAX_VUS   || '150');
@@ -57,10 +78,6 @@ const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
 const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES     || '3');
 const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES || '3');
 const CONNECTION_MODE    = __ENV.CONNECTION_MODE        || 'pinned';
-
-// ── Static data (loaded once in init context, shared across all VUs) ────────
-const fieldValues    = JSON.parse(open('../data/field-value-sample.json'));
-const INDEX_MAPPING  = open('../data/nyc_taxis_mapping.json');
 
 // ── Connection params (resolved once per VU in init context) ────────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
@@ -95,10 +112,10 @@ export const options = {
   },
 };
 
-// ── Setup: ensure the index exists with the correct mapping, then sample seed IDs ─────────────
-// Aggregations on vendor_id, payment_type, trip_type require keyword field types.
-// date_histogram on pickup_datetime requires a date field type.
-// Without this step, auto-created dynamic mapping maps these as text, causing 400s on all aggs.
+// ── Setup: ensure the index exists with the correct mapping, then sample seed IDs ──
+// Aggregations on keyword fields require the correct field type.
+// Without this step, auto-created dynamic mapping may map keyword fields as text,
+// causing 400s on all agg queries.
 export function setup() {
   const indexUrl = `${PROXY_URL}/${INDEX}`;
 
@@ -112,29 +129,27 @@ export function setup() {
     if (createRes.status !== 200) {
       console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
     } else {
-      console.log(`setup: created index ${INDEX} with nyc_taxis mapping`);
+      console.log(`setup: created index ${INDEX} with ${SCENARIO} mapping`);
     }
   } else {
     console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);
 
-    // Verify key fields have the correct types for aggregations.
-    // A stale index from a previous run may have vendor_id/payment_type mapped as 'text'
-    // (via OpenSearch dynamic mapping), which causes all terms/date_histogram aggs to return 400.
+    // Guard against a stale index with dynamic (wrong) field types.
     const mappingRes = http.get(`${indexUrl}/_mapping`, { tags: { name: 'setup_verify_mapping' } });
     if (mappingRes.status === 200) {
       try {
         const m = JSON.parse(mappingRes.body);
         const props = m[INDEX] && m[INDEX].mappings && m[INDEX].mappings.properties;
-        const vendorIdType = props && props.vendor_id && props.vendor_id.type;
-        if (vendorIdType && vendorIdType !== 'keyword') {
-          const msg = `index '${INDEX}' has wrong mapping — vendor_id is '${vendorIdType}', need 'keyword'. ` +
+        const { field, type } = docs.CRITICAL_MAPPING_CHECK;
+        const actualType = props && props[field] && props[field].type;
+        if (actualType && actualType !== type) {
+          const msg = `index '${INDEX}' has wrong mapping — ${field} is '${actualType}', need '${type}'. ` +
             `Aggregation queries will all return 400. Fix: docker compose down -v then re-run.`;
           console.error(`setup: FATAL — ${msg}`);
           throw new Error(msg);
         }
       } catch (e) {
         if (e.message && e.message.includes('wrong mapping')) throw e;
-        // ignore JSON parse errors from unexpected mapping shape
       }
     }
   }
@@ -189,20 +204,19 @@ export default function (data) {
 }
 
 function doFlatSearch() {
-  const res = flatSearch(PROXY_URL, INDEX, fieldValues, connParams);
+  const res = queries.flatSearch(PROXY_URL, INDEX, fieldValues, connParams);
   flatRequests.add(1);
   searchErrors.add(res.status >= 400 ? 1 : 0);
 }
 
 function doAggSearch() {
-  const res = aggSearch(PROXY_URL, INDEX, connParams);
+  const res = queries.aggSearch(PROXY_URL, INDEX, connParams);
   aggRequests.add(1);
   searchErrors.add(res.status >= 400 ? 1 : 0);
 }
 
 function doPartialUpdate(seedDocIds) {
   if (!seedDocIds || seedDocIds.length === 0) {
-    // No seed docs available — fall back to a flat search
     doFlatSearch();
     return;
   }
@@ -210,7 +224,7 @@ function doPartialUpdate(seedDocIds) {
   const id = seedDocIds[Math.floor(Math.random() * seedDocIds.length)];
   const res = http.post(
     `${PROXY_URL}/${INDEX}/_update/${id}`,
-    JSON.stringify({ doc: { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) } }),
+    JSON.stringify({ doc: docs.randomUpdateBody() }),
     { ...connParams, tags: { name: 'search_update' } },
   );
   check(res, { 'partial update (200)': (r) => r.status === 200 });
@@ -221,7 +235,7 @@ function doPartialUpdate(seedDocIds) {
 function doSingleDocWrite() {
   const res = http.post(
     `${PROXY_URL}/${INDEX}/_doc`,
-    JSON.stringify(randomDocument()),
+    JSON.stringify(docs.randomDocument()),
     { ...connParams, tags: { name: 'search_single_doc' } },
   );
   check(res, { 'single doc created (201)': (r) => r.status === 201 });
@@ -231,7 +245,7 @@ function doSingleDocWrite() {
 
 function doDeepPaging() {
   if (PAGING_MODE === 'search_after') {
-    const { success, pagesRead } = searchAfterSequence(
+    const { success, pagesRead } = queries.searchAfterSequence(
       PROXY_URL, INDEX, connParams, SEARCH_AFTER_PAGES,
     );
     searchAfterReqs.add(1);
@@ -239,7 +253,7 @@ function doDeepPaging() {
     deepPagingErrors.add(success ? 0 : 1);
     searchErrors.add(success ? 0 : 1);
   } else {
-    const { success, pagesRead } = scrollSequence(
+    const { success, pagesRead } = queries.scrollSequence(
       PROXY_URL, INDEX, connParams, SCROLL_PAGES,
     );
     scrollRequests.add(1);

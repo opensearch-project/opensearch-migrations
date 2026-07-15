@@ -161,6 +161,11 @@ services:
   redis:
     image: redis:7-alpine
     networks: [load-test]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ── Webdis ──────────────────────────────────────────────────────────────
   # HTTP-to-Redis proxy. Exposes the full Redis command set over plain HTTP
@@ -193,9 +198,9 @@ services:
     volumes:
       - .:/scripts
     environment:
-      # Prometheus remote write: k6 metrics land alongside pipeline metrics
-      - K6_PROMETHEUS_RW_SERVER_URL=http://otel-collector:9090/api/v1/write
-      - K6_PROMETHEUS_RW_TREND_STATS=p(50),p(90),p(95),p(99),max
+      # OTLP: k6 metrics flow through otel-collector alongside pipeline metrics
+      - K6_OTEL_GRPC_EXPORTER_ENDPOINT=otel-collector:4317
+      - K6_OTEL_GRPC_EXPORTER_INSECURE=true
       # Scenario config (see available .env files for the different scenarios)
       - CAPTURE_PROXY_URL=https://capture-proxy:9200
       - INDEX_NAME=nyc_taxis

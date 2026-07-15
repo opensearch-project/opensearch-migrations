@@ -10,9 +10,10 @@
  * and issue a targeted GET to verify write-then-read consistency through the
  * Capture Proxy → Kafka pipeline.
  *
- * Key environment variables (see k6-config/mixed-steady.env for defaults):
+ * Key environment variables (see k6-config/mixed-steady.env for load-profile defaults):
+ *   SCENARIO                — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL       — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME              — target OpenSearch index
+ *   INDEX_NAME              — target OpenSearch index; defaults to the value of SCENARIO
  *   INGEST_RATE             — target ingest requests/second (constant) or max stage target
  *   SEARCH_RATE             — target search requests/second (constant) or max stage target
  *   INGEST_VUS              — pre-allocated ingest VUs
@@ -41,9 +42,11 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import { randomDocument, randomBulkBatch } from '../lib/documents.js';
+import * as nycTaxisDocs    from '../lib/nyc_taxis/documents.js';
+import * as logsDocs         from '../lib/logs_data/documents.js';
+import * as nycTaxisQueries  from '../lib/nyc_taxis/queries.js';
+import * as logsQueries      from '../lib/logs_data/queries.js';
 import { runSequence } from '../lib/sequences.js';
-import { flatSearch, aggSearch } from '../lib/queries.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
 import { checkControl } from '../lib/control.js';
@@ -67,9 +70,28 @@ const consistencyMisses    = new Counter('mixed_search_consistency_misses');
 const searchErrors         = new Rate('mixed_search_errors');
 const idRegistryHits       = new Rate('mixed_id_registry_hits');
 
+// ── Scenario selection ──────────────────────────────────────────────────────
+// All open() calls must happen at init time — k6 does not allow deferred file reads.
+const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
+const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
+const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
+const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
+
+const FIELD_VALUES_MAP = {
+  nyc_taxis: JSON.parse(open('../data/nyc_taxis/field-value-sample.json')),
+  logs_data: JSON.parse(open('../data/logs_data/field-value-sample.json')),
+};
+const fieldValues = FIELD_VALUES_MAP[SCENARIO] || FIELD_VALUES_MAP['nyc_taxis'];
+
+const MAPPINGS = {
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
+};
+const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+
 // ── Config ──────────────────────────────────────────────────────────────────
 const PROXY_URL            = __ENV.CAPTURE_PROXY_URL        || 'https://capture-proxy:9200';
-const INDEX                = __ENV.INDEX_NAME               || 'nyc_taxis';
+const INDEX                = __ENV.INDEX_NAME               || SCENARIO;
 const INGEST_RATE          = parseInt(__ENV.INGEST_RATE      || '30');
 const SEARCH_RATE          = parseInt(__ENV.SEARCH_RATE      || '20');
 const INGEST_VUS           = parseInt(__ENV.INGEST_VUS       || '15');
@@ -100,10 +122,6 @@ const RING_FILL_DELAY_S = MIN_RING_FILL > 0 && EST_ID_RATE > 0
   ? Math.ceil(MIN_RING_FILL / EST_ID_RATE)
   : 0;
 const SEARCH_START_TIME = RING_FILL_DELAY_S > 0 ? `${RING_FILL_DELAY_S}s` : undefined;
-
-// ── Static data (loaded once in init context) ──────────────────────────────
-const fieldValues   = JSON.parse(open('../data/field-value-sample.json'));
-const INDEX_MAPPING = open('../data/nyc_taxis_mapping.json');
 
 // ── Connection params (resolved once in init context) ──────────────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
@@ -195,21 +213,22 @@ export function setup() {
     if (createRes.status !== 200) {
       console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
     } else {
-      console.log(`setup: created index ${INDEX} with nyc_taxis mapping`);
+      console.log(`setup: created index ${INDEX} with ${SCENARIO} mapping`);
     }
   } else {
     console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);
 
-    // Guard against a stale index with dynamic (wrong) mapping — same check as search.js.
+    // Guard against a stale index with dynamic (wrong) field types.
     const mappingRes = http.get(`${indexUrl}/_mapping`, { tags: { name: 'setup_verify_mapping' } });
     if (mappingRes.status === 200) {
       try {
         const m = JSON.parse(mappingRes.body);
         const props = m[INDEX] && m[INDEX].mappings && m[INDEX].mappings.properties;
-        const vendorIdType = props && props.vendor_id && props.vendor_id.type;
-        if (vendorIdType && vendorIdType !== 'keyword') {
+        const { field, type } = docs.CRITICAL_MAPPING_CHECK;
+        const actualType = props && props[field] && props[field].type;
+        if (actualType && actualType !== type) {
           throw new Error(
-            `index '${INDEX}' has wrong mapping — vendor_id is '${vendorIdType}', need 'keyword'. ` +
+            `index '${INDEX}' has wrong mapping — ${field} is '${actualType}', need '${type}'. ` +
             `Aggregation queries will return 400. Fix: docker compose down -v then re-run.`
           );
         }
@@ -301,7 +320,7 @@ export function searchVU(data) {
 
 function doSequence() {
   // create → update → query → delete; doc is ephemeral so we do NOT register the ID.
-  const { success } = runSequence(PROXY_URL, INDEX, connParams);
+  const { success } = runSequence(PROXY_URL, INDEX, connParams, docFns);
   ingestSeqRequests.add(1);
   ingestSeqErrors.add(success ? 0 : 1);
   ingestErrors.add(success ? 0 : 1);
@@ -313,7 +332,7 @@ function doSingleDocWithRegistry() {
   const id = `mix-${__VU}-${__ITER}`;
   const res = http.put(
     `${PROXY_URL}/${INDEX}/_doc/${id}`,
-    JSON.stringify(randomDocument()),
+    JSON.stringify(docs.randomDocument()),
     { ...connParams, tags: { name: 'single_doc' } },
   );
   ingestSingleRequests.add(1);
@@ -325,7 +344,7 @@ function doSingleDocWithRegistry() {
 }
 
 function sendBulk() {
-  const { body, docCount } = randomBulkBatch(INDEX, BATCH_SIZE);
+  const { body, docCount } = docs.randomBulkBatch(INDEX, BATCH_SIZE);
   const res = http.post(
     `${PROXY_URL}/_bulk`,
     body,
@@ -364,13 +383,13 @@ function doConsistencyRead() {
 }
 
 function doFlatSearch() {
-  const res = flatSearch(PROXY_URL, INDEX, fieldValues, connParams);
+  const res = queries.flatSearch(PROXY_URL, INDEX, fieldValues, connParams);
   searchFlatRequests.add(1);
   searchErrors.add(res.status >= 400 ? 1 : 0);
 }
 
 function doAggSearch() {
-  const res = aggSearch(PROXY_URL, INDEX, connParams);
+  const res = queries.aggSearch(PROXY_URL, INDEX, connParams);
   searchAggRequests.add(1);
   searchErrors.add(res.status >= 400 ? 1 : 0);
 }
@@ -383,7 +402,7 @@ function doPartialUpdate(seedDocIds) {
   const id = seedDocIds[Math.floor(Math.random() * seedDocIds.length)];
   const res = http.post(
     `${PROXY_URL}/${INDEX}/_update/${id}`,
-    JSON.stringify({ doc: { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) } }),
+    JSON.stringify({ doc: docs.randomUpdateBody() }),
     { ...connParams, tags: { name: 'search_update' } },
   );
   check(res, { 'partial update (200)': (r) => r.status === 200 });
@@ -394,7 +413,7 @@ function doPartialUpdate(seedDocIds) {
 function doSingleDocWrite() {
   const res = http.post(
     `${PROXY_URL}/${INDEX}/_doc`,
-    JSON.stringify(randomDocument()),
+    JSON.stringify(docs.randomDocument()),
     { ...connParams, tags: { name: 'search_single_doc' } },
   );
   check(res, { 'single doc created (201)': (r) => r.status === 201 });

@@ -32,10 +32,10 @@ function randomNycLocation() {
 
 // Returns a datetime string in the format expected by fieldDateISO(): "yyyy-MM-dd HH:mm:ss"
 function randomDatetime() {
-  const base    = new Date('2024-01-01T00:00:00Z').getTime();
+  const base     = new Date('2024-01-01T00:00:00Z').getTime();
   const offsetMs = Math.floor(Math.random() * 365 * 24 * 60 * 60 * 1000);
-  const d       = new Date(base + offsetMs);
-  const pad     = (n) => String(n).padStart(2, '0');
+  const d        = new Date(base + offsetMs);
+  const pad      = (n) => String(n).padStart(2, '0');
   return (
     `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
     `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
@@ -71,12 +71,14 @@ export function randomDocument() {
   };
 }
 
+/** Partial-update body for a sequence update step. */
+export function randomUpdateBody() {
+  return { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) };
+}
+
 /**
  * Build a newline-delimited _bulk request body for the given index.
  * Returns { body: string, docCount: number }.
- *
- * The _bulk format requires each action line to be followed immediately by
- * the source document line, with a trailing newline after the last document.
  */
 export function randomBulkBatch(index, batchSize) {
   const lines = [];
@@ -87,3 +89,9 @@ export function randomBulkBatch(index, batchSize) {
   lines.push(''); // _bulk requires a trailing newline
   return { body: lines.join('\n'), docCount: batchSize };
 }
+
+/**
+ * Used by setup() in search.js and mixed.js to guard against a stale index
+ * created with dynamic mapping (wrong field types for aggregations).
+ */
+export const CRITICAL_MAPPING_CHECK = { field: 'vendor_id', type: 'keyword' };

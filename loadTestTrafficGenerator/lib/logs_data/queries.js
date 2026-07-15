@@ -1,14 +1,14 @@
 /**
- * Query helpers — Phase 3.
+ * Query helpers for the Logs scenario — Phase 3.
  *
- * Implements four query patterns against the NYC Taxis index:
+ * Implements four query patterns against the logs index:
  *   flatSearch          — term / range / bool _search, 10 hits
  *   aggSearch           — date-histogram and terms aggregations, size 0
  *   scrollSequence      — open scroll → fetch pages → always close context
- *   searchAfterSequence — stateless deep-paging via search_after + sort
+ *   searchAfterSequence — stateless deep-paging via search_after + sort on @timestamp
  *
  * connParams must come from pinned() or spread() in lib/connection-control.js.
- * fieldValues is the parsed data/field-value-sample.json object.
+ * fieldValues is the parsed data/logs_data/field-value-sample.json object.
  */
 
 import http from 'k6/http';
@@ -22,28 +22,28 @@ function pickRange(ranges) {
   return ranges[Math.floor(Math.random() * ranges.length)];
 }
 
-// ── Flat search ─────────────────────────────────────────────────────────────
+// ── Flat search ──────────────────────────────────────────────────────────────
 
 function buildFlatBody(fieldValues) {
   const variant = Math.floor(Math.random() * 4);
   switch (variant) {
     case 0:
-      return { size: 10, query: { term: { vendor_id: pick(fieldValues.vendor_ids) } } };
+      return { size: 10, query: { term: { level: pick(fieldValues.levels) } } };
     case 1: {
-      const r = pickRange(fieldValues.fare_amount.ranges);
-      return { size: 10, query: { range: { fare_amount: { gte: r[0], lte: r[1] } } } };
+      const r = pickRange(fieldValues.duration_ms.ranges);
+      return { size: 10, query: { range: { duration_ms: { gte: r[0], lte: r[1] } } } };
     }
     case 2:
-      return { size: 10, query: { term: { payment_type: pick(fieldValues.payment_types) } } };
+      return { size: 10, query: { term: { service: pick(fieldValues.services) } } };
     case 3: {
-      const r = pickRange(fieldValues.trip_distance.ranges);
+      const r = pickRange(fieldValues.duration_ms.ranges);
       return {
         size: 10,
         query: {
           bool: {
             filter: [
-              { term: { vendor_id: pick(fieldValues.vendor_ids) } },
-              { range: { trip_distance: { gte: r[0], lte: r[1] } } },
+              { term: { level: pick(fieldValues.levels) } },
+              { range: { duration_ms: { gte: r[0], lte: r[1] } } },
             ],
           },
         },
@@ -73,11 +73,11 @@ function buildAggBody() {
       return {
         size: 0,
         aggs: {
-          trips_by_month: {
+          events_by_hour: {
             date_histogram: {
-              field: 'pickup_datetime',
-              calendar_interval: 'month',
-              format: 'yyyy-MM',
+              field: '@timestamp',
+              calendar_interval: 'hour',
+              format: 'yyyy-MM-dd HH:mm',
             },
           },
         },
@@ -85,20 +85,20 @@ function buildAggBody() {
     case 1:
       return {
         size: 0,
-        aggs: { by_payment_type: { terms: { field: 'payment_type', size: 10 } } },
+        aggs: { by_level: { terms: { field: 'level', size: 10 } } },
       };
     case 2:
       return {
         size: 0,
         aggs: {
-          by_vendor: {
-            terms: { field: 'vendor_id', size: 10 },
-            aggs: { avg_fare: { avg: { field: 'fare_amount' } } },
+          by_service: {
+            terms: { field: 'service', size: 10 },
+            aggs: { avg_duration: { avg: { field: 'duration_ms' } } },
           },
         },
       };
     default:
-      return { size: 0, aggs: { by_trip_type: { terms: { field: 'trip_type', size: 10 } } } };
+      return { size: 0, aggs: { by_environment: { terms: { field: 'environment', size: 10 } } } };
   }
 }
 
@@ -184,9 +184,8 @@ export function scrollSequence(proxyUrl, index, connParams, pageCount) {
 // ── search_after sequence ────────────────────────────────────────────────────
 
 /**
- * Pages through results using search_after.
+ * Pages through results using search_after, sorted by @timestamp + _id.
  * Each request is independent — no server-side state to clean up.
- * Stops when: a page has fewer hits than page size, hits are empty, or maxPages reached.
  * Returns { success: boolean, pagesRead: number }.
  */
 export function searchAfterSequence(proxyUrl, index, connParams, maxPages) {
@@ -196,7 +195,7 @@ export function searchAfterSequence(proxyUrl, index, connParams, maxPages) {
   for (let page = 0; page < maxPages; page++) {
     const body = {
       size: 50,
-      sort: [{ pickup_datetime: 'asc' }, { _id: 'asc' }],
+      sort: [{ '@timestamp': 'asc' }, { _id: 'asc' }],
       query: { match_all: {} },
     };
     if (searchAfterKey) {
@@ -221,7 +220,7 @@ export function searchAfterSequence(proxyUrl, index, connParams, maxPages) {
     const lastHit = hits[hits.length - 1];
     searchAfterKey = lastHit.sort;
 
-    if (hits.length < 50) break; // last page reached
+    if (hits.length < 50) break;
   }
 
   return { success: pagesRead > 0, pagesRead };

@@ -6,9 +6,10 @@
  *   Default: 15% stateful sequence, 59.5% bulk, 25.5% single-doc.
  * Phase 5 (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
  *
- * Key environment variables (see k6-config/ingest-steady.env for defaults):
+ * Key environment variables (see k6-config/ingest-steady.env for load-profile defaults):
+ *   SCENARIO           — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL  — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME         — target OpenSearch index
+ *   INDEX_NAME         — target OpenSearch index; defaults to the value of SCENARIO
  *   INGEST_RATE        — target requests/second for constant-arrival-rate executor;
  *                        also used as stage target when RAMP_STAGES is not set
  *   INGEST_VUS         — pre-allocated VUs (= concurrent connections in pinned mode)
@@ -31,7 +32,8 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import { randomDocument, randomBulkBatch } from '../lib/documents.js';
+import * as nycTaxisDocs from '../lib/nyc_taxis/documents.js';
+import * as logsDocs     from '../lib/logs_data/documents.js';
 import { runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { checkControl } from '../lib/control.js';
@@ -46,9 +48,21 @@ const ingestErrors     = new Rate('ingest_errors');
 const sequenceErrors   = new Rate('ingest_sequence_errors');
 const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 
+// ── Scenario selection ─────────────────────────────────────────────────────
+// All open() calls must happen at init time — k6 does not allow deferred file reads.
+const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
+const docs     = SCENARIO === 'logs_data' ? logsDocs : nycTaxisDocs;
+const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
+
+const MAPPINGS = {
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
+};
+const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+
 // ── Config ─────────────────────────────────────────────────────────────────
 const PROXY_URL       = __ENV.CAPTURE_PROXY_URL   || 'https://capture-proxy:9200';
-const INDEX           = __ENV.INDEX_NAME          || 'nyc_taxis';
+const INDEX           = __ENV.INDEX_NAME          || SCENARIO;
 const RATE            = parseInt(__ENV.INGEST_RATE         || '50');
 const VUS             = parseInt(__ENV.INGEST_VUS          || '20');
 const MAX_VUS         = parseInt(__ENV.INGEST_MAX_VUS      || '100');
@@ -60,9 +74,6 @@ const EXECUTOR        = __ENV.EXECUTOR            || 'constant-arrival-rate';
 const RAMP_STAGES     = __ENV.RAMP_STAGES
   ? JSON.parse(__ENV.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
-
-// ── Index mapping (read once in init context) ──────────────────────────────
-const INDEX_MAPPING = open('../data/nyc_taxis_mapping.json');
 
 // ── Connection params (resolved once per VU in init context) ───────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
@@ -142,14 +153,14 @@ export default function () {
 }
 
 function doSequence() {
-  const { success } = runSequence(PROXY_URL, INDEX, connParams);
+  const { success } = runSequence(PROXY_URL, INDEX, connParams, docFns);
   sequenceRequests.add(1);
   sequenceErrors.add(success ? 0 : 1);
   ingestErrors.add(success ? 0 : 1);
 }
 
 function sendBulk() {
-  const { body, docCount } = randomBulkBatch(INDEX, BATCH_SIZE);
+  const { body, docCount } = docs.randomBulkBatch(INDEX, BATCH_SIZE);
 
   const res = http.post(
     `${PROXY_URL}/_bulk`,
@@ -172,7 +183,7 @@ function sendBulk() {
 function sendSingleDoc() {
   const res = http.post(
     `${PROXY_URL}/${INDEX}/_doc`,
-    JSON.stringify(randomDocument()),
+    JSON.stringify(docs.randomDocument()),
     { ...connParams, tags: { name: 'single_doc' } },
   );
 

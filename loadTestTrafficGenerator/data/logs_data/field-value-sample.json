@@ -1,0 +1,13 @@
+{
+  "levels":       ["DEBUG", "INFO", "WARN", "ERROR", "FATAL"],
+  "services":     ["api-gateway", "auth-service", "user-service", "payment-service", "notification-service"],
+  "environments": ["prod", "staging", "dev"],
+
+  "duration_ms": {
+    "min": 1,
+    "max": 5000,
+    "ranges": [[1, 100], [100, 1000], [1000, 5000]]
+  },
+
+  "status_codes": [200, 201, 400, 401, 403, 404, 500, 503]
+}

@@ -12,9 +12,6 @@ receivers:
       - brokers
       - topics
       - consumers
-  prometheusremotewrite:
-    endpoint: 0.0.0.0:9090
-
 processors:
   batch:
     timeout: 10s
@@ -33,7 +30,7 @@ exporters:
 service:
   pipelines:
     metrics:
-      receivers: [otlp, kafkametrics, prometheusremotewrite]
+      receivers: [otlp, kafkametrics]
       processors: [batch]
       exporters: [prometheus, debug]
     traces:

@@ -17,7 +17,7 @@
     "list": [
       {
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(k6_http_reqs_total, scenario)",
+        "definition": "label_values(http_reqs_total, scenario)",
         "hide": 0,
         "includeAll": true,
         "label": "Scenario",
@@ -25,7 +25,7 @@
         "name": "scenario",
         "options": [],
         "query": {
-          "query": "label_values(k6_http_reqs_total, scenario)",
+          "query": "label_values(http_reqs_total, scenario)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -46,7 +46,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(k6_http_reqs_total{scenario=~\"$scenario\"}[1m]))",
+          "expr": "sum(rate(http_reqs_total{scenario=~\"$scenario\"}[1m]))",
           "legendFormat": "req/s",
           "refId": "A"
         }
@@ -80,7 +80,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "max(k6_http_req_failed_rate{scenario=~\"$scenario\"}) * 100",
+          "expr": "sum(rate(http_req_failed_total{scenario=~\"$scenario\"}[1m])) / sum(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
           "legendFormat": "error %",
           "refId": "A"
         }
@@ -120,7 +120,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_vus",
+          "expr": "vus",
           "legendFormat": "VUs",
           "refId": "A"
         }
@@ -154,7 +154,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "max(k6_ingest_bulk_batch_docs_p95{scenario=~\"$scenario\"})",
+          "expr": "histogram_quantile(0.95, sum by(le)(rate(ingest_bulk_batch_docs_bucket{scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "docs/batch p95",
           "refId": "A"
         }
@@ -188,19 +188,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(k6_http_reqs_total{name=\"bulk_write\",scenario=~\"$scenario\"}[1m])",
+          "expr": "rate(http_reqs_total{name=\"bulk_write\",scenario=~\"$scenario\"}[1m])",
           "legendFormat": "{{scenario}} bulk write",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(k6_http_reqs_total{name=\"single_doc\",scenario=~\"$scenario\"}[1m])",
+          "expr": "rate(http_reqs_total{name=\"single_doc\",scenario=~\"$scenario\"}[1m])",
           "legendFormat": "{{scenario}} single doc",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by(scenario)(rate(k6_http_reqs_total{scenario=~\"$scenario\"}[1m]))",
+          "expr": "sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m]))",
           "legendFormat": "{{scenario}} total",
           "refId": "C"
         }
@@ -222,31 +222,31 @@
       "id": 6,
       "type": "timeseries",
       "title": "Bulk Write Latency",
-      "description": "Latency for _bulk requests (threshold: p95 < 3 s). k6 remote-write stores durations in seconds; Grafana unit 's' auto-formats to ms/s.",
+      "description": "Latency for _bulk requests (threshold: p95 < 3000 ms). k6 OTLP sends durations in milliseconds.",
       "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p50{name=\"bulk_write\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.50, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p50",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p95{name=\"bulk_write\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.95, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p95",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p99{name=\"bulk_write\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.99, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p99",
           "refId": "C"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_max{name=\"bulk_write\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(1.00, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} max",
           "refId": "D"
         }
@@ -257,7 +257,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ms",
           "color": { "mode": "palette-classic" },
           "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
         },
@@ -268,31 +268,31 @@
       "id": 7,
       "type": "timeseries",
       "title": "Single-Doc Latency",
-      "description": "Latency for single-document POST requests (threshold: p95 < 2 s). Values in seconds; Grafana unit 's' auto-formats.",
+      "description": "Latency for single-document POST requests (threshold: p95 < 2000 ms). k6 OTLP sends durations in milliseconds.",
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p50{name=\"single_doc\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.50, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p50",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p95{name=\"single_doc\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.95, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p95",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_p99{name=\"single_doc\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(0.99, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p99",
           "refId": "C"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_duration_max{name=\"single_doc\",scenario=~\"$scenario\"}",
+          "expr": "histogram_quantile(1.00, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} max",
           "refId": "D"
         }
@@ -303,7 +303,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ms",
           "color": { "mode": "palette-classic" },
           "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
         },
@@ -320,13 +320,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_http_req_failed_rate{scenario=~\"$scenario\"} * 100",
-          "legendFormat": "{{scenario}} {{name}} HTTP err %",
+          "expr": "sum by(scenario)(rate(http_req_failed_total{scenario=~\"$scenario\"}[1m])) / sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
+          "legendFormat": "{{scenario}} HTTP err %",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_ingest_errors_rate{scenario=~\"$scenario\"} * 100",
+          "expr": "sum by(scenario)(rate(ingest_errors_total{scenario=~\"$scenario\"}[1m])) / sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
           "legendFormat": "{{scenario}} ingest err %",
           "refId": "B"
         }
@@ -368,13 +368,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_vus",
+          "expr": "vus",
           "legendFormat": "active VUs",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "k6_vus_max",
+          "expr": "vus_max",
           "legendFormat": "max VUs",
           "refId": "B"
         }
@@ -410,13 +410,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(k6_data_sent_total{scenario=~\"$scenario\"}[1m])",
+          "expr": "rate(data_sent_bytes_total{scenario=~\"$scenario\"}[1m])",
           "legendFormat": "{{scenario}} sent",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(k6_data_received_total{scenario=~\"$scenario\"}[1m])",
+          "expr": "rate(data_received_bytes_total{scenario=~\"$scenario\"}[1m])",
           "legendFormat": "{{scenario}} received",
           "refId": "B"
         }
