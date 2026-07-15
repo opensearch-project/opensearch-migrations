@@ -25,14 +25,17 @@ from .tree_utils import (
 )
 
 
+PENDING_CONFIG_PHASE = 'Pending Config'
+DEPLOYED_CONFIG_PHASE = 'Deployed Config'
+
 PHASE_SYMBOLS = {
     'Ready': ('✓', 'green'),
     'Completed': ('✓', 'green'),
     'Succeeded': ('✓', 'green'),
     'Running': ('▶', 'yellow'),
     'Pending': ('○', 'cyan'),
-    'Pending Config': ('○', 'cyan'),
-    'Deployed Config': ('✓', 'green'),
+    PENDING_CONFIG_PHASE: ('○', 'cyan'),
+    DEPLOYED_CONFIG_PHASE: ('✓', 'green'),
     'Initialized': ('○', 'cyan'),
     'Failed': ('✗', 'red'),
     'Error': ('✗', 'red'),
@@ -231,7 +234,7 @@ def apply_config_overlays(
         virtual = ResourceNode(
             name=name,
             plural=plural,
-            phase='Deployed Config' if deployed_resource else 'Pending Config',
+            phase=DEPLOYED_CONFIG_PHASE if deployed_resource else PENDING_CONFIG_PHASE,
             depends_on=parameters.get('dependsOn', []) or [],
             spec=(deployed_resource or {}).get('parameters') or {},
             status={},
@@ -657,16 +660,14 @@ def _build_config_diff(
     submitted_available: bool = False,
     pending_available: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    submitted_parameters = (
-        (submitted_resource or {}).get('parameters') if submitted_resource else (
-            None if submitted_available else deployed_parameters
-        )
-    )
-    pending_parameters = (
-        (pending_resource or {}).get('parameters') if pending_resource else (
-            None if pending_available else submitted_parameters
-        )
-    )
+    if submitted_resource:
+        submitted_parameters = (submitted_resource or {}).get('parameters')
+    else:
+        submitted_parameters = None if submitted_available else deployed_parameters
+    if pending_resource:
+        pending_parameters = (pending_resource or {}).get('parameters')
+    else:
+        pending_parameters = None if pending_available else submitted_parameters
     if submitted_parameters is None and pending_parameters is None and not deployed_parameters:
         return None
 
@@ -1001,7 +1002,7 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
 
 
 # Phases shown in the resource label (settled states)
-DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error', 'Pending Config', 'Deployed Config'}
+DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error', PENDING_CONFIG_PHASE, DEPLOYED_CONFIG_PHASE}
 
 
 def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:

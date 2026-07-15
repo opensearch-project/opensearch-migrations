@@ -285,9 +285,11 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         entry = self._focused_entry()
         if not self.show_all or not entry:
             return
-        if entry.get("type") == "group" and entry.get("group") == "nonmatching":
-            self._set_nonmatching_expanded(False)
-        elif entry.get("type") == "resource" and self._is_nonmatching_row(entry.get("row")):
+        if (
+            entry.get("type") == "group" and entry.get("group") == "nonmatching"
+        ) or (
+            entry.get("type") == "resource" and self._is_nonmatching_row(entry.get("row"))
+        ):
             self._set_nonmatching_expanded(False)
 
     def _focus_nonmatching_group(self) -> None:
@@ -375,7 +377,7 @@ class ExternalResourcePickerModal(ButtonArrowNavigationMixin, ModalScreen[Option
         ]
 
     def _nonmatching_rows(self) -> List[Dict[str, Any]]:
-        matching = set(id(row) for row in self._matching_rows())
+        matching = {id(row) for row in self._matching_rows()}
         return [row for row in self.rows if id(row) not in matching]
 
     def _is_nonmatching_row(self, row: Optional[Dict[str, Any]]) -> bool:

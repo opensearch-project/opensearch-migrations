@@ -15,6 +15,8 @@ from .modal_results import CLEAR_VALUE
 
 
 class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
+    VALUE_SELECTOR = "#value"
+
     CSS = """
     TextInputModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
@@ -79,7 +81,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
 
     def on_mount(self) -> None:
         self.query_one("#documentation", Static).display = bool(self.documentation)
-        input_widget = self.query_one("#value", Input)
+        input_widget = self.query_one(self.VALUE_SELECTOR, Input)
         input_widget.focus()
         input_widget.cursor_position = len(input_widget.value)
         self._update_validation(input_widget.value)
@@ -89,7 +91,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
         self.dismiss(None)
 
     def action_submit(self) -> None:
-        value = self.query_one("#value", Input).value
+        value = self.query_one(self.VALUE_SELECTOR, Input).value
         if self._update_validation(value):
             return
         self.dismiss(value)
@@ -194,7 +196,7 @@ class TextInputModal(ButtonArrowNavigationMixin, ModalScreen[Optional[Any]]):
             samples_widget.update("")
 
     def _current_regex101_url(self) -> str:
-        value = self.query_one("#value", Input).value if self.is_mounted else self.initial_value
+        value = self.query_one(self.VALUE_SELECTOR, Input).value if self.is_mounted else self.initial_value
         return self._regex101_url(value, self._regex_help_samples())
 
     def _regex_help_samples(self) -> list[str]:

@@ -24,6 +24,7 @@ from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 
 
 RESOURCE_ID_PREFIX = 'resource:'
+NOT_CONFIGURED_LABEL = "[dim](not configured)[/dim]"
 
 
 class ResourceTreeStateManager:
@@ -225,7 +226,7 @@ class ResourceTreeStateManager:
                 data.update(group.tree_data)
             node = section_node.add(self._group_label(group), data=data)
             if group.not_configured:
-                node.add("[dim](not configured)[/dim]", data=None)
+                node.add(NOT_CONFIGURED_LABEL, data=None)
             else:
                 self._add_group_resources(node, group)
             if gid in collapsed:
@@ -506,7 +507,7 @@ class ResourceTreeStateManager:
         else:
             group_node.expand()
         if group.not_configured:
-            group_node.add("[dim](not configured)[/dim]", data=None)
+            group_node.add(NOT_CONFIGURED_LABEL, data=None)
             return group_node
 
         group_plurals = group_plurals_for(group.plural)
@@ -534,7 +535,7 @@ class ResourceTreeStateManager:
     @staticmethod
     def _replace_not_configured_child(node: TreeNode) -> None:
         ResourceTreeStateManager._remove_children(node)
-        node.add("[dim](not configured)[/dim]", data=None)
+        node.add(NOT_CONFIGURED_LABEL, data=None)
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
         """Add a resource node with its details and workflow subtree."""

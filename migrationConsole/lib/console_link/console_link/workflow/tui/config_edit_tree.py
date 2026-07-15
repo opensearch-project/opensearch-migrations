@@ -24,6 +24,7 @@ from console_link.workflow.tui.resource_tree_state_manager import ResourceTreeSt
 
 
 EDIT_NODE_TYPE = "config-edit"
+UNSET_LABEL = "<unset>"
 EDIT_MODE_ALL = "all"
 EDIT_MODE_DEPLOYED = "deployed"
 EDIT_MODE_CURRENT_WORKFLOW = "currentWorkflow"
@@ -449,7 +450,7 @@ def _is_optional_unset_block(edit_node: Dict[str, Any], visible_children: list[D
     label = strip_status_badge(str(edit_node.get("label", ""))).lower()
     value_present = "value" in edit_node
     value = edit_node.get("value")
-    if "<unset>" in label:
+    if UNSET_LABEL in label:
         return True
     return value_present and value in (None, "", "unset")
 
@@ -558,14 +559,14 @@ def _formatted_mode_value(edit_node: Dict[str, Any], value_mode: str) -> Optiona
         return format_state_value(
             states.get(value_mode) or {},
             missing_value=None,
-            none_value="<unset>",
+            none_value=UNSET_LABEL,
         )
     return format_phase_value_groups(
         _STATE_MODES,
         states,
         _STATE_LABELS,
         missing_value=None,
-        none_value="<unset>",
+        none_value=UNSET_LABEL,
     )
 
 
