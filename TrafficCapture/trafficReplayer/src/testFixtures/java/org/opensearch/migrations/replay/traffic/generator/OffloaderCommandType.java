@@ -5,5 +5,7 @@ public enum OffloaderCommandType {
     EndOfMessage,
     DropRequest,
     Write,
-    Flush
+    Flush,
+    ConnectionException,
+    Close
 }
