@@ -5,7 +5,9 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Allow job name overrides for matrix parent and child job routing
+// Allow job name override for webhook routing. CHILD_JOB_NAME_OVERRIDE is still
+// read for compatibility with existing Jenkins job configs, but k8sMatrixTest
+// now routes to per-source child jobs itself.
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
 def childJobNameOverride = params.CHILD_JOB_NAME_OVERRIDE ?: ''
 k8sMatrixTest(
