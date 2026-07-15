@@ -162,6 +162,7 @@ docker compose run --rm \
 | Variable | Default | Meaning |
 |---|---|---|
 | `SEQUENCE_FRACTION` | `0.15` | Share of iterations run as a create→update→query→delete sequence |
+| `BULK_FRACTION` | `0.70` | Share of non-sequence iterations sent as `_bulk` (remainder → single-doc POSTs) |
 | `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive (one stream); `spread` = `Connection: close` (one stream per request) |
 
 ---
@@ -217,6 +218,10 @@ to be running separately — see the script output for guidance.
 | `SCROLL_PAGES` | `3` | Max pages per scroll sequence |
 | `SEARCH_AFTER_PAGES` | `3` | Max pages per search_after sequence |
 | `CONNECTION_MODE` | `pinned` | Same as Stateful Sequences |
+| `SEARCH_FLAT_FRACTION` | `0.60` | Fraction of iterations for flat `_search` (term / range / bool) |
+| `SEARCH_AGG_FRACTION` | `0.20` | Fraction of iterations for aggregation queries |
+| `SEARCH_UPDATE_FRACTION` | `0.10` | Fraction of iterations for partial updates |
+| `SEARCH_WRITE_FRACTION` | `0.05` | Fraction of iterations for single-doc writes; remainder → deep paging or flat fallback |
 
 The `search` scenario auto-appears in the Grafana Scenario drop-down — no dashboard changes needed.
 
@@ -270,7 +275,11 @@ docker compose run --rm \
 | `SEARCH_VUS` | `15` | Pre-allocated search VUs |
 | `SEARCH_MAX_VUS` | `75` | Max search VUs |
 | `SEQUENCE_FRACTION` | `0.15` | Fraction of ingest iterations run as create→update→query→delete |
+| `BULK_FRACTION` | `0.70` | Fraction of non-sequence ingest iterations sent as `_bulk` (remainder → single-doc with registry write) |
 | `CONSISTENCY_FRACTION` | `0.10` | Fraction of search iterations that query a recently-ingested doc |
+| `SEARCH_FLAT_FRACTION` | `0.60` | Fraction of non-consistency search iterations for flat `_search` |
+| `SEARCH_AGG_FRACTION` | `0.20` | Fraction of non-consistency search iterations for aggregation queries |
+| `SEARCH_UPDATE_FRACTION` | `0.10` | Fraction of non-consistency search iterations for partial updates; remainder → single-doc write |
 | `WEBDIS_URL` | `http://webdis:7379` | Webdis HTTP-to-Redis proxy URL |
 | `REGISTRY_ENABLED` | `false` | `true` to activate the ID ring buffer; when `false` all registry calls are no-ops and the consistency fraction falls back to flat searches (safe to run without Redis/Webdis) |
 
@@ -354,7 +363,7 @@ Additional variables for `mixed.js` ramping (override `RAMP_STAGES` per stream):
 |---|---|---|
 | `INGEST_RAMP_STAGES` | single hold stage | Stage array for the ingest stream |
 | `SEARCH_RAMP_STAGES` | single hold stage | Stage array for the search stream |
-| `MIN_RING_FILL` | `0` | Minimum IDs in the Redis ring before search VUs start; converted to a `startTime` delay using `INGEST_RATE × (1−SEQUENCE_FRACTION) × 0.3` IDs/s |
+| `MIN_RING_FILL` | `0` | Minimum IDs in the Redis ring before search VUs start; converted to a `startTime` delay using `INGEST_RATE × (1−SEQUENCE_FRACTION) × (1−BULK_FRACTION)` IDs/s |
 
 > When `DURATION` is set and `RAMP_STAGES` is not, the scenario falls back to a single
 > hold-at-`INGEST_RATE` stage — existing env files from Phases 1–4 work unchanged.

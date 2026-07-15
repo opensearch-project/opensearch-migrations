@@ -1,9 +1,10 @@
 /**
- * Ingest scenario — Phases 1, 2 & 5 (Profile 1)
+ * Ingest scenario
  *
- * Phase 1 (SEQUENCE_FRACTION=0): 70% _bulk, 30% single-doc writes.
- * Phase 2 (SEQUENCE_FRACTION>0): remaining budget split 70/30 between bulk and single-doc.
- *   Default: 15% stateful sequence, 59.5% bulk, 25.5% single-doc.
+ * Operation mix (configurable):
+ *   SEQUENCE_FRACTION of iterations → stateful create→update→query→delete sequence
+ *   of the remaining budget: BULK_FRACTION → _bulk write; rest → single-doc POST
+ *   Defaults: 15% sequence, 59.5% bulk, 25.5% single-doc.
  * Phase 5 (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
  *
  * Key environment variables (see k6-config/ingest-steady.env for load-profile defaults):
@@ -18,7 +19,9 @@
  *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
  *   BULK_BATCH_SIZE    — documents per _bulk call
  *   SEQUENCE_FRACTION  — share of iterations run as a create→update→query→delete sequence
- *                        (0.0 = Phase 1 behavior; default 0.15)
+ *                        (0.0 disables sequences; default 0.15)
+ *   BULK_FRACTION      — share of non-sequence iterations sent as _bulk (default 0.70;
+ *                        remainder goes to single-doc POSTs)
  *   CONNECTION_MODE    — "pinned" (default, keep-alive) or "spread" (Connection: close)
  *   EXECUTOR           — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
@@ -69,6 +72,7 @@ const MAX_VUS         = parseInt(__ENV.INGEST_MAX_VUS      || '100');
 const DURATION        = __ENV.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(__ENV.BULK_BATCH_SIZE     || '20');
 const SEQ_FRACTION    = parseFloat(__ENV.SEQUENCE_FRACTION || '0.15');
+const BULK_FRACTION   = parseFloat(__ENV.BULK_FRACTION     || '0.70');
 const CONNECTION_MODE = __ENV.CONNECTION_MODE     || 'pinned';
 const EXECUTOR        = __ENV.EXECUTOR            || 'constant-arrival-rate';
 const RAMP_STAGES     = __ENV.RAMP_STAGES
@@ -138,14 +142,14 @@ export function setup() {
 }
 
 // ── VU function ────────────────────────────────────────────────────────────
-// Dispatch: SEQ_FRACTION → sequence; remaining budget → 70% bulk / 30% single-doc.
+// Dispatch: SEQ_FRACTION → sequence; remaining budget → BULK_FRACTION bulk / rest single-doc.
 export default function () {
   if (!checkControl(RATE)) return;
 
   const r = Math.random();
   if (r < SEQ_FRACTION) {
     doSequence();
-  } else if (r < SEQ_FRACTION + (1 - SEQ_FRACTION) * 0.7) {
+  } else if (r < SEQ_FRACTION + (1 - SEQ_FRACTION) * BULK_FRACTION) {
     sendBulk();
   } else {
     sendSingleDoc();

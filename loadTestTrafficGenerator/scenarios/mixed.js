@@ -1,5 +1,5 @@
 /**
- * Mixed scenario — Phases 4 & 5 (Profile 3)
+ * Mixed scenario
  *
  * Two independent k6 scenarios share one test run:
  *   mixed_ingest  — ingest stream (Profile 1 operation mix)
@@ -23,7 +23,13 @@
  *   DURATION                — test duration for both streams; ignored when ramping (stages define it)
  *   BULK_BATCH_SIZE         — documents per _bulk call
  *   SEQUENCE_FRACTION       — fraction of ingest iterations run as create→update→query→delete
+ *   BULK_FRACTION           — fraction of non-sequence ingest iterations sent as _bulk
+ *                             (default 0.70; remainder → single-doc with registry write)
  *   CONSISTENCY_FRACTION    — fraction of search iterations that query a recently-ingested doc
+ *   SEARCH_FLAT_FRACTION    — fraction of non-consistency search iterations for flat _search (default 0.60)
+ *   SEARCH_AGG_FRACTION     — fraction of non-consistency search iterations for agg queries (default 0.20)
+ *   SEARCH_UPDATE_FRACTION  — fraction of non-consistency search iterations for partial updates (default 0.10)
+ *                             remainder → single-doc write
  *   CONNECTION_MODE         — "pinned" (default, keep-alive) or "spread" (Connection: close)
  *   SEED_DOC_COUNT          — expected document count (informs seed sampling in setup)
  *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
@@ -33,7 +39,7 @@
  *   SEARCH_RAMP_STAGES      — JSON stage array for the search stream when EXECUTOR=ramping-arrival-rate
  *   MIN_RING_FILL           — minimum number of IDs the ring must contain before search VUs start;
  *                             converted to a startTime delay using the estimated single-doc ID rate
- *                             (INGEST_RATE × (1−SEQUENCE_FRACTION) × 0.3); default 0 (no delay)
+ *                             (INGEST_RATE × (1−SEQUENCE_FRACTION) × (1−BULK_FRACTION)); default 0 (no delay)
  *   CONTROL_ENABLED         — "true" to enable mid-test pause/resume/rate control via Webdis;
  *                             defaults to "false" (no-op). See lib/control.js.
  *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
@@ -101,7 +107,16 @@ const SEARCH_MAX_VUS       = parseInt(__ENV.SEARCH_MAX_VUS   || '75');
 const DURATION             = __ENV.DURATION                 || '5m';
 const BATCH_SIZE           = parseInt(__ENV.BULK_BATCH_SIZE  || '20');
 const SEQ_FRACTION         = parseFloat(__ENV.SEQUENCE_FRACTION     || '0.15');
+const BULK_FRACTION        = parseFloat(__ENV.BULK_FRACTION         || '0.70');
 const CONSISTENCY_FRACTION = parseFloat(__ENV.CONSISTENCY_FRACTION  || '0.10');
+const FLAT_FRACTION        = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION         = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION      = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
+
+// Precomputed cumulative dispatch thresholds for the non-consistency search mix
+const S_AGG    = FLAT_FRACTION;
+const S_UPDATE = FLAT_FRACTION + AGG_FRACTION;
+const S_WRITE  = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION;
 const CONNECTION_MODE      = __ENV.CONNECTION_MODE          || 'pinned';
 const EXECUTOR             = __ENV.EXECUTOR                 || 'constant-arrival-rate';
 const INGEST_RAMP_STAGES   = __ENV.INGEST_RAMP_STAGES
@@ -113,11 +128,11 @@ const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
 
 // ── Ring fill delay ────────────────────────────────────────────────────────
 // Single-doc writes (the only operations that register IDs to the ring) occur
-// at INGEST_RATE × (1 − SEQ_FRACTION) × 0.3 per second. MIN_RING_FILL converts
-// a desired ID count into an estimated startTime delay for the search scenario,
+// at INGEST_RATE × (1 − SEQ_FRACTION) × (1 − BULK_FRACTION) per second. MIN_RING_FILL
+// converts a desired ID count into an estimated startTime delay for the search scenario,
 // so search VUs don't begin until the ring has enough entries to hit consistently.
 const MIN_RING_FILL     = parseInt(__ENV.MIN_RING_FILL || '0');
-const EST_ID_RATE       = INGEST_RATE * (1 - SEQ_FRACTION) * 0.3;
+const EST_ID_RATE       = INGEST_RATE * (1 - SEQ_FRACTION) * (1 - BULK_FRACTION);
 const RING_FILL_DELAY_S = MIN_RING_FILL > 0 && EST_ID_RATE > 0
   ? Math.ceil(MIN_RING_FILL / EST_ID_RATE)
   : 0;
@@ -277,14 +292,14 @@ export function setup() {
 
 // ── Ingest VU ───────────────────────────────────────────────────────────────
 // Dispatch: SEQ_FRACTION → sequence (ephemeral, no registry)
-//           remaining budget → 70% bulk / 30% single-doc with registry
+//           remaining budget → BULK_FRACTION bulk / rest single-doc with registry
 export function ingestVU() {
   if (!checkControl(INGEST_RATE)) return;
 
   const r = Math.random();
   if (r < SEQ_FRACTION) {
     doSequence();
-  } else if (r < SEQ_FRACTION + (1 - SEQ_FRACTION) * 0.7) {
+  } else if (r < SEQ_FRACTION + (1 - SEQ_FRACTION) * BULK_FRACTION) {
     sendBulk();
   } else {
     doSingleDocWithRegistry();
@@ -305,11 +320,11 @@ export function searchVU(data) {
   }
 
   const r = Math.random();
-  if (r < 0.60) {
+  if (r < S_AGG) {
     doFlatSearch();
-  } else if (r < 0.80) {
+  } else if (r < S_UPDATE) {
     doAggSearch();
-  } else if (r < 0.90) {
+  } else if (r < S_WRITE) {
     doPartialUpdate(seedDocIds);
   } else {
     doSingleDocWrite();

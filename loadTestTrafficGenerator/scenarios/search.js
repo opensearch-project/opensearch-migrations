@@ -1,13 +1,13 @@
 /**
- * Search scenario — Phase 3 (Profile 2)
+ * Search scenario
  *
- * Default operation mix (DEEP_PAGING_ENABLED=false):
- *   60% flat _search (term / range / bool)
- *   20% aggregation query (date-histogram, terms)
- *   10% partial update (existing doc from seed set, sampled during setup)
- *   5%  single-doc write
- *   5%  deep paging (scroll or search_after — activated by DEEP_PAGING_ENABLED=true)
- *        When disabled, these iterations run as flat searches instead.
+ * Default operation mix (configurable via SEARCH_*_FRACTION env vars):
+ *   60% flat _search (term / range / bool)        SEARCH_FLAT_FRACTION
+ *   20% aggregation query (date-histogram, terms)  SEARCH_AGG_FRACTION
+ *   10% partial update (seed doc sampled in setup) SEARCH_UPDATE_FRACTION
+ *   5%  single-doc write                           SEARCH_WRITE_FRACTION
+ *   5%  deep paging (scroll or search_after)       remainder (activated by DEEP_PAGING_ENABLED=true)
+ *        When deep paging is disabled the remainder falls back to flat search.
  *
  * Key environment variables (see k6-config/search-steady.env for load-profile defaults):
  *   SCENARIO              — document schema to use: "nyc_taxis" (default) or "logs_data"
@@ -23,6 +23,11 @@
  *   SCROLL_PAGES          — max pages per scroll sequence (default 3)
  *   SEARCH_AFTER_PAGES    — max pages per search_after sequence (default 3)
  *   CONNECTION_MODE       — "pinned" (default) or "spread"
+ *   SEARCH_FLAT_FRACTION   — fraction of iterations for flat _search (default 0.60)
+ *   SEARCH_AGG_FRACTION    — fraction of iterations for aggregation queries (default 0.20)
+ *   SEARCH_UPDATE_FRACTION — fraction of iterations for partial updates (default 0.10)
+ *   SEARCH_WRITE_FRACTION  — fraction of iterations for single-doc writes (default 0.05;
+ *                            remainder goes to deep paging / flat fallback)
  */
 
 import http from 'k6/http';
@@ -75,9 +80,19 @@ const MAX_VUS            = parseInt(__ENV.SEARCH_MAX_VUS   || '150');
 const DURATION           = __ENV.DURATION               || '5m';
 const DEEP_PAGING        = (__ENV.DEEP_PAGING_ENABLED    || 'false') === 'true';
 const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
-const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES     || '3');
-const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES || '3');
-const CONNECTION_MODE    = __ENV.CONNECTION_MODE        || 'pinned';
+const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES          || '3');
+const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES    || '3');
+const CONNECTION_MODE    = __ENV.CONNECTION_MODE               || 'pinned';
+const FLAT_FRACTION      = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION       = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION    = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
+const WRITE_FRACTION     = parseFloat(__ENV.SEARCH_WRITE_FRACTION  || '0.05');
+
+// Precomputed cumulative dispatch thresholds
+const T_AGG    = FLAT_FRACTION;
+const T_UPDATE = FLAT_FRACTION + AGG_FRACTION;
+const T_WRITE  = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION;
+const T_DEEP   = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION + WRITE_FRACTION;
 
 // ── Connection params (resolved once per VU in init context) ────────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
@@ -183,23 +198,23 @@ export function setup() {
 }
 
 // ── VU function ─────────────────────────────────────────────────────────────
-// Dispatch: 60% flat, 20% agg, 10% update, 5% write, 5% deep-paging (or flat).
+// Dispatch thresholds derived from SEARCH_*_FRACTION env vars (see Config section above).
 export default function (data) {
   const seedDocIds = data.seedDocIds;
   const r = Math.random();
 
-  if (r < 0.60) {
+  if (r < T_AGG) {
     doFlatSearch();
-  } else if (r < 0.80) {
+  } else if (r < T_UPDATE) {
     doAggSearch();
-  } else if (r < 0.90) {
+  } else if (r < T_WRITE) {
     doPartialUpdate(seedDocIds);
-  } else if (r < 0.95) {
+  } else if (r < T_DEEP) {
     doSingleDocWrite();
   } else if (DEEP_PAGING) {
     doDeepPaging();
   } else {
-    doFlatSearch(); // 5% fallback when deep paging is disabled
+    doFlatSearch(); // remainder fallback when deep paging is disabled
   }
 }
 
