@@ -440,10 +440,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             );
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
-            accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp).holdTrafficStream(trafficStreamKey);
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
-            accum.resetForNextRequest();
+            // Commit all held TSKs before nulling the rrPair. Without this, offsets from
+            // prior TrafficStream records that contributed to the in-progress request are
+            // permanently orphaned in OffsetLifecycleTracker, pinning the partition's commit
+            // pointer forever (same pattern as handleDroppedRequestForAccumulation).
+            // Note: we do NOT holdTrafficStream(trafficStreamKey) first — that would cause
+            // the current record's TSK to be double-committed (once here, once by the
+            // end-of-accept() fallback). The current record is committed by the fallback.
+            handleDroppedRequestForAccumulation(accum);
             log.atDebug()
                 .setMessage("Removing accumulated traffic pair due to recorded connection exception event for {}")
                 .addArgument(trafficStreamKey::getConnectionId)
@@ -691,6 +697,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                             accumulation.trafficChannelKey.getTrafficStreamsContext(),
                             Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld)
                         );
+                        // Null the rrPair so the finally-block's onConnectionClose (which
+                        // always runs despite the return) does not double-commit the same
+                        // TSKs — getTrafficStreamsHeldByAccum returns List.of() when
+                        // hasRrPair()==false. Without this, keep-alive connections expiring
+                        // mid-second-request hit IllegalStateException in
+                        // OffsetLifecycleTracker.removeAndReturnNewHead (double-remove).
+                        accumulation.resetForNextRequest();
                     }
                     return;
                 case ACCUMULATING_WRITES:
