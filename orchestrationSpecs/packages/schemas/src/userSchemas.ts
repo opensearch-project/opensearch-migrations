@@ -845,9 +845,9 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    skipEvaluateApproval: z.boolean().default(false).optional()
+    skipEvaluateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
-    skipMigrateApproval: z.boolean().default(false).optional()
+    skipMigrateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
@@ -921,7 +921,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    skipApproval: z.boolean().default(false).optional()
+    skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
         .describe("[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). " +
@@ -1192,6 +1192,8 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."),
     source: z.string()
         .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."),
+    skipApproval: z.boolean().optional()
+        .describe("When true, skips the manual approval gate after this proxy is configured and ready."),
     proxyConfig: USER_PROXY_OPTIONS
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
@@ -1561,7 +1563,7 @@ export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
     .describe("Map of snapshot names to their migration configurations. Keys must match snapshot names defined in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups.");
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional()
+    skipApprovals : z.boolean().optional()
         .describe("When true, skips all manual approval gates for migrations in this configuration block."),
     fromSource: z.string()
         .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters."),
@@ -1594,7 +1596,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional()
-            .describe("Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."),
+            .describe("Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."),
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),

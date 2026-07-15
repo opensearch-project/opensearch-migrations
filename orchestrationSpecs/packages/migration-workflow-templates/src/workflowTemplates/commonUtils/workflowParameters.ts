@@ -6,7 +6,6 @@ export const CommonWorkflowParameters = {
     s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
     gcsSnapshotConfigMap: defineParam({expression: "gcs-snapshot-config"}),
     imageConfigMapName: defineParam({expression: "migration-image-config"}),
-    approvalConfigMapName: defineParam({expression: "approval-config"}),
     migrationRunNumber: defineParam({expression: "0"}),
     workflowScriptsRoot: defineParam({expression: DEFAULT_WORKFLOW_SCRIPTS_ROOT})
 } as const;

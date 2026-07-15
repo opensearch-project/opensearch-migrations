@@ -9,6 +9,7 @@ import {
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
     DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
@@ -187,7 +188,7 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
     .addTemplate("setupSingleProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -195,6 +196,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -220,6 +222,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
@@ -484,6 +487,19 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: b.inputs.checksumForReplayer
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
+            )
+            .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
+                    }),
+                {when: {templateExp: expr.and(
+                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                    expr.not(expr.dig(
+                        expr.deserializeRecord(b.inputs.documentBackfillConfig),
+                        ["skipApproval"],
+                        false
+                    ))
+                )}}
             )
         )
     )
@@ -757,9 +773,9 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b.addStepGroup(g => g
-            .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
-                c.register({})
-            )
+                .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
+                    c.register({})
+                )
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -805,6 +821,7 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
+                    skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),

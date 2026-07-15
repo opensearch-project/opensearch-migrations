@@ -128,6 +128,30 @@ class TestStatusCommand:
         assert 'test-wf' in output
         assert 'Succeeded' in output
 
+    def test_handle_status_command_returns_single_workflow_phase(self):
+        workflows = {
+            'test-wf': {
+                'metadata': {'name': 'test-wf'},
+                'status': {
+                    'phase': 'Running',
+                    'startedAt': '2023-01-01T10:00:00Z',
+                    'nodes': {
+                        'root': {'id': 'root', 'displayName': 'root', 'type': 'Steps',
+                                 'phase': 'Running'}
+                    }
+                }
+            }
+        }
+
+        service = FakeWorkflowService(workflows)
+        handler = StatusCommandHandler(service)
+        handler.data_fetcher = FakeDataFetcher(workflows, service)
+
+        phase = handler.handle_status_command(
+            'test-wf', 'https://argo', 'ma', False, False, False)
+
+        assert phase == 'Running'
+
     def test_snapshot_migration_wait_node_reads_backfill_status(self, monkeypatch):
         def fake_snapshot_migration_reader(name: str, namespace: str):
             assert name == 'source-target-snap1-migration-0'

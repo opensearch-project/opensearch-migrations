@@ -7,8 +7,6 @@ import {z} from "zod";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
 import * as path from "path";
-import {scrapeApprovals} from "./formatApprovals";
-import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import { crdName } from './crdNaming';
 import {
@@ -93,8 +91,6 @@ export class MigrationInitializer {
         if (migrationRunOptions?.runNumber === undefined) {
             throw new Error("Migration run number is required when generating migration resources.");
         }
-        // Generate ConfigMaps
-        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
         const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
         const customMigrationResources = this.generateCustomMigrationResources(
@@ -108,7 +104,6 @@ export class MigrationInitializer {
         return {
             workflows,
             resolvedMigrationResources,
-            approvalConfigMaps,
             concurrencyConfigMaps,
             customMigrationResources,
             warnings
@@ -134,10 +129,7 @@ export class MigrationInitializer {
         await fs.mkdir(resourcesDir, { recursive: true });
 
         const allItems = bundle.customMigrationResources.items || [];
-        const configMapItems = [
-            ...(bundle.approvalConfigMaps.items || []),
-            ...(bundle.concurrencyConfigMaps.items || []),
-        ];
+        const configMapItems = bundle.concurrencyConfigMaps.items || [];
 
         type ResourceEntry = {
             file: string;
@@ -286,36 +278,6 @@ export class MigrationInitializer {
         const plural = `${pluralName}.${group}`;
         const patch = JSON.stringify({ status: item.status });
         return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
-    }
-
-    private generateApprovalConfigMaps(userConfig: any) {
-        if (!userConfig) {
-            return { 
-                apiVersion: 'v1',
-                kind: 'List',
-                items: [] 
-            };
-        }
-
-        const approvals = scrapeApprovals(setNamesInUserConfig(userConfig));
-        
-        return {
-            apiVersion: 'v1',
-            kind: 'List',
-            items: [{
-                apiVersion: 'v1',
-                kind: 'ConfigMap',
-                metadata: {
-                    name: 'approval-config',
-                    labels: {
-                        'workflows.argoproj.io/configmap-type': 'Parameter'
-                    }
-                },
-                data: {
-                    'autoApprove': JSON.stringify(approvals)
-                }
-            }]
-        };
     }
 
     private generateConcurrencyConfigMaps(userConfig: any) {
@@ -583,7 +545,7 @@ export class MigrationInitializer {
                 status: { phase: 'Created', configChecksum: '' }
             });
 
-            // VAP retry gates
+            // VAP retry gates (fire during reconcile steps, before proxy deployment)
             items.push(this.makeApprovalGateResource(
                 ['capturedtraffic', topicCrName, 'vapretry'],
                 gateLabels({
@@ -594,6 +556,15 @@ export class MigrationInitializer {
             ));
             items.push(this.makeApprovalGateResource(
                 ['captureproxy', proxy.name, 'vapretry'],
+                gateLabels({
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
+                    [MigrationInitializer.GATE_LABEL_SOURCE]: proxySource,
+                })
+            ));
+            // Step approval gate: fires after reconcile, before actual proxy deployment
+            items.push(this.makeApprovalGateResource(
+                ['captureproxysetup', proxy.name],
                 gateLabels({
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
@@ -697,7 +668,7 @@ export class MigrationInitializer {
                 [MigrationInitializer.GATE_LABEL_MIGRATION]: migration.migrationLabel,
             });
 
-            // VAP retry gate for the root SnapshotMigration CR reconcile
+            // VAP retry gate for the root SnapshotMigration CR reconcile (fires first, during reconcile step)
             items.push(this.makeApprovalGateResource(
                 ['snapshotmigration', snapshotMigrationName, 'vapretry'], migLabels));
 
@@ -708,10 +679,13 @@ export class MigrationInitializer {
                 migration.migrationLabel,
             ];
             const resourcePath = this.makeCrdName(...approvalNameParts);
+            // Step approval gates: ordered by workflow execution sequence (all inside migrateFromSnapshot)
             items.push(this.makeApprovalGateResource(
                 ['evaluatemetadata', resourcePath], migLabels));
             items.push(this.makeApprovalGateResource(
                 ['migratemetadata', resourcePath], migLabels));
+            items.push(this.makeApprovalGateResource(
+                ['documentbackfill', resourcePath], migLabels));
         }
 
         // TrafficReplay resources from trafficReplays

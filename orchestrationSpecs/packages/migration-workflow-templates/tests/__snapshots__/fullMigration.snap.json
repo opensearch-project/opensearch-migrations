@@ -24,10 +24,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -519,6 +515,10 @@
               "name": "listenPort"
             },
             {
+              "name": "skipApproval",
+              "value": "false"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -591,6 +591,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{inputs.parameters.skipApproval}}"
                   },
                   {
                     "name": "podReplicas",
@@ -1426,6 +1430,24 @@
                 ]
               },
               "name": "bulkLoadDocuments"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "approvebackfill",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{='documentbackfill.'+inputs.parameters.crdName}}"
+                  }
+                ]
+              },
+              "name": "approveBackfill"
             }
           ]
         ],
@@ -2263,6 +2285,10 @@
                   {
                     "name": "proxyConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"sourceConfig\", fromJSON(item['sourceConfig']), \"sourceConnectionIdentity\", fromJSON(item['sourceConnectionIdentity']), \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                  },
+                  {
+                    "name": "skipApproval",
+                    "value": "{{=sprig.dig('skipApproval', false, item)}}"
                   },
                   {
                     "name": "kafkaClusterName",

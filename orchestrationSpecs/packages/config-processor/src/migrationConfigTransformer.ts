@@ -403,7 +403,8 @@ function lowerFileBackedContextValues(
 }
 
 function prepareMetadataConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -414,13 +415,16 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
+        skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
 
 function prepareDocumentBackfillConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -431,6 +435,7 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
@@ -813,7 +818,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
-        const proxies = this.buildProxies(userConfig);
+        const proxies = this.buildProxies(userConfig, userConfig.skipApprovals ?? false);
         const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
@@ -1055,7 +1060,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
-    private buildProxies(userConfig: NormalizedUserConfig) {
+    private buildProxies(userConfig: NormalizedUserConfig, globalSkipApprovals: boolean) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
@@ -1072,7 +1077,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 sourceConnectionIdentity,
-                proxyConfig: prepareProxyConfig(proxy.proxyConfig)
+                proxyConfig: prepareProxyConfig(proxy.proxyConfig),
+                skipApproval: proxy.skipApproval ?? globalSkipApprovals,
             };
         });
     }
@@ -1206,6 +1212,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
+            const skipApprovals = mc.skipApprovals ?? userConfig.skipApprovals ?? false;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
@@ -1277,10 +1284,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         label: toTarget,
                     });
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist)
+                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist)
+                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     results.push({
                         label: snapshotName,

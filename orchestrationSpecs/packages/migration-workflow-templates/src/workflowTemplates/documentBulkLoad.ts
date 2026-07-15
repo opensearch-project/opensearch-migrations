@@ -12,6 +12,7 @@ import {
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
+import {ResourceManagement} from "./resourceManagement";
 import {CONTAINER_NAMES} from "../containerNames";
 
 import {
@@ -43,7 +44,6 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
-import {ResourceManagement} from "./resourceManagement";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
 import {
     minAvailableForSingleReplicaDependency,
@@ -449,6 +449,14 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         )
     )
 
+
+    .addTemplate("approveBackfill", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSteps(b => b
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
+    )
 
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
