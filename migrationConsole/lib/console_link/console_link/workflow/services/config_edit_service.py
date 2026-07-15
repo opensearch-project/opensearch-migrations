@@ -222,7 +222,10 @@ class ConfigEditService:
             return self._save_external_config_map(external_ref, output, values, name)
         raise ValueError(f"External resource output kind is not supported: {output.get('kind')}")
 
-    def load_resource_config_snapshots(self, workflow_name: Optional[str] = None) -> Dict[str, Optional[Dict[str, Any]]]:
+    def load_resource_config_snapshots(
+        self,
+        workflow_name: Optional[str] = None,
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
         """Load resolved resource snapshots for current submitted and saved config."""
         submitted = self.load_latest_submitted_resolved_config(workflow_name)
         pending = self.load_pending_resolved_config(workflow_name, validation_mode="loose")
@@ -911,9 +914,10 @@ def _add_diagnostic_with_counts(
 
 
 def _diagnostic_exists(existing: list[Dict[str, Any]], diagnostic: Dict[str, Any]) -> bool:
+    diagnostic_path = [str(part) for part in (diagnostic.get("path") or [])]
     return any(
         item.get("message") == diagnostic.get("message")
-        and [str(part) for part in (item.get("path") or [])] == [str(part) for part in (diagnostic.get("path") or [])]
+        and [str(part) for part in (item.get("path") or [])] == diagnostic_path
         for item in existing
     )
 

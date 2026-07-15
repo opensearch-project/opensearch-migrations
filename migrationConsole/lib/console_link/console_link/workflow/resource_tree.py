@@ -640,9 +640,9 @@ def _virtual_adoption_status(counts: Dict[str, int]) -> str:
 
 
 def _pending_field_value(config_diff: Optional[Dict[str, Any]], path: str):
-    for field in (config_diff or {}).get('fields', []):
-        if field.get('path') == path:
-            state = field.get('values', {}).get('pending') or {}
+    for diff_field in (config_diff or {}).get('fields', []):
+        if diff_field.get('path') == path:
+            state = diff_field.get('values', {}).get('pending') or {}
             if state.get('present'):
                 return state.get('value')
     return None
@@ -1224,9 +1224,9 @@ def format_config_diff_fields(
         return []
 
     result = []
-    for field in fields:
-        label = field.get('label') or field.get('path')
-        values = field.get('values') or {}
+    for diff_field in fields:
+        label = diff_field.get('label') or diff_field.get('path')
+        values = diff_field.get('values') or {}
         display_label = escape(str(label)) if rich_markup else str(label)
         if value_mode == CONFIG_MODE_ALL:
             parts = []
@@ -1238,7 +1238,8 @@ def format_config_diff_fields(
 
         key = CONFIG_PHASE_KEY.get(value_mode)
         if key:
-            result.append(f"{display_label}: {_format_config_value_segment(value_mode, values.get(key) or {}, rich_markup)}")
+            value = _format_config_value_segment(value_mode, values.get(key) or {}, rich_markup)
+            result.append(f"{display_label}: {value}")
     return result
 
 

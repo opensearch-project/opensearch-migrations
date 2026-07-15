@@ -926,7 +926,8 @@ class WorkflowTreeApp(App):
             "Commit command:",
             shlex.join(command),
             "",
-            "The commit uses the exact resource set above. If a new dependent resource exists, reset will fail and you must dry-run again.",
+            "The commit uses the exact resource set above. If a new dependent resource exists, "
+            "reset will fail and you must dry-run again.",
         ])
         return "\n".join(lines)
 
@@ -1964,7 +1965,8 @@ class WorkflowTreeApp(App):
     def _config_edit_exit_status_message(self) -> str:
         count = self._config_edit_validation_issue_count()
         if count:
-            return f"Validation still reports {count} issue{'s' if count != 1 else ''}. You can save anyway, discard, or return."
+            issue_label = "issues" if count != 1 else "issue"
+            return f"Validation still reports {count} {issue_label}. You can save anyway, discard, or return."
         return "No validation errors are currently reported. You can save, discard, or return."
 
     def _config_edit_validation_issue_count(self) -> int:
@@ -2889,7 +2891,13 @@ class WorkflowTreeApp(App):
         }
         raw_yaml = self._edit_draft_yaml or ""
         self.run_worker(
-            lambda: self._validate_config_edit_operation_worker(raw_yaml, operation, generation, node.get("path") or [], modal),
+            lambda: self._validate_config_edit_operation_worker(
+                raw_yaml,
+                operation,
+                generation,
+                node.get("path") or [],
+                modal,
+            ),
             thread=True,
             name="validate_config_edit_operation",
         )
@@ -2925,7 +2933,10 @@ class WorkflowTreeApp(App):
         edit_state = getattr(result, "edit_state", None) or result["edit_state"]
         diagnostic = self._diagnostic_for_path(edit_state, path)
         if diagnostic:
-            modal.set_remote_validation(str(diagnostic.get("message") or ""), str(diagnostic.get("severity") or "error"))
+            modal.set_remote_validation(
+                str(diagnostic.get("message") or ""),
+                str(diagnostic.get("severity") or "error"),
+            )
         else:
             modal.set_remote_validation("No validation issues found.", "ok")
 
@@ -3064,7 +3075,8 @@ class WorkflowTreeApp(App):
         ):
             return {
                 "pattern": r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
+                "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', "
+                           "starting and ending with an alphanumeric character.",
             }
         return None
 
@@ -3274,7 +3286,11 @@ class WorkflowTreeApp(App):
         if is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
             return node
         approval_node = node.get('approval_node')
-        if isinstance(approval_node, dict) and is_approval_node(approval_node) and approval_node.get('phase') == PHASE_RUNNING:
+        if (
+            isinstance(approval_node, dict)
+            and is_approval_node(approval_node)
+            and approval_node.get('phase') == PHASE_RUNNING
+        ):
             return approval_node
         return None
 
@@ -3512,10 +3528,20 @@ class WorkflowTreeApp(App):
                 migration_path = ["snapshotMigrationConfigs", str(index)]
                 from_source = str(migration.get("fromSource") or "")
                 if from_source:
-                    add(migration_path, [*migration_path, "fromSource"], ["sourceClusters", from_source], f"fromSource={from_source}")
+                    add(
+                        migration_path,
+                        [*migration_path, "fromSource"],
+                        ["sourceClusters", from_source],
+                        f"fromSource={from_source}",
+                    )
                 to_target = str(migration.get("toTarget") or "")
                 if to_target:
-                    add(migration_path, [*migration_path, "toTarget"], ["targetClusters", to_target], f"toTarget={to_target}")
+                    add(
+                        migration_path,
+                        [*migration_path, "toTarget"],
+                        ["targetClusters", to_target],
+                        f"toTarget={to_target}",
+                    )
                 per_snapshot = migration.get("perSnapshotConfig")
                 if from_source and isinstance(per_snapshot, dict):
                     for snapshot_name in per_snapshot:
@@ -3557,7 +3583,12 @@ class WorkflowTreeApp(App):
                 else:
                     to_path = None
                 if to_path:
-                    add(replayer_path, [*replayer_path, "fromCapturedTraffic"], to_path, f"fromCapturedTraffic={from_captured_traffic}")
+                    add(
+                        replayer_path,
+                        [*replayer_path, "fromCapturedTraffic"],
+                        to_path,
+                        f"fromCapturedTraffic={from_captured_traffic}",
+                    )
             to_target = str(replayer.get("toTarget") or "")
             if to_target:
                 add(replayer_path, [*replayer_path, "toTarget"], ["targetClusters", to_target], f"toTarget={to_target}")
@@ -3569,7 +3600,12 @@ class WorkflowTreeApp(App):
                     dependency_path = [*replayer_path, "dependsOnSnapshotMigrations", str(index)]
                     source = str(dependency.get("source") or "")
                     if source:
-                        add(dependency_path, [*dependency_path, "source"], ["sourceClusters", source], f"source={source}")
+                        add(
+                            dependency_path,
+                            [*dependency_path, "source"],
+                            ["sourceClusters", source],
+                            f"source={source}",
+                        )
                     snapshot = str(dependency.get("snapshot") or "")
                     if source and snapshot:
                         add(
@@ -3593,7 +3629,13 @@ class WorkflowTreeApp(App):
                     continue
                 repo_name = str(snapshot.get("repoName") or "")
                 if repo_name:
-                    snapshot_path = ["sourceClusters", str(source_name), "snapshotInfo", "snapshots", str(snapshot_name)]
+                    snapshot_path = [
+                        "sourceClusters",
+                        str(source_name),
+                        "snapshotInfo",
+                        "snapshots",
+                        str(snapshot_name),
+                    ]
                     add(
                         snapshot_path,
                         [*snapshot_path, "repoName"],

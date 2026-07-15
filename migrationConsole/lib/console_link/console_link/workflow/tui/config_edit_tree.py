@@ -66,6 +66,8 @@ _STATE_MODES = (
     EDIT_MODE_CURRENT_WORKFLOW,
     EDIT_MODE_PENDING_SUBMIT,
 )
+
+
 def render_edit_state(
     tree: Tree,
     edit_state: Dict[str, Any],

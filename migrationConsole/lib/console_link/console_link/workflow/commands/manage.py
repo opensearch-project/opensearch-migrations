@@ -168,7 +168,8 @@ def _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
               type=click.IntRange(1, 65535), envvar='WORKFLOW_MANAGE_SERVE_PORT',
               help='Port for --serve to bind.')
 @click.option('--serve-public-url', default=None, envvar='WORKFLOW_MANAGE_SERVE_PUBLIC_URL',
-              help='Browser-facing URL used for links and websockets. Defaults to http://localhost:<port> for kubectl port-forward.')
+              help='Browser-facing URL used for links and websockets. Defaults to '
+                   'http://localhost:<port> for kubectl port-forward.')
 @click.option('--serve-debug', is_flag=True, hidden=True, envvar='WORKFLOW_MANAGE_SERVE_DEBUG')
 @click.pass_context
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view,

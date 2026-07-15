@@ -540,7 +540,8 @@ class TestResetCommandDelete:
             'snapshotmigration.mig-a',
         ]
         assert plan['warnings'] == [
-            'reset does not delete indexes on the target cluster. If the snapshot migration created indexes on the target, remove them with: console clusters clear-indices --cluster target'
+            'reset does not delete indexes on the target cluster. If the snapshot migration created indexes on '
+            'the target, remove them with: console clusters clear-indices --cluster target'
         ]
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')

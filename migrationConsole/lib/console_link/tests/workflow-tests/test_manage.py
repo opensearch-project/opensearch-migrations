@@ -796,12 +796,16 @@ def test_config_edit_does_not_open_dialog_for_blocked_add_commands():
         "valueKind": "command",
         "command": {
             "requiresName": True,
-            "blockedMessage": "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before adding source snapshots.",
+            "blockedMessage": (
+                "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos "
+                "before adding source snapshots."
+            ),
         },
     })
 
     app.notify.assert_called_once_with(
-        "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before adding source snapshots.",
+        "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos "
+        "before adding source snapshots.",
         severity="warning",
         timeout=8,
     )
@@ -821,12 +825,16 @@ def test_config_edit_does_not_open_dialog_for_empty_constrained_references():
         "inputHint": {
             "kind": "reference",
             "options": [],
-            "message": "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before binding source snapshots.",
+            "message": (
+                "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos "
+                "before binding source snapshots."
+            ),
         },
     })
 
     app.notify.assert_called_once_with(
-        "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos before binding source snapshots.",
+        "First define at least one repository under sourceClusters.legacy.snapshotInfo.repos "
+        "before binding source snapshots.",
         severity="warning",
         timeout=8,
     )
@@ -1062,7 +1070,10 @@ def edit_state_with_proxy_logging_config(config_map_name=""):
                                         "statusCounts": {"required": 1} if missing else {},
                                         "children": [
                                             {
-                                                "id": "edit:traffic.proxies.cap.proxyConfig.loggingConfigurationOverrideConfigMap",
+                                                "id": (
+                                                    "edit:traffic.proxies.cap.proxyConfig."
+                                                    "loggingConfigurationOverrideConfigMap"
+                                                ),
                                                 "path": [
                                                     "traffic", "proxies", "cap", "proxyConfig",
                                                     "loggingConfigurationOverrideConfigMap"
@@ -1074,7 +1085,9 @@ def edit_state_with_proxy_logging_config(config_map_name=""):
                                                 ),
                                                 "value": config_map_name,
                                                 "valueKind": "scalar",
-                                                "description": "Name of a Kubernetes ConfigMap containing Log4j2 properties.",
+                                                "description": (
+                                                    "Name of a Kubernetes ConfigMap containing Log4j2 properties."
+                                                ),
                                                 "required": True,
                                                 "externalRef": log4j_config_map_external_ref(),
                                                 "status": "ok" if config_map_name else "required",
@@ -1160,11 +1173,16 @@ def edit_state_with_proxy_console_client_secret(secret_name=""):
         "children": [
             {
                 "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem",
-                "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaPem"],
+                "path": [
+                    "traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaPem"
+                ],
                 "label": "[OK] trustedClientCaPem: -----BEGIN CERTIFICATE-----...",
                 "value": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
                 "valueKind": "scalar",
-                "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy.",
+                "description": (
+                    "Inline PEM trusted CA certificate used to verify client certificates accepted by the "
+                    "capture proxy."
+                ),
                 "status": "ok",
                 "statusCounts": {},
             },
@@ -1220,11 +1238,16 @@ def edit_state_with_missing_proxy_client_auth_trust_source():
         "children": [
             {
                 "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaPem",
-                "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaPem"],
+                "path": [
+                    "traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaPem"
+                ],
                 "label": "[OK] trustedClientCaPem: <unset>",
                 "value": "",
                 "valueKind": "scalar",
-                "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy.",
+                "description": (
+                    "Inline PEM trusted CA certificate used to verify client certificates accepted by the "
+                    "capture proxy."
+                ),
                 "presence": "optional",
                 "status": "ok",
                 "statusCounts": {},
@@ -1268,11 +1291,16 @@ def edit_state_with_proxy_client_auth_file_ref():
         "children": [
             {
                 "id": "edit:traffic.proxies.cap.proxyConfig.tls.clientAuth.trustedClientCaFile",
-                "path": ["traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaFile"],
+                "path": [
+                    "traffic", "proxies", "cap", "proxyConfig", "tls", "clientAuth", "trustedClientCaFile"
+                ],
                 "label": "[OK] trustedClientCaFile: < configMap >",
                 "value": "configMap",
                 "valueKind": "union",
-                "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy.",
+                "description": (
+                    "PEM trusted CA certificate file used to verify client certificates accepted by the "
+                    "capture proxy."
+                ),
                 "presence": "optional",
                 "status": "ok",
                 "statusCounts": {},
@@ -1350,7 +1378,9 @@ def edit_state_with_editable_source_fields():
                                         r"^https?:\/\/[^:\/\s]+(?::(?:[1-9]\d{0,3}|[1-5]\d{4}|"
                                         r"6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]))?(?:\/)?$"
                                     ),
-                                    "message": "Use an http:// or https:// endpoint with an optional port and trailing slash.",
+                                    "message": (
+                                        "Use an http:// or https:// endpoint with an optional port and trailing slash."
+                                    ),
                                 },
                                 "status": "changed",
                                 "statusCounts": {"changed": 1},
@@ -1611,7 +1641,10 @@ def edit_state_with_collapsed_transform_item():
                                     {
                                         "id": "edit:snapshotMigrationConfigs.0.metadataTransforms:add",
                                         "path": [
-                                            "snapshotMigrationConfigs", "0", "metadataMigrationConfig", "metadataTransforms"
+                                            "snapshotMigrationConfigs",
+                                            "0",
+                                            "metadataMigrationConfig",
+                                            "metadataTransforms",
                                         ],
                                         "label": "+ Add item",
                                         "valueKind": "command",
@@ -2280,7 +2313,10 @@ def test_text_input_modal_regex101_help_markup_avoids_wrapped_url():
 
 
 def test_text_input_modal_uses_consistent_inner_spacing():
-    assert "#dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }" in TextInputModal.CSS
+    assert (
+        "#dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }"
+        in TextInputModal.CSS
+    )
     assert "#prompt { margin-bottom: 1; }" in TextInputModal.CSS
     assert "#value { margin-bottom: 1; }" in TextInputModal.CSS
     assert "#regex-help { color: gray; margin-top: 1; margin-bottom: 0; }" in TextInputModal.CSS
@@ -3664,7 +3700,8 @@ async def test_resource_view_edit_mode_external_secret_picker_creates_and_applie
             assert await wait_until(
                 pilot,
                 lambda: any(
-                    (button.label.plain if hasattr(button.label, "plain") else str(button.label)) == "  admin-creds (missing password)"
+                    (button.label.plain if hasattr(button.label, "plain") else str(button.label))
+                    == "  admin-creds (missing password)"
                     for button in app.screen.query(Button)
                     if button.id and button.id.startswith("row-") and button.display
                 ),
@@ -6412,7 +6449,10 @@ async def test_resource_view_uses_submitted_console_as_deployed_virtual_config_a
             source_node = find_tree_node_by_id(tree.root, "resource:source")
             assert "Deployed Config" in get_clean_text_label(source_node)
             labels = [get_clean_text_label(child) for child in source_node.children]
-            assert "endpoint: deployed=https://old.example.com | pending=https://old.example.com | to-submit=https://new.example.com" in labels
+            assert (
+                "endpoint: deployed=https://old.example.com | pending=https://old.example.com | "
+                "to-submit=https://new.example.com"
+            ) in labels
 
 
 @pytest.mark.asyncio

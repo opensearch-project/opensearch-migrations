@@ -367,7 +367,12 @@ class Cluster:
 
     @staticmethod
     def _write_temp_client_cert_file(contents: str, suffix: str) -> str:
-        with tempfile.NamedTemporaryFile(mode="w", prefix="migration-console-client-", suffix=suffix, delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix="migration-console-client-",
+            suffix=suffix,
+            delete=False,
+        ) as f:
             f.write(contents)
             return f.name
 

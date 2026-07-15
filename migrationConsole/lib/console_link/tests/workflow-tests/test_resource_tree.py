@@ -431,7 +431,10 @@ class TestConfigOverlays:
         }]
         assert format_resource_diagnostics(resource) == [{
             'severity': 'required',
-            'label': 'required: traffic.proxies.capture-new.proxyConfig: Invalid input: expected object, received undefined',
+            'label': (
+                'required: traffic.proxies.capture-new.proxyConfig: '
+                'Invalid input: expected object, received undefined'
+            ),
         }]
 
     def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):
