@@ -8,8 +8,10 @@ import {
     REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    SOURCE_CLUSTER_CONFIG,
     FieldMeta, ChecksumDependency,
+    USER_CREATE_SNAPSHOT_OPTIONS,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
     ARGO_PROXY_OPTIONS,
@@ -27,8 +29,41 @@ import {FileSourceRegistry} from "./fileSourceUtils";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
-export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
+type SolrBackupNormalizedConfig = {
+    externalBackupName?: string;
+    collectionAllowlist: string[];
+    otelTraceCollectorEndpoint?: string;
+    otelMetricsCollectorEndpoint?: string;
+    jvmArgs?: string;
+    loggingConfigurationOverrideConfigMap?: string;
+};
+type SolrExternalBackupNormalizedConfig = SolrBackupNormalizedConfig & {
+    externalBackupName: string;
+};
+type WorkflowGeneratedSnapshotConfig = {
+    createSnapshotConfig: z.infer<typeof USER_CREATE_SNAPSHOT_OPTIONS>;
+};
+type WorkflowExternalSnapshotConfig = {
+    externallyManagedSnapshotName: string;
+};
+type WorkflowSnapshotNameConfig = WorkflowGeneratedSnapshotConfig | WorkflowExternalSnapshotConfig;
+type NormalizedSnapshotDefinition = {
+    repoName: string;
+    config: WorkflowSnapshotNameConfig;
+    solrBackupConfig?: SolrBackupNormalizedConfig;
+};
+type NormalizedSnapshotInfo = {
+    repos?: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>;
+    snapshots: Record<string, NormalizedSnapshotDefinition>;
+    serializeSnapshotCreation?: boolean;
+};
+type NormalizedSourceCluster = Omit<z.infer<typeof SOURCE_CLUSTER_CONFIG>, "snapshotInfo"> & {
+    snapshotInfo?: NormalizedSnapshotInfo;
+};
+type ClusterAuthConfig = z.infer<typeof SOURCE_CLUSTER_CONFIG>["authConfig"];
+export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration" | "sourceClusters"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+    sourceClusters: Record<string, NormalizedSourceCluster>;
 };
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
@@ -368,7 +403,8 @@ function lowerFileBackedContextValues(
 }
 
 function prepareMetadataConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -379,13 +415,16 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
+        skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
 
 function prepareDocumentBackfillConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"]
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    skipApprovals: boolean
 ) {
     if (config === undefined) {
         return undefined;
@@ -396,6 +435,7 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
@@ -502,7 +542,88 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
     };
 }
 
-export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+function normalizeSnapshotInfo(
+    snapshotInfo: z.infer<typeof SOURCE_CLUSTER_CONFIG>["snapshotInfo"]
+): NormalizedSnapshotInfo | undefined {
+    if (!snapshotInfo) {
+        return undefined;
+    }
+    if ("snapshots" in snapshotInfo) {
+        return snapshotInfo;
+    }
+
+    return {
+        repos: snapshotInfo.repos,
+        serializeSnapshotCreation: snapshotInfo.serializeSnapshotCreation,
+        snapshots: Object.fromEntries(
+            Object.entries(snapshotInfo.backups).map(([label, backup]) => {
+                if ("createBackupConfig" in backup) {
+                    const {
+                        repoName,
+                        createBackupConfig,
+                    } = backup;
+                    const {
+                        collectionAllowlist,
+                        ...createBackupOptions
+                    } = createBackupConfig;
+                    const normalizedCollectionAllowlist = collectionAllowlist ?? [];
+                    return [
+                        label,
+                        {
+                            repoName,
+                            config: {
+                                createSnapshotConfig: {
+                                    ...createBackupOptions,
+                                    solrCollections: normalizedCollectionAllowlist,
+                                },
+                            },
+                            solrBackupConfig: {
+                                collectionAllowlist: normalizedCollectionAllowlist,
+                            },
+                        },
+                    ];
+                }
+
+                const {
+                    externalBackupName,
+                    repoName,
+                    collectionAllowlist,
+                    ...solrBackupOptions
+                } = backup;
+                return [
+                    label,
+                    {
+                        repoName,
+                        config: {
+                            externallyManagedSnapshotName: externalBackupName,
+                        },
+                        solrBackupConfig: {
+                            ...solrBackupOptions,
+                            externalBackupName,
+                            collectionAllowlist: collectionAllowlist ?? [],
+                        },
+                    },
+                ];
+            })
+        ),
+    };
+}
+
+function normalizeSourceClusters(
+    sourceClusters: InputConfig["sourceClusters"]
+): NormalizedUserConfig["sourceClusters"] {
+    return Object.fromEntries(
+        Object.entries(sourceClusters).map(([sourceName, sourceCluster]) => [
+            sourceName,
+            {
+                ...sourceCluster,
+                snapshotInfo: normalizeSnapshotInfo(sourceCluster.snapshotInfo),
+            },
+        ])
+    );
+}
+
+function normalizeUserConfigForValidation(userConfig: InputConfig): InputConfig {
     const namedConfig = setNamesInUserConfig(userConfig);
     return {
         ...namedConfig,
@@ -513,6 +634,15 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
                 normalizeKafkaClusterConfig(cluster)
             ])
         ),
+    } as InputConfig;
+}
+
+export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+    const validationNormalized = normalizeUserConfigForValidation(userConfig);
+    return {
+        ...validationNormalized,
+        kafkaClusterConfiguration: validationNormalized.kafkaClusterConfiguration ?? {},
+        sourceClusters: normalizeSourceClusters(validationNormalized.sourceClusters),
     };
 }
 
@@ -586,8 +716,58 @@ function buildKafkaClientConfig(
     };
 }
 
-function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAPSHOT> {
+function isGenerateSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowGeneratedSnapshotConfig {
     return 'createSnapshotConfig' in config;
+}
+
+function isExternalSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowExternalSnapshotConfig {
+    return 'externallyManagedSnapshotName' in config;
+}
+
+function isSolrSourceVersion(version: string | undefined): boolean {
+    return typeof version === "string" && version.startsWith("SOLR ");
+}
+
+function needsSolrExternalPrepare(
+    sourceCluster: Pick<NormalizedSourceCluster, "version">,
+    snapshotDef: NormalizedSnapshotDefinition
+): snapshotDef is NormalizedSnapshotDefinition & { solrBackupConfig: SolrExternalBackupNormalizedConfig } {
+    return isSolrSourceVersion(sourceCluster.version)
+        && snapshotDef.solrBackupConfig !== undefined
+        && snapshotDef.solrBackupConfig.externalBackupName !== undefined
+        && isExternalSnapshot(snapshotDef.config);
+}
+
+function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefinition & { solrBackupConfig: SolrBackupNormalizedConfig }) {
+    const {
+        externalBackupName: _externalBackupName,
+        collectionAllowlist,
+        ...runtimeOptions
+    } = snapshotDef.solrBackupConfig;
+    return {
+        ...runtimeOptions,
+        solrCollections: collectionAllowlist,
+    };
+}
+
+function solrCollectionAllowlistForSnapshot(snapshotDef: NormalizedSnapshotDefinition): string[] {
+    return snapshotDef.solrBackupConfig?.collectionAllowlist ?? [];
+}
+
+function applySolrCollectionAllowlist<T extends {indexAllowlist?: string[]} | undefined>(
+    config: T,
+    collectionAllowlist: string[]
+): T {
+    if (config === undefined || collectionAllowlist.length === 0) {
+        return config;
+    }
+    if ((config.indexAllowlist ?? []).length > 0) {
+        return config;
+    }
+    return {
+        ...config,
+        indexAllowlist: collectionAllowlist,
+    } as T;
 }
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
@@ -601,17 +781,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     validateInput(data: unknown): NormalizedUserConfig {
         // First pass: zod schema validation (including refinements)
         const parsed = super.validateInput(data);
-        const normalized = normalizeUserConfig(parsed);
+        const validationNormalized = normalizeUserConfigForValidation(parsed);
 
-        // Second pass: unified schema validation against the normalized user config.
-        // This stays in the user-config schema family and avoids mixing raw input
-        // with selectively patched normalized subtrees.
-        validateInputAgainstUnifiedSchema(normalized);
+        // Second pass: unified schema validation against the normalized user-config shape.
+        // Internal transformer normalization may add fields that are not user-facing.
+        validateInputAgainstUnifiedSchema(validationNormalized);
 
         // Third pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
-        
-        return normalized;
+
+        return normalizeUserConfig(parsed);
     }
 
     async transform(input: NormalizedUserConfig): Promise<OutputConfig> {
@@ -639,7 +818,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
-        const proxies = this.buildProxies(userConfig);
+        const proxies = this.buildProxies(userConfig, userConfig.skipApprovals ?? false);
         const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
@@ -650,31 +829,64 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const csDep = MigrationConfigTransformer.checksumForDependency;
         const PROXY_SCHEMA = z.object({...USER_PROXY_WORKFLOW_OPTIONS.shape, ...USER_PROXY_PROCESS_OPTIONS.shape});
         const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
-        const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
+        const kafkaChecksums = new Map(kafkaClusters.map(k => [
+            k.name,
+            cs(MigrationConfigTransformer.kafkaClusterContract(k as Record<string, unknown>))
+        ]));
 
-        const proxiesWithChecksums = proxies.map(p => ({
-            ...p,
-            kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
-            configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
-            topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
-            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
-        }));
+        const proxiesWithChecksums = proxies.map(p => {
+            const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
+            const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const topicConfigChecksum = cs(
+                kafkaIdentity,
+                p.kafkaConfig.kafkaTopic,
+                p.kafkaConfig.topicSpecOverrides,
+                kafkaChecksum
+            );
+            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            return {
+                ...p,
+                kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
+                configChecksum: cs(p.sourceConnectionIdentity, p.proxyConfig, topicConfigChecksum),
+                topicConfigChecksum,
+                checksumForSnapshot: csDep(
+                    PROXY_SCHEMA,
+                    p.proxyConfig as Record<string, unknown>,
+                    'snapshot',
+                    sourceConnectionIdentityChecksum,
+                    topicConfigChecksum
+                ),
+                checksumForReplayer: csDep(
+                    PROXY_SCHEMA,
+                    p.proxyConfig as Record<string, unknown>,
+                    'replayer',
+                    sourceConnectionIdentityChecksum,
+                    topicConfigChecksum
+                ),
+            };
+        });
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
 
         const s3LoadersWithChecksums = s3TrafficLoaders.map(s => {
             const kafkaCs = kafkaChecksums.get(s.kafkaConfig.label) ?? '';
+            const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(s.kafkaConfig as Record<string, unknown>);
+            const topicConfigChecksum = cs(
+                kafkaIdentity,
+                s.kafkaConfig.kafkaTopic,
+                s.kafkaConfig.topicSpecOverrides,
+                kafkaCs
+            );
             // Replayer & topic checksums are derived from the loader's identity:
             // s3Uri + topic + kafka cluster. Editing the URI would force a reset
             // of the CapturedTraffic resource (VAP-protected); the resulting
             // checksum change is what flags the replayer to re-evaluate.
-            const checksum = cs(s.s3Uri, s.kafkaConfig.kafkaTopic, kafkaCs);
+            const checksum = cs(s.s3Uri, topicConfigChecksum);
             return {
                 ...s,
                 kafkaConfig: { ...s.kafkaConfig, configChecksum: kafkaCs },
-                topicConfigChecksum: cs(s.kafkaConfig.kafkaTopic, s.kafkaConfig.topicSpecOverrides, kafkaCs),
+                topicConfigChecksum,
                 checksumForReplayer: checksum,
                 configChecksum: checksum,
             };
@@ -690,13 +902,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 }));
                 const sourceConnectionIdentity =
                     MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
+                const repoIdentity = MigrationConfigTransformer.repoIdentity(item.repo as Record<string, unknown>);
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
+                    dependsOn: enrichedDeps.map(d => d.name),
                     configChecksum: cs(
                         sourceConnectionIdentity,
                         item.config,
-                        item.repo,
+                        item.solrExternalBackupName ?? '',
+                        repoIdentity,
                         ...enrichedDeps.map(d => d.configChecksum)
                     ),
                 };
@@ -711,15 +926,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
-                label: m.sourceLabel,
-                version: m.sourceVersion,
-                endpoint: m.sourceEndpoint,
-                allowInsecure: m.sourceAllowInsecure,
-                authConfig: m.sourceAuth,
-            });
-            const targetConnectionIdentity =
-                MigrationConfigTransformer.clusterConnectionIdentity(m.targetConfig as Record<string, unknown>);
+            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const targetConnectionIdentity = m.targetConnectionIdentity;
+            const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
+                (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
+            );
             const replayerMaterialPart = m.documentBackfillConfig
                 ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
                 : '';
@@ -738,17 +949,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
                     m.documentBackfillConfig ?? {},
-                    m.targetConfig,
+                    targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
-                    m.snapshotConfig
+                    snapshotRepoIdentity
                 ),
-                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+                checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
                     sourceConnectionIdentity,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
-                    m.snapshotConfig,
+                    snapshotRepoIdentity,
                     snapshotConfigChecksum,
                     m.migrationLabel,
                     workloadIdentityMaterialPart
@@ -779,7 +990,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ],
                 kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
                 fromCapturedTrafficConfigChecksum: fromCapturedTrafficChecksum,
-                configChecksum: cs(r.replayerConfig, r.toTarget, fromCapturedTrafficChecksum),
+                configChecksum: cs(r.replayerConfig, r.targetConnectionIdentity, fromCapturedTrafficChecksum),
                 dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
                     migrationsWithChecksums
                         .filter(m =>
@@ -849,7 +1060,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
-    private buildProxies(userConfig: NormalizedUserConfig) {
+    private buildProxies(userConfig: NormalizedUserConfig, globalSkipApprovals: boolean) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
@@ -857,11 +1068,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
             const topic = proxy.kafkaTopic || proxyName;
+            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                ...sourceCluster,
+                label: proxy.source,
+            });
             return {
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
-                proxyConfig: prepareProxyConfig(proxy.proxyConfig)
+                sourceConnectionIdentity,
+                proxyConfig: prepareProxyConfig(proxy.proxyConfig),
+                skipApproval: proxy.skipApproval ?? globalSkipApprovals,
             };
         });
     }
@@ -906,7 +1123,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const createConfigs: any[] = [];
 
             for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
-                if (!isGenerateSnapshot(snapshotDef.config)) continue;
+                const snapshotConfig = snapshotDef.config;
+                // Only generated snapshots and Solr external-backup prepare/validation flow
+                // through the snapshot-creation path. ES/OS externally-managed snapshots are
+                // handled entirely on the migration side and need no DataSnapshot CR.
+                if (!isGenerateSnapshot(snapshotConfig) && !needsSolrExternalPrepare(sourceCluster, snapshotDef)) continue;
 
                 const repoConfig = snapshotInfo?.repos?.[snapshotDef.repoName];
                 if (!repoConfig) {
@@ -915,26 +1136,58 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
-                const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 const semaphore = this.generateSemaphoreConfig(
                     sourceCluster.version,
                     sourceName,
                     snapshotName,
                     snapshotInfo?.serializeSnapshotCreation
                 );
-                createConfigs.push({
-                    label: snapshotName,
-                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
-                    config: {
-                        ...createSnapshotOpts,
-                    },
-                    repo: repoConfig,
-                    ...semaphore,
-                    ...{dependsOnProxySetups: (proxyDeps ?? []).map(name => ({
-                        name,
-                        configChecksum: ''
-                    }))}
-                });
+
+                const dependsOnProxySetups = (proxyDeps ?? []).map(name => ({
+                    name,
+                    configChecksum: ''
+                }));
+
+                if (isGenerateSnapshot(snapshotConfig)) {
+                    const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotConfig.createSnapshotConfig;
+                    createConfigs.push({
+                        label: snapshotName,
+                        snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
+                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                            ...sourceCluster,
+                            label: sourceName,
+                        }),
+                        config: {
+                            ...createSnapshotOpts,
+                        },
+                        repo: repoConfig,
+                        ...semaphore,
+                        dependsOnProxySetups,
+                    });
+                } else if (needsSolrExternalPrepare(sourceCluster, snapshotDef)) {
+                    // Solr external prepare. Build a create-config whose `config` carries
+                    // mode:"import" plus optional Solr collection scoping, and record the external
+                    // backup name so the workflow uses it verbatim. No backup runs.
+                    const solrBackupConfig = solrCreateSnapshotConfigForBackup(snapshotDef);
+                    createConfigs.push({
+                        label: snapshotName,
+                        snapshotPrefix: snapshotName,
+                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                            ...sourceCluster,
+                            label: sourceName,
+                        }),
+                        config: {
+                            ...solrBackupConfig,
+                            mode: "import" as const,
+                        },
+                        repo: repoConfig,
+                        solrExternalBackupName: snapshotDef.solrBackupConfig.externalBackupName,
+                        ...semaphore,
+                        dependsOnProxySetups,
+                    });
+                } else {
+                    throw new Error(`Unexpected snapshot config for '${snapshotName}' in source '${sourceName}'`);
+                }
             }
 
             if (createConfigs.length > 0) {
@@ -959,6 +1212,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
+            const skipApprovals = mc.skipApprovals ?? userConfig.skipApprovals ?? false;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
@@ -966,8 +1220,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            // When perSnapshotConfig is not provided, auto-generate it from snapshotInfo.snapshots
-            // so the workflow creates/waits for snapshots the same way for both ES and Solr sources.
+            // When perSnapshotConfig is not provided, auto-generate it from the normalized
+            // snapshotInfo.snapshots map so the workflow creates/waits for snapshots the same way
+            // for both ES and Solr sources.
             const effectivePerSnapshotConfig = perSnapshotConfig ?? (
                 sourceCluster.snapshotInfo?.snapshots
                     ? Object.fromEntries(
@@ -995,17 +1250,46 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
-                const isExternal = 'externallyManagedSnapshotName' in snapshotDef.config;
-                const snapshotNameResolution = isExternal
-                    ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
-                    : { dataSnapshotResourceName: globallyUniqueSnapshotName };
+                const snapshotConfig = snapshotDef.config;
+                let snapshotNameResolution:
+                    | { externalSnapshotName: string }
+                    | { dataSnapshotResourceName: string }
+                    | { dataSnapshotResourceName: string; externalSnapshotName: string };
+                if (needsSolrExternalPrepare(sourceCluster, snapshotDef)) {
+                    // Solr external prepare creates a DataSnapshot CR (so the migration waits for
+                    // validation/schema capture), but the snapshot name used is the external,
+                    // pre-existing one -- not a workflow-generated name.
+                    snapshotNameResolution = {
+                        dataSnapshotResourceName: globallyUniqueSnapshotName,
+                        externalSnapshotName: snapshotDef.solrBackupConfig.externalBackupName,
+                    };
+                } else if (isExternalSnapshot(snapshotConfig)) {
+                    snapshotNameResolution = {
+                        externalSnapshotName: snapshotConfig.externallyManagedSnapshotName,
+                    };
+                } else {
+                    snapshotNameResolution = { dataSnapshotResourceName: globallyUniqueSnapshotName };
+                }
 
                 for (const migration of autoLabelMigrations(migrations)) {
+                    const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
+                        ? solrCollectionAllowlistForSnapshot(snapshotDef)
+                        : [];
+                    const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                        ...sourceCluster,
+                        label: fromSource,
+                    });
+                    const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                        ...targetCluster,
+                        label: toTarget,
+                    });
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        migration.metadataMigrationConfig
+                        applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        migration.documentBackfillConfig
+                        applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
+                        skipApprovals
                     );
                     results.push({
                         label: snapshotName,
@@ -1014,6 +1298,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         snapshotConfigChecksum: '',
                         metadataMigrationConfig,
                         documentBackfillConfig,
+                        sourceConnectionIdentity,
+                        targetConnectionIdentity,
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
                         ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
@@ -1068,6 +1354,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
+            const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                ...targetCluster,
+                label: replayer.toTarget,
+            });
 
             return {
                 name: [sourceName, replayer.toTarget, name].join('-'),
@@ -1077,6 +1367,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 kafkaClusterName: kafkaCluster,
                 kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },
+                targetConnectionIdentity,
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
             };
@@ -1156,14 +1447,91 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
     }
 
+    static authIdentity(authConfig?: ClusterAuthConfig): Record<string, string> {
+        const emptyAuthIdentity = {
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
+        };
+        if (!authConfig) {
+            return emptyAuthIdentity;
+        }
+        if ("basic" in authConfig) {
+            return {
+                ...emptyAuthIdentity,
+                authType: "basic",
+                authBasicSecretName: authConfig.basic.secretName,
+            };
+        }
+        if ("sigv4" in authConfig) {
+            return {
+                ...emptyAuthIdentity,
+                authType: "sigv4",
+                authSigv4Region: authConfig.sigv4.region,
+                authSigv4Service: authConfig.sigv4.service ?? "es",
+            };
+        }
+        return {
+            ...emptyAuthIdentity,
+            authType: "mtls",
+            authMtlsClientSecretName: authConfig.mtls.clientSecretName,
+            authMtlsCaCertHash: MigrationConfigTransformer.identityHash(authConfig.mtls.caCert),
+        };
+    }
+
     static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        const authIdentity = MigrationConfigTransformer.authIdentity(clusterConfig.authConfig as ClusterAuthConfig);
         return {
             label: clusterConfig.label,
-            version: clusterConfig.version,
+            version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
-            authConfig: clusterConfig.authConfig ?? {},
+            ...authIdentity,
         };
+    }
+
+    static kafkaClusterContract(kafkaCluster: Record<string, unknown>): Record<string, unknown> {
+        const config = (kafkaCluster.config ?? {}) as Record<string, unknown>;
+        return {
+            name: kafkaCluster.name ?? "",
+            version: kafkaCluster.version ?? "",
+            auth: config.auth ?? {},
+            clusterSpecOverrides: config.clusterSpecOverrides ?? {},
+            nodePoolSpecOverrides: config.nodePoolSpecOverrides ?? {},
+        };
+    }
+
+    static kafkaClientIdentity(kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            kafkaClusterName: kafkaConfig.label ?? "",
+            kafkaBrokers: kafkaConfig.kafkaConnection ?? "",
+            kafkaManagedByWorkflow: kafkaConfig.managedByWorkflow ?? false,
+            kafkaAuthType: kafkaConfig.authType ?? "none",
+            kafkaEnableMSKAuth: kafkaConfig.enableMSKAuth ?? false,
+            kafkaSecretName: kafkaConfig.secretName ?? "",
+            kafkaCaSecretName: kafkaConfig.caSecretName ?? "",
+            kafkaUserName: kafkaConfig.kafkaUserName ?? "",
+        };
+    }
+
+    static repoIdentity(repoConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            repoName: repoConfig.repoName ?? "",
+            repoPathUri: repoConfig.repoPathUri ?? "",
+            awsRegion: repoConfig.awsRegion ?? "",
+            endpoint: repoConfig.endpoint ?? "",
+            s3RoleArn: repoConfig.s3RoleArn ?? "",
+            useLocalStack: repoConfig.useLocalStack ?? false,
+        };
+    }
+
+    static identityHash(value: unknown): string {
+        return "sha256:" + createHash('sha256')
+            .update(JSON.stringify(value))
+            .digest('hex');
     }
 
     static configChecksum(...parts: unknown[]): string {

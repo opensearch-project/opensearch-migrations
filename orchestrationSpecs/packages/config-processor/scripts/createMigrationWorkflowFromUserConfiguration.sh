@@ -105,8 +105,6 @@ spec:
         value: "$RUN_NONCE"
       - name: migrationRunNumber
         value: "$RUN_NUMBER"
-      - name: approval-config
-        value: "approval-config-0"
       - name: config
         value: |
 $(sed 's/^/          /' "$TEMP_DIR/workflowMigration.config.yaml")
