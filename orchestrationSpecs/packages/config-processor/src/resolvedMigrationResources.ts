@@ -281,6 +281,13 @@ const CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS = [
     "sslTrustCertPemEnvVar",
     "requireClientAuth",
 ] as const;
+const SNAPSHOT_MIGRATION_METADATA_RESOURCE_OMITTED_FIELDS = [
+    "skipEvaluateApproval",
+    "skipMigrateApproval",
+] as const;
+const SNAPSHOT_MIGRATION_DOCUMENT_RESOURCE_OMITTED_FIELDS = [
+    "skipApproval",
+] as const;
 
 const WORKFLOW_ONLY_FIELDS_ANNOTATION = "migrations.opensearch.org/workflow-only-fields";
 const WORKFLOW_ONLY_HASH_ANNOTATION = "migrations.opensearch.org/workflow-only-hash";
@@ -493,13 +500,27 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
             ? snapshotNameResolution.externalSnapshotName
             : "";
     const repo = migration.snapshotConfig.repoConfig as Record<string, unknown>;
+    const metadataMigrationConfig = migration.metadataMigrationConfig
+        ? omitFields(
+            withEmptyStringDefaults(
+                migration.metadataMigrationConfig as Record<string, unknown>,
+                METADATA_EMPTY_STRING_DEFAULT_FIELDS
+            ),
+            SNAPSHOT_MIGRATION_METADATA_RESOURCE_OMITTED_FIELDS
+        )
+        : undefined;
+    const documentBackfillConfig = migration.documentBackfillConfig
+        ? omitFields(
+            withEmptyStringDefaults(
+                migration.documentBackfillConfig as Record<string, unknown>,
+                DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS
+            ),
+            SNAPSHOT_MIGRATION_DOCUMENT_RESOURCE_OMITTED_FIELDS
+        )
+        : undefined;
     return {
-        ...prefixFields("metadataMigration", migration.metadataMigrationConfig
-            ? withEmptyStringDefaults(migration.metadataMigrationConfig as Record<string, unknown>, METADATA_EMPTY_STRING_DEFAULT_FIELDS)
-            : undefined),
-        ...prefixFields("documentBackfill", migration.documentBackfillConfig
-            ? withEmptyStringDefaults(migration.documentBackfillConfig as Record<string, unknown>, DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS)
-            : undefined),
+        ...prefixFields("metadataMigration", metadataMigrationConfig),
+        ...prefixFields("documentBackfill", documentBackfillConfig),
         dependsOn: dataSnapshotResourceName ? [dataSnapshotResourceName] : [],
         migrationLabel: migration.migrationLabel,
         ...connectionIdentityParameters(

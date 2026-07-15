@@ -37,6 +37,7 @@ interface SchemaProjection {
     schema: z.ZodObject<any>;
     policySchemas?: readonly z.ZodObject<any>[];
     prefix?: string;
+    omitFields?: readonly string[];
 }
 
 interface InternalProjectedField {
@@ -88,6 +89,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
         schema: ARGO_METADATA_OPTIONS,
         policySchemas: [USER_METADATA_OPTIONS],
         prefix: "metadataMigration",
+        omitFields: ["skipEvaluateApproval", "skipMigrateApproval"],
     },
     {
         resourceKind: "SnapshotMigration",
@@ -95,6 +97,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
         schema: ARGO_RFS_OPTIONS,
         policySchemas: [USER_RFS_WORKFLOW_OPTIONS, USER_RFS_PROCESS_OPTIONS],
         prefix: "documentBackfill",
+        omitFields: ["skipApproval"],
     },
 ] as const;
 
@@ -247,18 +250,20 @@ function projectedFieldMeta(projection: SchemaProjection, fieldName: string, fie
 
 export function collectProjectedFields(): ProjectedField[] {
     const schemaFields = SCHEMA_PROJECTIONS.flatMap(projection =>
-        Object.entries(projection.schema.shape).map(([fieldName, fieldSchema]) => {
-            const meta = projectedFieldMeta(projection, fieldName, fieldSchema as z.ZodTypeAny);
-            return {
-                resourceKind: projection.resourceKind,
-                specPath: [prefixedFieldName(projection.prefix, fieldName)],
-                schema: fieldSchema as z.ZodTypeAny,
-                sourceSchema: projection.sourceSchema,
-                sourcePath: [fieldName],
-                changeRestriction: meta?.changeRestriction ?? "safe",
-                checksumFor: meta?.checksumFor,
-            } satisfies ProjectedField;
-        })
+        Object.entries(projection.schema.shape)
+            .filter(([fieldName]) => !(projection.omitFields ?? []).includes(fieldName))
+            .map(([fieldName, fieldSchema]) => {
+                const meta = projectedFieldMeta(projection, fieldName, fieldSchema as z.ZodTypeAny);
+                return {
+                    resourceKind: projection.resourceKind,
+                    specPath: [prefixedFieldName(projection.prefix, fieldName)],
+                    schema: fieldSchema as z.ZodTypeAny,
+                    sourceSchema: projection.sourceSchema,
+                    sourcePath: [fieldName],
+                    changeRestriction: meta?.changeRestriction ?? "safe",
+                    checksumFor: meta?.checksumFor,
+                } satisfies ProjectedField;
+            })
     );
 
     const internalFields = INTERNAL_PROJECTED_FIELDS.map(field => ({
