@@ -45,6 +45,54 @@
         "sort": 1,
         "type": "query",
         "current": {}
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(http_req_duration_milliseconds_bucket{scenario=~\"$scenario\"}, name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Operation",
+        "multi": true,
+        "name": "op_name",
+        "options": [],
+        "query": {
+          "query": "label_values(http_req_duration_milliseconds_bucket{scenario=~\"$scenario\"}, name)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query",
+        "current": {}
+      },
+      {
+        "hide": 0,
+        "label": "Max percentile",
+        "name": "show_max",
+        "options": [
+          {
+            "selected": false,
+            "text": "visible",
+            "value": ".*"
+          },
+          {
+            "selected": true,
+            "text": "hidden",
+            "value": "^$"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "hidden",
+          "value": "^$"
+        },
+        "query": ".*,^$",
+        "type": "custom",
+        "multi": false,
+        "includeAll": false
       }
     ]
   },
@@ -255,7 +303,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by(le)(rate(ingest_bulk_batch_docs_bucket{scenario=~\"$scenario\"}[5m])))",
+          "expr": "(histogram_quantile(0.95, sum by(le)(rate(ingest_bulk_batch_docs_bucket{scenario=~\"$scenario\"}[5m]))) or vector(0))",
           "legendFormat": "docs/batch p95",
           "refId": "A"
         }
@@ -314,18 +362,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(http_reqs_total{name=\"bulk_write\",scenario=~\"$scenario\"}[1m])",
-          "legendFormat": "{{scenario}} bulk write",
+          "expr": "sum by(scenario, name)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m]))",
+          "legendFormat": "{{scenario}} {{name}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(http_reqs_total{name=\"single_doc\",scenario=~\"$scenario\"}[1m])",
-          "legendFormat": "{{scenario}} single doc",
-          "refId": "B"
         },
         {
           "datasource": {
@@ -334,7 +373,7 @@
           },
           "expr": "sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m]))",
           "legendFormat": "{{scenario}} total",
-          "refId": "C"
+          "refId": "B"
         }
       ],
       "options": {
@@ -364,92 +403,26 @@
       }
     },
     {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Bulk Write Latency",
-      "description": "Latency for _bulk requests (threshold: p95 < 3000 ms). k6 OTLP sends durations in milliseconds.",
+      "id": 11,
+      "type": "row",
+      "title": "Latencies",
+      "collapsed": false,
       "gridPos": {
         "x": 0,
         "y": 12,
-        "w": 12,
-        "h": 8
+        "w": 24,
+        "h": 1
       },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.50, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
-          "legendFormat": "{{scenario}} p50",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.95, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
-          "legendFormat": "{{scenario}} p95",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
-          "legendFormat": "{{scenario}} p99",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(1.00, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"bulk_write\",scenario=~\"$scenario\"}[5m])))",
-          "legendFormat": "{{scenario}} max",
-          "refId": "D"
-        }
-      ],
-      "options": {
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        },
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      }
+      "panels": []
     },
     {
-      "id": 7,
+      "id": 6,
       "type": "timeseries",
-      "title": "Single-Doc Latency",
-      "description": "Latency for single-document POST requests (threshold: p95 < 2000 ms). k6 OTLP sends durations in milliseconds.",
+      "title": "$op_name Latency",
+      "description": "Latency for _bulk requests (threshold: p95 < 3000 ms). k6 OTLP sends durations in milliseconds.",
       "gridPos": {
-        "x": 12,
-        "y": 12,
+        "x": 0,
+        "y": 13,
         "w": 12,
         "h": 8
       },
@@ -463,7 +436,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"$op_name\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p50",
           "refId": "A"
         },
@@ -472,7 +445,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"$op_name\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p95",
           "refId": "B"
         },
@@ -481,7 +454,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"$op_name\",scenario=~\"$scenario\"}[5m])))",
           "legendFormat": "{{scenario}} p99",
           "refId": "C"
         },
@@ -490,7 +463,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(1.00, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"single_doc\",scenario=~\"$scenario\"}[5m])))",
+          "expr": "histogram_quantile(1.00, sum by(le,scenario)(rate(http_req_duration_milliseconds_bucket{name=\"$op_name\",scenario=~\"$scenario\",le=~\"$show_max\"}[5m])))",
           "legendFormat": "{{scenario}} max",
           "refId": "D"
         }
@@ -519,7 +492,23 @@
           }
         },
         "overrides": []
-      }
+      },
+      "repeat": "op_name",
+      "repeatDirection": "h",
+      "maxPerRow": 2
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Health & Load",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
     },
     {
       "id": 8,
@@ -528,7 +517,7 @@
       "description": "Fraction of requests returning HTTP >= 400. One series per active scenario and request type. Threshold: < 5%.",
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -601,7 +590,7 @@
       "description": "Each VU holds one persistent TCP connection to the Capture Proxy, mapping directly to connectionId. VU count is global \u2014 not per-scenario.",
       "gridPos": {
         "x": 12,
-        "y": 20,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -688,7 +677,7 @@
       "title": "Data Volume (bytes/s)",
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 30,
         "w": 24,
         "h": 8
       },
