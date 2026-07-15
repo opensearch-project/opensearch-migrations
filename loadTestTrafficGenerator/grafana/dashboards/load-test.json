@@ -80,7 +80,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(http_req_failed_total{scenario=~\"$scenario\"}[1m])) / sum(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
+          "expr": "(sum(rate(http_reqs_total{status=~\"4..|5..\",scenario=~\"$scenario\"}[1m])) or vector(0)) / sum(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
           "legendFormat": "error %",
           "refId": "A"
         }
@@ -320,7 +320,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by(scenario)(rate(http_req_failed_total{scenario=~\"$scenario\"}[1m])) / sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
+          "expr": "sum by(scenario)(rate(http_reqs_total{status=~\"4..|5..\",scenario=~\"$scenario\"}[1m])) / sum by(scenario)(rate(http_reqs_total{scenario=~\"$scenario\"}[1m])) * 100",
           "legendFormat": "{{scenario}} HTTP err %",
           "refId": "A"
         },
