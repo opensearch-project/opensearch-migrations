@@ -92,7 +92,7 @@ spec:
                         "mode": "certManager",
                         "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                         "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                        "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                        "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                       }
                     } else {} end))
                   }
@@ -187,7 +187,7 @@ spec:
                           "mode": "certManager",
                           "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                           "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                          "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                          "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                         }
                       } else {} end))
                     }
