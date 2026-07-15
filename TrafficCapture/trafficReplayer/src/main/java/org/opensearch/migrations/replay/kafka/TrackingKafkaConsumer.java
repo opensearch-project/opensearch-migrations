@@ -296,6 +296,37 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
+    /**
+     * Lightweight keepalive: reap stale heads, pause, poll(ZERO), resume, commit.
+     * Resets the broker's max.poll.interval.ms timer without requiring a tracing context.
+     * Called from the background keepalive scheduler on kafkaExecutor when the main read
+     * loop is blocked in batch processing. Since touch(), keepAlive(), and
+     * getNextBatchOfRecords all run on the single-threaded kafkaExecutor, no additional
+     * synchronization is needed.
+     */
+    public void keepAlive() {
+        log.atDebug().setMessage("keepAlive() — background poll to prevent max.poll.interval.ms expiry").log();
+        reapStaleHeads();
+        pause();
+        try {
+            var records = kafkaConsumer.poll(Duration.ZERO);
+            if (!records.isEmpty()) {
+                log.atWarn().setMessage("keepAlive poll returned {} records while paused — unexpected")
+                    .addArgument(records.count()).log();
+            }
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                .setMessage("keepAlive poll failed for topic: {} consumer: {}")
+                .addArgument(topic).addArgument(this).log();
+        } finally {
+            resume();
+        }
+        safeCommit(globalContext::createCommitContext);
+        lastTouchTimeRef.set(clock.instant());
+    }
+
     private void pause() {
         var activePartitions = kafkaConsumer.assignment();
         try {
