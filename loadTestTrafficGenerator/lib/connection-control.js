@@ -1,5 +1,5 @@
 /**
- * Connection mode helpers — Phase 2.
+ * Connection mode helpers.
  *
  * The Capture Proxy groups all requests on a single TCP connection into one
  * TrafficStream. The Replayer then replays each stream on its own connection,

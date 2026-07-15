@@ -1,5 +1,5 @@
 /**
- * Chaos control hooks — Phase 6.
+ * Chaos control hooks.
  *
  * Allows an external orchestration layer to pause, resume, or throttle traffic
  * mid-test by writing a command string to a Redis key via the Webdis HTTP sidecar.

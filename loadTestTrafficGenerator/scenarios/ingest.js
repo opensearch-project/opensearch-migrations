@@ -5,7 +5,7 @@
  *   SEQUENCE_FRACTION of iterations → stateful create→update→query→delete sequence
  *   of the remaining budget: BULK_FRACTION → _bulk write; rest → single-doc POST
  *   Defaults: 15% sequence, 59.5% bulk, 25.5% single-doc.
- * Phase 5 (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
+ *   (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
  *
  * Key environment variables (see k6-config/ingest-steady.env for load-profile defaults):
  *   SCENARIO           — document schema to use: "nyc_taxis" (default) or "logs_data"

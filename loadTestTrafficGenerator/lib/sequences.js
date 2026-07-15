@@ -1,5 +1,5 @@
 /**
- * Stateful sequence helpers — Phase 2.
+ * Stateful sequence helpers.
  *
  * Each internal function performs one step of a create → update → query → delete
  * lifecycle for a single document. `runSequence` composes all four steps and

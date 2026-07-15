@@ -366,7 +366,7 @@ Additional variables for `mixed.js` ramping (override `RAMP_STAGES` per stream):
 | `MIN_RING_FILL` | `0` | Minimum IDs in the Redis ring before search VUs start; converted to a `startTime` delay using `INGEST_RATE × (1−SEQUENCE_FRACTION) × (1−BULK_FRACTION)` IDs/s |
 
 > When `DURATION` is set and `RAMP_STAGES` is not, the scenario falls back to a single
-> hold-at-`INGEST_RATE` stage — existing env files from Phases 1–4 work unchanged.
+> hold-at-`INGEST_RATE` stage — existing env files work unchanged.
 
 ---
 

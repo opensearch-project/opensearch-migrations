@@ -1,5 +1,5 @@
 /**
- * ID ring buffer via Webdis — Phase 4 (Mixed profile).
+ * ID ring buffer via Webdis.
  *
  * Ingest VUs call registryWrite() after successfully creating a document so that
  * search VUs can retrieve a recently-written ID for targeted write-then-read queries.
