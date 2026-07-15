@@ -25,7 +25,7 @@
  *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
  *                        Omit to use a single hold-at-INGEST_RATE-for-DURATION stage.
  *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Webdis;
- *                        defaults to "false" (no-op). See lib/control.js and DESIGN.md §11.
+ *                        defaults to "false" (no-op). See lib/control.js.
  *   CONTROL_CMD_KEY    — Redis key polled for control commands (default: "control_cmd")
  */
 

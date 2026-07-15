@@ -1,7 +1,7 @@
 # Load Test Traffic Generator
 
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay
-pipeline. See [`DESIGN.md`](DESIGN.md) for the full design rationale.
+pipeline.
 
 ---
 

@@ -35,7 +35,7 @@
  *                             converted to a startTime delay using the estimated single-doc ID rate
  *                             (INGEST_RATE × (1−SEQUENCE_FRACTION) × 0.3); default 0 (no delay)
  *   CONTROL_ENABLED         — "true" to enable mid-test pause/resume/rate control via Webdis;
- *                             defaults to "false" (no-op). See lib/control.js and DESIGN.md §11.
+ *                             defaults to "false" (no-op). See lib/control.js.
  *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
  */
 

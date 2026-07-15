@@ -174,7 +174,7 @@ export function setup() {
 
   if (seedDocIds.length === 0) {
     console.warn('setup: no seed documents found — partial updates will fall back to flat searches');
-    console.warn('setup: seed the index first for realistic update traffic (see DESIGN.md §7.1)');
+    console.warn('setup: seed the index first for realistic update traffic');
   } else {
     console.log(`setup: sampled ${seedDocIds.length} seed doc IDs for partial updates`);
   }

@@ -34,7 +34,6 @@
  *   # clear throttle:
  *   curl -s "http://localhost:7379/DEL/control_cmd"
  *
- * See DESIGN.md §11 for the full interface contract and integration notes.
  */
 
 import http from 'k6/http';
