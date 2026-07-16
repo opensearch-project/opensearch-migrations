@@ -74,7 +74,12 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      # --create --if-not-exists both verifies Kafka is ready AND pre-creates the capture topic.
+      # Kafka log dirs live in /tmp (wiped on container restart), so the topic must be re-created
+      # on every start. Without pre-creation, kafkametrics' topics scraper sees an empty topic
+      # list on its first scrape (T+15s), then enters a silently-broken state when the topic is
+      # auto-created later by the CaptureProxy — producing kafka_brokers but no partition metrics.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic logging-traffic-topic --partitions 1 --replication-factor 1"]
       interval: 5s
       timeout: 10s
       retries: 15
