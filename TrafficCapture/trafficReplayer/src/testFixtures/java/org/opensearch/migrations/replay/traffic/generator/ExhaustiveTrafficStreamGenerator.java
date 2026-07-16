@@ -78,7 +78,8 @@ public class ExhaustiveTrafficStreamGenerator {
         WriteSegment(5),
         EndOfWriteSegment(6),
         RequestDropped(7),
-        Close(8);
+        Close(8),
+        ConnectionException(9);
 
         private final int intValue;
 
@@ -91,7 +92,8 @@ public class ExhaustiveTrafficStreamGenerator {
         }
 
         public static Stream<ObservationType> valueStream() {
-            return Arrays.stream(ObservationType.values()).filter(ot -> ot != ObservationType.Close);
+            return Arrays.stream(ObservationType.values())
+                .filter(ot -> ot != ObservationType.Close && ot != ObservationType.ConnectionException);
         }
     }
 
@@ -132,6 +134,8 @@ public class ExhaustiveTrafficStreamGenerator {
             return Optional.empty();
         } else if (trafficObservation.hasClose()) {
             return Optional.of(ObservationType.Close);
+        } else if (trafficObservation.hasConnectionException()) {
+            return Optional.of(ObservationType.ConnectionException);
         } else if (trafficObservation.hasRequestDropped()) {
             return Optional.of(ObservationType.RequestDropped);
         } else {
@@ -244,6 +248,16 @@ public class ExhaustiveTrafficStreamGenerator {
                 ++i; // compensate to get the right number of requests in the loop
                 sizes.remove(sizes.size() - 1); // This won't show up as a request, so don't propagate it
                 continue;
+            }
+            // Occasionally terminate with a connectionException mid-request (before EOM).
+            // Bug to trigger: multi-record request + exception = orphaned offsets.
+            // Use a flush before the exception to ensure prior reads are in a separate TrafficStream
+            // record, which is required to trigger the multi-record aspect.
+            if (r.nextDouble() <= cancelRequestLikelihood) {
+                commands.add(ObservationDirective.flush());
+                commands.add(ObservationDirective.connectionException());
+                sizes.remove(sizes.size() - 1); // This won't show up as a completed request
+                break; // connection is terminated — no more observations
             }
             if (r.nextDouble() <= flushLikelihood) {
                 commands.add(ObservationDirective.flush());

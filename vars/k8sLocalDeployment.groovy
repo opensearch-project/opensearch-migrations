@@ -115,8 +115,14 @@ def call(Map config = [:]) {
                     timeout(time: 5, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
-                                def sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                                def targetVer = targetVersion ?: params.TARGET_VERSION
+                                def requestedSourceVersion = params.SOURCE_VERSION ?: ""
+                                def requestedTargetVersion = params.TARGET_VERSION ?: ""
+                                def sourceVer = requestedSourceVersion && requestedSourceVersion != 'all'
+                                        ? requestedSourceVersion
+                                        : sourceVersion ?: requestedSourceVersion
+                                def targetVer = requestedTargetVersion && requestedTargetVersion != 'all'
+                                        ? requestedTargetVersion
+                                        : targetVersion ?: requestedTargetVersion
                                 currentBuild.description = "${sourceVer} → ${targetVer}"
                                 // --source-version accepts one or more space-separated values; convert commas for multi-source jobs
                                 def sourceVerArg = sourceVer ? sourceVer.replace(',', ' ') : 'all'
