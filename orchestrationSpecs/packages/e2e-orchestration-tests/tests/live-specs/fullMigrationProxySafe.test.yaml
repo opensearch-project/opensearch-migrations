@@ -1,0 +1,26 @@
+baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
+phaseCompletionTimeoutSeconds: 1200
+
+# Safe variant of the noop spec. Runs the 4-run safe case sequence
+# (baseline → noop-pre → mutated → noop-post) for each mutator matched
+# by the selector. With the built-in mutator registry this resolves to
+# exactly one case: proxy-numThreads on captureproxy:capture-proxy.
+matrix:
+  subject: captureproxy:capture-proxy
+  select:
+    - changeClass: safe
+      patterns: [subject-change]
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
