@@ -103,9 +103,13 @@ services:
       opensearch-source:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -skf https://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
-      interval: 5s
-      timeout: 10s
+      # TCP-only: verify the proxy port is listening without sending an HTTP request.
+      # An HTTP check would be forwarded to OpenSearch and captured to Kafka, generating
+      # continuous background noise in metrics. The upstream services (kafka, opensearch-source)
+      # are already health-checked independently before the proxy starts (see depends_on).
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9200'"]
+      interval: 10s
+      timeout: 5s
       retries: 20
 
   # ── OTEL Collector ──────────────────────────────────────────────────────
