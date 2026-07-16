@@ -14,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
@@ -139,6 +140,70 @@ class RotatingGzipS3ObjectWriterTest {
         assertEquals(3, attempts.get());
         // Every retry used the same key.
         assertTrue(attemptKeys.stream().allMatch(k -> k.equals("p/obj-0.gz")));
+    }
+
+    @Test
+    void localAppendFailureIsRetainedAndSurfacesOnGatingFlush() throws Exception {
+        // A local append failure (e.g. disk full) is an infrastructure durability failure: the record
+        // we were asked to persist is lost, so the failure must be RETAINED and surface on the next
+        // flush() — that's what makes the RFS gating flush refuse to mark the work item complete.
+        var captured = new CopyOnWriteArrayList<Captured>();
+        var failFirstAppend = new AtomicBoolean(true);
+        var w = new RotatingGzipS3ObjectWriter<byte[]>(
+            capturing(captured), "bucket",
+            (now, seq) -> "p/obj-" + seq + ".gz",
+            bytes -> bytes,
+            RotationPolicy.ofBytes(1 << 20), Duration.ofMillis(10), 1, "writer-test-") {
+            @Override
+            void appendBytes(byte[] bytes) throws IOException {
+                if (failFirstAppend.getAndSet(false)) {
+                    throw new IOException("disk full");
+                }
+                super.appendBytes(bytes);
+            }
+        };
+        try (w) {
+            var writeFuture = w.write(rec("a"));
+            assertTrue(writeFuture.isCompletedExceptionally(),
+                "a retained local append failure should fail the write future");
+
+            var ex = assertThrows(ExecutionException.class, () -> w.flush().get(2, TimeUnit.SECONDS));
+            assertTrue(ex.getCause() instanceof IOException, "gating flush must re-surface the retained append failure");
+
+            // The stream was rotated to a fresh object after the failure, so a later write still lands.
+            w.write(rec("b"));
+            w.flush().get(2, TimeUnit.SECONDS);
+        }
+        // Only "b" made it to S3; "a" was lost with its (surfaced) failure — never silently dropped.
+        assertEquals(1, captured.size());
+        assertEquals("b\n", decode(captured.get(captured.size() - 1).data()));
+    }
+
+    @Test
+    void serializationFailureIsNotRetainedSoItCannotBlockGatingFlush() throws Exception {
+        // A serialization failure is a per-record "poison pill": a successor would fail to serialize the
+        // identical record too, so retaining it would block the gating flush forever. It must surface on
+        // the write() but NOT be retained.
+        var captured = new CopyOnWriteArrayList<Captured>();
+        RotatingGzipS3ObjectWriter.RecordSerializer<String> poison = s -> {
+            if ("bad".equals(s)) {
+                throw new IOException("cannot serialize");
+            }
+            return rec(s);
+        };
+        try (var w = new RotatingGzipS3ObjectWriter<String>(
+            capturing(captured), "bucket",
+            (now, seq) -> "p/obj-" + seq + ".gz",
+            poison,
+            RotationPolicy.ofBytes(1 << 20), Duration.ofMillis(10), 1, "writer-test-")) {
+            assertTrue(w.write("bad").isCompletedExceptionally(), "serialization failure should fail the write future");
+            // The poison record left nothing buffered and nothing retained, so the gating flush passes.
+            w.flush().get(2, TimeUnit.SECONDS);
+            w.write("good");
+            w.flush().get(2, TimeUnit.SECONDS);
+        }
+        assertEquals(1, captured.size());
+        assertEquals("good\n", decode(captured.get(0).data()));
     }
 
     @Test

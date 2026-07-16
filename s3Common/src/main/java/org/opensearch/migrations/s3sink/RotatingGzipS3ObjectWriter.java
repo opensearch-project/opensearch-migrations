@@ -59,7 +59,9 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * @param <T> the in-memory record type; serialized to bytes by {@link RecordSerializer}
  */
 @Slf4j
-public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
+// Not final: package-private tests subclass it to override appendBytes(...) and exercise the
+// local-append-failure durability path deterministically (see RotatingGzipS3ObjectWriterTest).
+public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
 
     /** Serializes one record to the bytes appended (followed by a newline) to the gzip stream. */
     @FunctionalInterface
@@ -169,16 +171,32 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         try {
             bytes = serializer.serialize(item);
         } catch (Exception e) {
+            // A serialization failure is a per-record ("poison pill") failure: a successor that
+            // reprocesses would fail to serialize the same record too, so retrying forever is
+            // pointless. Surface it to the caller (which logs + drops) but do NOT retain it, so it
+            // never blocks a gating flush.
             return CompletableFuture.failedFuture(e);
         }
         var objectFuture = currentObjectFuture;
         try {
-            gzipOut.write(bytes);
-            gzipOut.write('\n');
+            appendBytes(bytes);
             uncompressedBytes += (long) bytes.length + 1;
             recordCount++;
         } catch (IOException e) {
-            return CompletableFuture.failedFuture(e);
+            // A local append failure (e.g. disk full) is an infrastructure durability failure, not a
+            // per-record one: the current object is now corrupt and we've lost a record we were asked
+            // to persist. Retain the failed object future so the next flush() surfaces it and the
+            // caller's gating flush refuses to mark the work item complete (at-least-once: a successor
+            // reprocesses). Discard the corrupt stream and open a fresh one so later writes in the same
+            // batch can still be attempted.
+            log.atError().setCause(e)
+                .setMessage("Failed to append to gzip stream for s3://{}/{}; retaining failure so the "
+                    + "next flush surfaces it").addArgument(bucket).addArgument(currentKey).log();
+            discardCurrentStream();
+            objectFuture.completeExceptionally(e);
+            outstandingUploads.add(objectFuture);
+            openNewStream();
+            return objectFuture;
         }
         if (rotationPolicy.shouldRotate(uncompressedBytes, recordCount, openedAt, clock.instant())) {
             return rotate(true);
@@ -348,6 +366,14 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
             ? error.getCause() : error;
     }
 
+    // Append one already-serialized record (plus a record separator) to the current gzip stream.
+    // Package-private and overridable purely as a test seam for the local-append-failure path;
+    // production behavior is exactly the two gzipOut writes.
+    void appendBytes(byte[] bytes) throws IOException {
+        gzipOut.write(bytes);
+        gzipOut.write('\n');
+    }
+
     /** Finish gzip and close the local temp file before upload. Returns true on success. */
     private boolean closeCurrentStream() {
         try {
@@ -383,6 +409,25 @@ public final class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         recordCount = 0;
         uncompressedBytes = 0;
         currentObjectFuture = null;
+    }
+
+    /**
+     * Best-effort teardown of a stream that failed mid-append: close the (likely-corrupt) local
+     * handles and delete the temp file. Never uploads — the object is incomplete. The caller is
+     * responsible for completing/retaining {@code currentObjectFuture} and opening a fresh stream.
+     */
+    private void discardCurrentStream() {
+        var file = currentFile;
+        try {
+            if (gzipOut != null) {
+                gzipOut.close();
+            } else if (fileOutputStream != null) {
+                fileOutputStream.close();
+            }
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to close corrupt gzip stream during discard").log();
+        }
+        deleteFile(file);
     }
 
     private void deleteFile(Path file) {
