@@ -514,5 +514,20 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
 
 
 ## Usage Notes
-- captureproxy image recently had breaking changes regarding env variable naming. If you see errors on startup, 
-  try rebuilding the captureproxy. 
+
+- **CaptureProxy flag rename**: `--otelCollectorEndpoint` was split into `--otelTraceCollectorEndpoint`
+  and `--otelMetricsCollectorEndpoint`. If you see a JCommander error about an unknown main parameter
+  on proxy startup, your local image is stale — rebuild it:
+  ```bash
+  ./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest
+  ```
+
+- **Jib ENTRYPOINT**: Jib bakes `java -cp @/app/jib-classpath-file CaptureProxy` as the image
+  `ENTRYPOINT`. `docker-compose.yml` therefore uses an explicit `entrypoint:` key (not just `command:`)
+  to run `/runJavaWithClasspath.sh` — without it, the script name lands as a JCommander argument and
+  the proxy exits immediately with code 2.
+
+- **Prometheus config changes**: After editing `prometheus.yaml`, restart Prometheus to pick up the change:
+  ```bash
+  docker compose restart prometheus
+  ```

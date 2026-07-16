@@ -117,11 +117,14 @@ services:
       opensearch-source:
         condition: service_healthy
     healthcheck:
-      # TCP-only: verify the proxy port is listening without sending an HTTP request.
-      # An HTTP check would be forwarded to OpenSearch and captured to Kafka, generating
-      # continuous background noise in metrics. The upstream services (kafka, opensearch-source)
-      # are already health-checked independently before the proxy starts (see depends_on).
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9200'"]
+      # Verify port 9200 is in LISTEN state by scanning /proc/net/tcp6 (falling back to tcp).
+      # Cannot use a TCP connection: the proxy writes a connection-start TrafficStream to Kafka
+      # for EVERY inbound TCP connection, even bare SYN/FIN with no HTTP data — a TCP health
+      # check at 10s interval adds exactly 1 spurious Kafka message every 10s and makes the
+      # "write throughput" panel show non-zero activity when no traffic is running.
+      # /proc/net/tcp6 is readable inside the container with only bash (no ss/grep/awk).
+      # 23F0 is 9200 in hex; state 0A is LISTEN.
+      test: ["CMD-SHELL", "bash -c 'while read sl l r st e; do [[ $$l == *:23F0 && $$st == 0A ]] && exit 0; done < /proc/net/tcp6 2>/dev/null; while read sl l r st e; do [[ $$l == *:23F0 && $$st == 0A ]] && exit 0; done < /proc/net/tcp 2>/dev/null; exit 1'"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -135,6 +138,12 @@ services:
     volumes:
       - ./otel-config.yaml:/etc/otel-config.yaml
     command: ["--config=/etc/otel-config.yaml"]
+    # kafkametricsreceiver's topics/consumers scrapers fail silently on initial connect
+    # and do NOT recover if Kafka isn't ready on the first scrape attempt. Waiting for
+    # Kafka to be healthy before starting ensures all scrapers connect cleanly.
+    depends_on:
+      kafka:
+        condition: service_healthy
     ports:
       - "4317:4317"    # OTLP gRPC receiver
       - "4318:4318"    # OTLP HTTP receiver
