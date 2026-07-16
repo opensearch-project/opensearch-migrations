@@ -8,6 +8,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
@@ -34,14 +40,29 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
  * <p>{@link #getLocation()} points at the session prefix ({@code .../session=&lt;sessionId&gt;/}),
  * which contains every index's records for the run.
  *
+ * <h2>Threading</h2>
+ * All access to the per-index writers (serialize, gzip append, rotation, flush, close) is marshalled
+ * onto a single dedicated worker thread, exactly as the replayer's {@code S3TupleSink}
+ * does. This is deliberate: {@link #write} is invoked from
+ * {@code OpenSearchClient.compactPendingDocs}/{@code emitRetryExhaustedToFailedDocumentStream}, which
+ * run inline on the reactor-netty event-loop thread that delivered the bulk response. Doing the
+ * CPU-bound JSON serialization + gzip deflation and the blocking local temp-file I/O on that event
+ * loop would stall other in-flight HTTP requests sharing it — precisely when failures are spiking. By
+ * hopping to the worker, the event loop is freed and the writers stay single-threaded without a lock.
+ * The async S3 upload (and, for other callers, its retries) still runs on SDK / the writer's own
+ * scheduler threads.
+ *
  * <p><b>Memory bounding:</b> each index's writer stages its gzip to a local temp file and rotates to a
  * fresh S3 object once its accumulated <em>uncompressed</em> size crosses {@code maxBufferBytes}
  * (default {@value #DEFAULT_MAX_BUFFER_BYTES} bytes), so heap stays bounded regardless of how many
  * records fail.
  *
  * <p><b>At-least-once gating:</b> the writer is configured fail-fast (no upload retry). A failed
- * rotation upload makes the gating {@link #flush()} fail too, so the work item is not marked complete
- * and a successor reprocesses the partition and re-emits the failures (deduped downstream).
+ * rotation upload — or a failed local append (e.g. disk full) — makes the gating {@link #flush()} fail
+ * too, so the work item is not marked complete and a successor reprocesses the partition and re-emits
+ * the failures (deduped downstream). A per-record serialization failure ("poison pill") is the one
+ * exception: it is logged and dropped rather than retained, because a successor would fail to
+ * serialize the identical record too and would otherwise loop forever.
  */
 @Slf4j
 public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
@@ -63,15 +84,15 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
     private final RotatingGzipS3ObjectWriter.ObjectUploader uploader;
     private final long maxBufferBytes;
 
-    // Guards the per-index writer map and the closed flag. Bulk writes run concurrently
-    // (batchConcurrency defaults to 10) and the per-batch flush runs on the pipeline emission thread,
-    // so all access to a writer is serialized through this lock (the writer itself is not internally
-    // synchronized). Synchronous uploads happen under the lock; production async uploads return
-    // immediately so a slow PutObject doesn't block other writers.
-    private final Object lock = new Object();
+    // Owns all writer state. Only ever touched on the single worker thread, so no lock is needed
+    // (the writers themselves are not internally synchronized). See the class-level threading note.
     private final Map<String, RotatingGzipS3ObjectWriter<FailedDocumentStreamRecord>> writers =
         new LinkedHashMap<>();
-    private boolean closed;
+    // Single worker thread that serializes all writer access and keeps the netty event loop free of
+    // serialize/gzip/temp-file work. Non-daemon so buffered records still flush on JVM shutdown.
+    private final ExecutorService executor;
+    // Set on close() so write() rejects late records synchronously rather than racing executor shutdown.
+    private final AtomicBoolean closeRequested = new AtomicBoolean();
 
     @Builder
     public S3FailedDocumentStreamSink(
@@ -91,6 +112,7 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
         // A non-positive value (including the Lombok default for an unset long) means "use default".
         this.maxBufferBytes = maxBufferBytes > 0 ? maxBufferBytes : DEFAULT_MAX_BUFFER_BYTES;
         this.location = "s3://" + bucket + "/" + this.prefix + "session=" + sessionId + "/";
+        this.executor = Executors.newSingleThreadExecutor(makeWorkerThreadFactory(sessionId, workerId));
         log.atDebug().setMessage("failed document stream sink at {} (region={})")
             .addArgument(location).addArgument(region).log();
     }
@@ -117,47 +139,58 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
 
     @Override
     public Mono<Void> write(FailedDocumentStreamRecord failedDocumentStreamRecord) {
-        CompletableFuture<Void> objectFuture;
-        synchronized (lock) {
-            if (closed) {
-                return Mono.error(new IllegalStateException("S3FailedDocumentStreamSink is closed"));
-            }
+        if (closeRequested.get()) {
+            return Mono.error(new IllegalStateException("S3FailedDocumentStreamSink is closed"));
+        }
+        var result = new CompletableFuture<Void>();
+        // Eagerly submit the append onto the worker (serialize + gzip happen there, off the event
+        // loop). The append task is submitted synchronously from the bulk-response handler, before the
+        // batch's Mono completes, so the subsequent per-batch flush() — submitted from concatMap after
+        // the batch completes — is guaranteed by the FIFO worker to observe every record it must cover.
+        runOnWorker(() -> {
             try {
                 var index = sanitizeIndex(failedDocumentStreamRecord.getTargetIndex());
-                var writer = writers.get(index);
-                if (writer == null) {
-                    writer = newWriter(index);
-                    writers.put(index, writer);
+                var writer = writers.computeIfAbsent(index, this::newWriter);
+                var objectFuture = writer.write(failedDocumentStreamRecord);
+                // write() returns the object's durability future. On success we complete immediately
+                // (the append is buffered; durability is gated by flush()), matching the prior
+                // return-Mono.empty()-on-append semantics. A synchronous failure (fail-fast rotation
+                // upload, or a retained local append IO failure) surfaces here; the writer also retains
+                // it so the gating flush() fails once more.
+                if (objectFuture.isCompletedExceptionally()) {
+                    objectFuture.whenComplete((v, e) -> result.completeExceptionally(unwrap(e)));
+                } else {
+                    result.complete(null);
                 }
-                objectFuture = writer.write(failedDocumentStreamRecord);
             } catch (Exception e) {
-                return Mono.error(e);
+                result.completeExceptionally(e);
             }
-        }
-        // A synchronous (fail-fast) rotation-upload failure surfaces here immediately; the writer also
-        // retains it so the gating flush() fails once more. A failed serialization/gzip append surfaces
-        // here too but is not retained (no rotation happened), matching per-record error semantics.
-        if (objectFuture.isCompletedExceptionally()) {
-            try {
-                objectFuture.getNow(null);
-            } catch (Exception t) {
-                return Mono.error(unwrap(t));
-            }
-        }
-        return Mono.empty();
+        }, result);
+        return Mono.fromFuture(result).onErrorMap(S3FailedDocumentStreamSink::unwrap);
     }
 
     @Override
     public Mono<Void> flush() {
-        CompletableFuture<Void> all;
-        synchronized (lock) {
-            var futures = new ArrayList<CompletableFuture<Void>>(writers.size());
-            for (var writer : writers.values()) {
-                futures.add(writer.flush());
+        var result = new CompletableFuture<Void>();
+        runOnWorker(() -> {
+            try {
+                var futures = new ArrayList<CompletableFuture<Void>>(writers.size());
+                for (var writer : writers.values()) {
+                    futures.add(writer.flush());
+                }
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .whenComplete((v, e) -> {
+                        if (e != null) {
+                            result.completeExceptionally(unwrap(e));
+                        } else {
+                            result.complete(null);
+                        }
+                    });
+            } catch (Exception e) {
+                result.completeExceptionally(e);
             }
-            all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-        }
-        return Mono.fromFuture(all).onErrorMap(S3FailedDocumentStreamSink::unwrap);
+        }, result);
+        return Mono.fromFuture(result).onErrorMap(S3FailedDocumentStreamSink::unwrap);
     }
 
     @Override
@@ -167,23 +200,59 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
 
     @Override
     public void close() {
-        Map<String, RotatingGzipS3ObjectWriter<FailedDocumentStreamRecord>> toClose;
-        synchronized (lock) {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            toClose = new LinkedHashMap<>(writers);
+        if (!closeRequested.compareAndSet(false, true)) {
+            return;
         }
-        // close() flushes each writer's remainder and waits for in-flight uploads (durability before
-        // returning). Errors are logged rather than thrown — close is best-effort cleanup.
-        for (var writer : toClose.values()) {
-            try {
-                writer.close();
-            } catch (Exception e) {
-                log.atWarn().setCause(e).setMessage("Error closing a failed-document-stream writer").log();
-            }
+        // Drain on the worker and block until done: each writer.close() flushes its remainder and waits
+        // for in-flight uploads (durability before returning). Errors are logged rather than thrown —
+        // close is best-effort cleanup.
+        try {
+            runAndAwaitOnWorker(() -> {
+                for (var writer : writers.values()) {
+                    try {
+                        writer.close();
+                    } catch (Exception e) {
+                        log.atWarn().setCause(e).setMessage("Error closing a failed-document-stream writer").log();
+                    }
+                }
+            });
+        } finally {
+            executor.shutdown();
         }
+    }
+
+    /**
+     * Submit writer work to the single worker thread; on rejection (post-close) fail the associated
+     * future so a caller blocking on the returned Mono never waits forever.
+     */
+    private void runOnWorker(Runnable task, CompletableFuture<Void> futureToFailOnReject) {
+        try {
+            executor.execute(task);
+        } catch (RejectedExecutionException e) {
+            futureToFailOnReject.completeExceptionally(
+                new IllegalStateException("S3FailedDocumentStreamSink is closed", e));
+        }
+    }
+
+    private void runAndAwaitOnWorker(Runnable task) {
+        try {
+            executor.submit(task).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RejectedExecutionException e) {
+            // already shutting down — nothing to drain
+        } catch (ExecutionException e) {
+            log.atError().setCause(e.getCause())
+                .setMessage("Error draining failed-document-stream sink on close").log();
+        }
+    }
+
+    private static ThreadFactory makeWorkerThreadFactory(String sessionId, String workerId) {
+        return runnable -> {
+            var thread = new Thread(runnable, "fds-sink-worker-" + sessionId + "-" + workerId);
+            thread.setDaemon(false);
+            return thread;
+        };
     }
 
     /**

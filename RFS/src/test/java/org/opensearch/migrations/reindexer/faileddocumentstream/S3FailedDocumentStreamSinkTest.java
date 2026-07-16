@@ -215,12 +215,15 @@ class S3FailedDocumentStreamSinkTest {
             .uploader(capturing(captured))
             .build();
 
-        sink.write(buildRecordForIndex("idx", "d1")).subscribe();
-        sink.write(buildRecordForIndex("idx", "d2")).subscribe();
+        // block() on each write to await the worker thread appending it (writes are marshalled onto a
+        // single worker so the serialize/gzip work stays off the netty event loop). This test asserts
+        // intermediate captured state between writes, so it must wait for each append to be processed.
+        sink.write(buildRecordForIndex("idx", "d1")).block();
+        sink.write(buildRecordForIndex("idx", "d2")).block();
         // The second write crosses the cap and rotates — one object is uploaded before any flush.
         assertThat(captured, hasSize(1));
 
-        sink.write(buildRecordForIndex("idx", "d3")).subscribe();
+        sink.write(buildRecordForIndex("idx", "d3")).block();
         sink.flush().block();
         // flush() uploads the remaining partial buffer (the third record).
         assertThat(captured, hasSize(2));
