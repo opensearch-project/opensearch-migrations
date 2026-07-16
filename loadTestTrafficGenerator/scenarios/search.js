@@ -22,7 +22,10 @@
  *   PAGING_MODE           — "scroll" or "search_after" (default "scroll")
  *   SCROLL_PAGES          — max pages per scroll sequence (default 3)
  *   SEARCH_AFTER_PAGES    — max pages per search_after sequence (default 3)
- *   CONNECTION_MODE       — "pinned" (default) or "spread"
+ *   CONNECTION_MODE       — "pinned" (default) or "spread" (Connection: close header)
+ *   NO_CONNECTION_REUSE  — "true" to disable keep-alive at the k6 transport level for all VUs
+ *                          (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
+ *                          guaranteed per-request TCP teardown independent of server behaviour
  *   SEARCH_FLAT_FRACTION   — fraction of iterations for flat _search (default 0.60)
  *   SEARCH_AGG_FRACTION    — fraction of iterations for aggregation queries (default 0.20)
  *   SEARCH_UPDATE_FRACTION — fraction of iterations for partial updates (default 0.10)
@@ -80,6 +83,7 @@ const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
 const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES          || '3');
 const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES    || '3');
 const CONNECTION_MODE    = __ENV.CONNECTION_MODE               || 'pinned';
+const NO_CONNECTION_REUSE = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
 const EXECUTOR           = __ENV.EXECUTOR                      || 'constant-arrival-rate';
 const RAMP_STAGES        = __ENV.RAMP_STAGES
   ? JSON.parse(__ENV.RAMP_STAGES)
@@ -120,6 +124,7 @@ const searchScenario = EXECUTOR === 'ramping-arrival-rate'
 // ── k6 options ───────────────────────────────────────────────────────────────
 export const options = {
   insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
+  ...(NO_CONNECTION_REUSE ? { noConnectionReuse: true } : {}),
 
   scenarios: {
     search: searchScenario,

@@ -162,7 +162,15 @@ docker compose run --rm \
 |---|---|---|
 | `SEQUENCE_FRACTION` | `0.15` | Share of iterations run as a create→update→query→delete sequence |
 | `BULK_FRACTION` | `0.70` | Share of non-sequence iterations sent as `_bulk` (remainder → single-doc POSTs) |
-| `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive (one stream); `spread` = `Connection: close` (one stream per request) |
+| `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive (one stream); `spread` = sends `Connection: close` header, asking the server to close the TCP connection after each response (one stream per request). See caveat below. |
+| `NO_CONNECTION_REUSE` | _(unset)_ | Set to `true` to disable keep-alive at the k6 transport level (`noConnectionReuse: true`). Guarantees a new TCP connection per request client-side, regardless of server behaviour. Use alongside `CONNECTION_MODE=spread` for the strongest isolation. |
+
+> **`Connection: close` caveat:** k6 does not close the TCP connection itself when this header
+> is set on a request — it only sends the header to the server. The connection is closed only if
+> the server echoes `Connection: close` back in the response. The Capture Proxy and OpenSearch
+> are HTTP/1.1 compliant and will do so, but if traffic flows through an intermediary that strips
+> the header (some load balancers or TLS terminators), spread mode silently falls back to
+> keep-alive. `NO_CONNECTION_REUSE=true` avoids this dependency.
 
 ---
 
@@ -216,7 +224,8 @@ to be running separately — see the script output for guidance.
 | `PAGING_MODE` | `scroll` | `scroll` or `search_after` |
 | `SCROLL_PAGES` | `3` | Max pages per scroll sequence |
 | `SEARCH_AFTER_PAGES` | `3` | Max pages per search_after sequence |
-| `CONNECTION_MODE` | `pinned` | Same as Stateful Sequences |
+| `CONNECTION_MODE` | `pinned` | Same as Stateful Sequences (see caveat there) |
+| `NO_CONNECTION_REUSE` | _(unset)_ | Same as Stateful Sequences |
 | `SEARCH_FLAT_FRACTION` | `0.60` | Fraction of iterations for flat `_search` (term / range / bool) |
 | `SEARCH_AGG_FRACTION` | `0.20` | Fraction of iterations for aggregation queries |
 | `SEARCH_UPDATE_FRACTION` | `0.10` | Fraction of iterations for partial updates |
@@ -474,7 +483,9 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
 - **Operation mix.** Ingest baseline: 70% `_bulk` writes, 30% single-doc POSTs. Sequences adds
   stateful sequences (create → update → query → delete); the budget is redistributed using
   `SEQUENCE_FRACTION` (default 0.15). `CONNECTION_MODE=pinned` (default) keeps all VU requests
-  on one TCP connection; `CONNECTION_MODE=spread` forces `Connection: close` per request.
+  on one TCP connection; `CONNECTION_MODE=spread` sends `Connection: close` per request, relying
+  on the server to echo it back and close the socket. For a client-side guarantee independent of
+  server behaviour, set `NO_CONNECTION_REUSE=true` (adds `noConnectionReuse: true` to k6 options).
   Search adds a separate search scenario: 60% flat search, 20% aggregations, 10% partial update,
   5% single-doc write, 5% deep paging (scroll or search_after, off by default).
 

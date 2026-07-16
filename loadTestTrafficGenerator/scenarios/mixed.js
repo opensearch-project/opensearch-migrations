@@ -30,7 +30,10 @@
  *   SEARCH_AGG_FRACTION     — fraction of non-consistency search iterations for agg queries (default 0.20)
  *   SEARCH_UPDATE_FRACTION  — fraction of non-consistency search iterations for partial updates (default 0.10)
  *                             remainder → single-doc write
- *   CONNECTION_MODE         — "pinned" (default, keep-alive) or "spread" (Connection: close)
+ *   CONNECTION_MODE         — "pinned" (default, keep-alive) or "spread" (Connection: close header)
+ *   NO_CONNECTION_REUSE     — "true" to disable keep-alive at the k6 transport level for all VUs
+ *                             (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
+ *                             guaranteed per-request TCP teardown independent of server behaviour
  *   SEED_DOC_COUNT          — expected document count (informs seed sampling in setup)
  *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
  *   EXECUTOR                — "constant-arrival-rate" (default) or "ramping-arrival-rate"
@@ -112,6 +115,7 @@ const S_AGG    = FLAT_FRACTION;
 const S_UPDATE = FLAT_FRACTION + AGG_FRACTION;
 const S_WRITE  = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION;
 const CONNECTION_MODE      = __ENV.CONNECTION_MODE          || 'pinned';
+const NO_CONNECTION_REUSE  = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
 const EXECUTOR             = __ENV.EXECUTOR                 || 'constant-arrival-rate';
 const INGEST_RAMP_STAGES   = __ENV.INGEST_RAMP_STAGES
   ? JSON.parse(__ENV.INGEST_RAMP_STAGES)
@@ -181,6 +185,7 @@ const mixedSearchScenario = EXECUTOR === 'ramping-arrival-rate'
 // ── k6 options ─────────────────────────────────────────────────────────────
 export const options = {
   insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
+  ...(NO_CONNECTION_REUSE ? { noConnectionReuse: true } : {}),
 
   scenarios: {
     mixed_ingest: mixedIngestScenario,

@@ -22,7 +22,10 @@
  *                        (0.0 disables sequences; default 0.15)
  *   BULK_FRACTION      — share of non-sequence iterations sent as _bulk (default 0.70;
  *                        remainder goes to single-doc POSTs)
- *   CONNECTION_MODE    — "pinned" (default, keep-alive) or "spread" (Connection: close)
+ *   CONNECTION_MODE    — "pinned" (default, keep-alive) or "spread" (Connection: close header)
+ *   NO_CONNECTION_REUSE — "true" to disable keep-alive at the k6 transport level for all VUs
+ *                         (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
+ *                         guaranteed per-request TCP teardown independent of server behaviour
  *   EXECUTOR           — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
  *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
@@ -73,8 +76,9 @@ const DURATION        = __ENV.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(__ENV.BULK_BATCH_SIZE     || '20');
 const SEQ_FRACTION    = parseFloat(__ENV.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(__ENV.BULK_FRACTION     || '0.70');
-const CONNECTION_MODE = __ENV.CONNECTION_MODE     || 'pinned';
-const EXECUTOR        = __ENV.EXECUTOR            || 'constant-arrival-rate';
+const CONNECTION_MODE     = __ENV.CONNECTION_MODE           || 'pinned';
+const NO_CONNECTION_REUSE = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR            = __ENV.EXECUTOR                 || 'constant-arrival-rate';
 const RAMP_STAGES     = __ENV.RAMP_STAGES
   ? JSON.parse(__ENV.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
@@ -104,6 +108,7 @@ const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
 // ── k6 options ─────────────────────────────────────────────────────────────
 export const options = {
   insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert (generateSelfSignedCerts task)
+  ...(NO_CONNECTION_REUSE ? { noConnectionReuse: true } : {}),
 
   scenarios: {
     ingest: ingestScenario,
