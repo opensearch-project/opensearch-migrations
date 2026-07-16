@@ -302,7 +302,8 @@ export function ingestVU() {
 
 // ── Search VU ───────────────────────────────────────────────────────────────
 // CONSISTENCY_FRACTION of iterations draw a recently-ingested ID from Redis.
-// The remaining iterations run the standard Profile 2 mix.
+// The remaining iterations the configured mix.
+// NOTE: data input is the return value of setup().
 export function searchVU(data) {
   if (!checkControl(SEARCH_RATE)) return;
 

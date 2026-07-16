@@ -20,25 +20,15 @@ export function pickRange(ranges) {
   return ranges[Math.floor(Math.random() * ranges.length)];
 }
 
-// ── Low-level executors ───────────────────────────────────────────────────────
+// ── Low-level executor ────────────────────────────────────────────────────────
 
-function flatSearch(proxyUrl, index, buildBodyFn, connParams) {
+function executeSearch(proxyUrl, index, buildBodyFn, tag, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
     JSON.stringify(buildBodyFn()),
-    { ...connParams, tags: { name: 'search_flat' } },
+    { ...connParams, tags: { name: tag } },
   );
-  check(res, { 'flat search (200)': (r) => r.status === 200 });
-  return res;
-}
-
-function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
-  const res = http.post(
-    `${proxyUrl}/${index}/_search`,
-    JSON.stringify(buildBodyFn()),
-    { ...connParams, tags: { name: 'search_agg' } },
-  );
-  check(res, { 'agg search (200)': (r) => r.status === 200 });
+  check(res, { [`${tag} (200)`]: (r) => r.status === 200 });
   return res;
 }
 
@@ -87,7 +77,7 @@ export function makeFlatSearch({ termA, rangeA, termB, rangeB }) {
     }
   }
   return (proxyUrl, index, connParams) =>
-    flatSearch(proxyUrl, index, buildBody, connParams);
+    executeSearch(proxyUrl, index, buildBody, 'search_flat', connParams);
 }
 
 /**
@@ -134,7 +124,7 @@ export function makeAggSearch({ dateHistogram, termsA, termsB, avgField, termsDe
     }
   }
   return (proxyUrl, index, connParams) =>
-    aggSearch(proxyUrl, index, buildBody, connParams);
+    executeSearch(proxyUrl, index, buildBody, 'search_agg', connParams);
 }
 
 /**

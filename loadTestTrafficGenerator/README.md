@@ -505,3 +505,10 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
 | `validate_mixed.sh` | Concurrent ingest + search; Webdis ID registry; consistency metrics |
 | `validate_load_shapes.sh` | `ramping-arrival-rate` profiles: ramp, burst, mixed-ramp |
 | `validate_chaos.sh` | Pause/resume/rate-throttle via Webdis; Kafka offset delta assertions |
+
+
+## Thresholds vs Checks
+- `check()` calls (k6 built-in) are used for checks whose outcome is listed in the k6 summary after a run. Failed
+  checks do not cancel the run or similar, its solely observational.
+- thresholds on metrics configured in the run script. If those checks fail, this can abort the run if the flag to 
+  ignore thresholds is not set (`--no-thresholds`).
