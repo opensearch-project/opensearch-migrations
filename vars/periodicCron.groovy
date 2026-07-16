@@ -28,7 +28,6 @@ def call(String jobName) {
         case 'main-k8s-local-solr8x-test':            return 'H H(0-23)/6 * * *'
         case 'main-k8s-local-solr-other-test':        return 'H H(0-23)/6 * * *'
         case 'main-full-es68source-e2e-test':         return '@hourly'
-        case 'main-k8s-matrix-test':                  return 'H 22 * * *'
         case 'main-rfs-default-e2e-test':             return '@hourly'
         case 'main-solutions-cfn-create-vpc-test':    return '@hourly'
         case 'main-eks-byos-integ-test':              return 'H H(0-23)/6 * * *'

@@ -1,14 +1,42 @@
 def call(Map config = [:]) {
     def jobName = config.jobName ?: "k8s-matrix-test"
-    if (!config.childJobName) {
-        error("k8sMatrixTest requires childJobName to be specified explicitly — " +
-              "k8s-local-integ-test has been replaced by per-source jobs.")
-    }
-    def childJobName = config.childJobName
+    def childJobNameOverride = config.childJobName ?: ""
 
     def versions = migrationVersions()
     def allSourceVersions = versions.sourceVersions
     def allTargetVersions = versions.targetVersions
+
+    def sourceChildJobBaseNames = [
+            'ES_1.5'   : 'k8s-local-elasticsearch1x-test',
+            'ES_2.4'   : 'k8s-local-elasticsearch2x-test',
+            'ES_5.6'   : 'k8s-local-elasticsearch5x-test',
+            'ES_6.8'   : 'k8s-local-elasticsearch6x-test',
+            'ES_7.10'  : 'k8s-local-elasticsearch7x-test',
+            'ES_8.19'  : 'k8s-local-elasticsearch8x-test',
+            'OS_1.3'   : 'k8s-local-opensearch1x-test',
+            'SOLR_6.6' : 'k8s-local-solr-other-test',
+            'SOLR_7.7' : 'k8s-local-solr-other-test',
+            'SOLR_8.11': 'k8s-local-solr8x-test',
+            'SOLR_9.8' : 'k8s-local-solr-other-test'
+    ]
+
+    def childJobPathForSource = { source ->
+        def childBaseName = sourceChildJobBaseNames[source]
+        if (!childBaseName) {
+            error("No k8s matrix child job mapping configured for source version '${source}'")
+        }
+
+        if (jobName.startsWith('main-')) {
+            return "main/main-${childBaseName}"
+        }
+        if (jobName.startsWith('pr-')) {
+            return "pr-checks/pr-${childBaseName}"
+        }
+        if (jobName.startsWith('release-')) {
+            return "release-canaries/release-${childBaseName}"
+        }
+        return childBaseName
+    }
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -60,14 +88,16 @@ def call(Map config = [:]) {
             stage('Create and Monitor Integ Tests') {
                 steps {
                     script {
-                        // Determine which combinations to run. We currently will launch a separate k8sLocalDeployment job for
-                        // each target version, and will let it run against the single source version specified or all source versions
-                        def sourceVersions = params.SOURCE_VERSION
+                        if (childJobNameOverride) {
+                            echo "Ignoring CHILD_JOB_NAME_OVERRIDE='${childJobNameOverride}'; matrix tests route to per-source child jobs."
+                        }
+
+                        def sourceVersions = params.SOURCE_VERSION == 'all' ? allSourceVersions : [params.SOURCE_VERSION]
                         def targetVersions = params.TARGET_VERSION == 'all' ? allTargetVersions : [params.TARGET_VERSION]
 
                         echo "Source versions: ${sourceVersions}"
                         echo "Target versions: ${targetVersions}"
-                        echo "Total created pipelines: ${targetVersions.size()}"
+                        echo "Total candidate pipelines: ${sourceVersions.size() * targetVersions.size()}"
 
                         // Create parallel jobs map
                         def jobs = [:]
@@ -75,53 +105,63 @@ def call(Map config = [:]) {
 
                         sh "mkdir -p libraries/testAutomation/reports"
 
-                        targetVersions.each { target ->
-                            def source = sourceVersions
-                            def combination = "${source}_to_${target}"
-                            def displayName = "${source} → ${target}"
+                        sourceVersions.each { source ->
+                            targetVersions.each { target ->
+                                if (source == target) {
+                                    echo "Skipping ${source} -> ${target}: source and target versions are the same."
+                                } else {
+                                    def childJobName = childJobPathForSource(source)
+                                    def displayName = "${source} → ${target}"
 
-                            jobs[displayName] = {
-                                try {
-                                    def result = build(
-                                            job: childJobName,
-                                            parameters: [
-                                                    string(name: 'SOURCE_VERSION', value: source),
-                                                    string(name: 'TARGET_VERSION', value: target),
-                                                    string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
-                                                    string(name: 'GIT_BRANCH', value: params.GIT_BRANCH),
-                                                    string(name: 'GIT_COMMIT', value: params.GIT_COMMIT)
-                                            ],
-                                            wait: true,
-                                            propagate: false // Don't fail parent if child fails
-                                    )
+                                    jobs[displayName] = {
+                                        try {
+                                            echo "Scheduling ${displayName} on ${childJobName}"
+                                            def result = build(
+                                                    job: childJobName,
+                                                    parameters: [
+                                                            string(name: 'SOURCE_VERSION', value: source),
+                                                            string(name: 'TARGET_VERSION', value: target),
+                                                            string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
+                                                            string(name: 'GIT_BRANCH', value: params.GIT_BRANCH),
+                                                            string(name: 'GIT_COMMIT', value: params.GIT_COMMIT)
+                                                    ],
+                                                    wait: true,
+                                                    propagate: false // Don't fail parent if child fails
+                                            )
 
-                                    copyArtifacts(
-                                            projectName: childJobName,
-                                            selector: specific("${result.number}"),
-                                            filter: 'reports/**',
-                                            target: "libraries/testAutomation/reports",
-                                            flatten: true,
-                                            optional: true
-                                    )
+                                            copyArtifacts(
+                                                    projectName: childJobName,
+                                                    selector: specific("${result.number}"),
+                                                    filter: 'reports/**',
+                                                    target: "libraries/testAutomation/reports",
+                                                    flatten: true,
+                                                    optional: true
+                                            )
 
-                                    results[displayName] = [
-                                            result  : result.result,
-                                            url     : result.absoluteUrl,
-                                            number  : result.number,
-                                            duration: result.duration
-                                    ]
+                                            results[displayName] = [
+                                                    result  : result.result,
+                                                    url     : result.absoluteUrl,
+                                                    number  : result.number,
+                                                    duration: result.duration
+                                            ]
 
-                                } catch (Exception e) {
-                                    echo "💥 ${displayName}: EXCEPTION - ${e.message}"
-                                    results[displayName] = [
-                                            result  : 'EXCEPTION',
-                                            url     : '',
-                                            number  : 0,
-                                            duration: 0,
-                                            error   : e.message
-                                    ]
+                                        } catch (Exception e) {
+                                            echo "💥 ${displayName}: EXCEPTION - ${e.message}"
+                                            results[displayName] = [
+                                                    result  : 'EXCEPTION',
+                                                    url     : '',
+                                                    number  : 0,
+                                                    duration: 0,
+                                                    error   : e.message
+                                            ]
+                                        }
+                                    }
                                 }
                             }
+                        }
+
+                        if (jobs.isEmpty()) {
+                            error("No k8s matrix child jobs were created for SOURCE_VERSION=${params.SOURCE_VERSION}, TARGET_VERSION=${params.TARGET_VERSION}")
                         }
 
                         // Execute all jobs in parallel

@@ -7,8 +7,6 @@ import {z} from "zod";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
 import * as path from "path";
-import {scrapeApprovals} from "./formatApprovals";
-import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import { crdName } from './crdNaming';
 import {
@@ -93,8 +91,6 @@ export class MigrationInitializer {
         if (migrationRunOptions?.runNumber === undefined) {
             throw new Error("Migration run number is required when generating migration resources.");
         }
-        // Generate ConfigMaps
-        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
         const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
         const customMigrationResources = this.generateCustomMigrationResources(
@@ -108,7 +104,6 @@ export class MigrationInitializer {
         return {
             workflows,
             resolvedMigrationResources,
-            approvalConfigMaps,
             concurrencyConfigMaps,
             customMigrationResources,
             warnings
@@ -134,10 +129,7 @@ export class MigrationInitializer {
         await fs.mkdir(resourcesDir, { recursive: true });
 
         const allItems = bundle.customMigrationResources.items || [];
-        const configMapItems = [
-            ...(bundle.approvalConfigMaps.items || []),
-            ...(bundle.concurrencyConfigMaps.items || []),
-        ];
+        const configMapItems = bundle.concurrencyConfigMaps.items || [];
 
         type ResourceEntry = {
             file: string;
@@ -286,36 +278,6 @@ export class MigrationInitializer {
         const plural = `${pluralName}.${group}`;
         const patch = JSON.stringify({ status: item.status });
         return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
-    }
-
-    private generateApprovalConfigMaps(userConfig: any) {
-        if (!userConfig) {
-            return { 
-                apiVersion: 'v1',
-                kind: 'List',
-                items: [] 
-            };
-        }
-
-        const approvals = scrapeApprovals(setNamesInUserConfig(userConfig));
-        
-        return {
-            apiVersion: 'v1',
-            kind: 'List',
-            items: [{
-                apiVersion: 'v1',
-                kind: 'ConfigMap',
-                metadata: {
-                    name: 'approval-config',
-                    labels: {
-                        'workflows.argoproj.io/configmap-type': 'Parameter'
-                    }
-                },
-                data: {
-                    'autoApprove': JSON.stringify(approvals)
-                }
-            }]
-        };
     }
 
     private generateConcurrencyConfigMaps(userConfig: any) {
@@ -503,6 +465,15 @@ export class MigrationInitializer {
         );
         const resourceFor = (kind: string, name: string) => resourcesByKey.get(`${kind}:${name}`);
         const specFor = (kind: string, name: string) => resourceFor(kind, name)?.parameters ?? {};
+        // Terminal-resource bootstrap spec: strip dependsOn so the initializer never advertises a
+        // dependency-graph edge before the workflow has actually established it. workflow reset reads
+        // spec.dependsOn from live CRs; for DataSnapshot/SnapshotMigration the edge must reflect the
+        // established graph, so tryApply (which re-applies with the resolved dependsOn) is its sole
+        // writer. The four long-running resources keep their initializer-stamped dependsOn.
+        const bootstrapSpecWithoutDependsOn = (kind: string, name: string) => {
+            const {dependsOn: _dependsOn, ...rest} = specFor(kind, name) as Record<string, unknown>;
+            return rest;
+        };
         const annotationsFor = (kind: string, name: string) => resourceFor(kind, name)?.annotations;
 
         // KafkaCluster resources from workflow-managed Kafka clusters
@@ -574,7 +545,7 @@ export class MigrationInitializer {
                 status: { phase: 'Created', configChecksum: '' }
             });
 
-            // VAP retry gates
+            // VAP retry gates (fire during reconcile steps, before proxy deployment)
             items.push(this.makeApprovalGateResource(
                 ['capturedtraffic', topicCrName, 'vapretry'],
                 gateLabels({
@@ -585,6 +556,15 @@ export class MigrationInitializer {
             ));
             items.push(this.makeApprovalGateResource(
                 ['captureproxy', proxy.name, 'vapretry'],
+                gateLabels({
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
+                    [MigrationInitializer.GATE_LABEL_SOURCE]: proxySource,
+                })
+            ));
+            // Step approval gate: fires after reconcile, before actual proxy deployment
+            items.push(this.makeApprovalGateResource(
+                ['captureproxysetup', proxy.name],
                 gateLabels({
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
@@ -639,9 +619,21 @@ export class MigrationInitializer {
                             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
                         }
                     },
-                    spec: specFor('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
+                    spec: bootstrapSpecWithoutDependsOn('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
                     status: { phase: 'Created', configChecksum: '' }
                 });
+
+                // VAP retry gate for the DataSnapshot CR reconcile, matching the other resources.
+                const dataSnapshotName = this.makeCrdName(snapshot.sourceConfig.label, item.label);
+                items.push(this.makeApprovalGateResource(
+                    ['datasnapshot', dataSnapshotName, 'vapretry'],
+                    gateLabels({
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'DataSnapshot',
+                        [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: dataSnapshotName,
+                        [MigrationInitializer.GATE_LABEL_SOURCE]: snapshot.sourceConfig.label,
+                        [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
+                    })
+                ));
             }
         }
 
@@ -663,7 +655,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_MIGRATION]: migration.migrationLabel,
                     }
                 },
-                spec: specFor('SnapshotMigration', snapshotMigrationName),
+                spec: bootstrapSpecWithoutDependsOn('SnapshotMigration', snapshotMigrationName),
                 status: { phase: 'Created', configChecksum: '' }
             });
 
@@ -676,7 +668,7 @@ export class MigrationInitializer {
                 [MigrationInitializer.GATE_LABEL_MIGRATION]: migration.migrationLabel,
             });
 
-            // VAP retry gate for the root SnapshotMigration CR reconcile
+            // VAP retry gate for the root SnapshotMigration CR reconcile (fires first, during reconcile step)
             items.push(this.makeApprovalGateResource(
                 ['snapshotmigration', snapshotMigrationName, 'vapretry'], migLabels));
 
@@ -687,10 +679,13 @@ export class MigrationInitializer {
                 migration.migrationLabel,
             ];
             const resourcePath = this.makeCrdName(...approvalNameParts);
+            // Step approval gates: ordered by workflow execution sequence (all inside migrateFromSnapshot)
             items.push(this.makeApprovalGateResource(
                 ['evaluatemetadata', resourcePath], migLabels));
             items.push(this.makeApprovalGateResource(
                 ['migratemetadata', resourcePath], migLabels));
+            items.push(this.makeApprovalGateResource(
+                ['documentbackfill', resourcePath], migLabels));
         }
 
         // TrafficReplay resources from trafficReplays
@@ -909,7 +904,11 @@ export class MigrationInitializer {
                 sourceVersion,
                 sourceCluster.snapshotInfo?.serializeSnapshotCreation
             );
-            for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
+            const snapshotNames = [
+                ...Object.keys(sourceCluster.snapshotInfo?.snapshots || {}),
+                ...Object.keys(sourceCluster.snapshotInfo?.backups || {}),
+            ];
+            for (const snapshotName of snapshotNames) {
                 const key = generateSemaphoreKey(serialize, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);

@@ -1,6 +1,5 @@
 from enum import Enum
 import logging
-import subprocess
 import time
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
@@ -49,6 +48,10 @@ _WILDCARD_TEMPLATE_MAP = {
     ("opensearch", 1): 3,
     ("opensearch", 2): 19,
     ("opensearch", 3): 1,
+    ("solr", 6): 6,
+    ("solr", 7): 7,
+    ("solr", 8): 11,
+    ("solr", 9): 8,
 }
 
 CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
@@ -256,26 +259,7 @@ class MATestBase:
             if self.image_registry_prefix:
                 self.parameters["image-registry-prefix"] = self.image_registry_prefix
 
-    def _ensure_approval_configmap(self):
-        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
-        In production, the config-processor creates this. In tests, we create a default."""
-        kubectl_cmd = [
-            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
-        ]
-        configmap_yaml = (
-            'apiVersion: v1\n'
-            'kind: ConfigMap\n'
-            'metadata:\n'
-            '  name: approval-config\n'
-            '  labels:\n'
-            '    workflows.argoproj.io/configmap-type: Parameter\n'
-            'data:\n'
-            '  autoApprove: "{}"\n'
-        )
-        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
-
     def workflow_start(self):
-        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True

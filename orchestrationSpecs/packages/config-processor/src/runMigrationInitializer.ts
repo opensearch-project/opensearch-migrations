@@ -21,7 +21,7 @@ that configuration will first be validated and transformed before doing the init
 Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
-  --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
+  --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, resource manifests, concurrency ConfigMaps)
   --run-number <number>        Required with --output-dir. Millisecond run number to stamp on generated resources and pass to the workflow
   --deployment-defaults <file> Deployment-provisioned S3 defaults (defaultS3Bucket/Region/Endpoint) read from the cluster
                                by the submitter; used to resolve the failed-document-stream destination before submission

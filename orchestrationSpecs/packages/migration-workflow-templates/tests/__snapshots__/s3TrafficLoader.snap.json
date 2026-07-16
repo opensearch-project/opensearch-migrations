@@ -22,10 +22,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -238,6 +234,10 @@
                   {
                     "name": "kafkaClusterName",
                     "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.loaderConfig)['kafkaConfig'])}}"
                   },
                   {
                     "name": "kafkaTopicName",

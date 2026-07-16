@@ -120,6 +120,91 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.authConfig\.basic: rogueInUnion/);
     });
 
+    it('should honor per-proxy skipApproval without global skipApprovals', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = false;
+        config.traffic.proxies.proxy1.skipApproval = true;
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(true);
+    });
+
+    it('should let per-proxy skipApproval false override global skipApprovals true', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        config.traffic.proxies.proxy1.skipApproval = false;
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(false);
+    });
+
+    it('should inherit global skipApprovals when per-proxy skipApproval is omitted', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.traffic.proxies.proxy1.skipApproval;
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.skipApproval).toBe(true);
+    });
+
+    it('should resolve global skipApprovals into snapshot migration gate flags', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.snapshotMigrationConfigs[0].skipApprovals;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(true);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(true);
+    });
+
+    it('should let per-migration skipApprovals override global skipApprovals for snapshot gates', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        config.snapshotMigrationConfigs[0].skipApprovals = false;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(false);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should let per-gate skip flags override broader skipApprovals', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.snapshotMigrationConfigs[0].skipApprovals;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                skipEvaluateApproval: false
+            },
+            documentBackfillConfig: {
+                skipApproval: false
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
     it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,
@@ -149,6 +234,19 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should reject solrCollections on a user-facing ES/OS createSnapshotConfig', () => {
+        // solrCollections is a Solr-only, internal (ARGO) field. It must not be settable on the
+        // user-facing ES/OS snapshot config; ES/OS users use indexAllowlist instead.
+        const configWithSolrCollections = cloneBaseConfig();
+        configWithSolrCollections.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrCollections: ["collectionA"]
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithSolrCollections);
+        }).toThrow(/Unrecognized keys.*solrCollections/);
     });
 
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
