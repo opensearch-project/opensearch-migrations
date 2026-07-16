@@ -712,10 +712,22 @@ public abstract class OpenSearchClient {
      * failure that never produced a bulk response).
      *
      * <p>The configured {@code allowlist} is honored when classifying the last response:
-     * allowlisted items are routed to {@code successPositions} and intentionally NOT
-     * added to {@code perPosition}, so a position-shifted lookup can never attach an
-     * allowlisted item's {@code failureType} or documentId to a real retryable failure's
-     * failed document stream record.
+     * allowlisted items are routed to {@code successPositions} and are therefore absent from the
+     * retryable-failure list used for correlation, so an allowlisted item's {@code failureType} or
+     * documentId can never be attached to a real retryable failure's failed document stream record.
+     *
+     * <p><b>Correlation is by retryable-failure index, not by raw response position.</b> By the time
+     * this runs, {@code compactPendingDocs} has already compacted {@code pendingOps} down to exactly
+     * the last response's retryable failures, kept in ascending-position order.
+     * {@code partitionItems(...).getRetryableFailures()} recomputes that same list in that same order,
+     * so {@code pendingOps.get(k)} and {@code retryableFailures.get(k)} are the same k-th retryable
+     * item. This alignment is stable across compaction and — unlike a document-id lookup — works for
+     * server-generated ids (the id was stripped from the request), for which it also recovers the
+     * cluster-assigned id carried on the response item.
+     *
+     * <p>If the last response can't be parsed (no {@code OperationFailed}, e.g. a network failure, or
+     * an unparseable body) there is no failure list to align against, so every pending op is emitted
+     * with a null failure (null failureType/responseItem); the document body is still preserved.
      */
     private void emitRetryExhaustedToFailedDocumentStream(
         String indexName,
@@ -736,22 +748,29 @@ public abstract class OpenSearchClient {
             cursor = cursor.getCause();
         }
         HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
-        Map<Integer, ItemFailure> perPosition = new HashMap<>();
+        List<ItemFailure> retryableFailures = List.of();
         if (lastResponse != null && lastResponse.body != null) {
             ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
             if (partition != null) {
-                for (ItemFailure f : partition.getRetryableFailures()) {
-                    perPosition.put(f.getPosition(), f);
-                }
-                for (ItemFailure f : partition.getNonRetryableFailures()) {
-                    perPosition.put(f.getPosition(), f);
-                }
+                retryableFailures = partition.getRetryableFailures();
             }
         }
+        // pendingOps and retryableFailures are the same retryable items in the same order (see javadoc);
+        // when they can't be aligned (unparseable response, or a size mismatch that should never happen)
+        // the failure is left null rather than risking a cross-item mis-attribution.
+        boolean aligned = retryableFailures.size() == pendingOps.size();
+        if (!aligned && !retryableFailures.isEmpty()) {
+            log.atWarn()
+                .setMessage("Retry-exhausted failed-document-stream correlation skipped for index '{}': "
+                    + "{} pending ops vs {} retryable failures in the last response")
+                .addArgument(indexName)
+                .addArgument(pendingOps.size())
+                .addArgument(retryableFailures.size())
+                .log();
+        }
         for (int i = 0; i < pendingOps.size(); i++) {
-            BulkOperationSpec op = pendingOps.get(i);
-            ItemFailure failure = perPosition.get(i);
-            emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.RETRYABLE_EXHAUSTED);
+            ItemFailure failure = aligned ? retryableFailures.get(i) : null;
+            emitFailedDocumentStreamRecord(indexName, pendingOps.get(i), failure, FailureClass.RETRYABLE_EXHAUSTED);
         }
     }
 

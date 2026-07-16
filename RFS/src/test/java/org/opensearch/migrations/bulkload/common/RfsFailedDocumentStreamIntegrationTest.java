@@ -361,6 +361,133 @@ class RfsFailedDocumentStreamIntegrationTest {
         }
     }
 
+    /**
+     * Regression test for the retry-exhaust position-misalignment bug: the surviving retryable doc
+     * must receive its <b>correct</b> {@code failureType}, not null and not a neighbor's.
+     *
+     * <p>The final (exhausting) response interleaves a non-retryable failure at position 0 with a
+     * retryable failure at position 1. {@code compactPendingDocs} emits + drops the non-retryable, so
+     * post-compaction {@code pendingOps} holds one op at index 0 that corresponds to response
+     * <em>position 1</em>. The old code keyed the last response's failures by position and looked up
+     * {@code pendingOps} index 0 → it would read position 0 (the already-removed non-retryable) and
+     * attach the wrong type, or miss entirely and attach null. Correlating by document id fixes it.
+     *
+     * <p>Note {@code mapper_parsing_exception} is non-retryable, so it's also written on the last
+     * attempt as its own NON_RETRYABLE record — the assertion below targets only the retryable doc's
+     * RETRYABLE_EXHAUSTED record.
+     */
+    @Test
+    void retryExhaustedFailureGetsCorrectTypeDespitePositionShift() throws Exception {
+        when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+
+        // Non-retryable at position 0, retryable at position 1 — position 0 is dropped by compaction.
+        var response = buildBulkResponse(List.of(
+            nonRetryableItem("bad-map-1"),
+            retryableItem("throttled-1")
+        ));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
+
+        var s3Captured = new S3Capture();
+        var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
+            .bucket("rfs-bucket")
+            .prefix("rfs-failed-document-stream/")
+            .sessionId("session-shift")
+            .workerId("worker-1")
+            .region("us-east-1")
+            .uploader(s3Captured.captureUploader())
+            .build();
+
+        var failedRequestsLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = spy(new OpenSearchClient_OS_2_11(
+            restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
+        openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-shift", "worker-1");
+        // 0 retries: attempt 1 exhausts immediately, so the last response still holds both items
+        // and pendingOps has been compacted to just "throttled-1".
+        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+
+        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+            "movies",
+            List.of(createBulkDoc("bad-map-1"), createBulkDoc("throttled-1")),
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
+        ).block());
+        failedDocumentStreamSink.flush().block();
+        failedDocumentStreamSink.close();
+
+        var byId = recordsById(s3Captured.objectsUnder("rfs-failed-document-stream/session=session-shift/").stream()
+            .flatMap(o -> decode(o.bytes).stream())
+            .toList());
+
+        // The retryable doc must carry ITS OWN error type despite the position shift — the crux of the fix.
+        var throttled = byId.get("throttled-1");
+        assertThat(throttled.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
+        assertThat(throttled.path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+        // And the non-retryable doc keeps its own type (written on the same attempt).
+        assertThat(byId.get("bad-map-1").path("failureType").asText(), equalTo("mapper_parsing_exception"));
+    }
+
+
+    /**
+     * Server-generated-id docs carry no client-side id, so a document-id based correlation would leave
+     * every retry-exhausted record with a null failureType/documentId. Index-aligning pendingOps to the
+     * last response's retryable failures instead recovers both the error type AND the cluster-assigned
+     * id from the response item — this test pins that.
+     *
+     * <p>Two id-less retryable docs both throttle; the last response assigns them ids gen-1 and gen-2.
+     * Each record must get es_rejected_execution_exception and its assigned id.
+     */
+    @Test
+    void retryExhaustedServerGeneratedIdDocsRecoverTypeAndAssignedId() throws Exception {
+        when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+
+        // Response assigns ids the client never had; both items are retryable and stay in pendingOps.
+        var response = buildBulkResponse(List.of(
+            retryableItem("gen-1"),
+            retryableItem("gen-2")
+        ));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
+
+        var s3Captured = new S3Capture();
+        var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
+            .bucket("rfs-bucket")
+            .prefix("rfs-failed-document-stream/")
+            .sessionId("session-genid")
+            .workerId("worker-1")
+            .region("us-east-1")
+            .uploader(s3Captured.captureUploader())
+            .build();
+
+        var failedRequestsLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = spy(new OpenSearchClient_OS_2_11(
+            restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
+        openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-genid", "worker-1");
+        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+
+        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+            "movies",
+            List.of(createBulkDocWithoutId(), createBulkDocWithoutId()),
+            mock(IRfsContexts.IRequestContext.class),
+            true,   // allowServerGeneratedIds
+            DocumentExceptionAllowlist.empty()
+        ).block());
+        failedDocumentStreamSink.flush().block();
+        failedDocumentStreamSink.close();
+
+        var byId = recordsById(s3Captured.objectsUnder("rfs-failed-document-stream/session=session-genid/").stream()
+            .flatMap(o -> decode(o.bytes).stream())
+            .toList());
+
+        // Both server-assigned ids present, each with the correct type — impossible under by-id lookup.
+        assertThat(byId.keySet(), containsInAnyOrder("gen-1", "gen-2"));
+        assertThat(byId.get("gen-1").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+        assertThat(byId.get("gen-2").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+    }
+
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -392,6 +519,18 @@ class RfsFailedDocumentStreamIntegrationTest {
         var bulkDoc = mock(IndexOp.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
         var operation = mock(IndexOperationMeta.class);
         when(operation.getId()).thenReturn(docId);
+        when(bulkDoc.getOperation()).thenReturn(operation);
+        when(bulkDoc.getOperationType()).thenReturn(OperationType.INDEX);
+        when(bulkDoc.isIncludeDocument()).thenReturn(true);
+        when(bulkDoc.getDocument()).thenReturn(Map.of("field", "value"));
+        return bulkDoc;
+    }
+
+    /** A bulk op with no client-side id, as when the server assigns ids (allowServerGeneratedIds). */
+    private static BulkOperationSpec createBulkDocWithoutId() {
+        var bulkDoc = mock(IndexOp.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
+        var operation = mock(IndexOperationMeta.class);
+        when(operation.getId()).thenReturn(null);
         when(bulkDoc.getOperation()).thenReturn(operation);
         when(bulkDoc.getOperationType()).thenReturn(OperationType.INDEX);
         when(bulkDoc.isIncludeDocument()).thenReturn(true);
