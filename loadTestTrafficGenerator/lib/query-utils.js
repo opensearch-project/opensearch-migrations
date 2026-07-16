@@ -22,10 +22,10 @@ export function pickRange(ranges) {
 
 // ── Low-level executors ───────────────────────────────────────────────────────
 
-function flatSearch(proxyUrl, index, buildBodyFn, fieldValues, connParams) {
+function flatSearch(proxyUrl, index, buildBodyFn, connParams) {
   const res = http.post(
     `${proxyUrl}/${index}/_search`,
-    JSON.stringify(buildBodyFn(fieldValues)),
+    JSON.stringify(buildBodyFn()),
     { ...connParams, tags: { name: 'search_flat' } },
   );
   check(res, { 'flat search (200)': (r) => r.status === 200 });
@@ -48,34 +48,34 @@ function aggSearch(proxyUrl, index, buildBodyFn, connParams) {
  * Returns a flatSearch function bound to the given field config.
  *
  * config:
- *   termA:  { field, key }  — term filter used in variants 0 and 3
- *   rangeA: { field, key }  — range filter used in variant 1
- *   termB:  { field, key }  — term filter used in variant 2
- *   rangeB: { field, key }  — range filter used in variant 3
+ *   termA:  { field, values }  — term filter used in variants 0 and 3; values is the enum array
+ *   rangeA: { field, ranges }  — range filter used in variant 1; ranges is [[min,max], ...]
+ *   termB:  { field, values }  — term filter used in variant 2
+ *   rangeB: { field, ranges }  — range filter used in variant 3
  *
- * `key` is the property name on the fieldValues object (from field-value-sample.json).
- * For range fields, fieldValues[key].ranges must be an array of [min, max] pairs.
+ * Values and ranges are passed directly from the schema's queries.js (sourced from documents.js),
+ * not looked up at call-time via a string key.
  */
 export function makeFlatSearch({ termA, rangeA, termB, rangeB }) {
-  function buildBody(fieldValues) {
+  function buildBody() {
     const variant = Math.floor(Math.random() * 4);
     switch (variant) {
       case 0:
-        return { size: 10, query: { term: { [termA.field]: pick(fieldValues[termA.key]) } } };
+        return { size: 10, query: { term: { [termA.field]: pick(termA.values) } } };
       case 1: {
-        const r = pickRange(fieldValues[rangeA.key].ranges);
+        const r = pickRange(rangeA.ranges);
         return { size: 10, query: { range: { [rangeA.field]: { gte: r[0], lte: r[1] } } } };
       }
       case 2:
-        return { size: 10, query: { term: { [termB.field]: pick(fieldValues[termB.key]) } } };
+        return { size: 10, query: { term: { [termB.field]: pick(termB.values) } } };
       case 3: {
-        const r = pickRange(fieldValues[rangeB.key].ranges);
+        const r = pickRange(rangeB.ranges);
         return {
           size: 10,
           query: {
             bool: {
               filter: [
-                { term: { [termA.field]: pick(fieldValues[termA.key]) } },
+                { term: { [termA.field]: pick(termA.values) } },
                 { range: { [rangeB.field]: { gte: r[0], lte: r[1] } } },
               ],
             },
@@ -86,8 +86,8 @@ export function makeFlatSearch({ termA, rangeA, termB, rangeB }) {
         return { size: 10, query: { match_all: {} } };
     }
   }
-  return (proxyUrl, index, fieldValues, connParams) =>
-    flatSearch(proxyUrl, index, buildBody, fieldValues, connParams);
+  return (proxyUrl, index, connParams) =>
+    flatSearch(proxyUrl, index, buildBody, connParams);
 }
 
 /**

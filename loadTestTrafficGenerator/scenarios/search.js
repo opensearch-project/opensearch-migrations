@@ -59,12 +59,6 @@ const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
 const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
 const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
 
-const FIELD_VALUES_MAP = {
-  nyc_taxis: JSON.parse(open('../data/nyc_taxis/field-value-sample.json')),
-  logs_data: JSON.parse(open('../data/logs_data/field-value-sample.json')),
-};
-const fieldValues = FIELD_VALUES_MAP[SCENARIO] || FIELD_VALUES_MAP['nyc_taxis'];
-
 const MAPPINGS = {
   nyc_taxis: open('../data/nyc_taxis/mapping.json'),
   logs_data: open('../data/logs_data/mapping.json'),
@@ -219,7 +213,7 @@ export default function (data) {
 }
 
 function doFlatSearch() {
-  const res = queries.flatSearch(PROXY_URL, INDEX, fieldValues, connParams);
+  const res = queries.flatSearch(PROXY_URL, INDEX, connParams);
   flatRequests.add(1);
   searchErrors.add(res.status >= 400 ? 1 : 0);
 }

@@ -9,12 +9,14 @@
 import { randomElement, randomInt, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
 
 // Weighted toward INFO to reflect typical production log volumes
-const LEVELS       = ['DEBUG', 'INFO', 'INFO', 'INFO', 'WARN', 'ERROR', 'FATAL'];
-const SERVICES     = ['api-gateway', 'auth-service', 'user-service', 'payment-service', 'notification-service'];
-const HOSTS        = ['host-01', 'host-02', 'host-03', 'host-04', 'host-05'];
-const ENVIRONMENTS = ['prod', 'staging', 'dev'];
+export const LEVELS       = ['DEBUG', 'INFO', 'INFO', 'INFO', 'WARN', 'ERROR', 'FATAL'];
+export const SERVICES     = ['api-gateway', 'auth-service', 'user-service', 'payment-service', 'notification-service'];
+export const HOSTS        = ['host-01', 'host-02', 'host-03', 'host-04', 'host-05'];
+export const ENVIRONMENTS = ['prod', 'staging', 'dev'];
 // Weighted toward 200 to reflect typical HTTP traffic
-const STATUS_CODES = [200, 200, 200, 201, 400, 401, 403, 404, 500, 503];
+export const STATUS_CODES = [200, 200, 200, 201, 400, 401, 403, 404, 500, 503];
+
+export const DURATION_MS_RANGE = { min: 1, max: 5000 };
 const MESSAGES     = [
   'Request processed successfully',
   'Authentication successful',

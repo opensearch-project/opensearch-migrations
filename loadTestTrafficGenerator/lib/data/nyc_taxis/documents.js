@@ -8,10 +8,14 @@
 
 import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
 
-const TRIP_TYPES      = ['1', '2'];
-const PAYMENT_TYPES   = ['1', '2', '3', '4'];
-const STORE_FWD_FLAGS = ['Y', 'N'];
-const VENDOR_IDS      = ['1', '2'];
+export const TRIP_TYPES      = ['1', '2'];
+export const PAYMENT_TYPES   = ['1', '2', '3', '4'];
+export const STORE_FWD_FLAGS = ['Y', 'N'];
+export const VENDOR_IDS      = ['1', '2'];
+
+export const FARE_AMOUNT_RANGE   = { min: 5.0,  max: 50.0 };
+export const TRIP_DISTANCE_RANGE = { min: 0.5,  max: 20.0 };
+export const PASSENGER_COUNTS    = [1, 2, 3, 4];
 
 function randomNycLocation() {
   return [

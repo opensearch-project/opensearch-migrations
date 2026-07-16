@@ -57,7 +57,7 @@ export function registryWrite(docId) {
  *
  * Picks a random index in [0, RING_CAP). LINDEX returns null for out-of-range
  * indices, so during warmup (ring shorter than RING_CAP) some calls return null
- * without needing a separate LLEN round trip.
+ * without needing a separate round trip.
  */
 export function registryRead() {
   if (!ENABLED) return null;
