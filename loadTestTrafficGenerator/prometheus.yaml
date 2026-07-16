@@ -6,6 +6,5 @@ scrape_configs:
   # Pipeline component metrics (Capture Proxy, Replayer) via OTEL collector
   - job_name: 'otel-collector'
     scrape_interval: 5s
-    honor_timestamps: true
     static_configs:
       - targets: ['otel-collector:8889']

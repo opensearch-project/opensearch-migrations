@@ -8,6 +8,7 @@ receivers:
   kafkametrics:
     brokers: ["kafka:9092"]
     protocol_version: 3.0.0
+    collection_interval: 15s
     scrapers:
       - brokers
       - topics

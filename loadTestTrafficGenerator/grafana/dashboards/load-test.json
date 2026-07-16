@@ -997,7 +997,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(kafka_partition_current_offset_ratio{topic=~\".*\"}[1m])",
+          "expr": "rate(kafka_partition_current_offset_ratio{topic=~\".*\"}[$__rate_interval])",
           "legendFormat": "{{topic}} p{{partition}}",
           "refId": "A"
         }

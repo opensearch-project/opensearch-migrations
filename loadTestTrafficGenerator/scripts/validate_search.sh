@@ -36,26 +36,26 @@ check_capture_proxy_image "$WITH_SETUP"
 if $WITH_SETUP; then
   header "Step 2 — Starting stack (clean volumes)"
   # Wipe volumes to ensure a clean index state before seeding docs for search.
-  docker compose down -v 2>/dev/null || true
-  docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+  "${DOCKER_COMPOSE[@]}" down -v 2>/dev/null || true
+  "${DOCKER_COMPOSE[@]}" up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
   echo ""
 
   header "Step 3 — Running k6 ingest (seed documents)"
   load_k6_env "k6-config/ingest-steady.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/ingest.js
   echo ""
 
   header "Step 4 — Running k6 search scenario"
   load_k6_env "k6-config/search-steady.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/search.js
   echo ""
 
   if $WITH_DEEP_PAGING; then
     header "Step 4b — Running k6 search deep-paging scenario"
     load_k6_env "k6-config/search-deep-paging.env"
-    docker compose run --rm "${env_flags[@]}" \
+    "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
       k6 run --out=opentelemetry /scripts/scenarios/search.js
     echo ""
   fi
@@ -127,7 +127,7 @@ info "  - Prefer search_after over scroll in long-running production replays."
 # ── Optional teardown ─────────────────────────────────────────────────────────
 if $WITH_TEARDOWN; then
   header "Teardown"
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 

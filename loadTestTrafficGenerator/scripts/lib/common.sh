@@ -7,6 +7,17 @@
 
 set -euo pipefail
 
+# ── Docker Compose command ─────────────────────────────────────────────────────
+# Prefer the V2 plugin ("docker compose"); fall back to the standalone V1 binary.
+if docker compose version &>/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose &>/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker-compose)
+else
+  echo "Error: Docker Compose not found. Install Docker Desktop or the docker-compose binary." >&2
+  exit 1
+fi
+
 # ── Colors and counters ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -114,7 +125,7 @@ kafka_total_offset() {
   while IFS= read -r line; do
     count=$(echo "$line" | awk -F: '{print $3}' | tr -d '[:space:]')
     [[ "$count" =~ ^[0-9]+$ ]] && (( total += count )) || true
-  done < <(docker compose exec -T kafka \
+  done < <("${DOCKER_COMPOSE[@]}" exec -T kafka \
     /opt/kafka/bin/kafka-get-offsets.sh \
     --bootstrap-server localhost:9092 \
     --topic logging-traffic-topic 2>/dev/null || true)
@@ -122,7 +133,7 @@ kafka_total_offset() {
 }
 
 check_kafka_topic() {
-  if docker compose exec -T kafka \
+  if "${DOCKER_COMPOSE[@]}" exec -T kafka \
        /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list 2>/dev/null \
      | grep -q "logging-traffic-topic"; then
     pass "logging-traffic-topic exists"
@@ -151,10 +162,10 @@ check_service_health() {
   local label="${1:-}"; shift
   for svc in "$@"; do
     local status
-    status=$(docker compose ps --format json "$svc" 2>/dev/null \
+    status=$("${DOCKER_COMPOSE[@]}" ps --format json "$svc" 2>/dev/null \
       | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Health','unknown'))" 2>/dev/null \
       || docker inspect --format '{{.State.Health.Status}}' \
-         "$(docker compose ps -q "$svc" 2>/dev/null)" 2>/dev/null \
+         "$("${DOCKER_COMPOSE[@]}" ps -q "$svc" 2>/dev/null)" 2>/dev/null \
       || echo "unknown")
     if [[ "$status" == "healthy" ]]; then
       pass "$svc is healthy${label:+ $label}"
@@ -171,8 +182,12 @@ check_capture_proxy_image() {
     pass "$CAPTURE_IMAGE found locally"
   else
     if [[ "$with_setup" == "true" ]]; then
-      info "$CAPTURE_IMAGE not found — building via buildDockerImages (this may take a few minutes)"
-      (cd "$DOCKER_SOLUTION" && "$PROJECT_ROOT/gradlew" buildDockerImages)
+      info "$CAPTURE_IMAGE not found — building via jibDockerBuild (this may take a few minutes)"
+      # -Djib.to.image overrides the registry-prefixed name that buildImages/build.gradle injects
+      # via applyJibConfigurations (e.g. docker-registry:5000/migrations/capture_proxy), ensuring
+      # jibDockerBuild always tags the local image as migrations/capture_proxy:latest.
+      (cd "$PROJECT_ROOT" && ./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild \
+        -Djib.to.image=migrations/capture_proxy:latest)
       if docker image inspect "$CAPTURE_IMAGE" &>/dev/null; then
         pass "$CAPTURE_IMAGE built successfully"
       else
@@ -181,7 +196,7 @@ check_capture_proxy_image() {
       fi
     else
       fail "$CAPTURE_IMAGE not found locally"
-      echo -e "       Build it with:\n         cd TrafficCapture/dockerSolution && ../../../gradlew buildDockerImages"
+      echo -e "       Build it with:\n         cd /path/to/opensearch-migrations && ./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest"
       echo -e "       Or re-run this script with --with-setup to build automatically."
       exit 1
     fi

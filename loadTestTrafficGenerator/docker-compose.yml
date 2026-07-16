@@ -1,7 +1,7 @@
 # Load Test Traffic Generator
 #
 # Pre-requisite: build the capture proxy image from the repo root:
-#   cd TrafficCapture/dockerSolution && ../../gradlew buildDockerImages
+#   cd /path/to/opensearch-migrations && ./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest
 # This also runs generateSelfSignedCerts, baking pub.pem/key.pem into
 # migrations/capture_proxy:latest.
 #
@@ -88,15 +88,29 @@ services:
     networks: [load-test]
     ports:
       - "9200:9200"
-    command: >
-      /runJavaWithClasspath.sh
-      org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy
-      --kafkaConnection kafka:9092
-      --destinationUri http://opensearch-source:9200
-      --listenPort 9200
-      --sslCertChainFile /usr/share/captureProxy/config/pub.pem
-      --sslKeyFile /usr/share/captureProxy/config/key.pem
-      --otelCollectorEndpoint http://otel-collector:4317
+    # Jib bakes "java -cp @/app/jib-classpath-file CaptureProxy" as the image ENTRYPOINT.
+    # Without an explicit override, docker-compose's `command:` becomes CMD and is appended
+    # to that entrypoint — CaptureProxy.main() gets "/runJavaWithClasspath.sh" as its first
+    # argument and JCommander rejects it.  Setting entrypoint here replaces the Jib-generated
+    # one so the script is actually exec'd and receives the class name + flags as $@.
+    entrypoint:
+      - /runJavaWithClasspath.sh
+    command:
+      - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy
+      - --kafkaConnection
+      - kafka:9092
+      - --destinationUri
+      - http://opensearch-source:9200
+      - --listenPort
+      - "9200"
+      - --sslCertChainFile
+      - /usr/share/captureProxy/config/pub.pem
+      - --sslKeyFile
+      - /usr/share/captureProxy/config/key.pem
+      - --otelTraceCollectorEndpoint
+      - http://otel-collector:4317
+      - --otelMetricsCollectorEndpoint
+      - http://otel-collector:4317
     depends_on:
       kafka:
         condition: service_healthy

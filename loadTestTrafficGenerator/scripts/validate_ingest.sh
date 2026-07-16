@@ -33,12 +33,12 @@ check_capture_proxy_image "$WITH_SETUP"
 # ── Optional stack startup + k6 run ──────────────────────────────────────────
 if $WITH_SETUP; then
   header "Step 2 — Starting stack"
-  docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+  "${DOCKER_COMPOSE[@]}" up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
   echo ""
 
   header "Step 3 — Running k6 ingest scenario"
   load_k6_env "k6-config/ingest-steady.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/ingest.js
   echo ""
 else
@@ -55,8 +55,8 @@ check_kafka_topic
 
 # Capture Proxy startup logs reference Kafka when the producer initialises.
 header "Step 6 — Capture Proxy → Kafka connectivity"
-kafka_log_lines=$(docker compose logs capture-proxy 2>/dev/null | grep -ic "kafka" || true)
-error_log_lines=$(docker compose logs capture-proxy 2>/dev/null | grep -ic "error" || true)
+kafka_log_lines=$("${DOCKER_COMPOSE[@]}" logs capture-proxy 2>/dev/null | grep -ic "kafka" || true)
+error_log_lines=$("${DOCKER_COMPOSE[@]}" logs capture-proxy 2>/dev/null | grep -ic "error" || true)
 if (( kafka_log_lines > 0 )); then
   pass "Proxy logs reference Kafka ($kafka_log_lines lines); error lines: $error_log_lines"
 else
@@ -64,7 +64,7 @@ else
 fi
 
 # Topic describe confirms healthy partitions (no replayer in this scenario so consumer lag is N/A).
-topic_describe=$(docker compose exec -T kafka \
+topic_describe=$("${DOCKER_COMPOSE[@]}" exec -T kafka \
   /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --describe --topic logging-traffic-topic 2>/dev/null || true)
@@ -97,7 +97,7 @@ prom_check_latency_p95 "single_doc"  2000
 # ── Optional teardown ─────────────────────────────────────────────────────────
 if $WITH_TEARDOWN; then
   header "Teardown"
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 

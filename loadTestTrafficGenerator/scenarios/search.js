@@ -28,6 +28,9 @@
  *   SEARCH_UPDATE_FRACTION — fraction of iterations for partial updates (default 0.10)
  *   SEARCH_WRITE_FRACTION  — fraction of iterations for single-doc writes (default 0.05;
  *                            remainder goes to deep paging / flat fallback)
+ *   EXECUTOR               — "constant-arrival-rate" (default) or "ramping-arrival-rate"
+ *   RAMP_STAGES            — JSON stage array when EXECUTOR=ramping-arrival-rate
+ *                            e.g. '[{"duration":"2m","target":100},{"duration":"1m","target":0}]'
  */
 
 import http from 'k6/http';
@@ -77,6 +80,10 @@ const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
 const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES          || '3');
 const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES    || '3');
 const CONNECTION_MODE    = __ENV.CONNECTION_MODE               || 'pinned';
+const EXECUTOR           = __ENV.EXECUTOR                      || 'constant-arrival-rate';
+const RAMP_STAGES        = __ENV.RAMP_STAGES
+  ? JSON.parse(__ENV.RAMP_STAGES)
+  : [{ duration: DURATION, target: RATE }];
 const FLAT_FRACTION      = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
 const AGG_FRACTION       = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
 const UPDATE_FRACTION    = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
@@ -91,19 +98,31 @@ const T_DEEP   = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION + WRITE_FRACTION
 // ── Connection params (resolved once per VU in init context) ────────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
 
-// ── k6 options ───────────────────────────────────────────────────────────────
-export const options = {
-  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
-
-  scenarios: {
-    search: {
+// ── Scenario config (built at init time from EXECUTOR env var) ────────────────
+const searchScenario = EXECUTOR === 'ramping-arrival-rate'
+  ? {
+      executor: 'ramping-arrival-rate',
+      startRate: 0,
+      timeUnit: '1s',
+      preAllocatedVUs: VUS,
+      maxVUs: MAX_VUS,
+      stages: RAMP_STAGES,
+    }
+  : {
       executor: 'constant-arrival-rate',
       rate: RATE,
       timeUnit: '1s',
       duration: DURATION,
       preAllocatedVUs: VUS,
       maxVUs: MAX_VUS,
-    },
+    };
+
+// ── k6 options ───────────────────────────────────────────────────────────────
+export const options = {
+  insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
+
+  scenarios: {
+    search: searchScenario,
   },
 
   thresholds: {

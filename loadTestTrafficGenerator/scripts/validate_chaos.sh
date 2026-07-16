@@ -54,7 +54,7 @@ check_capture_proxy_image "$WITH_SETUP"
 # ── Optional stack startup + background k6 ───────────────────────────────────
 if $WITH_SETUP; then
   header "Step 2 — Starting stack (including Redis + Webdis)"
-  docker compose up -d --wait \
+  "${DOCKER_COMPOSE[@]}" up -d --wait \
     kafka opensearch-source capture-proxy otel-collector prometheus grafana \
     redis webdis
   echo ""
@@ -71,7 +71,7 @@ if $WITH_SETUP; then
   # -T: disable TTY allocation (background process, stdout → file).
   # --no-thresholds: pause inflates p95 latency beyond k6's
   # threshold limits, causing k6 to abort before chaos tests complete.
-  docker compose run --rm -T --name k6-chaos "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm -T --name k6-chaos "${env_flags[@]}" \
     -e CONTROL_ENABLED=true \
     k6 run --out=opentelemetry \
            --no-thresholds \
@@ -186,7 +186,7 @@ if $WITH_TEARDOWN; then
     rm -f "$K6_PID_FILE"
     info "Background k6 process stopped"
   fi
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 

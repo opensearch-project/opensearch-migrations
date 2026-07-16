@@ -39,7 +39,7 @@ check_capture_proxy_image "$WITH_SETUP"
 # ── Optional stack startup ────────────────────────────────────────────────────
 if $WITH_SETUP; then
   header "Step 2 — Starting stack"
-  docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+  "${DOCKER_COMPOSE[@]}" up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
   echo ""
 else
   info "Skipping stack startup (use --with-setup to include that step)."
@@ -48,7 +48,7 @@ fi
 # ── Ramp run ──────────────────────────────────────────────────────────────────
 header "Step 3 — Ramp load shape"
 load_k6_env "k6-config/ingest-ramp.env"
-docker compose run --rm "${env_flags[@]}" \
+"${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
   k6 run --out=opentelemetry /scripts/scenarios/ingest.js
 echo ""
 
@@ -69,7 +69,7 @@ if $WITH_BURST; then
   offset_before=$(kafka_total_offset)
 
   load_k6_env "k6-config/ingest-burst.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/ingest.js
   echo ""
 
@@ -93,7 +93,7 @@ if $WITH_MIXED_RAMP; then
   header "Step 5 — Mixed ramp load shape"
 
   load_k6_env "k6-config/mixed-ramp.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/mixed.js
   echo ""
 
@@ -118,7 +118,7 @@ prom_check_latency_p95 "bulk_write" 3000
 # ── Optional teardown ─────────────────────────────────────────────────────────
 if $WITH_TEARDOWN; then
   header "Teardown"
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 

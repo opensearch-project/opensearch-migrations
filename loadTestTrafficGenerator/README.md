@@ -11,9 +11,8 @@ Build the Capture Proxy Docker image (also generates the self-signed TLS certs).
 Run from the **repo root**:
 
 ```bash
-cd TrafficCapture/dockerSolution
-../../gradlew buildDockerImages
-cd -
+cd /path/to/opensearch-migrations   # repo root (where settings.gradle lives)
+./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest
 ```
 
 ---
@@ -512,3 +511,8 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
   checks do not cancel the run or similar, its solely observational.
 - thresholds on metrics configured in the run script. If those checks fail, this can abort the run if the flag to 
   ignore thresholds is not set (`--no-thresholds`).
+
+
+## Usage Notes
+- captureproxy image recently had breaking changes regarding env variable naming. If you see errors on startup, 
+  try rebuilding the captureproxy. 

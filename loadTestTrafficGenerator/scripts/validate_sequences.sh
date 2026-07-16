@@ -35,14 +35,14 @@ check_capture_proxy_image "$WITH_SETUP"
 # ── Optional stack startup + k6 run ──────────────────────────────────────────
 if $WITH_SETUP; then
   header "Step 2 — Starting stack"
-  docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
+  "${DOCKER_COMPOSE[@]}" up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
   echo ""
 
   header "Step 3 — Running k6 ingest scenario (sequences enabled, pinned mode)"
   load_k6_env "k6-config/ingest-steady.env"
   # SEQUENCE_FRACTION and CONNECTION_MODE default to 0.15 / pinned in ingest.js;
   # pass them explicitly so the intent is visible in the script output.
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     -e SEQUENCE_FRACTION=0.15 \
     -e CONNECTION_MODE=pinned \
     k6 run --out=opentelemetry /scripts/scenarios/ingest.js
@@ -117,7 +117,7 @@ info "  Expected: update or query arriving before create for some sequence IDs"
 # ── Optional teardown ─────────────────────────────────────────────────────────
 if $WITH_TEARDOWN; then
   header "Teardown"
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 

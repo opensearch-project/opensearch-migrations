@@ -33,14 +33,14 @@ check_capture_proxy_image "$WITH_SETUP"
 # ── Optional stack startup + k6 run ──────────────────────────────────────────
 if $WITH_SETUP; then
   header "Step 2 — Starting stack (including Redis + Webdis)"
-  docker compose up -d --wait \
+  "${DOCKER_COMPOSE[@]}" up -d --wait \
     kafka opensearch-source capture-proxy otel-collector prometheus grafana \
     redis webdis
   echo ""
 
   header "Step 3 — Running k6 mixed scenario"
   load_k6_env "k6-config/mixed-steady.env"
-  docker compose run --rm "${env_flags[@]}" \
+  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
     k6 run --out=opentelemetry /scripts/scenarios/mixed.js
   echo ""
 else
@@ -113,7 +113,7 @@ prom_check_counter "mixed_search_consistency_misses_total" "mixed_search_consist
 # ── Optional teardown ─────────────────────────────────────────────────────────
 if $WITH_TEARDOWN; then
   header "Teardown"
-  docker compose down -v
+  "${DOCKER_COMPOSE[@]}" down -v
   pass "Stack torn down (volumes removed)"
 fi
 
