@@ -4,6 +4,7 @@ from enum import Enum
 import json
 import logging
 import subprocess
+import tempfile
 import time
 from pydantic import BaseModel
 
@@ -82,6 +83,40 @@ SIGV4_SCHEMA = {
     }
 }
 
+
+def validate_client_cert_options(field, value, error):
+    cert_path = value.get("cert_path")
+    key_path = value.get("key_path")
+    k8s_secret_name = value.get("k8s_secret_name")
+
+    has_paths = cert_path is not None or key_path is not None
+    if has_paths and not (cert_path and key_path):
+        error(field, "Both cert_path and key_path must be provided")
+    elif has_paths and k8s_secret_name is not None:
+        error(field, "Only one client certificate source can be provided")
+    elif not has_paths and k8s_secret_name is None:
+        error(field, "Must provide either (cert_path + key_path) or k8s_secret_name")
+
+
+CLIENT_CERT_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "cert_path": {
+            "type": "string",
+            "required": False,
+        },
+        "key_path": {
+            "type": "string",
+            "required": False,
+        },
+        "k8s_secret_name": {
+            "type": "string",
+            "required": False,
+        },
+    },
+    "check_with": validate_client_cert_options,
+}
+
 SCHEMA = {
     "cluster": {
         "type": "dict",
@@ -92,7 +127,8 @@ SCHEMA = {
             SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
-            "sigv4": SIGV4_SCHEMA
+            "sigv4": SIGV4_SCHEMA,
+            "client_cert": CLIENT_CERT_SCHEMA,
         },
         "check_with": contains_one_of({auth.name.lower() for auth in AuthMethod})
     }
@@ -104,6 +140,7 @@ SOURCE_PROXY_SCHEMA = {
         "name": {"type": "string", "required": False},
         "endpoint": {"type": "string", "required": True},
         "allow_insecure": {"type": "boolean", "required": False},
+        "client_cert": CLIENT_CERT_SCHEMA,
     }
 }
 
@@ -118,6 +155,7 @@ SOURCE_CLUSTER_SCHEMA = {
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
             "sigv4": SIGV4_SCHEMA,
+            "client_cert": CLIENT_CERT_SCHEMA,
             "proxy": SOURCE_PROXY_SCHEMA,
         },
         "check_with": contains_one_of({auth.name.lower() for auth in AuthMethod})
@@ -141,8 +179,10 @@ class Cluster:
     aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
+    client_cert_details: Optional[Dict[str, Any]] = None
     allow_insecure: bool = False
     client_options: Optional[ClientOptions] = None
+    _client_cert_paths: Optional[tuple[str, str]] = None
 
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         logger.info(f"Initializing cluster with config: {config}")
@@ -163,6 +203,8 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
+        self.client_cert_details = config.get("client_cert")
+        self._client_cert_paths = None
         self.client_options = client_options
 
     @property
@@ -294,6 +336,46 @@ class Cluster:
             return None
         raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
+    def _get_client_cert_files(self) -> Optional[tuple[str, str]]:
+        if not self.client_cert_details:
+            return None
+        if self._client_cert_paths is not None:
+            return self._client_cert_paths
+
+        if "cert_path" in self.client_cert_details and "key_path" in self.client_cert_details:
+            self._client_cert_paths = (
+                self.client_cert_details["cert_path"],
+                self.client_cert_details["key_path"],
+            )
+            return self._client_cert_paths
+
+        secret_name = self.client_cert_details.get("k8s_secret_name")
+        if not secret_name:
+            return None
+
+        secret = KubectlRunner("ma", "").read_secret(secret_name)
+        missing_keys = [key for key in ("tls.crt", "tls.key") if key not in secret]
+        if missing_keys:
+            raise ValueError(
+                f"Secret {secret_name} is missing required client certificate key(s): {', '.join(missing_keys)}"
+            )
+
+        cert_path = self._write_temp_client_cert_file(secret["tls.crt"], suffix=".crt")
+        key_path = self._write_temp_client_cert_file(secret["tls.key"], suffix=".key")
+        self._client_cert_paths = (cert_path, key_path)
+        return self._client_cert_paths
+
+    @staticmethod
+    def _write_temp_client_cert_file(contents: str, suffix: str) -> str:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix="migration-console-client-",
+            suffix=suffix,
+            delete=False,
+        ) as f:
+            f.write(contents)
+            return f.name
+
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
                  timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
         """
@@ -311,17 +393,20 @@ class Cluster:
 
         # Extract query parameters from kwargs
         params = kwargs.get('params', {})
+        client_cert = self._get_client_cert_files()
 
-        r = session.request(
-            method.name,
-            f"{self.endpoint}{path}",
-            verify=(not self.allow_insecure),
-            params=params,
-            auth=auth,
-            data=data,
-            headers=request_headers,
-            timeout=timeout
-        )
+        request_kwargs = {
+            "verify": (not self.allow_insecure),
+            "params": params,
+            "auth": auth,
+            "data": data,
+            "headers": request_headers,
+            "timeout": timeout,
+        }
+        if client_cert is not None:
+            request_kwargs["cert"] = client_cert
+
+        r = session.request(method.name, f"{self.endpoint}{path}", **request_kwargs)
         logger.info(f"call_api request {method.name} {self.endpoint}{path}, response: {r.status_code} {r.text[:1000]}")
         if raise_error:
             r.raise_for_status()
@@ -347,6 +432,10 @@ class Cluster:
             client_options_parts.append("amazon_aws_log_in:session")
             client_options_parts.append(f"service:{service}")
             client_options_parts.append(f"region:{region}")
+        client_cert = self._get_client_cert_files()
+        if client_cert is not None:
+            client_options_parts.append(f"client_cert:{client_cert[0]}")
+            client_options_parts.append(f"client_key:{client_cert[1]}")
         client_options = ",".join(client_options_parts)
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
         command = (f"opensearch-benchmark run "
@@ -444,6 +533,7 @@ class SourceCluster(Cluster):
                 **base_config,
                 "endpoint": proxy_config["endpoint"],
                 "allow_insecure": proxy_config.get("allow_insecure", False),
+                **({"client_cert": proxy_config["client_cert"]} if "client_cert" in proxy_config else {}),
             }
             if self.auth_type == AuthMethod.SIGV4:
                 merged_proxy_config[SIGV4_SIGNING_ENDPOINT_KEY] = self.endpoint

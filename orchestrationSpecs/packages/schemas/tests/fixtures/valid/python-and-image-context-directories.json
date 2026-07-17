@@ -29,14 +29,14 @@
             {
               "entryPoint": {
                 "pythonFile": {
-                  "image": "example.com/transforms@sha256:abc123",
+                  "image": "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "path": "request.py"
                 }
               },
               "context": {
                 "valueDirectories": [
                   {
-                    "image": "example.com/transform-contexts@sha256:def456",
+                    "image": "example.com/transform-contexts@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     "path": "request"
                   }
                 ]

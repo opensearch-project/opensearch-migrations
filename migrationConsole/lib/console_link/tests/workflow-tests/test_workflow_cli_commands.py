@@ -3,6 +3,7 @@
 import base64
 import gzip
 import json
+import sys
 
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
@@ -49,6 +50,103 @@ class TestWorkflowCLICommands:
             assert result.exit_code == 0
             assert '--workflow-name' not in result.output
             assert '--all-workflows' not in result.output
+
+    @patch('console_link.workflow.commands.manage.WorkflowTreeApp')
+    @patch('console_link.workflow.commands.manage.WaiterInterface.default')
+    @patch('console_link.workflow.commands.manage.make_k8s_pod_scraper')
+    @patch('console_link.workflow.commands.manage.make_argo_service')
+    @patch('console_link.workflow.commands.manage._initialize_k8s_client')
+    @patch('console_link.workflow.commands.manage.reset_terminal_mouse_reporting')
+    def test_manage_defaults_to_resource_view(
+        self,
+        mock_reset_mouse,
+        mock_init_k8s,
+        mock_make_argo,
+        mock_make_scraper,
+        mock_waiter,
+        mock_app_class,
+    ):
+        runner = CliRunner()
+        app = Mock()
+        mock_app_class.return_value = app
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'default'])
+
+        assert result.exit_code == 0
+        assert mock_app_class.call_args.kwargs["resource_view"] is True
+        app.run.assert_called_once()
+        mock_reset_mouse.assert_called_once()
+        mock_reset_mouse.reset_mock()
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'default', '--step-view'])
+
+        assert result.exit_code == 0
+        assert mock_app_class.call_args.kwargs["resource_view"] is False
+        assert app.run.call_count == 2
+        mock_reset_mouse.assert_called_once()
+
+    @patch('console_link.workflow.commands.manage.Server')
+    @patch('console_link.workflow.commands.manage.WorkflowTreeApp')
+    @patch('console_link.workflow.commands.manage._initialize_k8s_client')
+    @patch('console_link.workflow.commands.manage.reset_terminal_mouse_reporting')
+    def test_manage_serve_starts_textual_web_server(
+        self,
+        mock_reset_mouse,
+        mock_init_k8s,
+        mock_app_class,
+        mock_server_class,
+    ):
+        runner = CliRunner()
+        server = Mock()
+        mock_server_class.return_value = server
+
+        result = runner.invoke(workflow_cli, [
+            'manage',
+            '--namespace', 'ma',
+            '--workflow-name', 'migration-workflow',
+            '--argo-server', 'https://argo.example:2746',
+            '--token', 'tok en',
+            '--step-view',
+            '--serve',
+            '--serve-host', '0.0.0.0',
+            '--serve-port', '8123',
+            '--serve-public-url', 'http://localhost:8123',
+        ])
+
+        assert result.exit_code == 0
+        mock_app_class.assert_not_called()
+        mock_init_k8s.assert_not_called()
+        mock_reset_mouse.assert_not_called()
+        server.serve.assert_called_once_with(debug=False)
+        assert mock_server_class.call_args.kwargs == {
+            "host": "0.0.0.0",
+            "port": 8123,
+            "title": "Workflow Manage: migration-workflow",
+            "public_url": "http://localhost:8123",
+        }
+        app_command = mock_server_class.call_args.args[0]
+        assert app_command.startswith(f"{sys.executable} -m console_link.workflow.cli manage")
+        assert "--serve" not in app_command
+        assert "--step-view" in app_command
+        assert "--resource-view" not in app_command
+        assert "--namespace ma" in app_command
+        assert "--workflow-name migration-workflow" in app_command
+        assert "--argo-server https://argo.example:2746" in app_command
+        assert "--token 'tok en'" in app_command
+        assert "Serving workflow manage on http://localhost:8123" in result.output
+
+    @patch('console_link.workflow.commands.manage.Server')
+    def test_manage_serve_defaults_to_loopback_and_localhost_public_url(self, mock_server_class):
+        runner = CliRunner()
+        server = Mock()
+        mock_server_class.return_value = server
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'ma', '--serve', '--serve-port', '9000'])
+
+        assert result.exit_code == 0
+        assert mock_server_class.call_args.kwargs["host"] == "127.0.0.1"
+        assert mock_server_class.call_args.kwargs["port"] == 9000
+        assert mock_server_class.call_args.kwargs["public_url"] == "http://localhost:9000"
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -101,10 +199,46 @@ class TestWorkflowCLICommands:
         assert 'test-workflow-' in result.output
         assert "--workflow-name" in mock_subprocess.call_args[0][0]
         assert "migration-workflow" in mock_subprocess.call_args[0][0]
+        assert "--quiet" in mock_subprocess.call_args[0][0]
+        assert mock_subprocess.call_count == 1
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
         _mock_verify_secrets.assert_called_once()
+
+    @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
+    @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
+    def test_submit_command_can_show_verbose_submit_output(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        _mock_stop,
+        _mock_delete,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+    ):
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
+        )
+        mock_exists.return_value = False
+
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.load_config.return_value = WorkflowConfig({'parameters': {'message': 'test'}})
+
+        result = CliRunner().invoke(workflow_cli, ['submit', '--verbose-submit-output'])
+
+        assert result.exit_code == 0
+        assert "--quiet" not in mock_subprocess.call_args[0][0]
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -125,9 +259,9 @@ class TestWorkflowCLICommands:
 
         # The secret check raises a click exception describing which secret is missing.
         mock_verify_secrets.side_effect = click.ClickException(
-            "Found 1 missing secret that must be created to make well-formed HTTP-Basic "
-            "requests to clusters:\n  source-cluster-secret\n\nRun `workflow configure edit` "
-            "to create them."
+            "Found 1 missing HTTP-Basic credential Secret referenced by the workflow config:\n"
+            "  source-cluster-secret\n\nCreate the referenced Secret from manage, or run "
+            "`workflow configure credentials create <secret-name>` before `workflow submit`."
         )
 
         runner = CliRunner()
@@ -147,11 +281,42 @@ class TestWorkflowCLICommands:
 
         assert result.exit_code != 0
         assert 'source-cluster-secret' in result.output
-        assert 'workflow configure edit' in result.output
+        assert 'HTTP-Basic credential Secret' in result.output
+        assert 'workflow configure credentials create <secret-name>' in result.output
         assert 'submitted successfully' not in result.output
         # The script_runner subprocess (which actually submits the workflow) must NOT
         # have been invoked — the check has to short-circuit before that.
         mock_subprocess.assert_not_called()
+
+    def test_secret_processing_missing_message_names_secrets_not_clusters(self):
+        import click
+        from console_link.workflow.commands.secret_utils import process_secrets
+
+        secret_store = Mock()
+        secret_store.secret_resource_exists.return_value = False
+
+        try:
+            process_secrets(secret_store, {"validSecrets": ["a"]}, interactive=False)
+        except click.ClickException as error:
+            message = str(error)
+        else:
+            raise AssertionError("process_secrets should reject missing referenced Secrets")
+
+        assert "missing HTTP-Basic credential Secret" in message
+        assert "referenced by the workflow config" in message
+        assert "\n  a" in message
+        assert "requests to clusters" not in message
+
+    def test_secret_processing_accepts_unmanaged_existing_kubernetes_secret(self):
+        from console_link.workflow.commands.secret_utils import process_secrets
+
+        secret_store = Mock()
+        secret_store.secret_resource_exists.return_value = True
+
+        process_secrets(secret_store, {"validSecrets": ["a"]}, interactive=False)
+
+        secret_store.secret_resource_exists.assert_called_once_with("a")
+        secret_store.secret_exists.assert_not_called()
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -218,6 +383,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
+        assert mock_subprocess.call_count == 1
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -275,6 +441,7 @@ class TestWorkflowCLICommands:
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
         mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
+        assert mock_subprocess.call_count == 1
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -1645,6 +1812,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
+        assert mock_subprocess.call_count == 1
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -1701,10 +1869,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {
-            'source-secret': False,
-            'target-secret': True,
-        }
+        mock_secret_store.secret_resource_exists.side_effect = lambda name: name == 'target-secret'
 
         result = runner.invoke(workflow_cli, ['configure', 'credentials', 'create', '--show-missing'])
 
@@ -1726,7 +1891,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {'source-secret': False}
+        mock_secret_store.secret_resource_exists.return_value = False
 
         result = runner.invoke(workflow_cli, ['configure', 'credentials', 'create', '--list'])
 
@@ -1963,10 +2128,7 @@ class TestConfigureCommands:
         }
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
-        mock_secret_store.secrets_exist.return_value = {
-            'cluster-creds': False,
-            'existing-creds': True,
-        }
+        mock_secret_store.secret_resource_exists.side_effect = lambda name: name == 'existing-creds'
 
         result = runner.invoke(
             workflow_cli,

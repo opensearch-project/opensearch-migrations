@@ -176,9 +176,9 @@
 #                "noCapture": false,
 #                "numThreads": 1,
 #                "sslConfigSettings": "",  # string
-#                "suppressCaptureForHeaderMatch": [],  # string[]
-#                "suppressCaptureForMethod": [],  # string[]
-#                "suppressCaptureForUriPath": [],  # string[]
+#                "suppressCaptureForHeaderMatch": {"User-Agent": ".*healthcheck.*"},  # map of header name to Java regex
+#                "suppressCaptureForMethod": "",  # Java regex string
+#                "suppressCaptureForUriPath": "",  # Java regex string
 #                "suppressMethodAndPath": ""  # string
             }
         }

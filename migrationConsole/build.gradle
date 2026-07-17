@@ -75,6 +75,8 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
 
     // Source files
     inputs.dir(configProcessorP.dir("src"))
+    // Dependency packages whose source is bundled through workspace imports
+    inputs.dir(schemasP.dir("src"))
     // Shell scripts copied into the config-processor bundle
     inputs.dir(configProcessorP.dir("scripts"))
     // Build script
@@ -82,6 +84,7 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     // Package-level config files
     inputs.file(configProcessorP.file("package.json"))
     inputs.file(configProcessorP.file("tsconfig.json"))
+    inputs.file(schemasP.file("package.json"))
     // Root-level tsconfig files that affect compilation
     inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
     inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))

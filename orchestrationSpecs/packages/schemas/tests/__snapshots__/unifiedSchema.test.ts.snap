@@ -35,7 +35,14 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
           ]
         }
       ],
-      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+      "x-effective-default": {
+        "label": "scram-sha-512",
+        "value": {
+          "type": "scram-sha-512"
+        },
+        "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
+      }
     },
     "clusterSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaSpec",

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Manage edit rollout state mockup</title>
+  <desc id="desc">Terminal-style mockup of submitted rollout and approval state for a resource.</desc>
+  <style>
+    .bg { fill: #0f172a; }
+    .panel { fill: #111827; stroke: #334155; stroke-width: 1; }
+    .header { fill: #1f2937; }
+    .selected { fill: #1e3a8a; opacity: 0.9; }
+    .text { fill: #d1d5db; font: 16px Menlo, Consolas, monospace; }
+    .dim { fill: #94a3b8; font: 15px Menlo, Consolas, monospace; }
+    .title { fill: #f9fafb; font: 18px Menlo, Consolas, monospace; font-weight: 700; }
+    .green { fill: #86efac; font: 16px Menlo, Consolas, monospace; }
+    .yellow { fill: #fde68a; font: 16px Menlo, Consolas, monospace; }
+    .red { fill: #fca5a5; font: 16px Menlo, Consolas, monospace; }
+    .cyan { fill: #67e8f9; font: 16px Menlo, Consolas, monospace; }
+    .footer { fill: #020617; }
+  </style>
+  <rect class="bg" width="1200" height="760"/>
+  <rect class="header" x="0" y="0" width="1200" height="48"/>
+  <text class="title" x="24" y="31">[ma] migration-workflow - Submitted Rollout</text>
+  <text class="dim" x="904" y="31">run 1781028122330</text>
+
+  <rect class="panel" x="24" y="72" width="740" height="612" rx="6"/>
+  <rect class="panel" x="788" y="72" width="388" height="612" rx="6"/>
+  <text class="title" x="48" y="108">Migration Resources</text>
+
+  <text class="dim" x="54" y="144">Source Clusters</text>
+  <text class="text" x="62" y="178">* source: legacy-cluster</text>
+  <text class="dim" x="54" y="220">Live Traffic Migration</text>
+  <rect class="selected" x="44" y="236" width="696" height="30" rx="4"/>
+  <text class="yellow" x="62" y="258">[..] capture-proxy (rollout pending)</text>
+  <text class="dim" x="86" y="288">spec accepted, status checksum still old</text>
+  <text class="yellow" x="86" y="320">Workflow progress:</text>
+  <text class="green" x="110" y="350">[OK] tryApply</text>
+  <text class="yellow" x="110" y="380">[..] waitForFix - ApprovalGate running</text>
+  <text class="dim" x="134" y="410">Gated changes detected. Approve to continue.</text>
+  <text class="dim" x="54" y="462">Snapshot Migration</text>
+  <text class="green" x="62" y="494">[OK] legacy-cluster-snapshot-a</text>
+  <text class="yellow" x="62" y="526">[..] legacy-prod-snapshot-a-migration-0</text>
+
+  <text class="title" x="812" y="108">Selected: capture-proxy</text>
+  <text class="yellow" x="812" y="148">Stage: submitted rollout</text>
+  <text class="text" x="812" y="192">Pending submit: none</text>
+  <text class="text" x="812" y="224">CR spec: new desired config</text>
+  <text class="text" x="812" y="256">Status: previous config realized</text>
+  <text class="cyan" x="812" y="308">Changes accepted into spec</text>
+  <text class="dim" x="834" y="340">source endpoint changed</text>
+  <text class="dim" x="834" y="368">noCapture: false -> true</text>
+  <text class="yellow" x="812" y="420">Approval needed</text>
+  <text class="dim" x="834" y="452">ApprovalGate: captureproxy.capture-proxy.vapretry</text>
+  <text class="text" x="812" y="500">Next step</text>
+  <text class="dim" x="834" y="528">Approve the gate to retry apply.</text>
+  <text class="dim" x="834" y="556">Logs and preview remain available.</text>
+
+  <rect class="footer" x="0" y="712" width="1200" height="48"/>
+  <text class="dim" x="24" y="742">a Approve   l Logs   o Output   p Preview   r Refresh   q Quit</text>
+</svg>

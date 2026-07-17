@@ -2,8 +2,23 @@
 
 
 from console_link.workflow.resource_tree import (
+    CONFIG_MODE_CURRENT_WORKFLOW,
+    CONFIG_MODE_DEPLOYED,
+    CONFIG_MODE_PENDING_SUBMIT,
+    ResourceGroup,
     ResourceNode,
-    _build_tree_from_raw, _nest_topics_under_kafka,
+    ResourceSection,
+    _build_tree_from_raw,
+    active_approval_node,
+    apply_config_overlays,
+    approval_target_ref,
+    format_config_diff_fields,
+    format_approval_gate_line,
+    format_dependency_line,
+    format_resource_diagnostics,
+    format_rollout_status_suffix,
+    resource_config_change_summary,
+    resource_visible_in_config_mode,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
     mark_not_configured_groups,
@@ -29,22 +44,51 @@ def make_resource(plural='snapshotmigrations', name='test', phase='Running',
     )
 
 
+def section_by_name(sections, name):
+    return next(section for section in sections if section.name == name)
+
+
+def group_by_plural(sections, plural):
+    for section in sections:
+        for group in section.groups:
+            if group.plural == plural:
+                return group
+    raise AssertionError(f"Missing group for plural {plural}")
+
+
 # --- _build_tree_from_raw ---
 
 class TestBuildTreeFromRaw:
     def test_empty_input_returns_empty_sections(self):
         sections = _build_tree_from_raw({})
-        assert len(sections) == 2  # Snapshot Migration, Live Traffic Migration
+        assert [section.name for section in sections] == [
+            'Sources',
+            'Targets',
+            'Snapshot Migration',
+            'Live Traffic Migration',
+        ]
         for s in sections:
             for g in s.groups:
                 assert g.resources == []
 
+    def test_dependency_states_are_attached_by_name(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [make_cr('captureproxies', 'cap', phase='Pending')],
+            'datasnapshots': [make_cr('datasnapshots', 'source-s1', phase='Pending', depends_on=['cap'])],
+        })
+
+        snapshot = group_by_plural(sections, 'datasnapshots').resources[0]
+
+        assert snapshot.dependency_states == [
+            {'name': 'cap', 'phase': 'Pending', 'plural': 'captureproxies'}
+        ]
+
     def test_snapshot_placed_in_correct_section(self):
         raw = {'datasnapshots': [make_cr('datasnapshots', 'my-snap', 'Completed')]}
         sections = _build_tree_from_raw(raw)
-        snapshot_section = sections[0]
+        snapshot_section = section_by_name(sections, 'Snapshot Migration')
         assert snapshot_section.name == 'Snapshot Migration'
-        snap_group = snapshot_section.groups[0]
+        snap_group = group_by_plural(sections, 'datasnapshots')
         assert snap_group.display_name == 'Snapshot'
         assert len(snap_group.resources) == 1
         assert snap_group.resources[0].name == 'my-snap'
@@ -56,7 +100,7 @@ class TestBuildTreeFromRaw:
             make_cr('trafficreplays', 'replay-b', 'Pending'),
         ]}
         sections = _build_tree_from_raw(raw)
-        replay_group = sections[1].groups[2]  # Live Traffic → Replay
+        replay_group = group_by_plural(sections, 'trafficreplays')
         assert len(replay_group.resources) == 2
 
     def test_depends_on_parsed(self):
@@ -65,7 +109,7 @@ class TestBuildTreeFromRaw:
                     depends_on=['my-snap'])
         ]}
         sections = _build_tree_from_raw(raw)
-        resource = sections[0].groups[1].resources[0]
+        resource = group_by_plural(sections, 'snapshotmigrations').resources[0]
         assert resource.depends_on == ['my-snap']
 
     def test_missing_status_defaults_to_unknown(self):
@@ -74,29 +118,27 @@ class TestBuildTreeFromRaw:
             'spec': {},
         }]}
         sections = _build_tree_from_raw(raw)
-        resource = sections[0].groups[0].resources[0]
+        resource = group_by_plural(sections, 'datasnapshots').resources[0]
         assert resource.phase == 'Unknown'
 
 
-# --- _nest_topics_under_kafka ---
+# --- CapturedTraffic placement ---
 
-class TestNestTopicsUnderKafka:
-    def test_topic_nested_under_parent_kafka(self):
-        kafka = ResourceNode(name='kafka-1', plural='kafkaclusters', phase='Ready',
-                             depends_on=[], spec={}, status={})
-        topic = ResourceNode(name='topic-1', plural='capturedtraffics', phase='Ready',
-                             depends_on=[], spec={'kafkaClusterName': 'kafka-1'}, status={})
-        resources = [kafka, topic]
-        _nest_topics_under_kafka(resources)
-        assert topic not in resources
-        assert topic in kafka.children
+class TestCapturedTrafficPlacement:
+    def test_topic_stays_peer_of_parent_kafka(self):
+        raw = {
+            'kafkaclusters': [make_cr('kafkaclusters', 'kafka-1')],
+            'capturedtraffics': [
+                make_cr('capturedtraffics', 'topic-1', spec={'kafkaClusterName': 'kafka-1'}),
+            ],
+        }
 
-    def test_orphan_topic_stays_at_top_level(self):
-        topic = ResourceNode(name='topic-1', plural='capturedtraffics', phase='Ready',
-                             depends_on=[], spec={'kafkaClusterName': 'nonexistent'}, status={})
-        resources = [topic]
-        _nest_topics_under_kafka(resources)
-        assert topic in resources
+        sections = _build_tree_from_raw(raw)
+        buffer_group = group_by_plural(sections, 'kafkaconfigs')
+
+        assert [resource.name for resource in buffer_group.resources] == ['kafka-1', 'topic-1']
+        assert buffer_group.resources[0].children == []
+        assert format_spec_fields(buffer_group.resources[1]) == ['kafkaClusterName: kafka-1']
 
 
 # --- format_spec_fields ---
@@ -139,10 +181,591 @@ class TestFormatSpecFields:
 
     def test_unknown_plural_returns_empty(self):
         resource = make_resource('unknowntype', spec={'foo': 'bar'})
-        assert format_spec_fields(resource) == []
+        assert format_spec_fields(resource) == ['foo: bar']
+
+    def test_uses_projected_display_fields_when_available(self):
+        resource = make_resource('captureproxies', spec={
+            'listenPort': 9201, 'podReplicas': 2, 'internetFacing': True,
+        })
+        resource.display_fields = ['podReplicas', 'listenPort']
+        assert format_spec_fields(resource) == ['podReplicas: 2', 'listenPort: 9201']
+
+    def test_hides_static_fields_that_have_config_diffs(self):
+        resource = make_resource('kafkaconfigs', spec={
+            'type': 'strimzi',
+            'clusterName': 'default',
+            'authType': 'none',
+            'listenerName': 'plain',
+        })
+        resource.display_fields = ['type', 'clusterName', 'authType', 'listenerName']
+        resource.config_diff = {
+            'fields': [
+                {'path': 'authType', 'values': {}},
+                {'path': 'listenerName', 'values': {}},
+            ],
+        }
+
+        assert format_spec_fields(resource) == ['type: strimzi', 'clusterName: default']
+
+    def test_projected_resource_without_display_fields_uses_concise_defaults(self):
+        resource = make_resource('snapshotmigrations', spec={
+            'metadataMigrationAllowLooseVersionMatching': True,
+            'metadataMigrationOtelMetricsCollectorEndpoint': 'http://otel-collector:4317',
+            'documentBackfillPodReplicas': 1,
+            'documentBackfillDocumentsPerBulkRequest': 2147483647,
+            'sourceVersion': 'ES 7.10',
+            'sourceLabel': 'source',
+        })
+        resource.config_presence = {'deployed': True, 'submitted': True}
+
+        assert format_spec_fields(resource) == [
+            'documentBackfillPodReplicas: 1',
+            'sourceVersion: ES 7.10',
+        ]
+
+
+class TestConfigOverlays:
+    def test_attaches_pending_and_to_submit_values(self):
+        resource = make_resource(
+            'kafkaclusters',
+            name='default',
+            spec={'version': '3.6.0', 'auth': {'type': 'none'}},
+        )
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='kafkaclusters', display_name='Buffer', resources=[resource])
+        ])]
+
+        submitted = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'version': '3.7.0', 'auth': {'type': 'none'}},
+        }]}
+        pending = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'version': '3.8.0', 'auth': {'type': 'none'}},
+        }]}
+
+        apply_config_overlays(sections, submitted, pending)
+
+        assert resource.config_diff['has_submitted_changes'] is True
+        assert resource.config_diff['has_pending_submit_changes'] is True
+        assert format_config_diff_fields(resource) == [
+            'version: deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0'
+        ]
+        assert format_config_diff_fields(resource, 'pendingSubmit') == ['version: to-submit=3.8.0']
+
+    def test_adds_virtual_resource_from_saved_config(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {'podReplicas': 2, 'speedupFactor': 1.5},
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        replay_group = group_by_plural(sections, 'trafficreplays')
+        assert len(replay_group.resources) == 1
+        resource = replay_group.resources[0]
+        assert resource.name == 'replay-new'
+        assert resource.phase == 'Pending Config'
+        assert resource.config_presence == {'deployed': False, 'pending': True}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
+        assert 'podReplicas: deployed=<absent> | pending=<absent> | to-submit=2' in format_config_diff_fields(resource)
+
+    def test_adds_virtual_captured_traffic_as_kafka_peer(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [
+            {
+                'kind': 'CapturedTraffic',
+                'name': 'cap-topic',
+                'parameters': {
+                    'kafkaClusterName': 'default',
+                    'topicName': 'aa',
+                },
+            },
+            {
+                'kind': 'KafkaCluster',
+                'name': 'default',
+                'parameters': {
+                    'version': '4.0.0',
+                    'auth': {'type': 'none'},
+                },
+            },
+        ]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        buffer_group = group_by_plural(sections, 'kafkaconfigs')
+        assert [resource.name for resource in buffer_group.resources] == ['cap-topic', 'default']
+        topic = next(resource for resource in buffer_group.resources if resource.name == 'cap-topic')
+        assert format_config_diff_fields(topic, CONFIG_MODE_PENDING_SUBMIT) == [
+            'kafkaClusterName: to-submit=default',
+            'topicName: to-submit=aa',
+        ]
+
+    def test_adds_virtual_snapshot_migration_from_saved_config(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'SnapshotMigration',
+            'name': 'snapshot migration: source -> target',
+            'parameters': {
+                'fromSource': 'source',
+                'toTarget': 'target',
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        backfill_group = group_by_plural(sections, 'snapshotmigrations')
+        assert len(backfill_group.resources) == 1
+        resource = backfill_group.resources[0]
+        assert resource.name == 'snapshot migration: source -> target'
+        assert resource.phase == 'Pending Config'
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is False
+        assert format_config_diff_fields(resource) == [
+            'fromSource: deployed=<absent> | pending=<absent> | to-submit=source',
+            'toTarget: deployed=<absent> | pending=<absent> | to-submit=target',
+        ]
+
+    def test_deployed_snapshot_migration_config_diff_uses_concise_defaults(self):
+        sections = _build_tree_from_raw({
+            'snapshotmigrations': [
+                make_cr('snapshotmigrations', 'migration-0', 'Pending', spec={
+                    'metadataMigrationAllowLooseVersionMatching': True,
+                    'metadataMigrationOtelMetricsCollectorEndpoint': 'http://otel-collector:4317',
+                    'documentBackfillPodReplicas': 1,
+                    'documentBackfillDocumentsPerBulkRequest': 2147483647,
+                    'sourceVersion': 'ES 7.10',
+                    'sourceLabel': 'source',
+                }),
+            ],
+        })
+        submitted = {'resources': [{
+            'kind': 'SnapshotMigration',
+            'name': 'migration-0',
+            'parameters': {},
+        }]}
+
+        apply_config_overlays(sections, submitted_resolved_config=submitted)
+
+        resource = group_by_plural(sections, 'snapshotmigrations').resources[0]
+        lines = format_config_diff_fields(resource)
+        assert lines == [
+            'documentBackfillPodReplicas: deployed=1 | pending=<absent> | to-submit=<absent>',
+            'sourceVersion: deployed=ES 7.10 | pending=<absent> | to-submit=<absent>',
+        ]
+
+    def test_hides_pending_only_defaulted_and_generated_fields(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {
+                'dependsOn': ['capture'],
+                'podReplicas': 1,
+                'speedupFactor': 2,
+            },
+            'parameterProvenance': {
+                'dependsOn': {'path': ['dependsOn'], 'presence': 'generated', 'value': ['capture']},
+                'podReplicas': {'path': ['podReplicas'], 'presence': 'defaulted', 'value': 1, 'defaultValue': 1},
+                'speedupFactor': {'path': ['speedupFactor'], 'presence': 'authored', 'value': 2},
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        resource = group_by_plural(sections, 'trafficreplays').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'speedupFactor: deployed=<absent> | pending=<absent> | to-submit=2'
+        ]
+        assert resource_config_change_summary(sections)['to_submit'] == 1
+
+    def test_counts_default_only_pending_resource_as_to_submit(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [{
+            'kind': 'TrafficReplay',
+            'name': 'replay-new',
+            'parameters': {'podReplicas': 1},
+            'parameterProvenance': {
+                'podReplicas': {'path': ['podReplicas'], 'presence': 'defaulted', 'value': 1, 'defaultValue': 1},
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        resource = group_by_plural(sections, 'trafficreplays').resources[0]
+        assert format_config_diff_fields(resource) == []
+        assert resource_config_change_summary(sections) == {'pending': 0, 'to_submit': 1, 'resources': 1}
+
+    def test_adds_partial_loose_resource_and_clears_not_configured_placeholder(self):
+        sections = _build_tree_from_raw({})
+        capture_group = group_by_plural(sections, 'captureproxies')
+        capture_group.not_configured = True
+        pending = {'resources': [{
+            'kind': 'CaptureProxy',
+            'name': 'capture-new',
+            'parameters': {'dependsOn': ['capture-new-topic']},
+            'diagnostics': [{
+                'severity': 'required',
+                'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+                'message': 'Invalid input: expected object, received undefined',
+            }],
+        }]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert capture_group.not_configured is False
+        assert len(capture_group.resources) == 1
+        resource = capture_group.resources[0]
+        assert resource.name == 'capture-new'
+        assert resource.phase == 'Pending Config'
+        assert resource.diagnostics == [{
+            'severity': 'required',
+            'path': ['traffic', 'proxies', 'capture-new', 'proxyConfig'],
+            'message': 'Invalid input: expected object, received undefined',
+        }]
+        assert format_resource_diagnostics(resource) == [{
+            'severity': 'required',
+            'label': (
+                'required: traffic.proxies.capture-new.proxyConfig: '
+                'Invalid input: expected object, received undefined'
+            ),
+        }]
+
+    def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        pending = {'resources': []}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        assert resource.config_presence == {'deployed': True, 'pending': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_PENDING_SUBMIT) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=2 | to-submit=<absent>'
+        ]
+
+    def test_existing_resource_absent_from_submitted_config_is_marked_for_delete(self):
+        resource = make_resource('trafficreplays', name='replay-old', spec={'podReplicas': 2})
+        sections = [ResourceSection(name='Live Traffic Migration', groups=[
+            ResourceGroup(plural='trafficreplays', display_name='Replay', resources=[resource])
+        ])]
+        submitted = {'resources': []}
+
+        apply_config_overlays(sections, submitted_resolved_config=submitted)
+
+        assert resource.config_presence == {'deployed': True, 'submitted': False}
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_DEPLOYED) is True
+        assert resource_visible_in_config_mode(resource, CONFIG_MODE_CURRENT_WORKFLOW) is False
+        assert format_config_diff_fields(resource) == [
+            'podReplicas: deployed=2 | pending=<absent> | to-submit=<absent>'
+        ]
+
+    def test_adds_virtual_source_config_from_console_resources(self):
+        sections = _build_tree_from_raw({})
+        submitted_console = {'sources': [{
+            'refName': 'legacy',
+            'clientConfig': {'endpoint': 'https://old.example.com', 'allow_insecure': False},
+        }]}
+        pending_console = {'sources': [{
+            'refName': 'legacy',
+            'clientConfig': {'endpoint': 'https://new.example.com', 'allow_insecure': False},
+        }]}
+
+        apply_config_overlays(
+            sections,
+            submitted_console_config=submitted_console,
+            pending_console_config=pending_console,
+        )
+
+        config_section = sections[0]
+        assert config_section.name == 'Sources'
+        source_group = group_by_plural(sections, 'sourceconfigs')
+        resource = source_group.resources[0]
+        assert resource.name == 'legacy'
+        assert resource.plural == 'sourceconfigs'
+        assert format_config_diff_fields(resource) == [
+            'endpoint: deployed=<absent> | pending=https://old.example.com | to-submit=https://new.example.com'
+        ]
+
+    def test_managed_kafka_changes_stay_on_kafka_cluster_resource(self):
+        sections = _build_tree_from_raw({})
+        deployed_console = {'kafkas': [{
+            'refName': 'default',
+            'runtime': {
+                'type': 'strimzi',
+                'clusterName': 'default',
+                'authType': 'none',
+                'listenerName': 'plain',
+            },
+        }]}
+        pending = {'resources': [{
+            'kind': 'KafkaCluster',
+            'name': 'default',
+            'parameters': {'auth': {'type': 'scram-sha-512'}},
+            'parameterProvenance': {
+                'auth.type': {
+                    'sourcePath': ['traffic', 'kafkaClusters', 'default', 'autoCreate', 'auth', 'type'],
+                    'presence': 'authored',
+                },
+            },
+        }]}
+
+        apply_config_overlays(
+            sections,
+            deployed_console_config=deployed_console,
+            pending_resolved_config=pending,
+        )
+
+        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'type: deployed=<absent> | pending=<absent> | to-submit=scram-sha-512',
+        ]
+        assert format_config_diff_fields(resource, CONFIG_MODE_PENDING_SUBMIT) == [
+            'type: to-submit=scram-sha-512',
+        ]
+
+    def test_external_kafka_config_remains_virtual_connection(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'kafkas': [{
+            'refName': 'external',
+            'runtime': {
+                'type': 'direct',
+                'clientConfig': {
+                    'broker_endpoints': 'broker.example.com:9093',
+                    'scram': {'username': 'migration-app'},
+                },
+                'secretName': 'external-user',
+                'caSecretName': 'external-ca',
+            },
+            'displayFields': ['type', 'clientConfig.broker_endpoints', 'secretName', 'caSecretName'],
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'kafkaconfigs').resources[0]
+        assert resource.name == 'external'
+        assert resource.phase == 'Pending Config'
+        assert format_config_diff_fields(resource) == [
+            'type: deployed=<absent> | pending=<absent> | to-submit=direct',
+            'broker_endpoints: deployed=<absent> | pending=<absent> | to-submit=broker.example.com:9093',
+            'secretName: deployed=<absent> | pending=<absent> | to-submit=external-user',
+            'caSecretName: deployed=<absent> | pending=<absent> | to-submit=external-ca',
+        ]
+
+    def test_virtual_source_config_labels_use_authored_config_paths(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {
+                'allow_insecure': True,
+                'basic_auth': {'k8s_secret_name': 'source-creds'},
+            },
+            'parameterProvenance': {
+                'allow_insecure': {
+                    'path': ['allow_insecure'],
+                    'value': True,
+                    'presence': 'authored',
+                    'sourcePath': ['sourceClusters', 'source', 'allowInsecure'],
+                },
+                'basic_auth.k8s_secret_name': {
+                    'path': ['basic_auth', 'k8s_secret_name'],
+                    'value': 'source-creds',
+                    'presence': 'authored',
+                    'sourcePath': ['sourceClusters', 'source', 'authConfig', 'basic', 'secretName'],
+                },
+            },
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'allowInsecure: deployed=<absent> | pending=<absent> | to-submit=true',
+            'authConfig.basic.secretName: deployed=<absent> | pending=<absent> | to-submit=source-creds',
+        ]
+
+    def test_virtual_source_config_shows_required_diagnostic_path_as_field(self):
+        sections = _build_tree_from_raw({})
+        pending_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {
+                'allow_insecure': False,
+                'version': 'ES 7.10',
+            },
+            'diagnostics': [{
+                'severity': 'required',
+                'path': ['sourceClusters', 'source', 'endpoint'],
+                'message': (
+                    'Source endpoint is required because snapshotMigrationConfigs[0], '
+                    'traffic.proxies.cap references this source.'
+                ),
+            }],
+        }]}
+
+        apply_config_overlays(sections, pending_console_config=pending_console)
+
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
+        assert format_config_diff_fields(resource) == [
+            'endpoint: deployed=<absent> | pending=<absent> | to-submit=<absent>',
+            'allow_insecure: deployed=<absent> | pending=<absent> | to-submit=false',
+            'version: deployed=<absent> | pending=<absent> | to-submit=ES 7.10',
+        ]
+        assert format_resource_diagnostics(resource) == [{
+            'severity': 'required',
+            'label': (
+                'required: sourceClusters.source.endpoint: Source endpoint is required because '
+                'snapshotMigrationConfigs[0], traffic.proxies.cap references this source.'
+            ),
+        }]
+        assert resource_config_change_summary(sections) == {'pending': 0, 'to_submit': 1, 'resources': 1}
+
+    def test_virtual_source_config_shows_partial_consumer_adoption(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [
+                make_cr('captureproxies', 'cap', 'Ready', status={'configChecksum': 'new'}),
+                make_cr('captureproxies', 'c2', 'Ready', status={'configChecksum': 'old'}),
+            ],
+        })
+        deployed_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {'endpoint': 'https://new.example.com'},
+            'consumers': [
+                {'kind': 'CaptureProxy', 'name': 'cap', 'configChecksum': 'new'},
+                {'kind': 'CaptureProxy', 'name': 'c2', 'configChecksum': 'new'},
+            ],
+        }]}
+
+        apply_config_overlays(sections, deployed_console_config=deployed_console)
+
+        source_group = group_by_plural(sections, 'sourceconfigs')
+        resource = source_group.resources[0]
+        assert resource.phase == 'Deployed Config'
+        assert resource.config_presence == {'deployed': True}
+        assert resource.virtual_adoption['status'] == 'partial'
+        assert format_rollout_status_suffix(resource.virtual_adoption['status']) == ' (rollout partial)'
+
+    def test_virtual_source_config_prioritizes_errored_consumers(self):
+        sections = _build_tree_from_raw({
+            'captureproxies': [
+                make_cr('captureproxies', 'cap', 'Ready', status={'configChecksum': 'new'}),
+                make_cr('captureproxies', 'c2', 'Error', status={'configChecksum': 'old'}),
+            ],
+        })
+        deployed_console = {'sources': [{
+            'refName': 'source',
+            'clientConfig': {'endpoint': 'https://new.example.com'},
+            'consumers': [
+                {'kind': 'CaptureProxy', 'name': 'cap', 'configChecksum': 'new'},
+                {'kind': 'CaptureProxy', 'name': 'c2', 'configChecksum': 'new'},
+            ],
+        }]}
+
+        apply_config_overlays(sections, deployed_console_config=deployed_console)
+
+        resource = group_by_plural(sections, 'sourceconfigs').resources[0]
+        assert resource.virtual_adoption['status'] == 'error'
+        assert format_rollout_status_suffix(resource.virtual_adoption['status']) == ' (rollout error)'
 
 
 # --- format_live_status ---
+
+class TestFormatDependencyLine:
+    def test_pending_dependency_renders_waiting_for(self):
+        resource = make_resource(
+            'datasnapshots',
+            phase='Pending',
+            depends_on=['cap'],
+        )
+        resource.dependency_states = [
+            {'name': 'cap', 'phase': 'Pending', 'plural': 'captureproxies'}
+        ]
+
+        assert format_dependency_line(resource) == 'Waiting for: cap (Pending)'
+
+    def test_ready_dependency_is_not_rendered_as_blocking(self):
+        resource = make_resource(
+            'captureproxies',
+            phase='Pending',
+            depends_on=['cap-topic'],
+        )
+        resource.dependency_states = [
+            {'name': 'cap-topic', 'phase': 'Ready', 'plural': 'capturedtraffics'}
+        ]
+
+        assert format_dependency_line(resource) is None
+
+    def test_unknown_dependency_keeps_depends_on_label(self):
+        resource = make_resource(
+            'datasnapshots',
+            phase='Pending',
+            depends_on=['cap'],
+        )
+
+        assert format_dependency_line(resource) == 'Depends on: cap'
+
+
+class TestFormatApprovalGateLine:
+    def test_approval_target_ref_parses_vapretry_gate_name(self):
+        node = {
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'capturedtraffic.cap-topic.vapretry'}]},
+        }
+
+        assert approval_target_ref(node) == ('capturedtraffics', 'cap-topic')
+
+    def test_running_approval_renders_blocked_reason(self):
+        resource = make_resource('captureproxies', name='cap', phase='Error')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CaptureProxy: cap',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'denial_reason': 'Impossible: listenPort cannot be changed.',
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'captureproxy.cap.vapretry'}]},
+            'children': [],
+        }]
+
+        assert format_approval_gate_line(resource) == 'BLOCKED: Impossible: listenPort cannot be changed.'
+
+    def test_running_approval_for_different_resource_is_ignored(self):
+        resource = make_resource('captureproxies', name='cap', phase='Error')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CapturedTraffic: cap-topic',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'denial_reason': 'Impossible: kafkaBrokers cannot be changed.',
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'capturedtraffic.cap-topic.vapretry'}]},
+            'children': [],
+        }]
+
+        assert active_approval_node(resource) is None
+        assert format_approval_gate_line(resource) is None
+
+    def test_running_approval_without_reason_renders_required(self):
+        resource = make_resource('captureproxies', name='cap', phase='Pending')
+        resource.workflow_progress = [{
+            'id': 'gate-1',
+            'display_name': 'CaptureProxy: cap',
+            'phase': 'Running',
+            'type': 'Pod',
+            'is_approval': True,
+            'inputs': {'parameters': [{'name': 'resourceName', 'value': 'captureproxy.cap.vapretry'}]},
+            'children': [],
+        }]
+
+        assert format_approval_gate_line(resource) == 'BLOCKED: approval required'
+
 
 class TestFormatLiveStatus:
     def test_backfill_running_shows_progress(self):
@@ -316,10 +939,9 @@ class TestMarkNotConfiguredGroups:
             {'display_name': 'createProxy', 'phase': 'Skipped'},
         ]
         mark_not_configured_groups(sections, filtered_tree)
-        # kafkaclusters and captureproxies should be marked
-        live_section = sections[1]
-        capture_group = next(g for g in live_section.groups if g.plural == 'captureproxies')
-        kafka_group = next(g for g in live_section.groups if g.plural == 'kafkaclusters')
+        # Buffer and captureproxies should be marked
+        capture_group = group_by_plural(sections, 'captureproxies')
+        kafka_group = group_by_plural(sections, 'kafkaconfigs')
         assert capture_group.not_configured is True
         assert kafka_group.not_configured is True
 
@@ -327,8 +949,7 @@ class TestMarkNotConfiguredGroups:
         sections = _build_tree_from_raw({})
         filtered_tree = [{'display_name': 'createKafka', 'phase': 'Running'}]
         mark_not_configured_groups(sections, filtered_tree)
-        live_section = sections[1]
-        kafka_group = next(g for g in live_section.groups if g.plural == 'kafkaclusters')
+        kafka_group = group_by_plural(sections, 'kafkaconfigs')
         assert kafka_group.not_configured is False
 
     def test_empty_filtered_tree_no_op(self):

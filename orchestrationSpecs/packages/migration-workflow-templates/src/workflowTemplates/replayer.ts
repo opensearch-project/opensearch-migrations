@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {Buffer} from "node:buffer";
 import {
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, ARGO_REPLAYER_WORKFLOW_OPTION_KEYS, KAFKA_CLIENT_CONFIG,
@@ -46,6 +47,15 @@ const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.prop
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const REPLAYER_APP_LABEL = "replayer";
 const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
+
+function base64(value: string): string {
+    return Buffer.from(value, "utf8").toString("base64");
+}
+
+const KAFKA_CLIENT_PROPERTIES_WITH_CA_BASE64 = base64([
+    "ssl.truststore.type=PEM",
+    `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
+].join("\n"));
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -143,16 +153,25 @@ function makeReplayerParamsDict(
     );
 }
 
-function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
+function hasKafkaCaSecret(caSecretName: BaseExpression<string>) {
+    return expr.and(
+        expr.not(expr.isEmpty(caSecretName)),
+        expr.not(expr.equals(caSecretName, expr.literal("empty"))),
+    );
+}
+
+function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>, caSecretName: BaseExpression<string>) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name},
         data: {
-            "client.properties": [
-                "ssl.truststore.type=PEM",
-                `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
-            ].join("\n")
+            "client.properties": makeStringTypeProxy(expr.ternary(
+                hasKafkaCaSecret(caSecretName),
+                // Argo expr parsing rejects newline escapes inside quoted literals here.
+                expr.fromBase64(expr.literal(KAFKA_CLIENT_PROPERTIES_WITH_CA_BASE64)),
+                expr.literal(""),
+            )),
         }
     };
 }
@@ -187,6 +206,7 @@ function getReplayerDeploymentManifest
     taskK8sLabel: BaseExpression<string>,
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
+    const hasCaSecret = hasKafkaCaSecret(args.kafkaCaSecretName);
     const baseContainerDefinition = {
         name: CONTAINER_NAMES.REPLAYER,
         image: makeStringTypeProxy(args.replayerImageName),
@@ -235,7 +255,7 @@ function getReplayerDeploymentManifest
                         name: "kafka-ca",
                         secret: {
                             secretName: makeStringTypeProxy(args.kafkaCaSecretName),
-                            optional: makeDirectTypeProxy(expr.not(isScramAuth))
+                            optional: makeDirectTypeProxy(expr.not(hasCaSecret))
                         }
                     }
                 ]},
@@ -401,11 +421,12 @@ export const Replayer = replayerBaseBuilder
   .addTemplate("createKafkaClientPropertiesConfigMap", (t) =>
     t
       .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("caSecretName", typeToken<string>())
       .addResourceTask((b) =>
         b.setDefinition({
           action: "apply",
           setOwnerReference: false,
-          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
+          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name, b.inputs.caSecretName)
         }),
       )
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY),
@@ -448,6 +469,8 @@ export const Replayer = replayerBaseBuilder
           expr.getLoose(kafkaConfig, "authType"),
         );
         const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+        const kafkaCaSecretName = expr.dig(kafkaConfig, ["caSecretName"], expr.literal(""));
+        const shouldUseKafkaCaSecret = expr.and(shouldUseScramAuth, expr.not(expr.isEmpty(kafkaCaSecretName)));
         const kafkaAuthConfigMapName = expr.concat(
           b.inputs.name,
           expr.literal("-kafka-auth"),
@@ -461,6 +484,11 @@ export const Replayer = replayerBaseBuilder
             (c) =>
               c.register({
                 name: kafkaAuthConfigMapName,
+                caSecretName: expr.ternary(
+                  shouldUseKafkaCaSecret,
+                  kafkaCaSecretName,
+                  expr.literal("empty"),
+                ),
               }),
           )
           .addStep("waitForKafkaAuthSecret", ResourceManagement, "waitForSecretKey", (c) =>
@@ -490,8 +518,8 @@ export const Replayer = replayerBaseBuilder
                 expr.literal("empty"),
               ),
               kafkaCaSecretName: expr.ternary(
-                shouldUseScramAuth,
-                expr.getLoose(kafkaConfig, "caSecretName"),
+                shouldUseKafkaCaSecret,
+                kafkaCaSecretName,
                 expr.literal("empty"),
               ),
               ownerUid: b.inputs.ownerUid,

@@ -1,5 +1,6 @@
 """Tests for script runner service."""
 
+import subprocess
 import pytest
 import tempfile
 from pathlib import Path
@@ -55,6 +56,7 @@ class TestScriptRunner:
         assert "workflow_name" in result
         assert result["workflow_name"].startswith("test-workflow-")
         assert "workflow_uid" in result
+        assert "--quiet" in mock_run.call_args[0][0]
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     def test_submit_workflow_custom_namespace(self, mock_run):
@@ -78,6 +80,41 @@ class TestScriptRunner:
 
         assert result["namespace"] == namespace
         assert "workflow_name" in result
+        assert "--quiet" in mock_run.call_args[0][0]
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_can_request_verbose_script_output(self, mock_run):
+        """Verbose submit keeps the generated resource handler output visible."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-xyz", "workflow_uid": "uid-456", "namespace": "ma"}'
+        )
+
+        runner = ScriptRunner()
+
+        runner.submit_workflow("sourceClusters: {}", ["--workflow-name", "migration-workflow"], quiet=False)
+
+        assert "--quiet" not in mock_run.call_args[0][0]
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_failure_includes_stderr(self, mock_run):
+        """Failed submit scripts should surface stderr instead of a bare CalledProcessError."""
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1,
+            ["createMigrationWorkflowFromUserConfiguration.sh", "/tmp/config.yaml"],
+            output="Running configuration conversion...",
+            stderr="Error: missing required workflow value",
+        )
+
+        runner = ScriptRunner()
+
+        with pytest.raises(RuntimeError) as exc_info:
+            runner.submit_workflow("sourceClusters: {}", ["--workflow-name", "migration-workflow"])
+
+        message = str(exc_info.value)
+        assert "Workflow submit script failed with exit code 1" in message
+        assert "Error: missing required workflow value" in message
+        assert "stdout: Running configuration conversion..." in message
 
     def test_script_not_found(self):
         """Test error handling when script doesn't exist."""

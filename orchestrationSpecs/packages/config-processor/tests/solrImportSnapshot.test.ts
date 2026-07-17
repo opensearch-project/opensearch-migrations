@@ -356,6 +356,6 @@ describe("Solr backup snapshotInfo paths", () => {
         }
         expect(threw).toBeInstanceOf(Error);
         expect(String((threw as Error).message ?? threw))
-            .toMatch(/Unrecognized keys.*mode/);
+            .toMatch(/Unrecognized key 'mode'/);
     });
 });

@@ -1,12 +1,27 @@
 import {
     ARGO_MIGRATION_CONFIG_PRE_ENRICH,
     collectProjectedFields,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     ProjectedField,
 } from "@opensearch-migrations/schemas";
 import {createHash} from "crypto";
 import {z} from "zod";
 import {crdName} from "./crdNaming";
 import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
+import {validationForConfig} from "./editConfig";
+import type {EditDiagnostic} from "./schemaEditModel";
+import type {ConsoleResources} from "./consoleResources";
+import {
+    KAFKA_VERSION,
+    kafkaClusterNameForReference,
+    looseKafkaEntriesForConfig,
+} from "./kafkaConfigResolution";
+import {
+    CLUSTER_CLIENT_DISPLAY_FIELDS,
+    KAFKA_CONFIG_DISPLAY_FIELDS,
+    displayFieldsForProjectedKind,
+} from "./resourceDisplayFields";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -22,24 +37,51 @@ export type ResolvedParameterPolicy = Pick<
     "specPath" | "sourceSchema" | "sourcePath" | "changeRestriction" | "checksumFor" | "invariant"
 >;
 
+export type ResolvedParameterPresence = "authored" | "defaulted" | "generated" | "inherited" | "unknown";
+
+export interface ResolvedParameterProvenance {
+    path: string[];
+    value: unknown;
+    presence: ResolvedParameterPresence;
+    sourcePath?: string[];
+    defaultValue?: unknown;
+}
+
+export type ResolvedParameterProvenanceMap = Record<string, ResolvedParameterProvenance>;
+
 export interface ResolvedMigrationResource {
     apiVersion: string;
     kind: string;
     name: string;
     parameters: Record<string, unknown>;
     annotations?: Record<string, string>;
+    displayFields?: string[];
     parameterPolicies?: ResolvedParameterPolicy[];
+    parameterProvenance?: ResolvedParameterProvenanceMap;
+    projectionComplete?: boolean;
+    diagnostics?: EditDiagnostic[];
 }
 
 export interface ResolvedMigrationResources {
     formatVersion: 1;
     workflowName?: string;
-    workflowConfig: WorkflowConfig;
+    workflowConfig?: WorkflowConfig;
     resources: ResolvedMigrationResource[];
+    projectionMode?: "strict" | "loose";
+    projectionComplete?: boolean;
+    validation?: {
+        mode: "strict" | "loose";
+        valid: boolean;
+        errors: string[];
+        diagnostics?: EditDiagnostic[];
+    };
+    consoleResources?: ConsoleResources;
 }
 
 export interface ResolvedMigrationResourcesOptions {
     includeParameterPolicies?: boolean;
+    includeParameterProvenance?: boolean;
+    sourceConfig?: unknown;
 }
 
 export interface VapDryRunChange {
@@ -116,6 +158,28 @@ function getPath(source: Record<string, unknown>, path: string[]): unknown {
 
 function stableEqual(left: unknown, right: unknown): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function pathKey(path: string[]): string {
+    return path.join(".");
+}
+
+function samePath(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((part, index) => part === right[index]);
+}
+
+function leafPaths(value: unknown, prefix: string[] = []): string[][] {
+    if (Array.isArray(value)) {
+        return prefix.length ? [prefix] : [];
+    }
+    if (typeof value !== "object" || value === null) {
+        return prefix.length ? [prefix] : [];
+    }
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+        return prefix.length ? [prefix] : [];
+    }
+    return entries.flatMap(([key, child]) => leafPaths(child, [...prefix, key]));
 }
 
 // Default-less optional string fields that the apply manifests always write with an "" default
@@ -217,6 +281,13 @@ const CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS = [
     "sslTrustCertPemEnvVar",
     "requireClientAuth",
 ] as const;
+const SNAPSHOT_MIGRATION_METADATA_RESOURCE_OMITTED_FIELDS = [
+    "skipEvaluateApproval",
+    "skipMigrateApproval",
+] as const;
+const SNAPSHOT_MIGRATION_DOCUMENT_RESOURCE_OMITTED_FIELDS = [
+    "skipApproval",
+] as const;
 
 const WORKFLOW_ONLY_FIELDS_ANNOTATION = "migrations.opensearch.org/workflow-only-fields";
 const WORKFLOW_ONLY_HASH_ANNOTATION = "migrations.opensearch.org/workflow-only-hash";
@@ -226,6 +297,24 @@ function omitFields(source: Record<string, unknown>, fields: readonly string[]):
     const result = {...source};
     for (const field of fields) {
         delete result[field];
+    }
+    return result;
+}
+
+function captureProxyResourceConfig(source: Record<string, unknown>): Record<string, unknown> {
+    const result = omitFields(source, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS);
+    const tls = result.tls;
+    if (tls && typeof tls === "object" && !Array.isArray(tls)) {
+        const tlsRecord = tls as Record<string, unknown>;
+        const clientAuth = tlsRecord.clientAuth;
+        if (clientAuth && typeof clientAuth === "object" && !Array.isArray(clientAuth)) {
+            const clientAuthRecord = {...clientAuth as Record<string, unknown>};
+            delete clientAuthRecord.consoleClientSecretName;
+            result.tls = {
+                ...tlsRecord,
+                clientAuth: clientAuthRecord,
+            };
+        }
     }
     return result;
 }
@@ -290,16 +379,22 @@ function resource(
     parameters: Record<string, unknown>,
     options: ResolvedMigrationResourcesOptions = {},
     annotations?: Record<string, string>,
+    parameterProvenance?: ResolvedParameterProvenanceMap,
 ): ResolvedMigrationResource {
     const normalizedParameters = removeUndefined(parameters) as Record<string, unknown>;
+    const displayFields = displayFieldsForProjectedKind(kind, normalizedParameters);
     return {
         apiVersion: CRD_API_VERSION,
         kind,
         name,
         parameters: normalizedParameters,
         ...(annotations === undefined ? {} : {annotations}),
+        ...(displayFields ? {displayFields} : {}),
         ...(options.includeParameterPolicies
             ? {parameterPolicies: resourcePolicies(kind, normalizedParameters)}
+            : {}),
+        ...(parameterProvenance && Object.keys(parameterProvenance).length > 0
+            ? {parameterProvenance}
             : {}),
     };
 }
@@ -360,8 +455,7 @@ function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
             proxy.sourceConnectionIdentity as Record<string, unknown>,
             {includeVersion: true}
         ),
-        serviceType: proxy.proxyConfig.serviceType,
-        ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
+        ...captureProxyResourceConfig(proxy.proxyConfig as Record<string, unknown>),
         dependsOn: [`${proxy.name}-topic`],
     };
 }
@@ -406,13 +500,27 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
             ? snapshotNameResolution.externalSnapshotName
             : "";
     const repo = migration.snapshotConfig.repoConfig as Record<string, unknown>;
+    const metadataMigrationConfig = migration.metadataMigrationConfig
+        ? omitFields(
+            withEmptyStringDefaults(
+                migration.metadataMigrationConfig as Record<string, unknown>,
+                METADATA_EMPTY_STRING_DEFAULT_FIELDS
+            ),
+            SNAPSHOT_MIGRATION_METADATA_RESOURCE_OMITTED_FIELDS
+        )
+        : undefined;
+    const documentBackfillConfig = migration.documentBackfillConfig
+        ? omitFields(
+            withEmptyStringDefaults(
+                migration.documentBackfillConfig as Record<string, unknown>,
+                DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS
+            ),
+            SNAPSHOT_MIGRATION_DOCUMENT_RESOURCE_OMITTED_FIELDS
+        )
+        : undefined;
     return {
-        ...prefixFields("metadataMigration", migration.metadataMigrationConfig
-            ? withEmptyStringDefaults(migration.metadataMigrationConfig as Record<string, unknown>, METADATA_EMPTY_STRING_DEFAULT_FIELDS)
-            : undefined),
-        ...prefixFields("documentBackfill", migration.documentBackfillConfig
-            ? withEmptyStringDefaults(migration.documentBackfillConfig as Record<string, unknown>, DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS)
-            : undefined),
+        ...prefixFields("metadataMigration", metadataMigrationConfig),
+        ...prefixFields("documentBackfill", documentBackfillConfig),
         dependsOn: dataSnapshotResourceName ? [dataSnapshotResourceName] : [],
         migrationLabel: migration.migrationLabel,
         ...connectionIdentityParameters(
@@ -448,6 +556,273 @@ function trafficReplayParameters(replay: ReplayConfig): Record<string, unknown> 
     };
 }
 
+function kafkaClusterParameterProvenance(
+    kafkaCluster: KafkaClusterConfig,
+    parameters: Record<string, unknown>,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const kafka = userKafkaRecord(options, kafkaCluster.name);
+    const result: ResolvedParameterProvenanceMap = {};
+    setParameterProvenance(
+        result,
+        parameters,
+        ["version"],
+        "defaulted",
+        ["traffic", "kafkaClusters", kafkaCluster.name, "autoCreate"],
+    );
+    setParameterProvenance(
+        result,
+        parameters,
+        ["auth", "type"],
+        hasPath(kafka, ["autoCreate", "auth", "type"]) ? "authored" : "defaulted",
+        ["traffic", "kafkaClusters", kafkaCluster.name, "autoCreate", "auth", "type"],
+    );
+    for (const path of [
+        ["nodePool", "replicas"],
+        ["nodePool", "roles"],
+        ["nodePool", "storage", "size"],
+        ["nodePool", "storage", "type"],
+    ]) {
+        const sourcePath = ["autoCreate", "nodePoolSpecOverrides", ...path.slice(1)];
+        setParameterProvenance(
+            result,
+            parameters,
+            path,
+            hasPath(kafka, sourcePath) ? "authored" : "defaulted",
+            ["traffic", "kafkaClusters", kafkaCluster.name, ...sourcePath],
+        );
+    }
+    return result;
+}
+
+function capturedTrafficParameterProvenance(
+    sourceName: string,
+    source: Record<string, unknown>,
+    sourceBasePath: string[],
+    parameters: Record<string, unknown>,
+    kafkaName: string,
+    options: ResolvedMigrationResourcesOptions,
+    extraGeneratedPaths: string[][] = [],
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const result: ResolvedParameterProvenanceMap = {};
+    setParameterProvenance(result, parameters, ["dependsOn"], "generated");
+    setParameterProvenance(
+        result,
+        parameters,
+        ["kafkaClusterName"],
+        hasPath(source, ["kafka"]) ? "authored" : "defaulted",
+        [...sourceBasePath, "kafka"],
+    );
+    setParameterProvenance(
+        result,
+        parameters,
+        ["topicName"],
+        asString(source.kafkaTopic) ? "authored" : "defaulted",
+        [...sourceBasePath, "kafkaTopic"],
+    );
+    for (const path of [["partitions"], ["replicas"], ["topicConfig"]]) {
+        const sourcePath = ["autoCreate", "topicSpecOverrides", path[0] === "topicConfig" ? "config" : path[0]];
+        setParameterProvenance(
+            result,
+            parameters,
+            path,
+            hasPath(userKafkaRecord(options, kafkaName), sourcePath) ? "authored" : "defaulted",
+            ["traffic", "kafkaClusters", kafkaName, ...sourcePath],
+        );
+    }
+    for (const path of extraGeneratedPaths) {
+        setParameterProvenance(result, parameters, path, "generated");
+    }
+    return result;
+}
+
+function captureProxyParameterProvenance(
+    proxyName: string,
+    parameters: Record<string, unknown>,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    return provenanceFromMatchingSource(
+        parameters,
+        userProxyRecord(options, proxyName).proxyConfig,
+        ["traffic", "proxies", proxyName, "proxyConfig"],
+        [["dependsOn"]],
+    );
+}
+
+function s3CapturedTrafficParameterProvenance(
+    sourceName: string,
+    parameters: Record<string, unknown>,
+    kafkaName: string,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    const source = userS3SourceRecord(options, sourceName);
+    const provenance = capturedTrafficParameterProvenance(
+        sourceName,
+        source,
+        ["traffic", "s3Sources", sourceName],
+        parameters,
+        kafkaName,
+        options,
+        [["sourceKind"], ["loadStarted"]],
+    );
+    if (!provenance) {
+        return undefined;
+    }
+    setParameterProvenance(
+        provenance,
+        parameters,
+        ["s3SourceUri"],
+        hasPath(source, ["s3Uri"]) ? "authored" : "defaulted",
+        ["traffic", "s3Sources", sourceName, "s3Uri"],
+    );
+    return provenance;
+}
+
+function trafficReplayParameterProvenance(
+    replay: ReplayConfig,
+    parameters: Record<string, unknown>,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const entry = userReplayEntryFor(options, replay);
+    if (!entry) {
+        return buildParameterProvenance(parameters, () => ({presence: "unknown"}));
+    }
+    const [key, value] = entry;
+    return provenanceFromMatchingSource(
+        parameters,
+        value.replayerConfig,
+        ["traffic", "replayers", key, "replayerConfig"],
+        [["dependsOn"]],
+    );
+}
+
+function dataSnapshotParameterProvenance(
+    snapshot: SnapshotConfig,
+    item: SnapshotItemConfig,
+    parameters: Record<string, unknown>,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const sourceName = snapshot.sourceConfig.label;
+    const snapshotName = item.label;
+    return provenanceFromMatchingSource(
+        parameters,
+        sourceRecordAt(
+            options,
+            ["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName, "config", "createSnapshotConfig"],
+        ),
+        ["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName, "config", "createSnapshotConfig"],
+        [["dependsOn"]],
+    );
+}
+
+function unprefixedProjectionField(prefix: string, value: string): string | undefined {
+    if (!value.startsWith(prefix) || value.length === prefix.length) {
+        return undefined;
+    }
+    const suffix = value.slice(prefix.length);
+    return suffix.charAt(0).toLowerCase() + suffix.slice(1);
+}
+
+function userSnapshotMigrationItemFor(
+    options: ResolvedMigrationResourcesOptions,
+    migration: SnapshotMigrationConfig,
+): {migrationPath: string[]; migrationRecord: Record<string, unknown>; itemPath: string[]; itemRecord: Record<string, unknown>} | undefined {
+    const migrations = Array.isArray(sourceConfigRoot(options).snapshotMigrationConfigs)
+        ? sourceConfigRoot(options).snapshotMigrationConfigs as unknown[]
+        : [];
+    for (let migrationIndex = 0; migrationIndex < migrations.length; migrationIndex++) {
+        const migrationRecord = asRecord(migrations[migrationIndex]);
+        if (asString(migrationRecord.fromSource) !== migration.sourceLabel ||
+            asString(migrationRecord.toTarget) !== migration.targetConfig.label) {
+            continue;
+        }
+        const migrationPath = ["snapshotMigrationConfigs", String(migrationIndex)];
+        const items = asRecord(migrationRecord.perSnapshotConfig)[migration.label];
+        const itemList = Array.isArray(items) ? items : [items];
+        for (let itemIndex = 0; itemIndex < itemList.length; itemIndex++) {
+            const itemRecord = asRecord(itemList[itemIndex]);
+            const itemLabel = asString(itemRecord.label) ?? `migration-${itemIndex}`;
+            if (itemLabel === migration.migrationLabel) {
+                return {
+                    migrationPath,
+                    migrationRecord,
+                    itemPath: [...migrationPath, "perSnapshotConfig", migration.label, String(itemIndex)],
+                    itemRecord,
+                };
+            }
+        }
+    }
+    return undefined;
+}
+
+function snapshotMigrationParameterProvenance(
+    migration: SnapshotMigrationConfig,
+    parameters: Record<string, unknown>,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const item = userSnapshotMigrationItemFor(options, migration);
+    const result = buildParameterProvenance(parameters, parameterPath => {
+        if (samePath(parameterPath, ["dependsOn"])) {
+            return {presence: "generated"};
+        }
+        if (samePath(parameterPath, ["sourceLabel"])) {
+            return {presence: "inherited", sourcePath: item ? [...item.migrationPath, "fromSource"] : undefined};
+        }
+        if (samePath(parameterPath, ["targetLabel"])) {
+            return {presence: "inherited", sourcePath: item ? [...item.migrationPath, "toTarget"] : undefined};
+        }
+        if (samePath(parameterPath, ["snapshotLabel"])) {
+            return {presence: "inherited", sourcePath: item ? [...item.migrationPath, "perSnapshotConfig", migration.label] : undefined};
+        }
+        if (samePath(parameterPath, ["sourceVersion"])) {
+            return {presence: "inherited", sourcePath: ["sourceClusters", migration.sourceLabel, "version"]};
+        }
+        if (samePath(parameterPath, ["migrationLabel"])) {
+            const sourcePath = item ? [...item.itemPath, "label"] : undefined;
+            return {
+                presence: item && hasPath(item.itemRecord, ["label"]) ? "authored" : "defaulted",
+                sourcePath,
+            };
+        }
+        const metadataField = unprefixedProjectionField("metadataMigration", parameterPath[0]);
+        if (metadataField) {
+            const sourcePath = item ? [...item.itemPath, "metadataMigrationConfig", metadataField] : undefined;
+            return {
+                presence: item && hasPath(item.itemRecord, ["metadataMigrationConfig", metadataField]) ? "authored" : "defaulted",
+                sourcePath,
+            };
+        }
+        const documentField = unprefixedProjectionField("documentBackfill", parameterPath[0]);
+        if (documentField) {
+            const sourcePath = item ? [...item.itemPath, "documentBackfillConfig", documentField] : undefined;
+            return {
+                presence: item && hasPath(item.itemRecord, ["documentBackfillConfig", documentField]) ? "authored" : "defaulted",
+                sourcePath,
+            };
+        }
+        return {presence: "unknown"};
+    });
+    return result;
+}
+
 export function buildResolvedMigrationResourceList(
     workflowConfig: WorkflowConfig,
     options: ResolvedMigrationResourcesOptions = {},
@@ -455,36 +830,73 @@ export function buildResolvedMigrationResourceList(
     const resources: ResolvedMigrationResource[] = [];
 
     for (const kafkaCluster of workflowConfig.kafkaClusters ?? []) {
-        resources.push(resource("KafkaCluster", kafkaCluster.name, kafkaClusterParameters(kafkaCluster), options));
+        const parameters = kafkaClusterParameters(kafkaCluster);
+        resources.push(resource(
+            "KafkaCluster",
+            kafkaCluster.name,
+            parameters,
+            options,
+            undefined,
+            kafkaClusterParameterProvenance(kafkaCluster, parameters, options),
+        ));
     }
 
     for (const proxy of workflowConfig.proxies ?? []) {
-        resources.push(resource("CapturedTraffic", `${proxy.name}-topic`, capturedTrafficParameters(proxy), options));
+        const topicParameters = capturedTrafficParameters(proxy);
+        resources.push(resource(
+            "CapturedTraffic",
+            `${proxy.name}-topic`,
+            topicParameters,
+            options,
+            undefined,
+            capturedTrafficParameterProvenance(
+                proxy.name,
+                userProxyRecord(options, proxy.name),
+                ["traffic", "proxies", proxy.name],
+                topicParameters,
+                proxy.kafkaConfig.label,
+                options,
+            ),
+        ));
+        const proxyParameters = captureProxyParameters(proxy);
         resources.push(resource(
             "CaptureProxy",
             proxy.name,
-            captureProxyParameters(proxy),
+            proxyParameters,
             options,
-            captureProxyAnnotations(proxy)
+            captureProxyAnnotations(proxy),
+            captureProxyParameterProvenance(proxy.name, proxyParameters, options),
         ));
     }
 
     for (const loader of workflowConfig.s3TrafficLoaders ?? []) {
-        resources.push(resource("CapturedTraffic", `${loader.name}-topic`, s3CapturedTrafficParameters(loader), options));
+        const parameters = s3CapturedTrafficParameters(loader);
+        resources.push(resource(
+            "CapturedTraffic",
+            `${loader.name}-topic`,
+            parameters,
+            options,
+            undefined,
+            s3CapturedTrafficParameterProvenance(loader.name, parameters, loader.kafkaConfig.label, options),
+        ));
     }
 
     for (const snapshot of workflowConfig.snapshots ?? []) {
         for (const item of snapshot.createSnapshotConfig) {
+            const parameters = dataSnapshotParameters(item);
             resources.push(resource(
                 "DataSnapshot",
                 crdName(snapshot.sourceConfig.label, item.label),
-                dataSnapshotParameters(item),
+                parameters,
                 options,
+                undefined,
+                dataSnapshotParameterProvenance(snapshot, item, parameters, options),
             ));
         }
     }
 
     for (const migration of workflowConfig.snapshotMigrations ?? []) {
+        const parameters = snapshotMigrationParameters(migration);
         resources.push(resource(
             "SnapshotMigration",
             [
@@ -493,13 +905,23 @@ export function buildResolvedMigrationResourceList(
                 migration.label,
                 migration.migrationLabel,
             ].join("-"),
-            snapshotMigrationParameters(migration),
+            parameters,
             options,
+            undefined,
+            snapshotMigrationParameterProvenance(migration, parameters, options),
         ));
     }
 
     for (const replay of workflowConfig.trafficReplays ?? []) {
-        resources.push(resource("TrafficReplay", replay.name, trafficReplayParameters(replay), options));
+        const parameters = trafficReplayParameters(replay);
+        resources.push(resource(
+            "TrafficReplay",
+            replay.name,
+            parameters,
+            options,
+            undefined,
+            trafficReplayParameterProvenance(replay, parameters, options),
+        ));
     }
 
     return resources;
@@ -516,6 +938,814 @@ export function buildResolvedMigrationResources(
         workflowConfig,
         resources: buildResolvedMigrationResourceList(workflowConfig, options),
     };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return isRecord(value) ? value : {};
+}
+
+function recordEntries(value: unknown): [string, Record<string, unknown>][] {
+    if (!isRecord(value)) {
+        return [];
+    }
+    return Object.entries(value).flatMap(([key, child]) =>
+        isRecord(child) ? [[key, child] as [string, Record<string, unknown>]] : []
+    );
+}
+
+function asString(value: unknown): string | undefined {
+    return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+    return typeof value === "boolean" ? value : undefined;
+}
+
+function shouldIncludeParameterProvenance(options: ResolvedMigrationResourcesOptions): boolean {
+    return Boolean(options.includeParameterProvenance || options.sourceConfig !== undefined);
+}
+
+function provenanceEntry(
+    parameters: Record<string, unknown>,
+    parameterPath: string[],
+    presence: ResolvedParameterPresence,
+    sourcePath?: string[],
+): ResolvedParameterProvenance {
+    const value = getPath(parameters, parameterPath);
+    return {
+        path: parameterPath,
+        value,
+        presence,
+        ...(sourcePath ? {sourcePath} : {}),
+        ...(presence === "defaulted" ? {defaultValue: value} : {}),
+    };
+}
+
+function buildParameterProvenance(
+    parameters: Record<string, unknown>,
+    classifier: (parameterPath: string[]) => Pick<ResolvedParameterProvenance, "presence" | "sourcePath">,
+): ResolvedParameterProvenanceMap {
+    return Object.fromEntries(
+        leafPaths(parameters).map(parameterPath => {
+            const classification = classifier(parameterPath);
+            return [
+                pathKey(parameterPath),
+                provenanceEntry(parameters, parameterPath, classification.presence, classification.sourcePath),
+            ];
+        })
+    );
+}
+
+function provenanceFromMatchingSource(
+    parameters: Record<string, unknown>,
+    source: unknown,
+    sourceBasePath: string[],
+    generatedPaths: string[][] = [],
+): ResolvedParameterProvenanceMap {
+    const sourceRecord = asRecord(source);
+    return buildParameterProvenance(parameters, parameterPath => {
+        if (generatedPaths.some(generated => samePath(generated, parameterPath))) {
+            return {presence: "generated"};
+        }
+        const sourcePath = [...sourceBasePath, ...parameterPath];
+        return hasPath(sourceRecord, parameterPath)
+            ? {presence: "authored", sourcePath}
+            : {presence: "defaulted", sourcePath};
+    });
+}
+
+function setParameterProvenance(
+    result: ResolvedParameterProvenanceMap,
+    parameters: Record<string, unknown>,
+    parameterPath: string[],
+    presence: ResolvedParameterPresence,
+    sourcePath?: string[],
+) {
+    if (!hasPath(parameters, parameterPath)) {
+        return;
+    }
+    result[pathKey(parameterPath)] = provenanceEntry(parameters, parameterPath, presence, sourcePath);
+}
+
+function sourceConfigRoot(options: ResolvedMigrationResourcesOptions): Record<string, unknown> {
+    return asRecord(options.sourceConfig);
+}
+
+function sourceRecordAt(options: ResolvedMigrationResourcesOptions, path: string[]): Record<string, unknown> {
+    return asRecord(getPath(sourceConfigRoot(options), path));
+}
+
+function userProxyRecord(options: ResolvedMigrationResourcesOptions, proxyName: string): Record<string, unknown> {
+    return sourceRecordAt(options, ["traffic", "proxies", proxyName]);
+}
+
+function userS3SourceRecord(options: ResolvedMigrationResourcesOptions, sourceName: string): Record<string, unknown> {
+    return sourceRecordAt(options, ["traffic", "s3Sources", sourceName]);
+}
+
+function userKafkaRecord(options: ResolvedMigrationResourcesOptions, kafkaName: string): Record<string, unknown> {
+    return sourceRecordAt(options, ["traffic", "kafkaClusters", kafkaName]);
+}
+
+function userReplayEntryFor(
+    options: ResolvedMigrationResourcesOptions,
+    replay: ReplayConfig,
+): [string, Record<string, unknown>] | undefined {
+    for (const [key, value] of recordEntries(sourceRecordAt(options, ["traffic", "replayers"]))) {
+        if (key === replay.name) {
+            return [key, value];
+        }
+    }
+    return undefined;
+}
+
+function startsWithPath(path: string[] | undefined, prefix: string[]): boolean {
+    if (!path || path.length < prefix.length) {
+        return false;
+    }
+    return prefix.every((part, index) => path[index] === part);
+}
+
+function diagnosticsForPrefixes(
+    diagnostics: EditDiagnostic[] | undefined,
+    prefixes: string[][],
+): EditDiagnostic[] {
+    const result = new Map<string, EditDiagnostic>();
+    for (const diagnostic of diagnostics ?? []) {
+        if (!prefixes.some(prefix => startsWithPath(diagnostic.path, prefix))) {
+            continue;
+        }
+        result.set(
+            `${diagnostic.severity}:${diagnostic.path?.join(".") ?? ""}:${diagnostic.message}`,
+            diagnostic,
+        );
+    }
+    return [...result.values()];
+}
+
+function diagnosticsWithRequiredField(
+    diagnostics: EditDiagnostic[],
+    path: string[],
+    value: unknown,
+    message = "Required field is missing.",
+): EditDiagnostic[] {
+    if (value !== undefined && value !== "") {
+        return diagnostics;
+    }
+    if (diagnostics.some(diagnostic => JSON.stringify(diagnostic.path ?? []) === JSON.stringify(path))) {
+        return diagnostics;
+    }
+    return [
+        ...diagnostics,
+        {
+            severity: "required",
+            message,
+            path,
+        },
+    ];
+}
+
+function resourceWithDiagnostics(
+    kind: string,
+    name: string,
+    parameters: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    diagnosticPrefixes: string[][],
+    options: ResolvedMigrationResourcesOptions = {},
+    parameterProvenance?: ResolvedParameterProvenanceMap,
+): ResolvedMigrationResource {
+    const diagnostics = diagnosticsForPrefixes(validation.diagnostics, diagnosticPrefixes);
+    return {
+        ...resource(kind, name, parameters, options, undefined, parameterProvenance),
+        ...(diagnostics.length > 0 ? {diagnostics, projectionComplete: false} : {}),
+    };
+}
+
+function addPathIfDefined(target: Record<string, unknown>, path: string[], value: unknown) {
+    if (value !== undefined) {
+        setPath(target, path, value);
+    }
+}
+
+function looseAuthType(kafkaConfig: Record<string, unknown>): string {
+    const autoCreate = asRecord(kafkaConfig.autoCreate);
+    const auth = asRecord(autoCreate.auth);
+    return asString(auth.type) ?? "scram-sha-512";
+}
+
+function looseKafkaClusterParameters(kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+    const autoCreate = asRecord(kafkaConfig.autoCreate);
+    const nodePool = asRecord(autoCreate.nodePoolSpecOverrides);
+    const storage = asRecord(nodePool.storage);
+    const parameters: Record<string, unknown> = {
+        version: KAFKA_VERSION,
+    };
+    addPathIfDefined(parameters, ["auth", "type"], looseAuthType(kafkaConfig));
+    addPathIfDefined(parameters, ["nodePool", "replicas"], nodePool.replicas);
+    addPathIfDefined(parameters, ["nodePool", "roles"], nodePool.roles);
+    addPathIfDefined(parameters, ["nodePool", "storage", "size"], storage.size);
+    addPathIfDefined(parameters, ["nodePool", "storage", "type"], storage.type);
+    return parameters;
+}
+
+function looseTopicSpecForKafka(
+    kafkaEntries: [string, Record<string, unknown>][],
+    kafkaName: string,
+): Record<string, unknown> {
+    const kafkaConfig = kafkaEntries.find(([name]) => name === kafkaName)?.[1];
+    const autoCreate = asRecord(kafkaConfig?.autoCreate);
+    return {
+        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+        ...asRecord(autoCreate.topicSpecOverrides),
+    };
+}
+
+function looseCapturedTrafficParameters(
+    sourceName: string,
+    source: Record<string, unknown>,
+    kafkaEntries: [string, Record<string, unknown>][],
+): Record<string, unknown> {
+    const kafkaName = kafkaClusterNameForReference({kafka: asString(source.kafka)});
+    const topicSpec = looseTopicSpecForKafka(kafkaEntries, kafkaName);
+    return {
+        dependsOn: [kafkaName],
+        kafkaClusterName: kafkaName,
+        topicName: asString(source.kafkaTopic) ?? sourceName,
+        partitions: topicSpec.partitions,
+        replicas: topicSpec.replicas,
+        topicConfig: topicSpec.config,
+    };
+}
+
+function looseS3CapturedTrafficParameters(
+    sourceName: string,
+    source: Record<string, unknown>,
+    kafkaEntries: [string, Record<string, unknown>][],
+): Record<string, unknown> {
+    return {
+        ...looseCapturedTrafficParameters(sourceName, source, kafkaEntries),
+        sourceKind: "s3",
+        s3SourceUri: source.s3Uri,
+        loadStarted: true,
+    };
+}
+
+function looseCaptureProxyParameters(proxyName: string, proxy: Record<string, unknown>): Record<string, unknown> {
+    return {
+        ...captureProxyResourceConfig(asRecord(proxy.proxyConfig)),
+        dependsOn: [`${proxyName}-topic`],
+    };
+}
+
+function looseTrafficReplayParameters(
+    replayer: Record<string, unknown>,
+): Record<string, unknown> {
+    const sourceName = asString(replayer.fromCapturedTraffic);
+    return {
+        ...asRecord(replayer.replayerConfig),
+        dependsOn: sourceName ? [sourceName] : [],
+    };
+}
+
+function looseSnapshotMigrationParameters(
+    migration: Record<string, unknown>,
+    snapshotName: string,
+    item: Record<string, unknown>,
+): Record<string, unknown> {
+    const sourceLabel = asString(migration.fromSource);
+    const targetLabel = asString(migration.toTarget);
+    return {
+        ...prefixFields("metadataMigration", asRecord(item.metadataMigrationConfig)),
+        ...prefixFields("documentBackfill", asRecord(item.documentBackfillConfig)),
+        dependsOn: sourceLabel ? [`${sourceLabel}-${snapshotName}`] : [],
+        migrationLabel: asString(item.label) ?? "migration-0",
+        sourceLabel,
+        targetLabel,
+        snapshotLabel: snapshotName,
+    };
+}
+
+function snapshotMigrationPlaceholderParameters(
+    migration: Record<string, unknown>,
+    migrationIndex: number,
+): Record<string, unknown> {
+    return {
+        fromSource: asString(migration.fromSource) ?? `source-${migrationIndex}`,
+        toTarget: asString(migration.toTarget) ?? `target-${migrationIndex}`,
+    };
+}
+
+function snapshotMigrationPlaceholderProvenance(
+    parameters: Record<string, unknown>,
+    migration: Record<string, unknown>,
+    migrationIndex: number,
+    options: ResolvedMigrationResourcesOptions,
+): ResolvedParameterProvenanceMap | undefined {
+    if (!shouldIncludeParameterProvenance(options)) {
+        return undefined;
+    }
+    const basePath = ["snapshotMigrationConfigs", String(migrationIndex)];
+    return buildParameterProvenance(parameters, parameterPath => {
+        const key = parameterPath[0];
+        return {
+            presence: hasPath(migration, [key]) ? "authored" : "defaulted",
+            sourcePath: [...basePath, key],
+        };
+    });
+}
+
+function hasSnapshotMigrationResourceFor(
+    resources: ResolvedMigrationResource[],
+    migrationIndex: number,
+    parameters: Record<string, unknown>,
+): boolean {
+    const migrationPath = ["snapshotMigrationConfigs", String(migrationIndex)];
+    return resources.some(resource => {
+        if (resource.kind !== "SnapshotMigration") {
+            return false;
+        }
+        if (Object.values(resource.parameterProvenance ?? {}).some(provenance =>
+            startsWithPath(provenance.sourcePath, migrationPath)
+        )) {
+            return true;
+        }
+        return (
+            resource.parameters.sourceLabel === parameters.fromSource &&
+            resource.parameters.targetLabel === parameters.toTarget
+        );
+    });
+}
+
+function looseSnapshotMigrationPlaceholderResources(
+    rawConfig: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    options: ResolvedMigrationResourcesOptions,
+    existingResources: ResolvedMigrationResource[] = [],
+): ResolvedMigrationResource[] {
+    const migrations = Array.isArray(rawConfig.snapshotMigrationConfigs)
+        ? rawConfig.snapshotMigrationConfigs
+        : [];
+    const placeholders: ResolvedMigrationResource[] = [];
+    const usedNames = new Set(
+        existingResources
+            .filter(resource => resource.kind === "SnapshotMigration")
+            .map(resource => resource.name)
+    );
+
+    migrations.forEach((migration, migrationIndex) => {
+        if (!isRecord(migration)) {
+            return;
+        }
+        const parameters = snapshotMigrationPlaceholderParameters(migration, migrationIndex);
+        if (hasSnapshotMigrationResourceFor([...existingResources, ...placeholders], migrationIndex, parameters)) {
+            return;
+        }
+
+        const baseName = `snapshot migration: ${parameters.fromSource} -> ${parameters.toTarget}`;
+        const name = usedNames.has(baseName)
+            ? `${baseName} (${migrationIndex + 1})`
+            : baseName;
+        usedNames.add(name);
+        placeholders.push(resourceWithDiagnostics(
+            "SnapshotMigration",
+            name,
+            parameters,
+            validation,
+            [["snapshotMigrationConfigs", String(migrationIndex)]],
+            options,
+            snapshotMigrationPlaceholderProvenance(parameters, migration, migrationIndex, options),
+        ));
+    });
+
+    return placeholders;
+}
+
+function looseClusterClientConfig(cluster: Record<string, unknown>): Record<string, unknown> {
+    const authConfig = asRecord(cluster.authConfig);
+    const result: Record<string, unknown> = {
+        endpoint: cluster.endpoint,
+        version: cluster.version,
+        allow_insecure: asBoolean(cluster.allowInsecure),
+    };
+    if ("basic" in authConfig) {
+        const basic = asRecord(authConfig.basic);
+        result.basic_auth = {
+            k8s_secret_name: basic.secretName,
+            user_secret_arn: basic.secretArn,
+            username: basic.username,
+            password: basic.password,
+        };
+    } else if ("sigv4" in authConfig) {
+        result.sigv4 = authConfig.sigv4 ?? null;
+    } else if ("mtls" in authConfig) {
+        result.mtls_auth = authConfig.mtls ?? null;
+    } else {
+        result.no_auth = null;
+    }
+    return removeUndefined(result) as Record<string, unknown>;
+}
+
+function looseClusterClientProvenance(
+    parameters: Record<string, unknown>,
+    cluster: Record<string, unknown>,
+    sourceBasePath: string[],
+): ResolvedParameterProvenanceMap {
+    return buildParameterProvenance(parameters, parameterPath => {
+        if (samePath(parameterPath, ["allow_insecure"])) {
+            return {
+                presence: hasPath(cluster, ["allowInsecure"]) ? "authored" : "defaulted",
+                sourcePath: [...sourceBasePath, "allowInsecure"],
+            };
+        }
+        if (samePath(parameterPath, ["endpoint"]) || samePath(parameterPath, ["version"])) {
+            return {
+                presence: hasPath(cluster, parameterPath) ? "authored" : "defaulted",
+                sourcePath: [...sourceBasePath, ...parameterPath],
+            };
+        }
+        if (parameterPath[0] === "basic_auth") {
+            const mapped = {
+                k8s_secret_name: "secretName",
+                user_secret_arn: "secretArn",
+            }[parameterPath[1]] ?? parameterPath[1];
+            return {
+                presence: hasPath(cluster, ["authConfig", "basic", mapped]) ? "authored" : "defaulted",
+                sourcePath: [...sourceBasePath, "authConfig", "basic", mapped],
+            };
+        }
+        if (parameterPath[0] === "sigv4") {
+            return {
+                presence: hasPath(cluster, ["authConfig", "sigv4", ...parameterPath.slice(1)]) ? "authored" : "defaulted",
+                sourcePath: [...sourceBasePath, "authConfig", "sigv4", ...parameterPath.slice(1)],
+            };
+        }
+        if (parameterPath[0] === "mtls_auth") {
+            return {
+                presence: hasPath(cluster, ["authConfig", "mtls", ...parameterPath.slice(1)]) ? "authored" : "defaulted",
+                sourcePath: [...sourceBasePath, "authConfig", "mtls", ...parameterPath.slice(1)],
+            };
+        }
+        if (parameterPath[0] === "no_auth") {
+            return {presence: hasPath(cluster, ["authConfig"]) ? "authored" : "defaulted", sourcePath: [...sourceBasePath, "authConfig"]};
+        }
+        return {presence: "unknown"};
+    });
+}
+
+function looseKafkaRuntime(kafkaName: string, kafkaConfig: Record<string, unknown>): Record<string, unknown> {
+    if ("autoCreate" in kafkaConfig || Object.keys(kafkaConfig).length === 0) {
+        const authType = looseAuthType(kafkaConfig);
+        return {
+            type: "strimzi",
+            clusterName: kafkaName,
+            authType,
+            listenerName: authType === "scram-sha-512" ? "tls" : "plain",
+        };
+    }
+
+    return {
+        type: "direct",
+        clientConfig: asRecord(kafkaConfig.existing),
+    };
+}
+
+function looseKafkaRuntimeProvenance(
+    kafkaName: string,
+    kafkaConfig: Record<string, unknown>,
+    runtime: Record<string, unknown>,
+): ResolvedParameterProvenanceMap {
+    if ((runtime as any).type === "direct") {
+        return buildParameterProvenance(runtime, parameterPath => {
+            if (samePath(parameterPath, ["type"])) {
+                return {presence: "generated"};
+            }
+            if (parameterPath[0] === "clientConfig") {
+                return {
+                    presence: hasPath(kafkaConfig, ["existing", ...parameterPath.slice(1)]) ? "authored" : "defaulted",
+                    sourcePath: ["traffic", "kafkaClusters", kafkaName, "existing", ...parameterPath.slice(1)],
+                };
+            }
+            return {
+                presence: hasPath(kafkaConfig, ["existing", ...parameterPath]) ? "authored" : "defaulted",
+                sourcePath: ["traffic", "kafkaClusters", kafkaName, "existing", ...parameterPath],
+            };
+        });
+    }
+    const autoCreate = asRecord(kafkaConfig.autoCreate);
+    return buildParameterProvenance(runtime, parameterPath => {
+        if (samePath(parameterPath, ["authType"])) {
+            return {
+                presence: hasPath(autoCreate, ["auth", "type"]) ? "authored" : "defaulted",
+                sourcePath: ["traffic", "kafkaClusters", kafkaName, "autoCreate", "auth", "type"],
+            };
+        }
+        if (samePath(parameterPath, ["type"]) || samePath(parameterPath, ["clusterName"]) || samePath(parameterPath, ["listenerName"])) {
+            return {presence: "generated"};
+        }
+        return {presence: "unknown"};
+    });
+}
+
+function looseConsoleResources(
+    rawConfig: Record<string, unknown>,
+    workflowName: string | undefined,
+    validation: ReturnType<typeof validationForConfig>,
+): ConsoleResources {
+    const sources = recordEntries(rawConfig.sourceClusters).map(([name, cluster]) => {
+        const diagnostics = diagnosticsWithRequiredField(
+            diagnosticsForPrefixes(validation.diagnostics, [["sourceClusters", name]]),
+            ["sourceClusters", name, "endpoint"],
+            cluster.endpoint,
+        );
+        const clientConfig = looseClusterClientConfig(cluster);
+        return {
+            refName: name,
+            aliases: [name],
+            clientConfig,
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
+            parameterProvenance: looseClusterClientProvenance(
+                clientConfig,
+                cluster,
+                ["sourceClusters", name],
+            ),
+            source: "config" as const,
+            diagnostics,
+        };
+    });
+    const targets = recordEntries(rawConfig.targetClusters).map(([name, cluster]) => {
+        const diagnostics = diagnosticsWithRequiredField(
+            diagnosticsForPrefixes(validation.diagnostics, [["targetClusters", name]]),
+            ["targetClusters", name, "endpoint"],
+            cluster.endpoint,
+        );
+        const clientConfig = looseClusterClientConfig(cluster);
+        return {
+            refName: name,
+            aliases: [name],
+            clientConfig,
+            displayFields: [...CLUSTER_CLIENT_DISPLAY_FIELDS],
+            parameterProvenance: looseClusterClientProvenance(
+                clientConfig,
+                cluster,
+                ["targetClusters", name],
+            ),
+            source: "config" as const,
+            diagnostics,
+        };
+    });
+    const kafkas = looseKafkaEntriesForConfig(rawConfig).map(([name, kafka]) => {
+        const runtime = looseKafkaRuntime(name, kafka) as any;
+        return {
+            refName: name,
+            aliases: [name, `kafkacluster.${name}`],
+            ...(("autoCreate" in kafka || Object.keys(kafka).length === 0) ? {k8sName: name} : {}),
+            runtime,
+            displayFields: [...KAFKA_CONFIG_DISPLAY_FIELDS],
+            parameterProvenance: looseKafkaRuntimeProvenance(name, kafka, runtime),
+            source: "config" as const,
+            diagnostics: diagnosticsForPrefixes(validation.diagnostics, [["traffic", "kafkaClusters", name]]),
+        };
+    });
+
+    return {
+        formatVersion: 1,
+        ...(workflowName ? {workflowName} : {}),
+        sources,
+        targets,
+        kafkas,
+        consumerGroups: [],
+    };
+}
+
+function buildLooseResourceList(
+    rawConfig: Record<string, unknown>,
+    validation: ReturnType<typeof validationForConfig>,
+    options: ResolvedMigrationResourcesOptions = {},
+): ResolvedMigrationResource[] {
+    const resources: ResolvedMigrationResource[] = [];
+    const kafkaEntries = looseKafkaEntriesForConfig(rawConfig);
+
+    for (const [name, kafka] of kafkaEntries) {
+        if ("autoCreate" in kafka || Object.keys(kafka).length === 0) {
+            const parameters = looseKafkaClusterParameters(kafka);
+            resources.push(resourceWithDiagnostics(
+                "KafkaCluster",
+                name,
+                parameters,
+                validation,
+                [["traffic", "kafkaClusters", name]],
+                options,
+                kafkaClusterParameterProvenance({name} as KafkaClusterConfig, parameters, options),
+            ));
+        }
+    }
+
+    const traffic = asRecord(rawConfig.traffic);
+    for (const [proxyName, proxy] of recordEntries(traffic.proxies)) {
+        const topicParameters = looseCapturedTrafficParameters(proxyName, proxy, kafkaEntries);
+        const kafkaName = kafkaClusterNameForReference({kafka: asString(proxy.kafka)});
+        resources.push(resourceWithDiagnostics(
+            "CapturedTraffic",
+            `${proxyName}-topic`,
+            topicParameters,
+            validation,
+            [["traffic", "proxies", proxyName, "kafka"], ["traffic", "proxies", proxyName, "kafkaTopic"]],
+            options,
+            capturedTrafficParameterProvenance(
+                proxyName,
+                proxy,
+                ["traffic", "proxies", proxyName],
+                topicParameters,
+                kafkaName,
+                options,
+            ),
+        ));
+        const proxyParameters = looseCaptureProxyParameters(proxyName, proxy);
+        resources.push(resourceWithDiagnostics(
+            "CaptureProxy",
+            proxyName,
+            proxyParameters,
+            validation,
+            [["traffic", "proxies", proxyName]],
+            options,
+            provenanceFromMatchingSource(
+                proxyParameters,
+                proxy.proxyConfig,
+                ["traffic", "proxies", proxyName, "proxyConfig"],
+                [["dependsOn"]],
+            ),
+        ));
+    }
+
+    for (const [s3Name, s3] of recordEntries(traffic.s3Sources)) {
+        const parameters = looseS3CapturedTrafficParameters(s3Name, s3, kafkaEntries);
+        const kafkaName = kafkaClusterNameForReference({kafka: asString(s3.kafka)});
+        resources.push(resourceWithDiagnostics(
+            "CapturedTraffic",
+            `${s3Name}-topic`,
+            parameters,
+            validation,
+            [["traffic", "s3Sources", s3Name]],
+            options,
+            s3CapturedTrafficParameterProvenance(s3Name, parameters, kafkaName, options),
+        ));
+    }
+
+    for (const [replayName, replayer] of recordEntries(traffic.replayers)) {
+        const fromCapturedTraffic = asString(replayer.fromCapturedTraffic) ?? replayName;
+        const toTarget = asString(replayer.toTarget) ?? "target";
+        const parameters = looseTrafficReplayParameters(replayer);
+        resources.push(resourceWithDiagnostics(
+            "TrafficReplay",
+            replayName,
+            parameters,
+            validation,
+            [["traffic", "replayers", replayName]],
+            options,
+            provenanceFromMatchingSource(
+                parameters,
+                replayer.replayerConfig,
+                ["traffic", "replayers", replayName, "replayerConfig"],
+                [["dependsOn"]],
+            ),
+        ));
+    }
+
+    for (const [sourceName, source] of recordEntries(rawConfig.sourceClusters)) {
+        const snapshotInfo = asRecord(source.snapshotInfo);
+        for (const [snapshotName, snapshot] of recordEntries(snapshotInfo.snapshots)) {
+            const config = asRecord(snapshot.config);
+            const createSnapshotConfig = asRecord(config.createSnapshotConfig);
+            if (Object.keys(createSnapshotConfig).length === 0) {
+                continue;
+            }
+            const parameters = {
+                snapshotPrefix: asString(createSnapshotConfig.snapshotPrefix) ?? snapshotName,
+                ...createSnapshotConfig,
+            };
+            resources.push(resourceWithDiagnostics(
+                "DataSnapshot",
+                `${sourceName}-${snapshotName}`,
+                parameters,
+                validation,
+                [["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName]],
+                options,
+                provenanceFromMatchingSource(
+                    parameters,
+                    createSnapshotConfig,
+                    ["sourceClusters", sourceName, "snapshotInfo", "snapshots", snapshotName, "config", "createSnapshotConfig"],
+                ),
+            ));
+        }
+    }
+
+    const migrations = Array.isArray(rawConfig.snapshotMigrationConfigs)
+        ? rawConfig.snapshotMigrationConfigs
+        : [];
+    migrations.forEach((migration, migrationIndex) => {
+        if (!isRecord(migration)) {
+            return;
+        }
+        const sourceLabel = asString(migration.fromSource) ?? `source-${migrationIndex}`;
+        const targetLabel = asString(migration.toTarget) ?? `target-${migrationIndex}`;
+        const perSnapshotConfig = asRecord(migration.perSnapshotConfig);
+        for (const [snapshotName, itemsValue] of Object.entries(perSnapshotConfig)) {
+            const items = Array.isArray(itemsValue) ? itemsValue : [itemsValue];
+            items.forEach((item, itemIndex) => {
+                if (!isRecord(item)) {
+                    return;
+                }
+                const migrationLabel = asString(item.label) ?? `migration-${itemIndex}`;
+                const parameters = looseSnapshotMigrationParameters(migration, snapshotName, item);
+                resources.push(resourceWithDiagnostics(
+                    "SnapshotMigration",
+                    [sourceLabel, targetLabel, snapshotName, migrationLabel].join("-"),
+                    parameters,
+                    validation,
+                    [["snapshotMigrationConfigs", String(migrationIndex)]],
+                    options,
+                    provenanceFromMatchingSource(
+                        parameters,
+                        {
+                            ...asRecord(item.metadataMigrationConfig),
+                            ...Object.fromEntries(Object.entries(asRecord(item.documentBackfillConfig)).map(([key, value]) => [
+                                `documentBackfill${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+                                value,
+                            ])),
+                        },
+                        ["snapshotMigrationConfigs", String(migrationIndex), "perSnapshotConfig", snapshotName, String(itemIndex)],
+                        [["dependsOn"], ["sourceLabel"], ["targetLabel"], ["snapshotLabel"]],
+                    ),
+                ));
+            });
+        }
+    });
+
+    resources.push(...looseSnapshotMigrationPlaceholderResources(rawConfig, validation, options, resources));
+
+    return resources;
+}
+
+export async function buildLooseResolvedMigrationResources(
+    rawConfig: unknown,
+    workflowName?: string,
+    options: ResolvedMigrationResourcesOptions = {},
+): Promise<ResolvedMigrationResources> {
+    const validation = validationForConfig(rawConfig);
+    const raw = asRecord(rawConfig);
+    const resolvedOptions = {
+        ...options,
+        includeParameterProvenance: true,
+        sourceConfig: options.sourceConfig ?? rawConfig,
+    };
+    try {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(rawConfig);
+        const resolved = buildResolvedMigrationResources(workflowConfig, workflowName, resolvedOptions);
+        resolved.resources.push(
+            ...looseSnapshotMigrationPlaceholderResources(raw, validation, resolvedOptions, resolved.resources)
+        );
+        return {
+            ...resolved,
+            projectionMode: "loose",
+            projectionComplete: true,
+            validation: {
+                mode: "loose",
+                valid: true,
+                errors: [],
+            },
+            consoleResources: looseConsoleResources(raw, workflowName, validation),
+        };
+    } catch (error) {
+        const looseValidation = validation.valid
+            ? {
+                valid: false,
+                errors: [String(error)],
+                diagnostics: [{
+                    severity: "error" as const,
+                    message: String(error),
+                    path: [],
+                }],
+            }
+            : validation;
+        return {
+            formatVersion: 1,
+            ...(workflowName ? {workflowName} : {}),
+            projectionMode: "loose",
+            projectionComplete: false,
+            validation: {
+                mode: "loose",
+                valid: looseValidation.valid,
+                errors: looseValidation.errors,
+                diagnostics: looseValidation.diagnostics,
+            },
+            consoleResources: looseConsoleResources(raw, workflowName, looseValidation),
+            resources: buildLooseResourceList(raw, looseValidation, resolvedOptions),
+        };
+    }
 }
 
 export function dryRunResourcePolicy(

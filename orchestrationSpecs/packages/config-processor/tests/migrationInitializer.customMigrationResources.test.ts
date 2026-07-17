@@ -103,7 +103,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind('CaptureProxy')).toContain('source-proxy');
         expect(byKind('DataSnapshot')).toContain('source-snap1');
         expect(byKind('SnapshotMigration')).toContain('source-target-snap1-migration-0');
-        expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
+        expect(byKind('TrafficReplay')).toContain('target-replay');
         expect(byKind('MigrationRun')).toHaveLength(1);
         expect(byKind('ApprovalGate')).toEqual(expect.arrayContaining([
             'evaluatemetadata.source-target-snap1-migration-0',
@@ -119,7 +119,7 @@ describe('migration initializer CRD resource generation', () => {
             // SnapshotMigration CR reconcile VAP retry gate
             'snapshotmigration.source-target-snap1-migration-0.vapretry',
             // Replay VAP retry gate
-            'trafficreplay.source-proxy-target-target-replay.vapretry',
+            'trafficreplay.target-replay.vapretry',
         ]));
 
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toBeUndefined();
@@ -130,7 +130,7 @@ describe('migration initializer CRD resource generation', () => {
         // workflow's tryApply is its sole writer (see makeSnapshotMigrationManifest / upsertDataSnapshotResource).
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toBeUndefined();
         expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
-        expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual([
+        expect(getResource('TrafficReplay', 'target-replay')?.spec.dependsOn).toEqual([
             'source-proxy',
             'source-target-snap1-migration-0',
         ]);
@@ -141,7 +141,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('CaptureProxy', 'source-proxy')?.spec.listenPort).toBe(9200);
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.snapshotPrefix).toBe('snap1');
         expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.metadataMigrationEnableSourcelessMigrations).toBe(false);
-        expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.speedupFactor).toBe(1.1);
+        expect(getResource('TrafficReplay', 'target-replay')?.spec.speedupFactor).toBe(1.1);
         expect(getResource('MigrationRun', byKind('MigrationRun')[0])?.spec.resolvedConfig.resources).toEqual(
             bundle.resolvedMigrationResources.resources
         );
@@ -212,10 +212,10 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind("KafkaCluster")).toContain("default");
         expect(byKind("CapturedTraffic")).toContain("loaded-dump-topic");
         expect(byKind("CaptureProxy")).toEqual([]);
-        expect(byKind("TrafficReplay")).toContain("loaded-dump-target-replay");
+        expect(byKind("TrafficReplay")).toContain("replay");
         expect(byKind("ApprovalGate")).toEqual(expect.arrayContaining([
             "capturedtraffic.loaded-dump-topic.vapretry",
-            "trafficreplay.loaded-dump-target-replay.vapretry"
+            "trafficreplay.replay.vapretry"
         ]));
 
         const capturedTraffic = getResource("CapturedTraffic", "loaded-dump-topic");
@@ -232,7 +232,7 @@ describe('migration initializer CRD resource generation', () => {
             s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz",
             loadStarted: true
         }));
-        expect(getResource("TrafficReplay", "loaded-dump-target-replay").spec.dependsOn).toEqual(["loaded-dump"]);
+        expect(getResource("TrafficReplay", "replay").spec.dependsOn).toEqual(["loaded-dump"]);
         expect(bundle.resolvedMigrationResources.resources).toContainEqual(expect.objectContaining({
             kind: "CapturedTraffic",
             name: "loaded-dump-topic",

@@ -1,6 +1,9 @@
 #!/bin/bash
 
-set -e -x # Exit on any error
+set -euo pipefail
+if [[ "${WORKFLOW_SUBMIT_TRACE:-}" == "1" ]]; then
+    set -x
+fi
 
 # Check if config filename argument is provided
 if [ $# -eq 0 ]; then
@@ -16,9 +19,18 @@ shift  # Remove first argument, leaving any additional args in $@
 # It is not part of INITIALIZE_CMD input, so filter it out while preserving all
 # other arguments for the config processor.
 RUN_NONCE=""
+QUIET=0
 ALL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --quiet)
+            QUIET=1
+            shift
+            ;;
+        --verbose)
+            QUIET=0
+            shift
+            ;;
         --unique-run-nonce)
             if [[ $# -lt 2 ]]; then
                 echo "Error: --unique-run-nonce requires a value" >&2
@@ -70,7 +82,14 @@ $INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --work
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
-    "$TEMP_DIR/handleK8sResources.sh"
+    if [[ "$QUIET" == "1" ]]; then
+        if ! "$TEMP_DIR/handleK8sResources.sh" > "$TEMP_DIR/handleK8sResources.log"; then
+            echo "Resource creation failed. Re-run submit with verbose output for full resource details." >&2
+            exit 1
+        fi
+    else
+        "$TEMP_DIR/handleK8sResources.sh"
+    fi
 fi
 
 if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then

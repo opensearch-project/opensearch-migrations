@@ -311,11 +311,16 @@ class Environment:
 
         tls = proxy_options.get("tls")
         has_tls = not (isinstance(tls, dict) and tls.get("mode") == "plaintext")
-        return {
+        result = {
             "name": proxy_name,
             "endpoint": f"{'https' if has_tls else 'http'}://{proxy_name}:{listen_port}",
             "allow_insecure": has_tls,
         }
+        client_auth = tls.get("clientAuth") if isinstance(tls, dict) else None
+        console_client_secret = client_auth.get("consoleClientSecretName") if isinstance(client_auth, dict) else None
+        if console_client_secret:
+            result["client_cert"] = {"k8s_secret_name": console_client_secret}
+        return result
 
     @staticmethod
     def _resolve_strimzi_bootstrap(cluster_name: str, listener_name: str, namespace: str = 'ma') -> str:
@@ -376,7 +381,7 @@ class Environment:
 
     @classmethod
     def _get_kafka_from_workflow_config(cls, config: Dict) -> Optional[Kafka]:
-        kafka_clusters = config.get("kafkaClusterConfiguration") or {}
+        kafka_clusters = ((config.get("traffic") or {}).get("kafkaClusters") or {})
         if not kafka_clusters:
             logger.info("No kafka cluster configuration is defined in the workflow config.")
             return None
@@ -406,7 +411,7 @@ class Environment:
 
         cluster_config = kafka_clusters.get(cluster_name)
         if cluster_config is None:
-            raise ValueError(f"Kafka cluster '{cluster_name}' not found in kafkaClusterConfiguration")
+            raise ValueError(f"Kafka cluster '{cluster_name}' not found in traffic.kafkaClusters")
 
         if "existing" in cluster_config:
             existing_config = cluster_config["existing"]

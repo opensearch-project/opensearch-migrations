@@ -12,18 +12,6 @@ import {main as resolveConsoleResourcesMain} from "../src/resolveConsoleResource
 
 function multiResourceConfig() {
     return {
-        kafkaClusterConfiguration: {
-            default: {
-                autoCreate: {},
-            },
-            "my-kafka": {
-                autoCreate: {
-                    auth: {
-                        type: "none",
-                    },
-                },
-            },
-        },
         sourceClusters: {
             sourceA: {
                 endpoint: "https://source-a.example.com",
@@ -88,11 +76,31 @@ function multiResourceConfig() {
             },
         }],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                },
+                "my-kafka": {
+                    autoCreate: {
+                        auth: {
+                            type: "none",
+                        },
+                    },
+                },
+            },
             proxies: {
                 "proxy-a": {
                     source: "sourceA",
                     proxyConfig: {
                         listenPort: 9201,
+                        tls: {
+                            mode: "existingSecret",
+                            secretName: "proxy-a-tls",
+                            clientAuth: {
+                                trustedClientCaPem: "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
+                                consoleClientSecretName: "proxy-a-console-client",
+                            },
+                        },
                     },
                 },
                 "proxy-b": {
@@ -107,11 +115,11 @@ function multiResourceConfig() {
                 },
             },
             replayers: {
-                replayA: {
+                "replay-a": {
                     fromCapturedTraffic: "proxy-a",
                     toTarget: "targetX",
                 },
-                replayB: {
+                "replay-b": {
                     fromCapturedTraffic: "proxy-b",
                     toTarget: "targetY",
                 },
@@ -145,8 +153,17 @@ describe("console resources", () => {
                         endpoint: "https://proxy-a:9201",
                         allow_insecure: true,
                         basic_auth: {k8s_secret_name: "source-a-creds"},
+                        client_cert: {k8s_secret_name: "proxy-a-console-client"},
                     }),
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture source",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "sourceB",
@@ -174,6 +191,18 @@ describe("console resources", () => {
                     endpoint: "https://target-x.example.com",
                     basic_auth: {k8s_secret_name: "target-x-creds"},
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "SnapshotMigration",
+                        role: "migration target",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "TrafficReplay",
+                        role: "replay target",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "targetY",
@@ -200,6 +229,26 @@ describe("console resources", () => {
                     usernameSecret: "default-migration-app",
                     caSecret: "default-cluster-ca-cert",
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "KafkaCluster",
+                        name: "default",
+                        role: "managed kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CapturedTraffic",
+                        name: "proxy-a-topic",
+                        role: "capture topic",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "my-kafka",
@@ -222,13 +271,13 @@ describe("console resources", () => {
                 name: "replayer-targetX",
                 targetRef: "targetX",
                 kafkaRef: "default",
-                replayRef: "proxy-a-targetX-replayA",
+                replayRef: "replay-a",
             },
             {
                 name: "replayer-targetY",
                 targetRef: "targetY",
                 kafkaRef: "my-kafka",
-                replayRef: "proxy-b-targetY-replayB",
+                replayRef: "replay-b",
             },
         ]);
         expect(resources.sources[0].proxy?.aliases).not.toContain(
@@ -253,7 +302,7 @@ describe("console resources", () => {
 
     it("projects externally managed SCRAM Kafka credential metadata", async () => {
         const config = multiResourceConfig();
-        config.kafkaClusterConfiguration = {
+        config.traffic.kafkaClusters = {
             external: {
                 existing: {
                     kafkaConnection: "broker.example.com:9093",
@@ -276,7 +325,7 @@ describe("console resources", () => {
             },
         };
         config.traffic.replayers = {
-            replayA: {
+            "replay-a": {
                 fromCapturedTraffic: "proxy-a",
                 toTarget: "targetX",
             },

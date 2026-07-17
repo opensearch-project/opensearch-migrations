@@ -2,6 +2,7 @@
 
 import io
 import json
+import subprocess
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -40,23 +41,24 @@ class TestWaiterInterfaceThreading:
         mock_popen.return_value = mock_proc
 
         waiter = WaiterInterface.default("test-wf", "test-ns")
+        try:
+            def stress_cycle():
+                for _ in range(20):
+                    waiter.trigger()
+                    time.sleep(0.01)
+                    waiter.reset()
 
-        def stress_cycle():
-            for _ in range(20):
-                waiter.trigger()
-                time.sleep(0.01)
-                waiter.reset()
+            threads = [threading.Thread(target=stress_cycle) for _ in range(3)]
+            for t in threads:
+                t.start()
 
-        threads = [threading.Thread(target=stress_cycle) for _ in range(3)]
-        for t in threads:
-            t.start()
-
-        # Timeout detection - if threads don't complete in 5s, we have a deadlock
-        for t in threads:
-            t.join(timeout=5.0)
-            assert not t.is_alive(), "Thread deadlocked during rapid trigger/reset cycles"
-
-        exit_event.set()
+            # Timeout detection - if threads don't complete in 5s, we have a deadlock
+            for t in threads:
+                t.join(timeout=5.0)
+                assert not t.is_alive(), "Thread deadlocked during rapid trigger/reset cycles"
+        finally:
+            exit_event.set()
+            waiter.reset()
 
     def test_concurrent_triggers_only_spawn_one_thread(self, mock_popen):
         """Multiple concurrent trigger() calls should only spawn one kubectl process."""
@@ -82,23 +84,26 @@ class TestWaiterInterfaceThreading:
         mock_popen.side_effect = mock_popen_factory
 
         waiter = WaiterInterface.default("test-wf", "test-ns")
+        try:
+            # Fire multiple triggers concurrently
+            threads = [threading.Thread(target=waiter.trigger) for _ in range(10)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=2.0)
 
-        # Fire multiple triggers concurrently
-        threads = [threading.Thread(target=waiter.trigger) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=2.0)
+            # Wait for process to start
+            assert proc_started.wait(timeout=2.0), "Process never started"
 
-        # Wait for process to start
-        assert proc_started.wait(timeout=2.0), "Process never started"
+            # Allow exit
+            proc_can_exit.set()
+            time.sleep(0.1)
 
-        # Allow exit
-        proc_can_exit.set()
-        time.sleep(0.1)
-
-        # Should only have spawned one process
-        assert spawn_count[0] == 1, f"Expected 1 spawn, got {spawn_count[0]}"
+            # Should only have spawned one process
+            assert spawn_count[0] == 1, f"Expected 1 spawn, got {spawn_count[0]}"
+        finally:
+            proc_can_exit.set()
+            waiter.reset()
 
     def test_cleanup_during_active_wait_no_deadlock(self, mock_popen):
         """Cleanup while kubectl is waiting should not deadlock."""
@@ -118,22 +123,72 @@ class TestWaiterInterfaceThreading:
         mock_popen.return_value = mock_proc
 
         waiter = WaiterInterface.default("test-wf", "test-ns")
-        waiter.trigger()
+        try:
+            waiter.trigger()
 
-        # Wait for process to be in wait state
-        assert proc_waiting.wait(timeout=2.0), "Process never started waiting"
+            # Wait for process to be in wait state
+            assert proc_waiting.wait(timeout=2.0), "Process never started waiting"
 
-        # Trigger another cycle (which should handle cleanup)
-        def trigger_again():
+            # Trigger another cycle (which should handle cleanup)
+            def trigger_again():
+                waiter.reset()
+                waiter.trigger()
+                cleanup_done.set()
+
+            cleanup_thread = threading.Thread(target=trigger_again)
+            cleanup_thread.start()
+            cleanup_thread.join(timeout=3.0)
+
+            assert not cleanup_thread.is_alive(), "Cleanup thread deadlocked"
+        finally:
+            waiter.reset()
+
+    def test_reset_prevents_stale_wait_thread_from_respawning(self, mock_popen):
+        """A wait thread that returns after reset must not continue under a new trigger."""
+        first_started = threading.Event()
+        first_release = threading.Event()
+        spawn_count = [0]
+
+        def mock_popen_factory(*args, **kwargs):
+            spawn_count[0] += 1
+            mock_proc = MagicMock()
+            mock_proc.pid = spawn_count[0]
+            mock_proc.poll.return_value = None
+            if mock_proc.pid == 1:
+                def wait(*wait_args, **wait_kwargs):
+                    timeout = wait_kwargs.get("timeout")
+                    if timeout is not None:
+                        if not first_release.wait(timeout=timeout):
+                            raise subprocess.TimeoutExpired("kubectl", timeout)
+                        return 1
+                    first_started.set()
+                    first_release.wait(timeout=2.0)
+                    return 1
+                mock_proc.wait.side_effect = wait
+            else:
+                mock_proc.wait.return_value = 0
+            return mock_proc
+
+        mock_popen.side_effect = mock_popen_factory
+
+        waiter = WaiterInterface.default("test-wf", "test-ns")
+        try:
+            waiter.trigger()
+            assert first_started.wait(timeout=2.0), "Initial wait process never started"
+
             waiter.reset()
             waiter.trigger()
-            cleanup_done.set()
+            start = time.time()
+            while mock_popen.call_count < 2 and (time.time() - start) < 2.0:
+                time.sleep(0.01)
+            assert mock_popen.call_count == 2
 
-        cleanup_thread = threading.Thread(target=trigger_again)
-        cleanup_thread.start()
-        cleanup_thread.join(timeout=3.0)
-
-        assert not cleanup_thread.is_alive(), "Cleanup thread deadlocked"
+            first_release.set()
+            time.sleep(0.2)
+            assert mock_popen.call_count == 2
+        finally:
+            first_release.set()
+            waiter.reset()
 
     def test_multiple_start_stop_cycles_complete(self, mock_popen):
         """Multiple full start/wait/stop cycles should complete without issues."""
@@ -149,20 +204,22 @@ class TestWaiterInterfaceThreading:
         mock_popen.return_value = mock_proc
 
         waiter = WaiterInterface.default("test-wf", "test-ns")
+        try:
+            for i in range(5):
+                waiter.reset()
+                waiter.trigger()
 
-        for i in range(5):
+                # Wait for checker to become true (with timeout)
+                start = time.time()
+                while not waiter.checker() and (time.time() - start) < 2.0:
+                    time.sleep(0.05)
+
+                assert waiter.checker(), f"Cycle {i}: checker never became true"
+                cycle_count[0] += 1
+
+            assert cycle_count[0] == 5, f"Only completed {cycle_count[0]} cycles"
+        finally:
             waiter.reset()
-            waiter.trigger()
-
-            # Wait for checker to become true (with timeout)
-            start = time.time()
-            while not waiter.checker() and (time.time() - start) < 2.0:
-                time.sleep(0.05)
-
-            assert waiter.checker(), f"Cycle {i}: checker never became true"
-            cycle_count[0] += 1
-
-        assert cycle_count[0] == 5, f"Only completed {cycle_count[0]} cycles"
 
 
 # --- ArgoWorkflowInterface Tests ---

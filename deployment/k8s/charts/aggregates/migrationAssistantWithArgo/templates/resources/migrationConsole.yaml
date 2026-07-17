@@ -102,6 +102,15 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
+  # Read-only issuer inventory for `workflow manage` external resource pickers.
+  # The workflow executor owns create/update permissions separately; the console
+  # only needs to discover existing issuers while editing proxy TLS config.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["issuers", "clusterissuers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["awspca.cert-manager.io"]
+    resources: ["awspcaclusterissuers"]
+    verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -244,6 +253,9 @@ spec:
         - name: console
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          ports:
+            - name: manage-web
+              containerPort: 8000
           # Since the console may be used interactively, try to keep the migration
           # console on the same node so that it can be stable.  Keep the requests
           # and limits values the same to have k8s treat the pod as "Guranteed",

@@ -92,7 +92,10 @@ export class MigrationInitializer {
             throw new Error("Migration run number is required when generating migration resources.");
         }
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
-        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
+        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName, {
+            includeParameterProvenance: true,
+            sourceConfig: userConfig,
+        });
         const customMigrationResources = this.generateCustomMigrationResources(
             workflows,
             workflowName,

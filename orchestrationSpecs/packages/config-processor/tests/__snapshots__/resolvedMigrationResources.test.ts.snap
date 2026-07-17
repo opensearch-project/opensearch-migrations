@@ -4,6 +4,11 @@ exports[`resolved migration resources extracts resolved resource parameters from
 [
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "version",
+      "auth.type",
+      "nodePool.replicas",
+    ],
     "kind": "KafkaCluster",
     "name": "default",
     "parameters": {
@@ -81,6 +86,13 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "kafkaClusterName",
+      "kafkaBrokers",
+      "topicName",
+      "partitions",
+      "replicas",
+    ],
     "kind": "CapturedTraffic",
     "name": "source-proxy-topic",
     "parameters": {
@@ -110,6 +122,12 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "podReplicas",
+      "listenPort",
+      "internetFacing",
+      "serviceType",
+    ],
     "kind": "CaptureProxy",
     "name": "source-proxy",
     "parameters": {
@@ -173,6 +191,10 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "snapshotPrefix",
+      "indexAllowlist",
+    ],
     "kind": "DataSnapshot",
     "name": "source-snap1",
     "parameters": {
@@ -212,6 +234,12 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "documentBackfillPodReplicas",
+      "sourceVersion",
+      "documentBackfillIndexAllowlist",
+      "metadataMigrationIndexAllowlist",
+    ],
     "kind": "SnapshotMigration",
     "name": "source-target-snap1-migration-0",
     "parameters": {
@@ -257,7 +285,6 @@ exports[`resolved migration resources extracts resolved resource parameters from
         },
       },
       "documentBackfillServerGeneratedIds": "AUTO",
-      "documentBackfillSkipApproval": false,
       "documentBackfillUseRecoverySource": false,
       "documentBackfillUseTargetClusterForWorkCoordination": false,
       "externalSnapshotName": "",
@@ -274,8 +301,6 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationOtelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "metadataMigrationOtelTraceCollectorEndpoint": "",
       "metadataMigrationOutput": "HUMAN_READABLE",
-      "metadataMigrationSkipEvaluateApproval": false,
-      "metadataMigrationSkipMigrateApproval": false,
       "metadataMigrationTransformerConfig": "",
       "metadataMigrationTransformerConfigBase64": "",
       "metadataMigrationTransformerConfigFile": "",
@@ -312,8 +337,13 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "podReplicas",
+      "speedupFactor",
+      "removeAuthHeader",
+    ],
     "kind": "TrafficReplay",
-    "name": "source-proxy-target-replay",
+    "name": "replay",
     "parameters": {
       "dependsOn": [
         "source-proxy",
