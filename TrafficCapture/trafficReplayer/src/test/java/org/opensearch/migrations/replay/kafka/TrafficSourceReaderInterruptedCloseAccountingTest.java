@@ -240,6 +240,87 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+    /**
+     * Verify that the drain-gate timeout circuit-breaker resets the counter and unblocks
+     * the read loop after DRAIN_GATE_TIMEOUT_NANOS is exceeded.
+     */
+    @Test
+    void drainGate_timeoutResetsCounterAndUnblocksReadLoop() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        mc.schedulePollTask(() -> mc.rebalance(Collections.singletonList(tp)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            // Trigger rebalance to get partition assignment
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Set up drain gate
+            var sessionKey = "conn1:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER + ":0";
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+
+            // Force the drainGateEnteredAtNanos to a value far in the past to simulate timeout
+            // (more than 5 minutes ago)
+            var field = KafkaTrafficCaptureSource.class.getDeclaredField("drainGateEnteredAtNanos");
+            field.setAccessible(true);
+            field.setLong(source, System.nanoTime() - KafkaTrafficCaptureSource.DRAIN_GATE_TIMEOUT_NANOS - 1_000_000_000L);
+
+            // This call should trigger the timeout path, reset the counter, and proceed to getNextBatchOfRecords
+            addRecord(mc, tp, 0);
+            var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Counter should have been reset to 0 by the circuit-breaker
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "Timeout circuit-breaker must reset the counter to 0");
+            // Pending map should be cleared
+            Assertions.assertTrue(source.pendingTrafficSourceReaderInterruptedCloses.isEmpty(),
+                "Timeout circuit-breaker must clear the pending map");
+            // Should have returned real data (or at least not blocked)
+            Assertions.assertFalse(result.isEmpty(),
+                "After timeout resets the gate, real records should be returned");
+        }
+    }
+
+    /**
+     * Verify that a RuntimeException thrown by touch() during drain-gate is caught and
+     * doesn't kill the read loop — the consumer remains operational.
+     */
+    @Test
+    void drainGate_touchRuntimeExceptionIsCaughtAndLoopContinues() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        mc.schedulePollTask(() -> mc.rebalance(Collections.singletonList(tp)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            // Trigger rebalance to get partition assignment
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Set up drain gate
+            var sessionKey = "conn1:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER + ":0";
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+
+            // Schedule a poll task that throws (simulates partition-assignment race with pause)
+            mc.schedulePollTask(() -> { throw new IllegalStateException("simulated partition assignment race"); });
+
+            // This should NOT throw — the RuntimeException should be caught internally
+            var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Should return empty (still in drain gate) but NOT throw
+            Assertions.assertTrue(result.isEmpty(),
+                "Drain gate must still return empty even when touch() throws");
+
+            // Consumer should still be operational — clear gate and verify reads work
+            source.onNetworkConnectionClosed("conn1", 0, 0);
+            addRecord(mc, tp, 0);
+            var realResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            Assertions.assertFalse(realResult.isEmpty(),
+                "Consumer must survive a RuntimeException from touch() and continue processing");
+        }
+    }
+
     private static void addRecord(MockConsumer<String, byte[]> mc, TopicPartition tp, long offset) {
         var ts = TrafficStream.newBuilder()
             .setNodeId("n").setConnectionId("c").setNumberOfThisLastChunk(0)
