@@ -27,6 +27,14 @@ public class ObservationDirective {
         return new ObservationDirective(OffloaderCommandType.Flush, 0);
     }
 
+    public static ObservationDirective connectionException() {
+        return new ObservationDirective(OffloaderCommandType.ConnectionException, 0);
+    }
+
+    public static ObservationDirective close() {
+        return new ObservationDirective(OffloaderCommandType.Close, 0);
+    }
+
     @Override
     public String toString() {
         return "(" + offloaderCommandType + ":" + size + ")";

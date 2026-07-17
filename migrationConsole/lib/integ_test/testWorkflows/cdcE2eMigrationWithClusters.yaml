@@ -48,6 +48,8 @@ spec:
           {"batchSize": 1000, "concurrency": 4}
       - name: skip-cleanup
         value: "false"
+      - name: skip-approvals
+        value: "true"
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
       - name: image-registry-prefix
         value: ""
@@ -166,6 +168,8 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
+                - name: skip-approvals
+                  value: "{{workflow.parameters.skip-approvals}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:

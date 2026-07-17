@@ -30,6 +30,7 @@ from ..tree_utils import (
 )
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
+from .hints import hint_after_status
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware
@@ -49,15 +50,15 @@ class StatusCommandHandler:
 
     def handle_status_command(self, workflow_name: Optional[str], argo_server: str,
                               namespace: str, insecure: bool,
-                              show_all: bool, live_check: bool) -> None:
-        """Handle the main status command logic."""
+                              show_all: bool, live_check: bool) -> Optional[str]:
+        """Handle the main status command logic and return the displayed phase, if singular."""
         try:
             if workflow_name:
-                self._handle_single_workflow(workflow_name, argo_server, namespace,
-                                             insecure, live_check)
+                return self._handle_single_workflow(workflow_name, argo_server, namespace,
+                                                    insecure, live_check)
             else:
-                self._handle_workflow_list(show_all, argo_server, namespace,
-                                           insecure, live_check)
+                return self._handle_workflow_list(show_all, argo_server, namespace,
+                                                  insecure, live_check)
         except click.Abort:
             raise
         except Exception as e:
@@ -65,7 +66,7 @@ class StatusCommandHandler:
             raise click.Abort()
 
     def _handle_single_workflow(self, workflow_name: str, argo_server: str,
-                                namespace: str, insecure: bool, live_check: bool) -> None:
+                                namespace: str, insecure: bool, live_check: bool) -> Optional[str]:
         """Handle status display for a specific workflow."""
         workflow_data = self.data_fetcher.get_workflow_data(
             workflow_name, argo_server, namespace, insecure)
@@ -78,17 +79,16 @@ class StatusCommandHandler:
             )
             raise click.Abort()
 
-        self._display_workflow_with_tree(workflow_data, live_check, argo_server, namespace, insecure)
+        return self._display_workflow_with_tree(workflow_data, live_check, argo_server, namespace, insecure)
 
     def _handle_workflow_list(self, show_all: bool, argo_server: str, namespace: str,
-                              insecure: bool, live_check: bool) -> None:
+                              insecure: bool, live_check: bool) -> Optional[str]:
         """Handle status display for workflow list."""
         workflow_list = self.data_fetcher.list_workflows(
             argo_server, namespace, insecure, exclude_completed=not show_all)
 
         if not workflow_list:
-            self._handle_no_workflows(show_all, argo_server, namespace, insecure, live_check)
-            return
+            return self._handle_no_workflows(show_all, argo_server, namespace, insecure, live_check)
 
         click.echo(f"Found {len(workflow_list)} workflow(s) in namespace {namespace}:")
         click.echo("")
@@ -102,13 +102,14 @@ class StatusCommandHandler:
                 f"{workflow_name}"
             )
             self._display_workflow_with_tree(workflow_data, live_check, argo_server, namespace, insecure)
+        return None
 
     def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str,
-                             insecure: bool, live_check: bool) -> None:
+                             insecure: bool, live_check: bool) -> Optional[str]:
         """Handle case when no active workflows are found."""
         if show_all:
             click.echo(f"No workflows found in namespace {namespace}")
-            return
+            return None
 
         click.echo(f"No running workflows found in namespace {namespace}")
 
@@ -118,13 +119,16 @@ class StatusCommandHandler:
 
         if all_workflows:
             most_recent = self.sorter.find_most_recent_completed(all_workflows)
+            phase = None
             if most_recent:
                 click.echo("\nShowing last completed workflow:\n")
-                self._display_workflow_with_tree(most_recent, live_check, argo_server, namespace, insecure)
+                phase = self._display_workflow_with_tree(most_recent, live_check, argo_server, namespace, insecure)
 
             click.echo("\nUse --all to see all completed workflows")
+            return phase if most_recent else None
         else:
             click.echo("Use --all to see completed workflows")
+            return None
 
     def _get_workflow_name(self, workflow_data: Dict[str, Any]) -> str:
         """Extract workflow name from workflow data."""
@@ -132,7 +136,7 @@ class StatusCommandHandler:
 
     def _display_workflow_with_tree(self, workflow_data: Dict[str, Any], live_check: bool,
                                     argo_server: str = "", namespace: str = "",
-                                    insecure: bool = False) -> None:
+                                    insecure: bool = False) -> str:
         """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
         if live_check:
@@ -153,15 +157,17 @@ class StatusCommandHandler:
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
         metadata = workflow_data.get('metadata', {})
+        phase = status.get('phase', 'Unknown')
 
         self.displayer.display_workflow_status(
             metadata.get('name', 'unknown'),
-            status.get('phase', 'Unknown'),
+            phase,
             status.get('startedAt'),
             status.get('finishedAt'),
             filtered_tree,
             workflow_data,
             artifact_resolver=artifact_resolver)
+        return phase
 
 
 class WorkflowDataFetcher:
@@ -572,7 +578,10 @@ def _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, in
         if all_workflows:
             handler.handle_status_command(None, argo_server, namespace, insecure, show_all, live_status)
         else:
-            handler.handle_status_command(workflow_name, argo_server, namespace, insecure, show_all, live_status)
+            phase = handler.handle_status_command(
+                workflow_name, argo_server, namespace, insecure, show_all, live_status
+            )
+            hint_after_status(phase or '')
 
     except click.Abort:
         ctx.exit(ExitCode.FAILURE.value)

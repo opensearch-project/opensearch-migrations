@@ -9,11 +9,14 @@ import {
     REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, configMapKey,
+    BaseExpression,
     ContainerBuilder,
     defineParam,
     defineRequiredParam,
-    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParamsToExpressions,
+    expr,
+    InputParameterSource,
+    InputParamDef,
+    InputParamsToExpressions,
     INTERNAL,
     selectInputsForRegister,
     Serialized,
@@ -27,10 +30,6 @@ import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {
-    getApprovalMap,
-    getSourceTargetPathAndSnapshotAndMigrationIndex
-} from "./commonUtils/configContextPathConstructors";
 import {ResourceManagement} from "./resourceManagement";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
@@ -164,25 +163,6 @@ function makeParamsDict(
     );
 
     return base;
-}
-
-function makeApprovalCheck<
-    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource>
->(
-    inputs: IPR,
-    skipApprovalMap: BaseExpression<any>,
-    ...innerSkipFlags: string[]
-) {
-    return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
-        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceLabel,
-            inputs.targetConfig,
-            expr.jsonPathStrict(inputs.snapshotConfig, "label"),
-            inputs.migrationLabel
-        ),
-        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f => expr.literal(f)) : []),
-        expr.literal(false),
-        expr.deserializeRecord(skipApprovalMap)
-    ]);
 }
 
 const runMetadataInputs = {
@@ -324,14 +304,12 @@ export const MetadataMigration = metadataMigrationBaseBuilder
         .addOptionalInput("sourceConfig", c =>
             expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addInputsFromRecord(
-            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
         .addOptionalInput("workflowCreationTimestamp", c => expr.getWorkflowValue("creationTimestamp"))
         .addOptionalInput("workflowUid", c => expr.getWorkflowValue("uid"))
         .addOptionalInput("skipEvaluateApproval", c =>
-            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
+            expr.dig(expr.deserializeRecord(c.inputParameters.metadataMigrationConfig), ["skipEvaluateApproval"], false))
         .addOptionalInput("skipMigrateApproval", c =>
-            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
+            expr.dig(expr.deserializeRecord(c.inputParameters.metadataMigrationConfig), ["skipMigrateApproval"], false))
         .addOptionalInput("approvalNameSuffix", c =>
             expr.concat(
                 expr.literal("."),
