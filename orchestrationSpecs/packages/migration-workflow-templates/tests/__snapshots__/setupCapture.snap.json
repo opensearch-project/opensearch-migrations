@@ -52,11 +52,21 @@
             {
               "name": "internetFacing",
               "value": "false"
+            },
+            {
+              "name": "cloudProvider",
+              "value": "aws",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "provider-config",
+                  "key": "cloudProvider"
+                }
+              }
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: {{=toJSON(inputs.parameters.proxyName)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{=toJSON(inputs.parameters.proxyName)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: {{=toJSON(((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal')))}}\nspec:\n  type: {{=toJSON(inputs.parameters.serviceType)}}\n  selector:\n    migrations/proxy: {{=toJSON(inputs.parameters.proxyName)}}\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: {{=toJSON(inputs.parameters.proxyName)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{=toJSON(inputs.parameters.proxyName)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  annotations: {{=((inputs.parameters.cloudProvider == 'gcp') ? (((fromJSON(inputs.parameters.internetFacing)) ? (sprig.dict()) : (sprig.dict(\"networking.gke.io/load-balancer-type\", 'Internal')))) : (((inputs.parameters.cloudProvider == 'azure') ? (((fromJSON(inputs.parameters.internetFacing)) ? (sprig.dict()) : (sprig.dict(\"service.beta.kubernetes.io/azure-load-balancer-internal\", 'true')))) : (sprig.dict(\"service.beta.kubernetes.io/aws-load-balancer-type\", 'external', \"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type\", 'ip', \"service.beta.kubernetes.io/aws-load-balancer-scheme\", ((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal')))))))}}\nspec:\n  type: {{=toJSON(inputs.parameters.serviceType)}}\n  selector:\n    migrations/proxy: {{=toJSON(inputs.parameters.proxyName)}}\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
           "action": "apply",
           "setOwnerReference": false
         },

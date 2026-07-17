@@ -10,7 +10,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
     ARGO_FILE_SOURCE_VOLUME,
@@ -60,12 +60,58 @@ function makeOwnerReferences(
     }];
 }
 
+// Build the cloud-specific Service annotations that control the load balancer's
+// public/private scheme. cloudProvider is resolved at runtime (from the
+// provider-config ConfigMap), so the annotation set must be selected with a
+// runtime expression rather than a build-time conditional: each cloud honors
+// only its own annotation keys, so we emit exactly the active cloud's keys.
+//   - aws:   NLB in IP mode; scheme internet-facing|internal per internetFacing.
+//   - gcp:   internal ILB via networking.gke.io/load-balancer-type=Internal
+//            (omitted when internetFacing, since external is GKE's default).
+//   - azure: internal ILB via azure-load-balancer-internal=true
+//            (omitted when internetFacing, since external is Azure's default).
+function makeProxyServiceAnnotations(
+    internetFacing: BaseExpression<boolean>,
+    cloudProvider: BaseExpression<string>,
+) {
+    const isGcp = expr.equals(cloudProvider, expr.literal("gcp"));
+    const isAzure = expr.equals(cloudProvider, expr.literal("azure"));
+
+    const awsAnnotations = expr.makeDict({
+        "service.beta.kubernetes.io/aws-load-balancer-type": expr.literal("external"),
+        "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": expr.literal("ip"),
+        "service.beta.kubernetes.io/aws-load-balancer-scheme":
+            expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal")),
+    });
+    const gcpAnnotations = expr.ternary(
+        internetFacing,
+        expr.makeDict({}),
+        expr.makeDict({"networking.gke.io/load-balancer-type": expr.literal("Internal")})
+    );
+    const azureAnnotations = expr.ternary(
+        internetFacing,
+        expr.makeDict({}),
+        expr.makeDict({"service.beta.kubernetes.io/azure-load-balancer-internal": expr.literal("true")})
+    );
+
+    return makeDirectTypeProxy(
+        expr.ternary(isGcp,
+            expr.cast(gcpAnnotations).to<Record<string, string>>(),
+            expr.ternary(isAzure,
+                expr.cast(azureAnnotations).to<Record<string, string>>(),
+                expr.cast(awsAnnotations).to<Record<string, string>>()
+            )
+        )
+    );
+}
+
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
     serviceType: BaseExpression<string>,
     internetFacing: BaseExpression<boolean>,
     ownerUid: BaseExpression<string>,
+    cloudProvider: BaseExpression<string>,
 ) {
     return {
         apiVersion: "v1",
@@ -73,14 +119,7 @@ function makeProxyServiceManifest(
         metadata: {
             name: proxyName,
             ownerReferences: makeOwnerReferences(proxyName, ownerUid),
-            annotations: {
-                // NLB IP mode for EKS Auto Mode — ignored on non-EKS and non-LoadBalancer Services.
-                "service.beta.kubernetes.io/aws-load-balancer-type": "external",
-                "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
-                "service.beta.kubernetes.io/aws-load-balancer-scheme": makeStringTypeProxy(
-                    expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal"))
-                )
-            }
+            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider)
         },
         spec: {
             type: makeStringTypeProxy(serviceType),
@@ -358,6 +397,11 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("serviceType", c => "LoadBalancer")
         .addOptionalInput("internetFacing", c => false)
+        // cloudProvider is resolved HERE, at the single point of use, directly from the
+        // provider-config ConfigMap (configMapKeyRef resolves on template inputs, unlike
+        // global workflow arguments). Defined once — not threaded through the workflow —
+        // so there is no scattered "aws" default to drift out of sync.
+        .addInputsFromRecord(cloudProviderResolvedInput())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -368,6 +412,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     b.inputs.serviceType,
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
+                    b.inputs.cloudProvider,
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -642,6 +687,8 @@ export const SetupCapture = WorkflowBuilder.create({
                             serviceType,
                             internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
                             ownerUid: b.inputs.ownerUid,
+                            // cloudProvider is NOT passed here — deployProxyService resolves it
+                            // itself from the provider-config ConfigMap (see its input def).
                         })
                     )
                     .addStep("provisionCert", INTERNAL, "provisionProxyCert", c =>
