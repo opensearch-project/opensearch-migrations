@@ -200,6 +200,16 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
+    public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
+        underlyingSource.onNetworkConnectionClosed(connectionId, sessionNumber, generation);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        underlyingSource.onConnectionAccumulationComplete(trafficStreamKey);
+    }
+
+    @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
         var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
         if (commitResult == CommitResult.AFTER_NEXT_READ) {

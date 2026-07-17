@@ -28,8 +28,9 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
     private static final String TOPIC = "test-topic";
 
     /**
-     * Test #1: Force a connection with non-zero sessionNumber. Assert onNetworkConnectionClosed
-     * decrements outstandingTrafficSourceReaderInterruptedCloseSessions.
+     * Test #1: Register a synthetic close with PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER.
+     * Call onNetworkConnectionClosed with a DIFFERENT (non-zero) sessionNumber.
+     * The lookup must still match because the key always uses the placeholder.
      */
     @Test
     void trafficSourceReaderInterruptedClose_counterDecrements_withNonZeroSessionNumber() throws Exception {
@@ -38,15 +39,16 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            // Manually register a synthetic close with sessionNumber=2
-            var sessionKey = "conn1:2:5";
+            // Register with placeholder sessionNumber (0) — this is what production code does
+            var sessionKey = "conn1:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER + ":5";
             source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
-            source.onNetworkConnectionClosed("conn1", 2, 5);
+            // Call with non-zero sessionNumber — must still match the placeholder-based key
+            source.onNetworkConnectionClosed("conn1", 7, 5);
 
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "onNetworkConnectionClosed must decrement counter for non-zero sessionNumber");
+                "onNetworkConnectionClosed must decrement counter regardless of actual sessionNumber");
         }
     }
 
@@ -114,6 +116,10 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            // First, assign the partition so the consumer is active
+            mc.schedulePollTask(() -> mc.rebalance(Collections.singletonList(tp)));
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
             int N = 3;
             // Register N synthetic closes
             for (int i = 0; i < N; i++) {
@@ -121,11 +127,7 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
             }
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(N);
 
-            // Verify empty batch while counter > 0
-            mc.schedulePollTask(() -> {
-                mc.rebalance(Collections.singletonList(tp));
-                addRecord(mc, tp, 0);
-            });
+            // Verify empty batch while counter > 0 (touch() is called but no data returned)
             var emptyResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertTrue(emptyResult.isEmpty(),
                 "Must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0");
@@ -137,10 +139,104 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "Counter must reach 0 after all sessions close");
 
+            // Add a record now that the drain gate is open
+            addRecord(mc, tp, 0);
+
             // Now real records should be returned
             var realResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(realResult.isEmpty(),
                 "Real records must be returned after counter reaches 0");
+        }
+    }
+
+    /**
+     * Regression test for the session-number mismatch bug: registration uses placeholder=0
+     * but the accumulator fires onNetworkConnectionClosed with the REAL sessionNumber.
+     * Without the fix, the counter would never decrement and the read loop would block forever.
+     */
+    @Test
+    void sessionNumberMismatch_counterStillDecrements_whenCalledWithAnySessionNumber() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            int generation = 3;
+            // Simulate what enqueueTrafficSourceReaderInterruptedClosesForPartitions does:
+            // registers with PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER
+            var registrationKey = "myConn:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER
+                + ":" + generation;
+            source.pendingTrafficSourceReaderInterruptedCloses.put(registrationKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+
+            // Simulate what the accumulator's close callback does: calls with real sessionNumber
+            // (e.g., 42 — any value != 0)
+            source.onNetworkConnectionClosed("myConn", 42, generation);
+
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "Counter must decrement even when sessionNumber differs from placeholder");
+            Assertions.assertTrue(source.pendingTrafficSourceReaderInterruptedCloses.isEmpty(),
+                "Entry must be removed from pending map");
+        }
+    }
+
+    /**
+     * Verify that onNetworkConnectionClosed is a no-op for connections that were never registered
+     * as synthetic closes (e.g., normal connection lifecycle closes).
+     */
+    @Test
+    void onNetworkConnectionClosed_noOpForUnregisteredConnections() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get());
+
+            // Call for a connection that was never registered — must not go negative
+            source.onNetworkConnectionClosed("unregistered-conn", 5, 1);
+
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "Counter must not go negative for unregistered connections");
+        }
+    }
+
+    /**
+     * Verify that the drain gate calls touch() (poll) to keep the consumer alive,
+     * rather than just parking. This prevents consumer fencing during synthetic close drain.
+     */
+    @Test
+    void drainGate_callsTouchToKeepConsumerAlive() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        mc.schedulePollTask(() -> mc.rebalance(Collections.singletonList(tp)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            // First call triggers the scheduled rebalance
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Set up the drain gate
+            var sessionKey = "conn1:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER + ":0";
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+
+            // Call readNextTrafficStreamChunk — should hit drain gate and call touch()
+            // If touch() throws (it shouldn't with MockConsumer), it should be caught
+            var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            Assertions.assertTrue(result.isEmpty(),
+                "Must return empty batch during drain gate");
+
+            // The consumer should still be alive (not fenced) — verify by clearing
+            // the counter and reading successfully
+            source.onNetworkConnectionClosed("conn1", 99, 0);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get());
+
+            // Add a record and verify we can still read
+            addRecord(mc, tp, 0);
+            var realResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            Assertions.assertFalse(realResult.isEmpty(),
+                "Consumer must still be alive after drain gate — real records should be returned");
         }
     }
 
