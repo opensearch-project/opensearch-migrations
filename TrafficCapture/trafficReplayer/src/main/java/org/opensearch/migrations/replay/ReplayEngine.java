@@ -94,6 +94,9 @@ public class ReplayEngine {
     private void updateContentTimeControllerWhenIdling() {
         var currentSourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
         if (currentSourceTimeOp.isEmpty()) {
+            // do nothing - the traffic source shouldn't be blocking initially.
+            // Leave it manage its own initialization since we don't have any better information about what a
+            // start time might be yet.
             return;
         }
         var currentSourceTimeEpochMs = currentSourceTimeOp.get().toEpochMilli();

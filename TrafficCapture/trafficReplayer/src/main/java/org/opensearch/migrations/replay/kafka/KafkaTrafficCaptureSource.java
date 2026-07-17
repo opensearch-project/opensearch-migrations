@@ -365,7 +365,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     + "assignment racing with pause). Continuing drain loop.")
                 .log();
         }
-        java.util.concurrent.locks.LockSupport.parkNanos(5_000_000);
+        // We should be draining very fast and if we block, we risk falling out of the Kafka group,
+        // which could then have knock-on effects throughout the fleet since we're recovering from
+        // the last recovery/partition reassignment.
+        java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
         return Collections.emptyList();
     }
 

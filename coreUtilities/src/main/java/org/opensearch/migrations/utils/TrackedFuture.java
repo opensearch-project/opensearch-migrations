@@ -105,6 +105,8 @@ public class TrackedFuture<D, T> {
                 .log();
             return;
         }
+        // the parent is a pretty good breadcrumb for the current stack... but the grandparent of the most recently
+        // finished ancestor begins to have diminished value immediately, so cut the ancestry tree at this point
         future.whenComplete(
             (v, t) -> Optional.ofNullable(getParentDiagnosticFuture()).ifPresent(p -> p.setParentDiagnosticFuture(null))
         );
