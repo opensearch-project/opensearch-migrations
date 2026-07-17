@@ -329,51 +329,59 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }, kafkaExecutor);
     }
 
+    /**
+     * Keeps the Kafka consumer alive while waiting for synthetic closes to drain.
+     * Returns an empty list if the gate is active (caller should return immediately),
+     * or null if the gate is clear and real records should be fetched.
+     */
+    private List<ITrafficStreamWithKey> handleDrainGateIfActive(ITrafficSourceContexts.IReadChunkContext context) {
+        if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() <= 0) {
+            drainGateEnteredAtNanos = 0;
+            return null;
+        }
+        long nowNanos = System.nanoTime();
+        if (drainGateEnteredAtNanos == 0) {
+            drainGateEnteredAtNanos = nowNanos;
+        }
+        long elapsedNanos = nowNanos - drainGateEnteredAtNanos;
+        if (elapsedNanos > DRAIN_GATE_TIMEOUT_NANOS) {
+            var outstanding = outstandingTrafficSourceReaderInterruptedCloseSessions.getAndSet(0);
+            pendingTrafficSourceReaderInterruptedCloses.clear();
+            log.atError().setMessage("Drain gate stuck for {}ms with {} outstanding synthetic closes. "
+                    + "Resetting counter to unblock the read loop — data loss may occur for in-flight connections.")
+                .addArgument(elapsedNanos / 1_000_000)
+                .addArgument(outstanding).log();
+            drainGateEnteredAtNanos = 0;
+            return null;
+        }
+        log.atDebug().setMessage("Drain gate active for {}ms: {} synthetic close sessions outstanding")
+            .addArgument(elapsedNanos / 1_000_000)
+            .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
+        try (var bpContext = context.createBackPressureContext()) {
+            trackingKafkaConsumer.touch(bpContext);
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                .setMessage("touch() threw during drain-gate phase (likely a new partition "
+                    + "assignment racing with pause). Continuing drain loop.")
+                .log();
+        }
+        java.util.concurrent.locks.LockSupport.parkNanos(5_000_000);
+        return Collections.emptyList();
+    }
+
     public List<ITrafficStreamWithKey> readNextTrafficStreamSynchronously(
         ITrafficSourceContexts.IReadChunkContext context
     ) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
-        // Drain synthetic closes before returning real Kafka records — one batch per revocation event
         var closeBatch = trafficSourceReaderInterruptedCloseQueue.poll();
         if (closeBatch != null) {
             log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records")
                 .addArgument(closeBatch::size).log();
             return Collections.unmodifiableList(closeBatch);
         }
-        // Block real data until all synthetic closes have been confirmed closed.
-        // CRITICAL: we still poll() via touch() to keep the consumer alive — without poll(),
-        // the cooperative rebalance protocol cannot complete and the consumer will be fenced.
-        if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() > 0) {
-            long nowNanos = System.nanoTime();
-            if (drainGateEnteredAtNanos == 0) {
-                drainGateEnteredAtNanos = nowNanos;
-            }
-            long elapsedNanos = nowNanos - drainGateEnteredAtNanos;
-            if (elapsedNanos > DRAIN_GATE_TIMEOUT_NANOS) {
-                var outstanding = outstandingTrafficSourceReaderInterruptedCloseSessions.getAndSet(0);
-                pendingTrafficSourceReaderInterruptedCloses.clear();
-                log.atError().setMessage("Drain gate stuck for {}ms with {} outstanding synthetic closes. "
-                        + "Resetting counter to unblock the read loop — data loss may occur for in-flight connections.")
-                    .addArgument(elapsedNanos / 1_000_000)
-                    .addArgument(outstanding).log();
-                drainGateEnteredAtNanos = 0;
-            } else {
-                log.atDebug().setMessage("Drain gate active for {}ms: {} synthetic close sessions outstanding")
-                    .addArgument(elapsedNanos / 1_000_000)
-                    .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
-                try (var bpContext = context.createBackPressureContext()) {
-                    trackingKafkaConsumer.touch(bpContext);
-                } catch (RuntimeException e) {
-                    log.atWarn().setCause(e)
-                        .setMessage("touch() threw during drain-gate phase (likely a new partition "
-                            + "assignment racing with pause). Continuing drain loop.")
-                        .log();
-                }
-                java.util.concurrent.locks.LockSupport.parkNanos(5_000_000);
-                return Collections.emptyList();
-            }
-        } else {
-            drainGateEnteredAtNanos = 0;
+        var drainResult = handleDrainGateIfActive(context);
+        if (drainResult != null) {
+            return drainResult;
         }
         try {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {

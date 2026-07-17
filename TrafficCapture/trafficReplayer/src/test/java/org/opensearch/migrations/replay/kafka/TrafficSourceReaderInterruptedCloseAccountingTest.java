@@ -241,6 +241,43 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
     }
 
     /**
+     * Verify the drain gate resets drainGateEnteredAtNanos when the counter drops to 0
+     * between read calls (the "else" branch in handleDrainGateIfActive).
+     */
+    @Test
+    void drainGate_resetsTimestampWhenCounterDropsToZeroBetweenReads() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        mc.schedulePollTask(() -> mc.rebalance(Collections.singletonList(tp)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            // Trigger rebalance to get partition assignment
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            // Set up drain gate and simulate that we've been in it for a while
+            var sessionKey = "conn1:" + KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER + ":0";
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+
+            // First read enters the drain gate
+            var emptyResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            Assertions.assertTrue(emptyResult.isEmpty(), "Should be empty while gate is active");
+
+            // Now externally close the connection (counter drops to 0)
+            source.onNetworkConnectionClosed("conn1", 0, 0);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get());
+
+            // Next read should hit the else branch (counter == 0), reset drainGateEnteredAtNanos,
+            // and proceed to fetch real records
+            addRecord(mc, tp, 0);
+            var realResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            Assertions.assertFalse(realResult.isEmpty(),
+                "After counter drops to 0, drain gate must clear and real records must be returned");
+        }
+    }
+
+    /**
      * Verify that the drain-gate timeout circuit-breaker resets the counter and unblocks
      * the read loop after DRAIN_GATE_TIMEOUT_NANOS is exceeded.
      */
