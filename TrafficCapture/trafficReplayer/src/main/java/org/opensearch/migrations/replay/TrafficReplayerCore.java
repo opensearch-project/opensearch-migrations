@@ -242,16 +242,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             TransformedTargetRequestAndResponseList summary,
             Exception requestFailure
         ) {
-            try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                if (!writeTupleOutput(httpContext, tupleHandlingContext, rrPair, summary, requestFailure)) {
-                    return;
+            try {
+                try (var tupleHandlingContext = httpContext.createTupleContext()) {
+                    if (!writeTupleOutput(httpContext, tupleHandlingContext, rrPair, summary, requestFailure)) {
+                        return;
+                    }
                 }
-            }
-            // Count the final outcome once per request (not per retry)
-            countFinalOutcome(summary, requestFailure);
-            recordTargetResponseCodes(summary);
-            if (tupleWriter == null) {
-                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                countFinalOutcome(summary, requestFailure);
+                recordTargetResponseCodes(summary);
+            } finally {
+                if (tupleWriter == null) {
+                    commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                }
             }
         }
 
@@ -572,12 +574,21 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             if (stopReadingRef.get()) {
                 break;
             }
+            var readStart = System.nanoTime();
             this.nextChunkFutureRef.set(
                 trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
             );
             List<ITrafficStreamWithKey> trafficStreams = null;
             try {
                 trafficStreams = this.nextChunkFutureRef.get().get();
+                var readDurationMs = (System.nanoTime() - readStart) / 1_000_000;
+                if (readDurationMs > 5_000) {
+                    log.atWarn().setMessage("readNextTrafficStreamChunk blocked for {}ms ({} records returned). " +
+                            "This indicates readGate/backpressure delay.")
+                        .addArgument(readDurationMs)
+                        .addArgument(trafficStreams::size)
+                        .log();
+                }
             } catch (ExecutionException ex) {
                 if (ex.getCause() instanceof EOFException) {
                     log.atWarn().setCause(ex.getCause())
@@ -601,7 +612,19 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(trafficStreams::size)
                 .log();
             var batchStart = System.nanoTime();
-            trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
+            for (var ts : trafficStreams) {
+                var recordStart = System.nanoTime();
+                trafficToHttpTransactionAccumulator.accept(ts);
+                var recordDurationMs = (System.nanoTime() - recordStart) / 1_000_000;
+                if (recordDurationMs > 2_000) {
+                    log.atWarn().setMessage("Single record accept() took {}ms — conn={} subStreams={} key={}")
+                        .addArgument(recordDurationMs)
+                        .addArgument(ts.getStream()::getConnectionId)
+                        .addArgument(ts.getStream()::getSubStreamCount)
+                        .addArgument(() -> ts.getKey().toString())
+                        .log();
+                }
+            }
             var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
             if (batchDurationMs > 5_000) {
                 log.atWarn().setMessage("Batch processing took {}ms ({} records). " +

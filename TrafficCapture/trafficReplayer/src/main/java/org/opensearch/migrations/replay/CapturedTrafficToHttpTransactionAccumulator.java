@@ -77,7 +77,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /** Emit a periodic heartbeat log summarizing the accumulator state. */
-    public void logHeartbeat() {
+    /**
+     * Logs accumulator state and force-expires connections idle beyond 1.5x the connection timeout.
+     */
+    public void heartbeatAndExpireStaleConnections() {
         var sb = new StringBuilder();
         int waiting = 0;
         int reads = 0;
@@ -86,8 +89,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         String oldestWriteConn = null;
         long oldestWriteLastPacketAgeMs = 0;
         String oldestWriteOffset = null;
+        int wallClockExpired = 0;
 
         var now = System.currentTimeMillis();
+        var wallClockExpiryThresholdMs = connectionTimeout.toMillis() * 3 / 2;
         var allAccumulations = liveStreams.values().collect(java.util.stream.Collectors.toList());
         int liveConnections = allAccumulations.size();
 
@@ -98,10 +103,18 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 case ACCUMULATING_WRITES: writes++; break;
                 case IGNORING_LAST_REQUEST: ignoring++; break;
             }
+            var lastPacketMs = accum.getNewestPacketTimestampInMillisReference().get();
+            var lastPacketAge = lastPacketMs > 0 ? now - lastPacketMs : 0;
+            if (lastPacketAge > wallClockExpiryThresholdMs) {
+                wallClockExpired++;
+                log.atWarn().setMessage("Wall-clock expiry: connection {} idle for {}ms (threshold={}ms). "
+                        + "Source-time-based expiry failed to fire — force-expiring.")
+                    .addArgument(accum.trafficChannelKey)
+                    .addArgument(lastPacketAge)
+                    .addArgument(wallClockExpiryThresholdMs).log();
+                fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY);
+            }
             if (accum.state == Accumulation.State.ACCUMULATING_WRITES) {
-                var lastPacketMs = accum.getNewestPacketTimestampInMillisReference().get();
-                var lastPacketAge = lastPacketMs > 0 ? now - lastPacketMs : 0;
-                // Use lastPacketAge as a proxy for how long this accumulation has been stuck
                 if (lastPacketAge > oldestWriteLastPacketAgeMs) {
                     oldestWriteLastPacketAgeMs = lastPacketAge;
                     oldestWriteConn = accum.trafficChannelKey.getConnectionId();
@@ -127,7 +140,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         sb.append(" totals={requests=").append(requestCounter.get())
             .append(", closed=").append(closedConnectionCounter.get())
             .append(", expired=").append(connectionsExpiredCounter.get())
-            .append(", exceptions=").append(exceptionConnectionCounter.get()).append("}");
+            .append(", exceptions=").append(exceptionConnectionCounter.get())
+            .append(", wallClockExpired=").append(wallClockExpired).append("}");
 
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
     }
