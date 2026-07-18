@@ -114,12 +114,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .addArgument(wallClockExpiryThresholdMs).log();
                 fireAccumulationsCallbacksAndClose(accum, RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY);
             }
-            if (accum.state == Accumulation.State.ACCUMULATING_WRITES) {
-                if (lastPacketAge > oldestWriteLastPacketAgeMs) {
-                    oldestWriteLastPacketAgeMs = lastPacketAge;
-                    oldestWriteConn = accum.trafficChannelKey.getConnectionId();
-                    oldestWriteOffset = accum.trafficChannelKey.toString();
-                }
+            if (accum.state == Accumulation.State.ACCUMULATING_WRITES && lastPacketAge > oldestWriteLastPacketAgeMs) {
+                oldestWriteLastPacketAgeMs = lastPacketAge;
+                oldestWriteConn = accum.trafficChannelKey.getConnectionId();
+                oldestWriteOffset = accum.trafficChannelKey.toString();
             }
         }
 
