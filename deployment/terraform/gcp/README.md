@@ -12,6 +12,28 @@ Provisions GCP infrastructure for the OpenSearch Migration Assistant.
   gcloud services enable container.googleapis.com storage.googleapis.com
   ```
 
+## Container images
+
+The Migration Assistant images (migration console, reindex-from-snapshot, and — for
+live capture-and-replay — the capture proxy and traffic replayer) must be available in
+a container registry your GKE cluster can pull from (e.g. Artifact Registry in the same
+project). Build and push them from the repo root, for example:
+
+```bash
+./gradlew buildImagesToRegistry -PregistryEndpoint=REGION-docker.pkg.dev/PROJECT
+```
+
+**Image reference caveat.** The Helm chart's default image `repository` values are
+*unqualified* (e.g. `migrations/capture_proxy`). Kubernetes resolves an unqualified
+repository against Docker Hub (`docker.io/...`), where these images do not exist, so
+pods fail with `ImagePullBackOff`. Until the chart gains a first-class registry-prefix
+setting, **every image must be given a fully-qualified `repository` at deploy time.**
+This module does that for you via the Helm `set` overrides in `main.tf`
+(`images.<name>.repository`); if you deploy the chart directly, pass equivalent
+`--set images.<name>.repository=...` values for each image. Note the built image names
+use underscores (`capture_proxy`, `traffic_replayer`) while the console/RFS repositories
+are hyphenated — match whatever your build actually publishes.
+
 ## Usage
 
 ```bash
