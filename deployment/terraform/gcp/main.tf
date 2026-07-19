@@ -405,6 +405,28 @@ resource "helm_release" "migration_assistant" {
       name  = "images.reindexFromSnapshot.tag"
       value = "latest"
     },
+    # Capture proxy and traffic replayer images (live capture-and-replay migrations).
+    # The chart's default repositories for these are unqualified ("migrations/..."),
+    # which Kubernetes resolves against docker.io and cannot pull. They must be given
+    # the fully-qualified registry path here, exactly as the console/RFS images above.
+    # NOTE: these use underscore names (capture_proxy, traffic_replayer) to match the
+    # image build output, unlike the hyphenated console/RFS repositories.
+    {
+      name  = "images.captureProxy.repository"
+      value = "us-central1-docker.pkg.dev/${var.project}/migrations/capture_proxy"
+    },
+    {
+      name  = "images.captureProxy.tag"
+      value = "latest"
+    },
+    {
+      name  = "images.trafficReplayer.repository"
+      value = "us-central1-docker.pkg.dev/${var.project}/migrations/traffic_replayer"
+    },
+    {
+      name  = "images.trafficReplayer.tag"
+      value = "latest"
+    },
     {
       name  = "migrationConfig.bucket_name"
       value = google_storage_bucket.migration_snapshots.name

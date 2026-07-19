@@ -53,10 +53,18 @@ public class TrafficStreamGenerator {
             rootContext::createTrafficStreamContextForTest
         );
         var offloader = connectionFactory.createOffloader(rootContext.createChannelContext(tsk));
+        boolean alreadyTerminated = false;
         for (var directive : directives) {
             serializeEvent(offloader, interactionOffset++, directive, Instant.EPOCH);
+            if (directive.offloaderCommandType == OffloaderCommandType.ConnectionException
+                || directive.offloaderCommandType == OffloaderCommandType.Close) {
+                alreadyTerminated = true;
+                break;
+            }
         }
-        offloader.addCloseEvent(Instant.EPOCH);
+        if (!alreadyTerminated) {
+            offloader.addCloseEvent(Instant.EPOCH);
+        }
         offloader.flushCommitAndResetStream(true).get();
         return connectionFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
     }
@@ -82,6 +90,12 @@ public class TrafficStreamGenerator {
                 return;
             case DropRequest:
                 offloader.cancelCaptureForCurrentRequest(timestamp);
+                return;
+            case ConnectionException:
+                offloader.addExceptionCaughtEvent(timestamp, new RuntimeException("synthetic connection exception"));
+                return;
+            case Close:
+                offloader.addCloseEvent(timestamp);
                 return;
             default:
                 throw new IllegalStateException("Unknown directive type: " + directive.offloaderCommandType);

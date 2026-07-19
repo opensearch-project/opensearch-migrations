@@ -150,6 +150,61 @@ describe('MigrationConfigTransformer validation', () => {
         expect(result.proxies?.[0]?.skipApproval).toBe(true);
     });
 
+    it('should resolve global skipApprovals into snapshot migration gate flags', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.snapshotMigrationConfigs[0].skipApprovals;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(true);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(true);
+    });
+
+    it('should let per-migration skipApprovals override global skipApprovals for snapshot gates', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        config.snapshotMigrationConfigs[0].skipApprovals = false;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(false);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should let per-gate skip flags override broader skipApprovals', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.snapshotMigrationConfigs[0].skipApprovals;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                skipEvaluateApproval: false
+            },
+            documentBackfillConfig: {
+                skipApproval: false
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
     it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,

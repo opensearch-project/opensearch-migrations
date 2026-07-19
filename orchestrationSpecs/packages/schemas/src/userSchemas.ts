@@ -845,9 +845,9 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    skipEvaluateApproval: z.boolean().default(false).optional()
+    skipEvaluateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
-    skipMigrateApproval: z.boolean().default(false).optional()
+    skipMigrateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
@@ -921,7 +921,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
-    skipApproval: z.boolean().default(false).optional()
+    skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
         .describe("[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). " +
@@ -1563,7 +1563,7 @@ export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
     .describe("Map of snapshot names to their migration configurations. Keys must match snapshot names defined in the source cluster's snapshotInfo.snapshots or snapshotInfo.backups.");
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional()
+    skipApprovals : z.boolean().optional()
         .describe("When true, skips all manual approval gates for migrations in this configuration block."),
     fromSource: z.string()
         .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters."),
