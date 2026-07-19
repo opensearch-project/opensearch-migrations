@@ -458,23 +458,28 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     /** Fails fatally in IMPORT mode if the S3 snapshot location is empty or cannot be listed. */
     private void validateS3SnapshotAccessible(S3Uri repoUri) {
         var snapshotPrefix = computeParentPrefix(repoUri.key) + args.snapshotName + "/";
-
-        boolean empty;
         try (var s3Client = buildS3Client(args.s3Region, args.endpoint)) {
+            var empty = isS3SnapshotEmpty(s3Client, repoUri.bucketName, snapshotPrefix);
+            requireNonEmptyS3Snapshot(repoUri.bucketName, snapshotPrefix, empty);
+        }
+    }
+
+    /** Lists the snapshot prefix and reports whether it is empty; wraps listing failures fatally. */
+    static boolean isS3SnapshotEmpty(S3Client s3Client, String bucketName, String snapshotPrefix) {
+        try {
             var response = s3Client.listObjectsV2(
                 software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
-                    .bucket(repoUri.bucketName)
+                    .bucket(bucketName)
                     .prefix(snapshotPrefix)
                     .maxKeys(1)
                     .build());
-            empty = response.contents().isEmpty();
+            return response.contents().isEmpty();
         } catch (Exception e) {
             throw new SolrImportSnapshotUnavailable(String.format(
                 "IMPORT mode could not verify the snapshot location s3://%s/%s: %s. "
                     + "The snapshot data must already exist at this location before import.",
-                repoUri.bucketName, snapshotPrefix, e.getMessage()), e);
+                bucketName, snapshotPrefix, e.getMessage()), e);
         }
-        requireNonEmptyS3Snapshot(repoUri.bucketName, snapshotPrefix, empty);
     }
 
     /** Throws if the listed S3 snapshot prefix is empty; the IO/listing is done by the caller. */

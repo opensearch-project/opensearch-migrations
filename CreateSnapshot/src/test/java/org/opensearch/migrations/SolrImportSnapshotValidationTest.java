@@ -5,11 +5,20 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.S3Object;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Fast, container-free unit tests for IMPORT-mode snapshot-location validation. The end-to-end
@@ -28,6 +37,34 @@ public class SolrImportSnapshotValidationTest {
     @Test
     void s3_nonEmptyPrefix_passes() {
         assertDoesNotThrow(() -> SolrBackupStrategy.requireNonEmptyS3Snapshot("bucket", "snap/", false));
+    }
+
+    @Test
+    void s3_listingEmpty_returnsTrue() {
+        var s3 = mock(S3Client.class);
+        when(s3.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(ListObjectsV2Response.builder().build());
+        assertTrue(SolrBackupStrategy.isS3SnapshotEmpty(s3, "bucket", "snap/"));
+    }
+
+    @Test
+    void s3_listingNonEmpty_returnsFalse() {
+        var s3 = mock(S3Client.class);
+        when(s3.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(ListObjectsV2Response.builder()
+                .contents(S3Object.builder().key("snap/segments_1").build()).build());
+        assertFalse(SolrBackupStrategy.isS3SnapshotEmpty(s3, "bucket", "snap/"));
+    }
+
+    @Test
+    void s3_listingFailure_wrapsInSnapshotUnavailable() {
+        var s3 = mock(S3Client.class);
+        when(s3.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenThrow(new RuntimeException("bucket does not exist"));
+        var ex = assertThrows(SolrBackupStrategy.SolrImportSnapshotUnavailable.class,
+            () -> SolrBackupStrategy.isS3SnapshotEmpty(s3, "bucket", "snap/"));
+        assertThat(ex.getMessage(), containsString("could not verify"));
+        assertThat(ex.getMessage(), containsString("bucket does not exist"));
     }
 
     @Test
