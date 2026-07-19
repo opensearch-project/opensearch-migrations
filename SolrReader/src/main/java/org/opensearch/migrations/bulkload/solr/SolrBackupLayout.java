@@ -45,6 +45,7 @@ public final class SolrBackupLayout {
 
     private static final Pattern ZK_BACKUP_PATTERN = Pattern.compile("zk_backup_(\\d+)");
     private static final Pattern SHARD_METADATA_PATTERN = Pattern.compile("md_(.+)_(\\d+)\\.json");
+    private static final Pattern BACKUP_PROPS_PATTERN = Pattern.compile("backup_(\\d+)\\.properties");
 
     private SolrBackupLayout() {}
 
@@ -200,6 +201,11 @@ public final class SolrBackupLayout {
 
     private static int extractZkBackupIndex(Path path) {
         var m = ZK_BACKUP_PATTERN.matcher(path.getFileName().toString());
+        return m.matches() ? Integer.parseInt(m.group(1)) : -1;
+    }
+
+    private static int extractBackupPropsIndex(Path path) {
+        var m = BACKUP_PROPS_PATTERN.matcher(path.getFileName().toString());
         return m.matches() ? Integer.parseInt(m.group(1)) : -1;
     }
 
@@ -460,12 +466,10 @@ public final class SolrBackupLayout {
             return bare;
         }
         try (var entries = Files.list(dir)) {
+            // Compare the index numerically so backup_10 outranks backup_9, matching zk_backup_N handling.
             return entries.filter(Files::isRegularFile)
-                .filter(p -> {
-                    var name = p.getFileName().toString();
-                    return name.startsWith("backup_") && name.endsWith(".properties");
-                })
-                .max(Comparator.comparing(p -> p.getFileName().toString()))
+                .filter(p -> BACKUP_PROPS_PATTERN.matcher(p.getFileName().toString()).matches())
+                .max(Comparator.comparingInt(SolrBackupLayout::extractBackupPropsIndex))
                 .orElse(null);
         } catch (IOException e) {
             return null;

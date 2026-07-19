@@ -282,6 +282,14 @@ class SolrBackupLayoutHelpersTest {
     }
 
     @Test
+    void readCollectionName_ordersNumberedPropertiesFilesNumerically() throws IOException {
+        // backup_10 is newer than backup_9, though it sorts earlier lexicographically.
+        Files.writeString(tempDir.resolve("backup_9.properties"), "collection=old\n");
+        Files.writeString(tempDir.resolve("backup_10.properties"), "collection=new\n");
+        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("new"));
+    }
+
+    @Test
     void readCollectionName_nullWhenNoPropertiesFile() {
         assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), nullValue());
     }
