@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -73,6 +74,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         "managed-schema.xml"
     );
 
+    /** Timeout for the SolrCloud-vs-standalone probe. Generous enough to ride out transient hiccups. */
+    private static final Duration DETECTION_TIMEOUT = Duration.ofSeconds(10);
+
     private String topologyLabel() {
         return isCloud ? COLLECTION_LABEL : CORE_LABEL;
     }
@@ -94,6 +98,21 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         public SolrImportSchemaUnavailable(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Thrown when the SolrCloud-vs-standalone topology cannot be determined — the source is
+     * unreachable, times out, or is access-controlled. Guessing a topology here would silently run
+     * the wrong backup mode, so detection fails loudly instead of defaulting to standalone.
+     */
+    public static class SolrTopologyDetectionException extends RuntimeException {
+        public SolrTopologyDetectionException(String message) {
+            super(message);
+        }
+
+        public SolrTopologyDetectionException(String message, Throwable cause) {
             super(message, cause);
         }
     }
@@ -503,18 +522,38 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     // ---- Cloud vs standalone detection ----
 
     static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+        var listUrl = solrUrl + "/solr/admin/collections?action=LIST&wt=json";
+        HttpResponse<String> response;
         try {
-            var response = httpClient.getRaw(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
-            return response.statusCode() == 200;
+            response = httpClient.getRaw(listUrl, DETECTION_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.info("SolrCloud detection interrupted, assuming standalone");
-            return false;
-        } catch (Exception e) {
-            log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
-            return false;
+            throw new SolrTopologyDetectionException(
+                "Interrupted while detecting Solr topology at " + solrUrl, e);
+        } catch (IOException e) {
+            // No HTTP response at all (unreachable host, refused connection, TLS error, timeout):
+            // we can't tell SolrCloud from standalone, so fail loudly rather than guess standalone.
+            throw new SolrTopologyDetectionException(
+                "Could not reach Solr at " + solrUrl + " to detect SolrCloud vs standalone topology: "
+                    + e.getMessage(), e);
         }
+
+        int status = response.statusCode();
+        if (status == 200) {
+            return true;
+        }
+        if (status == 401 || status == 403) {
+            // Reachable but access-controlled: we can't read the Collections API to decide, and
+            // assuming standalone could silently run the wrong mode against a secured SolrCloud.
+            throw new SolrTopologyDetectionException(
+                "Solr authentication/authorization failed (HTTP " + status + ") while detecting topology at "
+                    + solrUrl + "; cannot determine SolrCloud vs standalone");
+        }
+        // Reachable and responding, but not a SolrCloud node — standalone Solr returns HTTP 400
+        // ("not running in SolrCloud mode"). A definitive standalone result.
+        log.info("Solr topology detection: HTTP {} from Collections API at {} — treating as standalone",
+            status, solrUrl);
+        return false;
     }
 
     // ---- Collection / core discovery ----

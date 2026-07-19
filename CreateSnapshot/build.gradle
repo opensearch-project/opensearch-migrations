@@ -22,6 +22,8 @@ dependencies {
     testImplementation libs.testcontainers.localstack
     testImplementation libs.hamcrest
     testImplementation libs.netty.all
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
 }
 
 application {
