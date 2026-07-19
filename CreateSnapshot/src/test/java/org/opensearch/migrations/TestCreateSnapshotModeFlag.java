@@ -233,6 +233,9 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=importcoll&numShards=1&replicationFactor=1&wt=json");
 
+        // IMPORT validates the snapshot location is non-empty, so seed a placeholder object.
+        putSnapshotPlaceholder(subpath, snapshotName);
+
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = cloudSolrUrl();
         args.sourceArgs.insecure = true;
@@ -321,6 +324,9 @@ public class TestCreateSnapshotModeFlag {
         CLOUD_SOLR.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=nobkpcoll&numShards=1&replicationFactor=1&wt=json");
+
+        // IMPORT validates the snapshot location is non-empty, so seed a placeholder object.
+        putSnapshotPlaceholder(subpath, snapshotName);
 
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = cloudSolrUrl();
@@ -481,6 +487,9 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=branchcoll&numShards=1&replicationFactor=1&wt=json");
 
+        // IMPORT validates the snapshot location is non-empty, so seed a placeholder object.
+        putSnapshotPlaceholder("branch-import", "branch_import_test");
+
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = cloudSolrUrl();
         args.sourceArgs.insecure = true;
@@ -563,9 +572,85 @@ public class TestCreateSnapshotModeFlag {
         }
     }
 
+    // ── IMPORT mode fails loudly when the snapshot location has no data ───────
+    //
+    // IMPORT imports an existing snapshot rather than creating one. An empty location means there is
+    // nothing to import, so it must fail fatally (SolrImportSnapshotUnavailable) instead of warning and
+    // exiting green. SolrCloud is used so no synthetic config is written that would populate the prefix.
+
+    @Test
+    void importMode_emptySnapshotLocation_throwsInsteadOfWarning() throws Exception {
+        ensureBucket();
+        String snapshotName = "import_empty_test";
+        String subpath = "import-empty";
+
+        CLOUD_SOLR.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=CREATE"
+                + "&name=emptycoll&numShards=1&replicationFactor=1&wt=json");
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = cloudSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.s3Region = REGION;
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.mode = "import";
+        args.solrCollections = List.of("emptycoll");
+        args.noWait = false;
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+
+        var ex = Assertions.assertThrows(SolrBackupStrategy.SolrImportSnapshotUnavailable.class,
+            creator::run,
+            "IMPORT mode must throw when the snapshot location is empty");
+        Assertions.assertTrue(ex.getMessage().contains(subpath),
+            "Exception should name the empty snapshot location; got: " + ex.getMessage());
+
+        CLOUD_SOLR.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=DELETE&name=emptycoll&wt=json");
+    }
+
+    @Test
+    void importMode_missingFilesystemSnapshot_throwsInsteadOfWarning(@TempDir Path tempRepo) throws Exception {
+        // SolrCloud + filesystem: no synthetic config is written, so the snapshot dir stays absent.
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = cloudSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = "missing_fs_snapshot";
+        args.snapshotRepoName = "test";
+        args.repoUri = tempRepo.toString();
+        args.mode = "import";
+        args.solrCollections = List.of("branchcoll");
+        args.noWait = false;
+
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+        var ex = Assertions.assertThrows(SolrBackupStrategy.SolrImportSnapshotUnavailable.class,
+            creator::run,
+            "IMPORT mode must throw when the filesystem snapshot directory is missing");
+        Assertions.assertTrue(ex.getMessage().contains("missing_fs_snapshot"),
+            "Exception should name the missing snapshot directory; got: " + ex.getMessage());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static String cloudSolrUrl() {
         return "http://" + CLOUD_SOLR.getHost() + ":" + CLOUD_SOLR.getMappedPort(8983);
+    }
+
+    /** Writes a benign object under the snapshot prefix so IMPORT's non-empty check passes. */
+    private void putSnapshotPlaceholder(String subpath, String snapshotName) {
+        try (var s3 = testS3Client()) {
+            s3.putObject(
+                PutObjectRequest.builder().bucket(BUCKET_NAME)
+                    .key(subpath + "/" + snapshotName + "/.import-placeholder").build(),
+                RequestBody.fromString("placeholder", StandardCharsets.UTF_8));
+        }
     }
 }
