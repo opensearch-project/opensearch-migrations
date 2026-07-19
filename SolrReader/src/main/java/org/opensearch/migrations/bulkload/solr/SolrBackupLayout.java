@@ -431,12 +431,8 @@ public final class SolrBackupLayout {
     }
 
     /**
-     * Reads the collection name from a SolrCloud {@code backup.properties} (or the latest
-     * {@code backup_N.properties}) under the given directory. Returns {@code null} if no properties
-     * file is present or it carries no recognised collection-name key.
-     *
-     * <p>NOTE: the exact key Solr writes should be confirmed against a real Solr 7 backup; both
-     * {@code collection} and {@code collectionName} are accepted here.
+     * Reads the {@code collection} key SolrCloud writes to {@code backup.properties} /
+     * {@code backup_N.properties} (verified against real Solr 6-9 backups). {@code null} if absent.
      */
     public static String readCollectionNameFromBackupProperties(Path dir) {
         var propsFile = findBackupPropertiesFile(dir);
@@ -450,11 +446,9 @@ public final class SolrBackupLayout {
             log.warn("Failed to read {}: {}", propsFile, e.getMessage());
             return null;
         }
-        for (var key : List.of("collection", "collectionName")) {
-            var value = props.getProperty(key);
-            if (value != null && !value.isBlank()) {
-                return value.trim();
-            }
+        var value = props.getProperty("collection");
+        if (value != null && !value.isBlank()) {
+            return value.trim();
         }
         log.warn("No collection-name property found in {}", propsFile);
         return null;

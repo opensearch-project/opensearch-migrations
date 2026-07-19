@@ -275,12 +275,6 @@ class SolrBackupLayoutHelpersTest {
     }
 
     @Test
-    void readCollectionName_fallsBackToCollectionNameKey() throws IOException {
-        Files.writeString(tempDir.resolve("backup.properties"), "collectionName=products\n");
-        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("products"));
-    }
-
-    @Test
     void readCollectionName_picksLatestNumberedPropertiesFile() throws IOException {
         Files.writeString(tempDir.resolve("backup_0.properties"), "collection=old\n");
         Files.writeString(tempDir.resolve("backup_1.properties"), "collection=new\n");
@@ -361,12 +355,12 @@ class SolrBackupLayoutHelpersTest {
         assertThat(SolrBackupLayout.resolveCollectionDataDir(missing), equalTo(missing));
     }
 
-    // ---- readCollectionNameFromBackupProperties: skip-blank + non-.properties branches ----
+    // ---- readCollectionNameFromBackupProperties: blank-value + non-.properties branches ----
 
     @Test
-    void readCollectionName_skipsBlankCollectionAndUsesCollectionName() throws IOException {
-        Files.writeString(tempDir.resolve("backup.properties"), "collection=   \ncollectionName=products\n");
-        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("products"));
+    void readCollectionName_nullWhenCollectionBlank() throws IOException {
+        Files.writeString(tempDir.resolve("backup.properties"), "collection=   \n");
+        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), nullValue());
     }
 
     @Test
