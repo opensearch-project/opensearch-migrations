@@ -514,10 +514,7 @@ public class TestCreateSnapshotModeFlag {
     }
 
     // ── Unreachable source fails loudly at topology detection ─────────────────
-    //
-    // An unreachable source can't be classified as SolrCloud or standalone. Rather than guess
-    // standalone and run the wrong mode, detection fails loudly (SolrTopologyDetectionException).
-    // Needs no live Solr container (the host is intentionally unreachable), only LocalStack for S3.
+    // Rather than guess standalone, an unreachable source throws SolrTopologyDetectionException.
 
     @Test
     void unreachableSource_throwsTopologyDetectionInsteadOfGuessing() throws Exception {
@@ -526,8 +523,7 @@ public class TestCreateSnapshotModeFlag {
         String subpath = "import-unreachable";
 
         var args = new CreateSnapshot.Args();
-        // Routable-but-dead loopback port: the topology probe gets a connection refused (no HTTP
-        // response), so detection can't tell SolrCloud from standalone and must fail loudly.
+        // Routable-but-dead loopback port: the probe gets connection refused, so detection throws.
         args.sourceArgs.host = "http://127.0.0.1:1";
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
@@ -559,10 +555,7 @@ public class TestCreateSnapshotModeFlag {
     }
 
     // ── IMPORT still fails loudly when a reachable source can't provide the schema ──
-    //
-    // Detection succeeds (standalone Solr answers the probe), but the requested core does not exist,
-    // so its schema can't be fetched. IMPORT must throw SolrImportSchemaUnavailable rather than upload
-    // nothing and let the downstream metadata migration produce empty mappings with a green exit.
+    // Detection passes, but the bogus core has no schema to fetch → SolrImportSchemaUnavailable.
 
     @Test
     void importMode_reachableSourceMissingSchema_throws() throws Exception {

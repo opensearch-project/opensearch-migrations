@@ -19,9 +19,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Fast, container-free unit tests for {@link SolrBackupStrategy#isSolrCloud}. The real cloud/standalone
- * cases are also exercised end-to-end against live containers in TestCreateSnapshotSolr; these cover the
- * status/exception branches (auth, unreachable) that containers cannot easily reproduce.
+ * Container-free unit tests for {@link SolrBackupStrategy#isSolrCloud}, covering the status/exception
+ * branches (auth, unreachable) that the live-container tests in TestCreateSnapshotSolr can't reproduce.
  */
 public class SolrTopologyDetectionTest {
 

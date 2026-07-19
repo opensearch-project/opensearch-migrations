@@ -74,7 +74,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         "managed-schema.xml"
     );
 
-    /** Timeout for the SolrCloud-vs-standalone probe. Generous enough to ride out transient hiccups. */
+    /** Timeout for the SolrCloud-vs-standalone probe. */
     private static final Duration DETECTION_TIMEOUT = Duration.ofSeconds(10);
 
     private String topologyLabel() {
@@ -102,11 +102,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
     }
 
-    /**
-     * Thrown when the SolrCloud-vs-standalone topology cannot be determined — the source is
-     * unreachable, times out, or is access-controlled. Guessing a topology here would silently run
-     * the wrong backup mode, so detection fails loudly instead of defaulting to standalone.
-     */
+    /** Thrown when the Solr topology can't be determined (unreachable, timeout, or auth-blocked). */
     public static class SolrTopologyDetectionException extends RuntimeException {
         public SolrTopologyDetectionException(String message) {
             super(message);
@@ -531,8 +527,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             throw new SolrTopologyDetectionException(
                 "Interrupted while detecting Solr topology at " + solrUrl, e);
         } catch (IOException e) {
-            // No HTTP response at all (unreachable host, refused connection, TLS error, timeout):
-            // we can't tell SolrCloud from standalone, so fail loudly rather than guess standalone.
+            // No HTTP response (unreachable, refused, TLS, timeout): fail loudly rather than guess.
             throw new SolrTopologyDetectionException(
                 "Could not reach Solr at " + solrUrl + " to detect SolrCloud vs standalone topology: "
                     + e.getMessage(), e);
@@ -543,14 +538,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             return true;
         }
         if (status == 401 || status == 403) {
-            // Reachable but access-controlled: we can't read the Collections API to decide, and
-            // assuming standalone could silently run the wrong mode against a secured SolrCloud.
+            // Access-controlled: can't read the Collections API to decide, so don't guess standalone.
             throw new SolrTopologyDetectionException(
                 "Solr authentication/authorization failed (HTTP " + status + ") while detecting topology at "
                     + solrUrl + "; cannot determine SolrCloud vs standalone");
         }
-        // Reachable and responding, but not a SolrCloud node — standalone Solr returns HTTP 400
-        // ("not running in SolrCloud mode"). A definitive standalone result.
+        // Reachable non-200 (standalone Solr returns HTTP 400 "not running in SolrCloud mode").
         log.info("Solr topology detection: HTTP {} from Collections API at {} — treating as standalone",
             status, solrUrl);
         return false;
