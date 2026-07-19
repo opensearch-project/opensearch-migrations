@@ -386,6 +386,29 @@ class S3FailedDocumentStreamSinkTest {
     }
 
     @Test
+    void sinkWorkerThreadIsDaemonSoItCannotBlockJvmExit() throws Exception {
+        // Regression guard: RfsMigrateDocuments' WORK_COMPLETED path returns from main() without
+        // System.exit and relies on natural JVM shutdown. A non-daemon sink worker thread would keep
+        // the JVM alive, hanging the (one-shard-per-JVM) RFS pod until an external SIGTERM — which
+        // stalls the whole backfill. The worker thread that runs the uploader MUST be a daemon.
+        var workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
+        var sink = S3FailedDocumentStreamSink.builder()
+            .bucket("b").prefix("p/").sessionId("s").workerId("w").region("r")
+            .uploader((bucket, key, file) -> {
+                workerThread.set(Thread.currentThread());   // captured on the sink's worker thread
+                return CompletableFuture.completedFuture(null);
+            })
+            .build();
+        sink.write(buildRecord("doc-1")).block();
+        sink.flush().block();   // forces the rotation/upload, running the capturing uploader on the worker
+        sink.close();
+
+        var t = workerThread.get();
+        assertThat("uploader should have run on the sink worker thread", t, notNullValue());
+        assertThat("sink worker thread must be a daemon so it can't block JVM exit", t.isDaemon(), equalTo(true));
+    }
+
+    @Test
     void closeWithoutAnyWritesIsSafe() {
         // No writers were ever created; closing here must not NPE.
         var sink = S3FailedDocumentStreamSink.builder()

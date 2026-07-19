@@ -728,6 +728,18 @@ public class RfsMigrateDocuments {
             var status = sourceFactory.buildAndRun(
                 workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider);
             cleanShutdownCompleted.set(true);
+            // Close the failed document stream sink on the normal (WORK_COMPLETED) path too. This flushes
+            // any buffered records and shuts down the sink's worker thread. The shutdown hook also closes
+            // it, but only fires on JVM termination signals; the WORK_COMPLETED path returns from main()
+            // without System.exit and relies on natural JVM shutdown, so we must release the sink here so
+            // it can't delay exit (the sink worker is a daemon as a backstop, but closing is cleaner).
+            if (failedDocumentStreamSink != null) {
+                try {
+                    failedDocumentStreamSink.close();
+                } catch (Exception e) {
+                    log.atWarn().setCause(e).setMessage("Error closing failed document stream sink after work completion").log();
+                }
+            }
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
                 System.exit(NO_WORK_AVAILABLE_EXIT_CODE);

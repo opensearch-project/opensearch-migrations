@@ -250,7 +250,16 @@ public class S3FailedDocumentStreamSink implements FailedDocumentStreamSink {
     private static ThreadFactory makeWorkerThreadFactory(String sessionId, String workerId) {
         return runnable -> {
             var thread = new Thread(runnable, "fds-sink-worker-" + sessionId + "-" + workerId);
-            thread.setDaemon(false);
+            // Daemon so it can never keep the JVM alive. RfsMigrateDocuments' happy path
+            // (CompletionStatus.WORK_COMPLETED) returns from main() WITHOUT calling System.exit and
+            // relies on natural JVM shutdown; a non-daemon worker here would block that exit and hang
+            // the pod (which processes one shard per JVM), stalling the backfill. Durability does not
+            // depend on this thread outliving main(): each batch's records are made durable by the
+            // gating flush() before the work item is marked complete, and close() (shutdown hook, and
+            // the explicit close below) drains the worker synchronously. Unlike the replayer's
+            // S3TupleSink — which is non-daemon because the replayer always calls close() before exit —
+            // RFS has no such guarantee on the WORK_COMPLETED path, so daemon is the safe choice.
+            thread.setDaemon(true);
             return thread;
         };
     }
