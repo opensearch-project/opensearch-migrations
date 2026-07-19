@@ -109,7 +109,7 @@ public class ClusterReaderExtractor {
             case RepoUri.S3RepoUri s -> {
                 var s3Repo = createSolrS3Repo(s);
                 backupDir = s3Repo.getRepoRootDir();
-                var bare = detectBareSolrLayoutInS3(s3Repo);
+                var bare = s3Repo.detectBareSolrLayout();
                 if (bare != null && bare.collectionName() != null) {
                     collectionNames = List.of(bare.collectionName());
                     dataDirByCollection.put(bare.collectionName(), bare.dataPath());
@@ -173,18 +173,6 @@ public class ClusterReaderExtractor {
             return;
         }
         s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkName));
-    }
-
-    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo) {
-        return SolrBackupLayout.detectBareLayout(
-            s3Repo::listTopLevelDirectories,
-            s3Repo::listFilesInS3Root,
-            () -> {
-                s3Repo.downloadFile("backup.properties");
-                return s3Repo.getRepoRootDir();
-            },
-            () -> s3Repo.getS3RepoUri().key
-        );
     }
 
     private ClusterReader buildSolrSnapshotReader(

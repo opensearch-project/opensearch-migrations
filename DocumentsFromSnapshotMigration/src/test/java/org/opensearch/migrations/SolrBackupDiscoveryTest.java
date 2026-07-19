@@ -38,6 +38,8 @@ class SolrBackupDiscoveryTest {
     private S3Repo s3Repo() {
         var s3Repo = mock(S3Repo.class);
         lenient().when(s3Repo.getRepoRootDir()).thenReturn(backupDir);
+        // Run real detection against the stubbed primitives below; the adapter is unit-tested in S3RepoTest.
+        lenient().when(s3Repo.detectBareSolrLayout()).thenCallRealMethod();
         return s3Repo;
     }
 

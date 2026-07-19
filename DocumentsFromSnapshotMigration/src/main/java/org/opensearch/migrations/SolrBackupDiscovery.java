@@ -66,20 +66,8 @@ public class SolrBackupDiscovery {
 
     static SolrBackupLayout.BareBackupLayout detectBareLayout(S3Repo s3Repo, Path backupDir) {
         return s3Repo != null
-            ? detectBareSolrLayoutInS3(s3Repo)
+            ? s3Repo.detectBareSolrLayout()
             : SolrBackupLayout.classifyBareBackup(backupDir);
-    }
-
-    static SolrBackupLayout.BareBackupLayout detectBareSolrLayoutInS3(S3Repo s3Repo) {
-        return SolrBackupLayout.detectBareLayout(
-            s3Repo::listTopLevelDirectories,
-            s3Repo::listFilesInS3Root,
-            () -> {
-                s3Repo.downloadFile("backup.properties");
-                return s3Repo.getRepoRootDir();
-            },
-            () -> s3Repo.getS3RepoUri().key
-        );
     }
 
     public List<String> collections() {
