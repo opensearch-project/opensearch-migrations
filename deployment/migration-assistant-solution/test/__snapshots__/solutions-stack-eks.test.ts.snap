@@ -1307,6 +1307,14 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               "Effect": "Allow",
               "Resource": "*",
             },
+            {
+              "Action": [
+                "cloudformation:ListExports",
+                "cloudformation:DescribeStacks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -2557,6 +2565,14 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "acm-pca:DeleteCertificateAuthority",
                 "acm-pca:UpdateCertificateAuthority",
                 "acm-pca:TagCertificateAuthority",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "cloudformation:ListExports",
+                "cloudformation:DescribeStacks",
               ],
               "Effect": "Allow",
               "Resource": "*",
