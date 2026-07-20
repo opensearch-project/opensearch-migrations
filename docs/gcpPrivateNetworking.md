@@ -12,10 +12,11 @@ is unchanged from the standard GCP deployment.
 > requires HA VPN or Cloud Interconnect, which is not yet supported here.
 >
 > **Backfill migrations** (snapshot + reindex-from-snapshot) are covered end to end.
-> **Live capture-and-replay** adds a capture proxy in front of the source; making that
-> proxy's ingress private on GCP is not yet supported (its Service currently emits
-> AWS-only internal-load-balancer annotations). Keep live migration to a private network
-> path you control until GKE internal-LB support for the capture proxy lands.
+> **Live capture-and-replay** adds a capture proxy in front of the source; its ingress
+> is made private automatically on GKE. The proxy's Service is annotated for an internal
+> load balancer based on the deployment's cloud provider, so on GKE it receives an
+> internal (VPC-local) IP rather than a public one. See
+> [Live capture proxy ingress](#live-capture-proxy-ingress) below.
 
 ## The data legs
 
@@ -24,6 +25,7 @@ is unchanged from the standard GCP deployment.
 | Target write | `target_connectivity` = `psc_consumer` or `vpc_peering` |
 | Source read | `source_connectivity` = `psc_consumer` or `vpc_peering` |
 | Snapshot ↔ Cloud Storage | `gcs_connectivity = { mode = "private_google_access" }` (default) |
+| Live capture proxy ingress | Automatic on GKE (internal LB); leave the proxy's `internetFacing` unset |
 | Control plane (operator access) | `enable_private_endpoint = true` + narrow `master_authorized_cidrs` |
 
 ## Target/Source over Private Service Connect (`psc_consumer`)
@@ -137,6 +139,27 @@ gcloud compute networks subnets update YOUR_SUBNET --region REGION --enable-priv
 >
 > This is a property of the source cluster and independent of the private-networking
 > configuration here.
+
+## Live capture proxy ingress
+
+Live capture-and-replay migrations place a **capture proxy** in front of the source
+cluster: source clients connect to the proxy, which forwards traffic to the source while
+mirroring it to Kafka for the replayer. That proxy is exposed by a Kubernetes `Service`,
+and on a `LoadBalancer` Service the question is whether the resulting load balancer gets a
+public or an internal (VPC-local) IP.
+
+The proxy Service is annotated for an **internal** load balancer according to the
+deployment's cloud provider (the `cloudProvider` Helm value, surfaced to the migration
+workflow). On GKE this emits `networking.gke.io/load-balancer-type: Internal`, so the
+proxy receives a VPC-internal address and its ingress never traverses the public internet.
+No per-migration configuration is required — deploying with `cloudProvider: gcp` is enough.
+
+- The internal load balancer lives in the migration subnet; source clients must reach it
+  over the VPC (peering, VPN, or same-VPC), the same as any other private leg here.
+- Set the proxy's `internetFacing` option to `true` only if you deliberately want a
+  public proxy endpoint; leaving it unset (the default) keeps the proxy private.
+- The **replayer → target** leg reuses the target connectivity configured above, and
+  Kafka is in-cluster, so no additional private-networking setup is needed for them.
 
 ## Control-plane privacy (operator access)
 
