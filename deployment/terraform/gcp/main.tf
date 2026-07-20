@@ -377,6 +377,16 @@ resource "helm_release" "migration_assistant" {
       name  = "gcp.serviceAccountEmail"
       value = google_service_account.migration_nodes.email
     },
+    # Cluster name/location are required by the fluent-bit stackdriver output
+    # (k8s_container resource) so Cloud Logging entries carry the right resource.
+    {
+      name  = "gcp.clusterName"
+      value = local.cluster_name
+    },
+    {
+      name  = "gcp.clusterLocation"
+      value = local.cluster_location
+    },
     {
       name  = "gcsBucketConfiguration.bucketName"
       value = google_storage_bucket.migration_snapshots.name

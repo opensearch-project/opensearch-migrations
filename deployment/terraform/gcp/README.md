@@ -4,7 +4,7 @@ Provisions GCP infrastructure for the OpenSearch Migration Assistant.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6 (native `terraform test` is used for validation)
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6 or [OpenTofu](https://opentofu.org/docs/intro/install/) >= 1.6 (native `terraform test` / `tofu test` is used for validation)
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated with `gcloud auth application-default login`
 - GCP project with billing enabled
 - Required APIs enabled:
@@ -42,8 +42,7 @@ terraform plan -var="project=my-project"
 
 # Apply
 terraform apply -var="project=my-project" \
-  -var="region=us-central1" \
-  -var="cluster_type=standard"
+  -var="region=us-central1"
 
 # Get kubeconfig (cluster name is dynamically generated)
 gcloud container clusters get-credentials $(terraform output -raw cluster_name) \
@@ -65,11 +64,8 @@ terraform destroy -var="project=my-project"
 |------|---------|-------------|
 | `project` | (required) | GCP project ID |
 | `region` | `us-central1` | GCP region |
-| `cluster_type` | `standard` | `standard` or `autopilot` |
-| `cluster_name` | `migration-cluster` | GKE cluster name |
-| `node_machine_type` | `e2-standard-4` | Node machine type (standard only) |
-| `node_count` | `2` | Initial nodes per zone (standard only) |
-| `bucket_name` | `migration-snapshots-<project>` | Snapshot storage bucket |
+| `node_machine_type` | `e2-standard-4` | Node machine type |
+| `node_count` | `2` | Initial nodes per zone |
 | `create_vpc` | `true` | Create new VPC, or use existing (`false`) |
 | `existing_vpc_name` | `null` | Existing VPC name (when `create_vpc = false`) |
 | `existing_subnet_name` | `null` | Existing subnet name (when `create_vpc = false`) |
@@ -88,13 +84,62 @@ terraform destroy -var="project=my-project"
 | `release_channel` | `REGULAR` | GKE release channel |
 | `allowed_ingress_ports` | `["443","9200","9300"]` | Allowed ingress TCP ports |
 | `allowed_ingress_cidrs` | `["0.0.0.0/0"]` | Allowed ingress source CIDRs |
-| `node_iam_roles` | `["roles/storage.admin"]` | IAM roles for the node SA |
+| `node_iam_roles` | `["roles/storage.admin","roles/artifactregistry.reader","roles/logging.logWriter"]` | IAM roles for the node SA |
 | `workload_identity_namespace` | `migration` | Kubernetes namespace containing Migration Assistant service accounts |
 | `additional_workload_identity_service_accounts` | `["migration-console-access-role","argo-workflow-executor","argo-workflow-controller","argo-controller"]` | Additional Kubernetes service accounts that can use the GCP migration service account |
 | `source_connectivity` | `{mode = "none"}` | Private connectivity for source cluster read traffic; `mode = "none"` (default, public internet), `"psc_consumer"` (Private Service Connect), or `"vpc_peering"` |
 | `target_connectivity` | `{mode = "none"}` | Private connectivity for target cluster write traffic; same modes as `source_connectivity` |
 | `gcs_connectivity` | `{mode = "private_google_access"}` | Private Google Access for Cloud Storage snapshot traffic; `mode = "private_google_access"` (default, private path) or `"none"` (public internet) |
 | `enable_private_endpoint` | `false` | Restrict GKE control plane to private IP only (no public endpoint); requires VPN or bastion for kubectl access |
+
+## Observability
+
+### Logs
+
+Workload logs (migration console, capture proxy, traffic replayer, RFS workers,
+and Argo workflow steps) are shipped to **Google Cloud Logging** by the bundled
+fluent-bit collector. No extra setup is required: fluent-bit authenticates via
+Workload Identity, and this module grants the node service account
+`roles/logging.logWriter` and passes the cluster name and location the collector
+needs.
+
+View logs in the Cloud Logging console, or with `gcloud`:
+
+```bash
+# All migration workload logs in the ma namespace
+gcloud logging read \
+  'resource.type="k8s_container" resource.labels.namespace_name="ma"' \
+  --project my-project --limit 50
+
+# A single workload (e.g. the migration console)
+gcloud logging read \
+  'resource.type="k8s_container" resource.labels.namespace_name="ma"
+   resource.labels.container_name="console"' \
+  --project my-project --limit 50
+```
+
+Filter by `resource.labels.pod_name` or `resource.labels.container_name` to
+narrow to a specific workload.
+
+Log severity is derived from each entry's `level` field, so you can filter by
+`severity>=WARNING` in Cloud Logging.
+
+### Metrics and dashboards
+
+The chart deploys Prometheus by default and the migration workloads export
+metrics to it, so metrics are collected out of the box. A pre-built migration
+dashboard also ships with the chart, but the in-cluster **Grafana** that renders
+it is **off by default** — many operators already run their own dashboarding
+stack and point it at the migration metrics.
+
+If you do not already have a dashboarding solution, enable the bundled Grafana
+to get the migration dashboard preloaded:
+
+```yaml
+# valuesGke.yaml (or --set at install time)
+conditionalPackageInstalls:
+  grafana: true
+```
 
 ## Private networking
 
@@ -104,9 +149,16 @@ private Cloud Storage access, and a private control plane), see
 
 ## Notes
 
-- Standard clusters use private nodes with Cloud NAT for outbound access.
+- The cluster runs in GKE Standard mode with private nodes and Cloud NAT for
+  outbound access. The cluster name is generated as `os-migration-<random>`;
+  retrieve it with `terraform output -raw cluster_name`.
+- The snapshot bucket name is generated (`os-migration-<random>`, matching the
+  cluster name) and is not operator-settable. Retrieve it with
+  `terraform output` or from the `google_storage_bucket.migration_snapshots`
+  resource.
 - Workload Identity is enabled and bound to `migration/migrations-service-account`.
-- The node SA gets `roles/storage.admin` for GCS snapshot access.
+- The node SA gets `roles/storage.admin` for GCS snapshot access and
+  `roles/logging.logWriter` so fluent-bit can ship logs to Cloud Logging.
 
 ## Zone Placement
 
@@ -170,9 +222,11 @@ If you have a snapshot directory on local disk (for example, the bundled
 bucket under a path of your choice:
 
 ```bash
+# <bucket> is the generated snapshot bucket name (terraform output -raw cluster_name,
+# or the name of the google_storage_bucket.migration_snapshots resource).
 gsutil -m cp -r \
   RFS/test-resources/snapshots/ES_7_10_Single \
-  gs://migration-snapshots-<project>/e2e-test/
+  gs://<bucket>/e2e-test/
 ```
 
 The path you upload to becomes the `gcsRepoPathUri` you reference from the
@@ -189,7 +243,7 @@ as a workflow parameter to use the GCS bucket instead of the default S3 one.
 To switch it from "create-and-migrate" to BYOS, set:
 
 - `source.snapshotRepo.repoPathUri` to the GCS URI you staged
-  (`gs://migration-snapshots-<project>/e2e-test`).
+  (`gs://<bucket>/e2e-test`).
 - `snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName` to the
   name of the snapshot inside that repo (for the bundled test snapshot, this
   is `rfs-snapshot`).
