@@ -200,9 +200,44 @@ deploy_local_charts() {
   local ma_status=0 tc_status=0
   local tc_pid=""
 
-  install_ma_chart "${image_tag}"
+  set +e
+  install_ma_chart "${image_tag}" &
+  local ma_pid=$!
+
   if [[ "${install_test_clusters}" == "true" ]]; then
-    install_tc_chart "${image_tag}" "${tc_values_file}"
+    install_tc_chart "${image_tag}" "${tc_values_file}" &
+    tc_pid=$!
+  fi
+
+  wait "${ma_pid}"
+  ma_status=$?
+
+  if [[ -n "${tc_pid}" ]]; then
+    wait "${tc_pid}"
+    tc_status=$?
+  fi
+  set -e
+
+  print_step "Chart installation summary"
+  if [[ "${ma_status}" -eq 0 ]]; then
+    echo "Migration Assistant chart: SUCCESS"
+  else
+    echo "Migration Assistant chart: FAILED (exit code ${ma_status})"
+  fi
+
+  if [[ "${install_test_clusters}" == "true" ]]; then
+    if [[ "${tc_status}" -eq 0 ]]; then
+      echo "Test clusters chart (${test_clusters_source}): SUCCESS"
+    else
+      echo "Test clusters chart (${test_clusters_source}): FAILED (exit code ${tc_status})"
+    fi
+  else
+    echo "Test clusters chart: SKIPPED (INSTALL_TEST_CLUSTERS=false)"
+  fi
+
+  if [[ "${ma_status}" -ne 0 || "${tc_status}" -ne 0 ]]; then
+    echo "One or more chart installations failed; see summary above." >&2
+    exit 1
   fi
 }
 
