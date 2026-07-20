@@ -23,7 +23,7 @@ dependencies {
     implementation 'net.ltgt.gradle:gradle-errorprone-plugin:4.1.0'
 
     implementation "com.google.cloud.tools:jib-gradle-plugin:3.5.2"
-    implementation "com.google.cloud.tools:jib-core:0.28.1"
+    implementation "com.google.cloud.tools:jib-core:0.28.2"
 }
 
 tasks.withType(Tar){
