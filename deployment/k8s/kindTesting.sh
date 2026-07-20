@@ -6,6 +6,60 @@ MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
 source "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/localTestingCommon.sh"
 source "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/backends/dockerHostedBuildkit.sh"
 
+# These fall back to any existing environment variable, and finally to
+# elasticsearch/true, matching the defaults baked into localTestingCommon.sh.
+TEST_CLUSTERS_SOURCE="${TEST_CLUSTERS_SOURCE:-elasticsearch}"
+INSTALL_TEST_CLUSTERS="${INSTALL_TEST_CLUSTERS:-true}"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "${BASH_SOURCE[0]}") [options]
+
+Options:
+  --source=<elasticsearch|solr>   Source cluster type for the local test clusters
+                                   (default: elasticsearch)
+  --no-test-clusters              Skip installing the local test clusters chart entirely
+  -h, --help                      Show this help message
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source=*)
+      TEST_CLUSTERS_SOURCE="${1#*=}"
+      shift
+      ;;
+    --source)
+      TEST_CLUSTERS_SOURCE="${2:-}"
+      shift 2
+      ;;
+    --no-test-clusters)
+      INSTALL_TEST_CLUSTERS="false"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+case "${TEST_CLUSTERS_SOURCE}" in
+  elasticsearch|solr) ;;
+  *)
+    echo "Invalid --source value: '${TEST_CLUSTERS_SOURCE}' (expected 'elasticsearch' or 'solr')" >&2
+    exit 1
+    ;;
+esac
+
+export TEST_CLUSTERS_SOURCE
+export INSTALL_TEST_CLUSTERS
+
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ma}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/kindClusterConfig.yaml}"
