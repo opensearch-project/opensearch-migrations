@@ -290,6 +290,14 @@ class SolrBackupLayoutHelpersTest {
     }
 
     @Test
+    void readCollectionName_ordersMultiDigitPropertiesFilesNumerically() throws IOException {
+        // backup_29 is newer than backup_6, though '2' < '6' would sort it earlier lexicographically.
+        Files.writeString(tempDir.resolve("backup_6.properties"), "collection=old\n");
+        Files.writeString(tempDir.resolve("backup_29.properties"), "collection=new\n");
+        assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), equalTo("new"));
+    }
+
+    @Test
     void readCollectionName_nullWhenNoPropertiesFile() {
         assertThat(SolrBackupLayout.readCollectionNameFromBackupProperties(tempDir), nullValue());
     }
