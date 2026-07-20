@@ -34,7 +34,7 @@ wait_for_cluster_dns() {
 ## One time things - will require a restart to minikube if it was already running
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 MINIKUBE_CPU_COUNT="${MINIKUBE_CPU_COUNT:-8}"
-MINIKUBE_MEMORY_SIZE="${MINIKUBE_MEMORY_SIZE:-18000}"
+MINIKUBE_MEMORY_SIZE="${MINIKUBE_MEMORY_SIZE:-12000}"
 print_step "Configuring minikube resources"
 echo "Setting minikube config to use ${MINIKUBE_CPU_COUNT} CPUs and ${MINIKUBE_MEMORY_SIZE} MB memory."
 minikube -p "${MINIKUBE_PROFILE}" config set cpus $MINIKUBE_CPU_COUNT
