@@ -116,7 +116,8 @@ cd "$SCRIPT_DIR"
 # Cluster lifecycle helpers
 # ---------------------------------------------------------------------------
 compose_up() {
-    local version="$1" file="docker-compose-${version}.yml"
+    local version="$1"
+    local file="docker-compose-${version}.yml"
     [[ -f "$file" ]] || die "compose file $file not found"
 
     # solr:6.6.6 is published amd64-only, so force emulation on Apple Silicon via
@@ -134,7 +135,8 @@ compose_up() {
 }
 
 compose_down() {
-    local version="$1" file="docker-compose-${version}.yml"
+    local version="$1"
+    local file="docker-compose-${version}.yml"
     log "Shutting down Solr ${version} cluster"
     "${COMPOSE[@]}" -f "$file" down || warn "compose down failed for $file"
 }
@@ -155,7 +157,8 @@ wait_for_cluster() {
 }
 
 create_collection() {
-    local version="$1" cfg="nyc_taxis_${version}"
+    local version="$1"
+    local cfg="nyc_taxis_${version}"
     # Delete any pre-existing nyc_taxis collection first so re-runs start clean
     # (create_collection fails if the collection already exists). Ignore errors —
     # on a fresh cluster there's nothing to delete.
