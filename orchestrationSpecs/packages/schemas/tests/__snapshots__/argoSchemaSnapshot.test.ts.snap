@@ -2380,6 +2380,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
+                    "failedDocumentStreamS3Prefix": {
+                      "type": "string",
+                      "default": "rfs-failed-document-stream/"
+                    },
+                    "failedDocumentStreamS3Bucket": {
+                      "type": "string",
+                      "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                    },
+                    "failedDocumentStreamS3Region": {
+                      "type": "string",
+                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                    },
+                    "failedDocumentStreamS3Endpoint": {
+                      "type": "string",
+                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                    },
+                    "failedDocumentStreamMaxBufferBytes": {
+                      "type": "number",
+                      "default": 67108864
+                    },
                     "positionGapStopword": {
                       "type": "string",
                       "default": "a"
@@ -5272,6 +5292,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "changeRestriction": "impossible"
+                      },
+                      "failedDocumentStreamS3Prefix": {
+                        "type": "string",
+                        "default": "rfs-failed-document-stream/",
+                        "description": "S3 key prefix for the failed document stream where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-failed-document-stream/'."
+                      },
+                      "failedDocumentStreamS3Bucket": {
+                        "type": "string",
+                        "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                      },
+                      "failedDocumentStreamS3Region": {
+                        "type": "string",
+                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                      },
+                      "failedDocumentStreamS3Endpoint": {
+                        "type": "string",
+                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                      },
+                      "failedDocumentStreamMaxBufferBytes": {
+                        "type": "number",
+                        "default": 67108864,
+                        "description": "Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
                       },
                       "positionGapStopword": {
                         "type": "string",
