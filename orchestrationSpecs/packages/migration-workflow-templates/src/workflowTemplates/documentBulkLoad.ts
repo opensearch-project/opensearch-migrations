@@ -317,8 +317,8 @@ else
            "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" "$failed_document_stream_suffix" > /tmp/status-output.txt
 fi
 
-# Check completion status - exit 0 only if complete, otherwise exit 1
-if [[ "$status" == "Completed" ]]; then
+# Exit 0 on terminal completion; CompletedWithErrors is still done.
+if [[ "$status" == "Completed" || "$status" == "CompletedWithErrors" ]]; then
   exit 0
 else
   echo Checked > /tmp/phase-output.txt

@@ -2097,22 +2097,24 @@ def test_backfill_status_no_failed_document_stream_section_when_not_configured(r
     assert "Failed document count:" not in result.output
 
 
-def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(runner, mocker):
-    """The --json --deep-check path goes through _augment_status_with_failed_document_stream
-    rather than the trailing click.echo block."""
-    mocked_status = {
+def _completed_status_payload():
+    return {
         "status": "Completed",
         "percentage_completed": 100.0,
         "eta_ms": None,
         "started": "2026-04-19T21:40:01+00:00",
         "finished": "2026-04-19T21:40:01+00:00",
-        "shard_total": 0,
-        "shard_complete": 0,
+        "shard_total": 5,
+        "shard_complete": 5,
         "shard_in_progress": 0,
         "shard_waiting": 0,
     }
-    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
-                        return_value=cli_module.BackfillOverallStatus(**mocked_status))
+
+
+def test_backfill_status_json_deep_check_threads_count_and_includes_keys(runner, mocker):
+    # Count threaded into build_backfill_status and surfaced as keys.
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
     mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=2)
@@ -2124,9 +2126,49 @@ def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(ru
         catch_exceptions=False,
     )
     assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["failed_document_count"] == 2
     payload = json.loads(result.output)
     assert payload["failed_document_stream_location"] == "s3://b/rfs-failed-document-stream/session=sess-A/"
     assert payload["failed_document_count"] == 2
+
+
+def test_backfill_status_json_deep_check_threads_zero_count(runner, mocker):
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=0)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["failed_document_count"] == 0
+    payload = json.loads(result.output)
+    assert payload["failed_document_count"] == 0
+
+
+def test_backfill_status_json_deep_check_threads_unavailable_count(runner, mocker):
+    # None => S3 unreachable; passed through as-is.
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=None)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["failed_document_count"] is None
+    payload = json.loads(result.output)
+    assert payload["failed_document_count"] is None
 
 
 def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):

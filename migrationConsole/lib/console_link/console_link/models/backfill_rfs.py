@@ -110,7 +110,7 @@ class DockerRFSBackfill(RFSBackfill):
     def archive(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
-    def build_backfill_status(self, *args) -> BackfillStatus:
+    def build_backfill_status(self, failed_document_count: Optional[int] = None, *args) -> BackfillStatus:
         raise NotImplementedError()
 
 
@@ -159,18 +159,19 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, *args, **kwargs) -> CommandResult:
+    def get_status(self, *args, failed_document_count: Optional[int] = None, **kwargs) -> CommandResult:
         logger.info("Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
-        
+
         # Always perform deep check for K8s
         logger.info("config=" + str(self.config))
         session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
         logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
         try:
-            shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
+            shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name,
+                                               failed_document_count=failed_document_count)
         except Exception:
             logger.exception(f"Failed to get detailed status for session '{session_name}'")
             shard_status = None
@@ -192,7 +193,7 @@ class K8sRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.STARTING, status_str))
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
 
-    def build_backfill_status(self) -> BackfillOverallStatus:
+    def build_backfill_status(self, failed_document_count: Optional[int] = None) -> BackfillOverallStatus:
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
         if deployment_status is not None:
@@ -201,7 +202,8 @@ class K8sRFSBackfill(RFSBackfill):
         session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
         return get_detailed_status_obj(target_cluster=self.target_cluster,
                                        session_name=session_name,
-                                       active_workers=active_workers)
+                                       active_workers=active_workers,
+                                       failed_document_count=failed_document_count)
 
 
 class ECSRFSBackfill(RFSBackfill):
@@ -240,7 +242,8 @@ class ECSRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check=False, *args, failed_document_count: Optional[int] = None,
+                   **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:
@@ -250,7 +253,8 @@ class ECSRFSBackfill(RFSBackfill):
         if deep_check:
             try:
                 session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
-                shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
+                shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name,
+                                                   failed_document_count=failed_document_count)
             except Exception as e:
                 logger.error(f"Failed to get detailed status: {e}")
                 shard_status = None
@@ -263,7 +267,7 @@ class ECSRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
-    def build_backfill_status(self) -> BackfillOverallStatus:
+    def build_backfill_status(self, failed_document_count: Optional[int] = None) -> BackfillOverallStatus:
         deployment_status = self.ecs_client.get_instance_statuses()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
         if deployment_status is not None:
@@ -272,13 +276,16 @@ class ECSRFSBackfill(RFSBackfill):
         session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
         return get_detailed_status_obj(target_cluster=self.target_cluster,
                                        session_name=session_name,
-                                       active_workers=active_workers)
+                                       active_workers=active_workers,
+                                       failed_document_count=failed_document_count)
 
 
-def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[str]:
+def get_detailed_status(target_cluster: Cluster, session_name: str,
+                        failed_document_count: Optional[int] = None) -> Optional[str]:
     values = get_detailed_status_obj(target_cluster=target_cluster,
                                      session_name=session_name,
-                                     active_workers=True)  # Assume active workers
+                                     active_workers=True,  # Assume active workers
+                                     failed_document_count=failed_document_count)
     # Check if shards are initializing
     if (values.shard_total is None and values.shard_complete is None and
             values.shard_in_progress is None and values.shard_waiting is None):
@@ -380,7 +387,8 @@ class ShardStatusCounts:
 
 def get_detailed_status_obj(target_cluster: Cluster,
                             session_name: str = None,
-                            active_workers: bool = True) -> BackfillOverallStatus:
+                            active_workers: bool = True,
+                            failed_document_count: Optional[int] = None) -> BackfillOverallStatus:
     # Check whether the working state index exists. If not, we can't run queries.
     index_to_check = ".migrations_working_state" + (("_" + session_name) if session_name else "")
     logger.info("Checking status for index: " + index_to_check)
@@ -439,7 +447,8 @@ def get_detailed_status_obj(target_cluster: Cluster,
                                                                                  counts.total,
                                                                                  counts.completed,
                                                                                  started_epoch,
-                                                                                 active_workers)
+                                                                                 active_workers,
+                                                                                 failed_document_count)
 
     return BackfillOverallStatus(
         status=status,
@@ -454,7 +463,8 @@ def get_detailed_status_obj(target_cluster: Cluster,
     )
 
 
-def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
+def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool,
+                            failed_document_count: Optional[int] = None):
     # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
@@ -465,7 +475,9 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
         )
         percentage_completed = 100.0
         eta_ms = None
-        status = StepStateWithPause.COMPLETED
+        # Failed documents -> CompletedWithErrors.
+        status = (StepStateWithPause.COMPLETED_WITH_ERRORS if failed_document_count
+                  else StepStateWithPause.COMPLETED)
     else:
         finished_iso = None
         percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
