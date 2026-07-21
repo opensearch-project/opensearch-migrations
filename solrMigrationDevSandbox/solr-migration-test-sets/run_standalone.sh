@@ -315,8 +315,11 @@ reshape_snapshot() {
         local out="$dir/nyc_taxis/shard_backup_metadata/md_shard1_0.json"
         printf '{' > "$out"
         local first=true f
-        for f in $(ls "$dir/nyc_taxis/index"); do
-            if [[ "$first" == true ]]; then first=false; else printf ',' >> "$out"; fi
+        for f in "$dir"/nyc_taxis/index/*; do
+            [[ -f "$f" ]] || continue
+            f=${f##*/}
+
+            if $first; then first=false; else printf ',' >> "$out"; fi
             printf '"%s":{"fileName":"%s"}' "$f" "$f" >> "$out"
         done
         printf '}' >> "$out"
