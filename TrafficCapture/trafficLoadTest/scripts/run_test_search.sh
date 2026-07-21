@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# validate_search.sh
+# run_test_search.sh
 #
 # Validates search scenarios: flat search, aggregation, deep-paging (scroll + search_after).
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_search.sh                  # checks only
-#   ./scripts/validate_search.sh --with-setup     # also starts stack and runs k6
-#   ./scripts/validate_search.sh --deep-paging    # include deep-paging env run + checks
-#   ./scripts/validate_search.sh --teardown       # tear down after checks
+#   ./scripts/run_test_search.sh                  # checks only
+#   ./scripts/run_test_search.sh --with-setup     # also starts stack and runs k6
+#   ./scripts/run_test_search.sh --deep-paging    # include deep-paging env run + checks
+#   ./scripts/run_test_search.sh --teardown       # tear down after checks
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# validate_sequences.sh
+# run_test_sequences.sh
 #
 # Validates stateful create → update → query → delete sequences through the pipeline.
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_sequences.sh               # checks only (stack + k6 must already be done)
-#   ./scripts/validate_sequences.sh --with-setup  # also starts the stack and runs k6 first
-#   ./scripts/validate_sequences.sh --teardown    # also tears down the stack when finished
+#   ./scripts/run_test_sequences.sh               # checks only (stack + k6 must already be done)
+#   ./scripts/run_test_sequences.sh --with-setup  # also starts the stack and runs k6 first
+#   ./scripts/run_test_sequences.sh --teardown    # also tears down the stack when finished
 #
 # Note: The replayer ordering step requires the Traffic Replayer and is guidance only.
 

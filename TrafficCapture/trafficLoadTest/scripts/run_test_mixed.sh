@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# validate_mixed.sh
+# run_test_mixed.sh
 #
 # Validates the mixed ingest + search scenario with Redis/Webdis cross-VU ring buffer.
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_mixed.sh               # checks only
-#   ./scripts/validate_mixed.sh --with-setup  # starts full stack + redis + runs k6
-#   ./scripts/validate_mixed.sh --teardown    # tear down after checks
+#   ./scripts/run_test_mixed.sh               # checks only
+#   ./scripts/run_test_mixed.sh --with-setup  # starts full stack + redis + runs k6
+#   ./scripts/run_test_mixed.sh --teardown    # tear down after checks
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

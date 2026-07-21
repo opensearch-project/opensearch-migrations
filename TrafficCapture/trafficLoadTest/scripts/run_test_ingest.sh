@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# validate_ingest.sh
-#
 # Validates the ingest baseline: k6 → Capture Proxy → Kafka → OpenSearch.
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_ingest.sh               # checks only (stack + k6 must already be done)
-#   ./scripts/validate_ingest.sh --with-setup  # also starts the stack and runs k6 first
-#   ./scripts/validate_ingest.sh --teardown    # also tears down the stack when finished
+#   ./scripts/run_test_ingest.sh               # checks only (stack + k6 must already be done)
+#   ./scripts/run_test_ingest.sh --with-setup  # also starts the stack and runs k6 first
+#   ./scripts/run_test_ingest.sh --teardown    # also tears down the stack when finished
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

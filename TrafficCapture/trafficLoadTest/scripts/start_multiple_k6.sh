@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# NOTE: the below assumes a running stack of capture-proxy, kafka, proxy target as started up in the validate_*.sh
+# NOTE: the below assumes a running stack of capture-proxy, kafka, proxy target as started up in the run_test_*.sh
 # scripts with --with-setup but without --teardown option (if latter is set, the setup is only available during the
-# current run of validate_*.sh
+# current run of run_test_*.sh
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

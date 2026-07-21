@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# validate_load_shapes.sh
+# run_test_load_shapes.sh
 #
 # Validates non-steady load profiles: ramp-up and burst.
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_load_shapes.sh                     # all shapes (ramp + burst + mixed-ramp)
-#   ./scripts/validate_load_shapes.sh --with-burst        # burst shape only
-#   ./scripts/validate_load_shapes.sh --with-mixed-ramp   # mixed-ramp shape only
-#   ./scripts/validate_load_shapes.sh --with-setup        # start stack before running
-#   ./scripts/validate_load_shapes.sh --teardown          # tear down after checks
+#   ./scripts/run_test_load_shapes.sh                     # all shapes (ramp + burst + mixed-ramp)
+#   ./scripts/run_test_load_shapes.sh --with-burst        # burst shape only
+#   ./scripts/run_test_load_shapes.sh --with-mixed-ramp   # mixed-ramp shape only
+#   ./scripts/run_test_load_shapes.sh --with-setup        # start stack before running
+#   ./scripts/run_test_load_shapes.sh --teardown          # tear down after checks
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

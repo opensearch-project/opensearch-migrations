@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# validate_chaos.sh
+# run_test_chaos.sh
 #
 # Validates the runtime control plane: pause/resume and dynamic rate changes
 # via Webdis → Redis signals read by k6's lib/control.js.
-# Must be run from the loadTestTrafficGenerator/ directory.
+# Must be run from the TrafficCapture/trafficLoadTest/ directory.
 #
 # Usage:
-#   ./scripts/validate_chaos.sh               # chaos checks only (k6 must already be running)
-#   ./scripts/validate_chaos.sh --with-setup  # start stack + k6 background process, then check
-#   ./scripts/validate_chaos.sh --teardown    # kill background k6 and tear down when done
+#   ./scripts/run_test_chaos.sh               # chaos checks only (k6 must already be running)
+#   ./scripts/run_test_chaos.sh --with-setup  # start stack + k6 background process, then check
+#   ./scripts/run_test_chaos.sh --teardown    # kill background k6 and tear down when done
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

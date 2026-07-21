@@ -22,7 +22,7 @@ cd /path/to/opensearch-migrations   # repo root (where settings.gradle lives)
 ### Start the stack
 
 ```bash
-cd loadTestTrafficGenerator
+cd TrafficCapture/trafficLoadTest
 docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
 ```
 
@@ -49,13 +49,13 @@ docker compose run --rm -e INGEST_RATE=100 -e DURATION=10m \
 
 ```bash
 # checks only — stack and k6 run must already be complete
-./scripts/validate_ingest.sh
+./scripts/run_test_ingest.sh
 
 # start stack + run k6 + validate, all in one go
-./scripts/validate_ingest.sh --with-setup
+./scripts/run_test_ingest.sh --with-setup
 
 # add --teardown to bring the stack down after validation
-./scripts/validate_ingest.sh --with-setup --teardown
+./scripts/run_test_ingest.sh --with-setup --teardown
 ```
 
 ### What to check manually
@@ -150,9 +150,9 @@ docker compose run --rm \
 ### Validate
 
 ```bash
-./scripts/validate_sequences.sh
-./scripts/validate_sequences.sh --with-setup
-./scripts/validate_sequences.sh --with-setup --teardown
+./scripts/run_test_sequences.sh
+./scripts/run_test_sequences.sh --with-setup
+./scripts/run_test_sequences.sh --with-setup --teardown
 ```
 
 
@@ -204,10 +204,10 @@ docker compose run --rm \
 ### Validate
 
 ```bash
-./scripts/validate_search.sh
-./scripts/validate_search.sh --with-setup
-./scripts/validate_search.sh --with-setup --teardown
-./scripts/validate_search.sh --with-setup --deep-paging   # uses search-deep-paging.env
+./scripts/run_test_search.sh
+./scripts/run_test_search.sh --with-setup
+./scripts/run_test_search.sh --with-setup --teardown
+./scripts/run_test_search.sh --with-setup --deep-paging   # uses search-deep-paging.env
 ```
 
 Steps 1–8 are automated. Step 10 (Replayer memory growth) requires the Traffic Replayer
@@ -267,9 +267,9 @@ docker compose run --rm \
 ### Validate
 
 ```bash
-./scripts/validate_mixed.sh
-./scripts/validate_mixed.sh --with-setup
-./scripts/validate_mixed.sh --with-setup --teardown
+./scripts/run_test_mixed.sh
+./scripts/run_test_mixed.sh --with-setup
+./scripts/run_test_mixed.sh --with-setup --teardown
 ```
 
 ### New environment variables
@@ -344,16 +344,16 @@ docker compose run --rm \
 
 ```bash
 # Ramp profile only
-./scripts/validate_load_shapes.sh --with-setup
+./scripts/run_test_load_shapes.sh --with-setup
 
 # Ramp + burst
-./scripts/validate_load_shapes.sh --with-setup --with-burst
+./scripts/run_test_load_shapes.sh --with-setup --with-burst
 
 # Ramp + mixed-ramp (starts Redis+Webdis automatically)
-./scripts/validate_load_shapes.sh --with-setup --with-mixed-ramp
+./scripts/run_test_load_shapes.sh --with-setup --with-mixed-ramp
 
 # All three profiles + teardown
-./scripts/validate_load_shapes.sh --with-setup --with-burst --with-mixed-ramp --teardown
+./scripts/run_test_load_shapes.sh --with-setup --with-burst --with-mixed-ramp --teardown
 ```
 
 ### New environment variables
@@ -417,8 +417,8 @@ curl -s "http://localhost:7379/DEL/control_cmd"
 ### Validate
 
 ```bash
-./scripts/validate_chaos.sh --with-setup
-./scripts/validate_chaos.sh --with-setup --teardown
+./scripts/run_test_chaos.sh --with-setup
+./scripts/run_test_chaos.sh --with-setup --teardown
 ```
 
 The script runs k6 in the background and exercises pause → resume → set-rate automatically,
@@ -433,7 +433,7 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
 > k6 run --out=opentelemetry --no-thresholds /scripts/scenarios/ingest.js
 > ```
 >
-> `validate_chaos.sh` does this automatically — the flag is already wired in.
+> `run_test_chaos.sh` does this automatically — the flag is already wired in.
 
 ### New environment variables
 
@@ -509,12 +509,12 @@ using Kafka offset snapshots to confirm traffic stopped and restarted.
 
 | Script | What it validates |
 |---|---|
-| `validate_ingest.sh` | `_bulk` + single-doc writes at constant rate → Kafka → OpenSearch |
-| `validate_sequences.sh` | Stateful create → update → query → delete; connection pinning; doc leak check |
-| `validate_search.sh` | Queries, aggregations, deep paging (scroll / search_after); scroll context leak check |
-| `validate_mixed.sh` | Concurrent ingest + search; Webdis ID registry; consistency metrics |
-| `validate_load_shapes.sh` | `ramping-arrival-rate` profiles: ramp, burst, mixed-ramp |
-| `validate_chaos.sh` | Pause/resume/rate-throttle via Webdis; Kafka offset delta assertions |
+| `run_test_ingest.sh` | `_bulk` + single-doc writes at constant rate → Kafka → OpenSearch |
+| `run_test_sequences.sh` | Stateful create → update → query → delete; connection pinning; doc leak check |
+| `run_test_search.sh` | Queries, aggregations, deep paging (scroll / search_after); scroll context leak check |
+| `run_test_mixed.sh` | Concurrent ingest + search; Webdis ID registry; consistency metrics |
+| `run_test_load_shapes.sh` | `ramping-arrival-rate` profiles: ramp, burst, mixed-ramp |
+| `run_test_chaos.sh` | Pause/resume/rate-throttle via Webdis; Kafka offset delta assertions |
 
 
 ## Thresholds vs Checks
