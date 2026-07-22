@@ -153,7 +153,9 @@ class Test0003ApprovalGateIntegration(MATestBase):
 
     def _assert_gate_prerequisite_completed(self, gate_name: str):
         if gate_name == "begin":
-            self._assert_capture_proxy_not_ready()
+            self._assert_capture_proxy_not_started()
+        elif gate_name.startswith("captureproxysetup."):
+            self._assert_capture_proxy_setup_pending()
         elif gate_name.startswith("evaluatemetadata."):
             self._assert_workflow_show_output_available("evaluatemetadata")
         elif gate_name.startswith("migratemetadata."):
@@ -162,7 +164,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
         elif gate_name.startswith("documentbackfill."):
             self._assert_document_backfill_completed()
 
-    def _assert_capture_proxy_not_ready(self):
+    def _get_capture_proxy(self):
         result = subprocess.run(
             [
                 "kubectl", "get", "captureproxy", "capture-proxy",
@@ -172,24 +174,41 @@ class Test0003ApprovalGateIntegration(MATestBase):
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            if "NotFound" in result.stderr or "not found" in result.stderr:
-                logger.info("CaptureProxy is not present before begin approval")
-                return
             raise AssertionError(
-                f"Failed to inspect CaptureProxy before begin approval "
+                f"Failed to inspect CaptureProxy "
                 f"(rc={result.returncode}). stdout={result.stdout!r} stderr={result.stderr!r}"
             )
         try:
-            capture_proxy = json.loads(result.stdout)
+            return json.loads(result.stdout)
         except json.JSONDecodeError as e:
             raise AssertionError(
-                f"Failed to parse CaptureProxy JSON before begin approval: {e}. "
+                f"Failed to parse CaptureProxy JSON: {e}. "
                 f"stdout={result.stdout!r}"
             ) from e
+
+    def _assert_capture_proxy_not_started(self):
+        capture_proxy = self._get_capture_proxy()
         phase = capture_proxy.get("status", {}).get("phase")
-        if phase == "Ready":
-            raise AssertionError(f"CaptureProxy was Ready before begin approval: {capture_proxy.get('status')}")
-        logger.info("CaptureProxy phase before begin approval: %s", phase or "<unset>")
+        status = capture_proxy.get("status", {})
+        if phase != "Created":
+            raise AssertionError(
+                f"CaptureProxy phase before begin approval was {phase!r}, expected 'Created': {status}"
+            )
+        if status.get("configChecksum"):
+            raise AssertionError(f"CaptureProxy configChecksum was set before begin approval: {status}")
+        if status.get("serviceEndpoint") or status.get("loadBalancerEndpoint"):
+            raise AssertionError(f"CaptureProxy endpoint was set before begin approval: {status}")
+        logger.info("CaptureProxy is still Created before begin approval")
+
+    def _assert_capture_proxy_setup_pending(self):
+        capture_proxy = self._get_capture_proxy()
+        phase = capture_proxy.get("status", {}).get("phase")
+        if phase != "Pending":
+            raise AssertionError(
+                f"CaptureProxy phase before proxy setup approval was {phase!r}, expected 'Pending': "
+                f"{capture_proxy.get('status')}"
+            )
+        logger.info("CaptureProxy is Pending before proxy setup approval")
 
     def _assert_workflow_show_output_available(self, task_name: str):
         result = subprocess.run(
