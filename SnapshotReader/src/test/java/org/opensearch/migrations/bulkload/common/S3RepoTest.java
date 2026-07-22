@@ -6,8 +6,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
+import org.opensearch.migrations.bulkload.common.S3Repo.CannotListObjectsInS3;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout.SolrBackupMode;
 import org.opensearch.migrations.bulkload.solr.SolrBackupReadException;
 
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -27,6 +30,11 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.sameInstance;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -466,5 +474,247 @@ public class S3RepoTest {
 
         assertThat(bare.mode(), equalTo(SolrBackupMode.CLOUD));
         assertThat(bare.collectionName(), nullValue());
+    }
+
+    // ---------- close ----------------------------------------------------
+
+    @Test
+    void close_DelegatesToS3Client() {
+        testRepo.close();
+        verify(mockS3Client, times(1)).close();
+    }
+
+    @Test
+    void close_WithNullClient_IsNoOp() {
+        // When the repo was constructed without an S3 client (defensive code
+        // path), close() must not NPE — it just has nothing to do.
+        var nullClientRepo = new TestableS3Repo(testDir, testRepoUri, testRegion, null, mockFileFinder);
+        assertDoesNotThrow(nullClientRepo::close);
+    }
+
+    // ---------- toString -------------------------------------------------
+
+    @Test
+    void toString_EmbedsUriAndRegion() {
+        String s = testRepo.toString();
+        assertThat(s, containsString(testRepoUri.uri));
+        assertThat(s, containsString(testRegion));
+    }
+
+    // ---------- listFilesInS3Root error path -----------------------------
+
+    @Test
+    void listFilesInS3Root_WrapsCompletionExceptionAsCannotListObjects() {
+        // Simulate an S3 client failure — the joined future raises CompletionException
+        // which S3Repo must repackage as CannotListObjectsInS3 with bucket + prefix
+        // context so operators can identify the failed call.
+        CompletableFuture<ListObjectsV2Response> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new CompletionException(new RuntimeException("AccessDenied")));
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(failed);
+
+        CannotListObjectsInS3 thrown = assertThrows(
+            CannotListObjectsInS3.class,
+            () -> testRepo.listFilesInS3Root()
+        );
+        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
+        // Strip the trailing slash like the production code does before reporting.
+        assertThat(thrown.getMessage(), containsString(testRepoUri.key));
+    }
+
+    // ---------- listSubDirectories / listTopLevelDirectories -------------
+
+    @Test
+    void listSubDirectories_ReturnsCommonPrefixNamesStrippedOfRepoPrefixAndSlash() {
+        // Top-level "directories" under s3://bucket-name/directory/ — common
+        // prefixes come back as full keys ending with "/"; the helper should
+        // strip the repo prefix AND the trailing slash so callers get just the
+        // collection names.
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .commonPrefixes(
+                CommonPrefix.builder().prefix("directory/collA/").build(),
+                CommonPrefix.builder().prefix("directory/collB/").build()
+            )
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        List<String> dirs = testRepo.listSubDirectories("");
+        assertThat(dirs, contains("collA", "collB"));
+    }
+
+    @Test
+    void listSubDirectories_FiltersEmptyEntries() {
+        // A common prefix that equals the listed prefix (i.e. the listing
+        // includes the "directory" entry for the prefix itself) should be
+        // filtered out — we want subdirectory names only.
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .commonPrefixes(
+                CommonPrefix.builder().prefix("directory/").build(),         // -> "" after strip
+                CommonPrefix.builder().prefix("directory/keepMe/").build()
+            )
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        assertThat(testRepo.listSubDirectories(""), contains("keepMe"));
+    }
+
+    @Test
+    void listSubDirectories_RelativePrefix_IsJoinedAndSlashTerminated() {
+        // The caller passes "collA" (no trailing slash) and the helper should
+        // join it with the repo's prefix and ensure a single trailing slash.
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .commonPrefixes(CommonPrefix.builder().prefix("directory/collA/index/").build())
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        ArgumentCaptor<ListObjectsV2Request> captor = ArgumentCaptor.forClass(ListObjectsV2Request.class);
+
+        List<String> result = testRepo.listSubDirectories("collA");
+        assertThat(result, contains("index"));
+
+        verify(mockS3Client).listObjectsV2(captor.capture());
+        ListObjectsV2Request request = captor.getValue();
+        assertEquals(testRepoUri.bucketName, request.bucket());
+        assertEquals("directory/collA/", request.prefix());
+        assertEquals("/", request.delimiter());
+    }
+
+    @Test
+    void listSubDirectories_EmptyResponseReturnsEmptyList() {
+        ListObjectsV2Response response = ListObjectsV2Response.builder().build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        assertThat(testRepo.listSubDirectories(""), is(empty()));
+    }
+
+    @Test
+    void listSubDirectories_CompletionExceptionWrapsAsCannotListObjects() {
+        CompletableFuture<ListObjectsV2Response> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new CompletionException(new RuntimeException("throttled")));
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(failed);
+
+        CannotListObjectsInS3 thrown = assertThrows(
+            CannotListObjectsInS3.class,
+            () -> testRepo.listSubDirectories("collA")
+        );
+        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
+        // Joined prefix should appear so the operator can reproduce the call.
+        assertThat(thrown.getMessage(), containsString("directory/collA/"));
+    }
+
+    @Test
+    void listTopLevelDirectories_DelegatesToListSubDirectoriesWithEmptyPrefix() {
+        // testRepo is already a spy; stub on it directly.
+        doReturn(List.of("a", "b")).when(testRepo).listSubDirectories("");
+
+        List<String> result = testRepo.listTopLevelDirectories();
+        assertThat(result, contains("a", "b"));
+        verify(testRepo).listSubDirectories("");
+    }
+
+    // ---------- downloadFile / downloadAllFiles / downloadPrefix ---------
+
+    @Test
+    void downloadFile_ResolvesUnderRepoRootAndFetches() {
+        // ensureS3LocalDirectoryExists would otherwise hit the real filesystem at /fake/path.
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(any());
+
+        Path localPath = testRepo.downloadFile("collA/index/abc123");
+        assertEquals(testDir.resolve("collA/index/abc123"), localPath);
+
+        // getObject was issued with bucket/key matching the joined URI.
+        ArgumentCaptor<GetObjectRequest> req = ArgumentCaptor.forClass(GetObjectRequest.class);
+        verify(mockS3Client).getObject(req.capture(), any(AsyncResponseTransformer.class));
+        assertEquals(testRepoUri.bucketName, req.getValue().bucket());
+        assertEquals("directory/collA/index/abc123", req.getValue().key());
+    }
+
+    @Test
+    void downloadAllFiles_DelegatesToDownloadPrefixWithEmptyString() {
+        // Stub on the spy directly — Mockito.spy on a spy preserves the
+        // underlying mock state but stubs are scoped to the new wrapper.
+        doReturn(testDir).when(testRepo).downloadPrefix("");
+
+        Path result = testRepo.downloadAllFiles();
+        assertThat(result, sameInstance(testDir));
+        verify(testRepo).downloadPrefix("");
+    }
+
+    @Test
+    void downloadPrefix_DownloadsEveryObjectAndSkipsDirectoryMarkers() {
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(any());
+
+        // S3 listings sometimes include synthetic "directory marker" entries
+        // (keys ending in "/") and the prefix itself. Neither should be
+        // downloaded — only real file entries.
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .contents(List.of(
+                S3Object.builder().key("directory/collA/").build(),         // skipped (empty rel-path)
+                S3Object.builder().key("directory/collA/sub/").build(),    // skipped (trailing slash)
+                S3Object.builder().key("directory/collA/file1.bin").build(),
+                S3Object.builder().key("directory/collA/file2.bin").build()
+            ))
+            .isTruncated(false)
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        Path result = testRepo.downloadPrefix("collA");
+        assertThat(result, sameInstance(testDir));
+
+        // Exactly 2 downloads (for the file entries), not 4.
+        verify(mockS3Client, times(2)).getObject(
+            any(GetObjectRequest.class), any(AsyncResponseTransformer.class));
+    }
+
+    @Test
+    void downloadPrefix_HonoursPaginationContinuationToken() {
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(any());
+
+        // First page is truncated and carries a continuation token; second page
+        // returns the rest. The helper must call listObjectsV2 twice and pass
+        // the token on the second call.
+        ListObjectsV2Response page1 = ListObjectsV2Response.builder()
+            .contents(List.of(S3Object.builder().key("directory/collA/p1.bin").build()))
+            .isTruncated(true)
+            .nextContinuationToken("tok-1")
+            .build();
+        ListObjectsV2Response page2 = ListObjectsV2Response.builder()
+            .contents(List.of(S3Object.builder().key("directory/collA/p2.bin").build()))
+            .isTruncated(false)
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(page1))
+            .thenReturn(CompletableFuture.completedFuture(page2));
+
+        testRepo.downloadPrefix("collA");
+
+        ArgumentCaptor<ListObjectsV2Request> requests = ArgumentCaptor.forClass(ListObjectsV2Request.class);
+        verify(mockS3Client, times(2)).listObjectsV2(requests.capture());
+
+        // First call: no token. Second call: token from page1.
+        assertEquals(null, requests.getAllValues().get(0).continuationToken());
+        assertEquals("tok-1", requests.getAllValues().get(1).continuationToken());
+
+        // One getObject per real file across both pages.
+        verify(mockS3Client, times(2)).getObject(
+            any(GetObjectRequest.class), any(AsyncResponseTransformer.class));
+    }
+
+    @Test
+    void downloadPrefix_CompletionExceptionWrapsAsCannotListObjects() {
+        CompletableFuture<ListObjectsV2Response> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new CompletionException(new RuntimeException("503")));
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(failed);
+
+        CannotListObjectsInS3 thrown = assertThrows(
+            CannotListObjectsInS3.class,
+            () -> testRepo.downloadPrefix("collA")
+        );
+        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
+        assertThat(thrown.getMessage(), containsString("directory/collA/"));
     }
 }

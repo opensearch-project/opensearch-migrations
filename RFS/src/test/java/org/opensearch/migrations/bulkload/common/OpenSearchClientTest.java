@@ -55,7 +55,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
-import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryRetryableFailure;
 
 @ExtendWith(MockitoExtension.class)
 class OpenSearchClientTest {
@@ -163,13 +163,17 @@ class OpenSearchClientTest {
         var docId1 = "tt1979320";
         var docId2 = "tt0816711";
 
+        // Use retryable failures (es_rejected_execution_exception): we want this test
+        // to drive the bulk retry loop. NON_RETRYABLE error types (e.g.
+        // version_conflict_engine_exception) would be sent to the failed document stream on the first
+        // attempt and never retried — see BulkDocErrorTypes.NON_RETRYABLE.
         var bothDocsFail = bulkItemResponse(
             true,
-            List.of(itemEntryFailure(docId1), itemEntryFailure(docId2))
+            List.of(itemEntryRetryableFailure(docId1), itemEntryRetryableFailure(docId2))
         );
         var oneFailure = bulkItemResponse(
             true,
-            List.of(itemEntry(docId1), itemEntryFailure(docId2))
+            List.of(itemEntry(docId1), itemEntryRetryableFailure(docId2))
         );
         var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
@@ -202,7 +206,9 @@ class OpenSearchClientTest {
     @Test
     void testBulkRequest_recordsTotalFailures() {
         var docId1 = "tt1979320";
-        var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
+        // Retryable failure so the test exercises the retry-exhaust path; a
+        // NON_RETRYABLE type would skip retries entirely.
+        var docFails = bulkItemResponse(true, List.of(itemEntryRetryableFailure(docId1)));
 
         when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
@@ -317,7 +323,10 @@ class OpenSearchClientTest {
     void testBulkRequest_warningLogContainsDetails_onError() {
         try (var logs = new CloseableLogSetup(OpenSearchClient.class.getName())) {
             var docId1 = "tt1979320";
-            var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
+            // Retryable failure so the retry loop runs and emits the "After bulk
+            // request attempt" warn log. The asserted reason text below must match
+            // the helper's response body.
+            var docFails = bulkItemResponse(true, List.of(itemEntryRetryableFailure(docId1)));
 
             when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
@@ -343,7 +352,7 @@ class OpenSearchClientTest {
             for (String bulkErrorWarnLog : bulkErrorWarnLogs) {
                 // Add buffer for additional log line characters
                 assertThat(bulkErrorWarnLog.length(), lessThan(OpenSearchClient.BULK_TRUNCATED_RESPONSE_MAX_LENGTH + 300));
-                assertThat(bulkErrorWarnLog, containsString("version conflict, document already exists"));
+                assertThat(bulkErrorWarnLog, containsString("rejected execution of bulk request"));
             }
         }
     }
