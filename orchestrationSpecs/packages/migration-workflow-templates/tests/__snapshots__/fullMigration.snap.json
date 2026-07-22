@@ -1438,7 +1438,7 @@
                 "template": "approvebackfill",
                 "name": "document-bulk-load"
               },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(fromJSON(inputs.parameters.documentBackfillConfig)['skipApproval'])}}",
               "arguments": {
                 "parameters": [
                   {
@@ -2209,7 +2209,7 @@
                 "template": "waitforuserapproval",
                 "name": "resource-management"
               },
-              "when": "{{=sprig.dig('requireBeginApproval', false, fromJSON(inputs.parameters.config))}}",
+              "when": "{{=fromJSON(inputs.parameters.config)['requireBeginApproval']}}",
               "arguments": {
                 "parameters": [
                   {

@@ -494,10 +494,9 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 {when: {templateExp: expr.and(
                     expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
-                    expr.not(expr.dig(
+                    expr.not(expr.get(
                         expr.deserializeRecord(b.inputs.documentBackfillConfig),
-                        ["skipApproval"],
-                        false
+                        "skipApproval"
                     ))
                 )}}
             )
@@ -775,7 +774,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("approveBegin", ResourceManagement, "waitForUserApproval", c =>
                     c.register({resourceName: expr.literal("begin")}),
-                {when: {templateExp: expr.dig(expr.deserializeRecord(b.inputs.config), ["requireBeginApproval"], false)}}
+                {when: {templateExp: expr.get(expr.deserializeRecord(b.inputs.config), "requireBeginApproval")}}
             )
             .addStepGroup(g => g
                 .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
