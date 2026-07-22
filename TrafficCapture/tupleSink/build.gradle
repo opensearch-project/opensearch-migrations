@@ -4,6 +4,7 @@ plugins {
 }
 
 dependencies {
+    implementation project(':s3Common')
     implementation libs.jackson.databind
     implementation libs.slf4j.api
     implementation libs.aws.s3

@@ -6,6 +6,7 @@ import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.enums.SchemaVersion;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
@@ -14,7 +15,9 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 @Data
@@ -40,6 +43,17 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     private SchemaVersion schema = SchemaVersion.RFS_OPENSEARCH_BULK_V1;
     private Map<String, Object> document;
     private String documentPath;
+
+    /**
+     * Original (pre-transformation) source document, captured at conversion time so failed document stream
+     * records can carry the source-index document rather than the transformed one. This
+     * is never serialized to the bulk request wire format or exposed to the transformer;
+     * it is purely an in-memory side-channel for failure reporting.
+     */
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient Map<String, Object> originalSource;
 
     @JsonProperty(INCLUDE_DOCUMENT_KEY)
     public abstract boolean isIncludeDocument();
