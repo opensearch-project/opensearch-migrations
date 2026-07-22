@@ -60,26 +60,25 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Recreate Minikube') {
+            stage('Recreate Kind') {
                 steps {
                     // Always recreate. The shared docker-hosted registry/buildkit containers
                     // and their registry-data + buildkit-cache volumes live on host Docker,
-                    // so they survive `minikube delete` and image layers are reused.
-                    // Use minikube's default cri-dockerd runtime + bridge CNI: forcing
-                    // containerd makes minikube install kindnet, which pulls a docker.io
-                    // image at every cluster start and breaks under Docker Hub rate limits
-                    // in CI. `--insecure-registry=docker-registry:5001` lets cri-dockerd
-                    // accept plain HTTP pulls from the host-bound registry port.
+                    // so they survive `kind delete cluster` and image layers are reused.
+                    //
+                    // The kind nodes run as Docker containers. The local registry is configured
+                    // as an insecure HTTP registry in the kind node containerd configuration.
                     timeout(time: 10, unit: 'MINUTES') {
-                        // Tear down the registry before minikube/network so that
-                        // docker network rm isn't blocked by a connected container.
+                        // Tear down the registry before deleting the kind cluster.
+                        // This is only necessary if the registry container is attached to
+                        // the kind network and would otherwise prevent network cleanup.
                         sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
-                        sh 'minikube delete || true'
-                        // minikube delete sometimes leaves the "minikube" docker network behind
-                        // with its 192.168.49.0/24 subnet; drop it so the next start can recreate
-                        // it without "address already in use".
-                        sh 'docker network rm minikube 2>/dev/null || true'
-                        sh 'minikube start --driver=docker --insecure-registry=docker-registry:5001'
+
+                        // Always recreate the kind cluster.
+                        sh 'kind delete cluster --name ma || true'
+
+                        // Create the kind cluster with the local registry configured.
+                        sh 'kind create cluster --name ma --config ./deployment/k8s/kindClusterConfig.yaml'
                     }
                 }
             }
@@ -89,22 +88,19 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            // Bring up the docker-hosted registry/buildkit, then configure each
-                            // minikube node to resolve docker-registry to the host gateway and
-                            // pull from the host-bound port (no docker network connect needed).
+                            // Bring up the docker-hosted registry/buildkit, then connect the registry
+                            // container to the kind Docker network so kind nodes can resolve
+                            // docker-registry directly and pull images from docker-registry:5001.
                             sh '''
                                 set -eu
                                 . ./buildImages/backends/dockerHostedBuildkit.sh
-                                KUBE_CONTEXT=minikube setup_build_backend
-                                mk_nodes=()
-                                while IFS= read -r node; do
-                                    [ -n "$node" ] && mk_nodes+=("$node")
-                                done < <(minikube node list 2>/dev/null | awk '{print $1}')
-                                connect_cluster_to_registry_network minikube "${mk_nodes[@]}"
+                            
+                                KUBE_CONTEXT=kind-ma setup_build_backend
+                                docker network connect kind docker-registry 2>/dev/null || true
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
-                            // Keep builder-minikube alive across runs so the buildkit cache persists.
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            // Keep builder-kind alive across runs so the buildkit cache persists.
                         }
                     }
                 }
@@ -138,7 +134,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
+                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=kind-ma --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }
@@ -154,7 +150,7 @@ def call(Map config = [:]) {
                             sh "kubectl config unset current-context || true"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
-                            sh "pipenv run app --delete-only --kube-context=minikube"
+                            sh "pipenv run app --delete-only --kube-context=kind-ma"
                         }
                     }
                 }
