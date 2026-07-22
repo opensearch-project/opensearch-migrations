@@ -2,10 +2,9 @@
 
 Install prerequisites, including `kubectl`, `helm`, and `kind`.
 
-This script creates a `kind` cluster, starts or reuses the shared docker-hosted
-`docker-registry` container at `localhost:5001` (the same one `localTesting.sh`
-uses), starts or reuses an external `buildkitd` container, builds the project images into that registry, and installs
-the same helm charts used by the Minikube flow.
+This script creates a `kind` cluster, starts or reuses the shared docker-hosted `docker-registry` container at
+`localhost:5001`, starts or reuses an external `buildkitd` container, builds the
+project images into that registry, and installs the helm charts.
 
 ```bash
 echo "Will create/reuse a kind cluster, build images, and install the MA helm chart for those images"
@@ -33,7 +32,7 @@ Run this to open the migration-console terminal so that you can run
 kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
 ```
 
-To forward deployed services' ports from minikube to your localhost.  
+To forward deployed services' ports from kind to your localhost.  
 E.g. so that http://localhost:2746/ will load the argo web-ui, etc, run
 
 ```bash
