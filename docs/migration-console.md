@@ -44,7 +44,7 @@ In a migration with replayer components deployed, the Migration Console has some
 
 The Reindex-From-Snapshot and Replayer services are deployed (if enabled) by the CDK scripts to ECS, in the same cluster as the Migration Console, or by the `docker-compose.yml` as Docker containers. In the AWS deployment, the Migration Console does not directly interact with either of these services. Instead, it uses the AWS API to manipulate them at the control-plane level by changing the number of desired services to disable, enable, and scale the services.
 
-Documents that fail terminally during a Reindex-from-Snapshot backfill are written to a durable failed document stream in S3, which you can inspect and manage from the Migration Console. See [Failed Document Stream](failedDocumentStream.md).
+Documents that fail terminally during a Reindex-from-Snapshot backfill are written to a failed document stream, which is durably persisted to S3. You can inspect it from the Migration Console. See [Failed Document Stream](failedDocumentStream.md).
 
 #### Shared Logs Volume
 
