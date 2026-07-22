@@ -61,6 +61,30 @@ public class BulkRequestGenerator {
             .build();
     }
 
+    /**
+     * Failure entry that the bulk-retry classifier treats as RETRYABLE (i.e., not in
+     * {@code BulkDocErrorTypes.NON_RETRYABLE}). Use this when a test wants to drive
+     * the retry loop rather than send the doc straight to the failed document stream on first attempt.
+     */
+    public static BulkItemResponseEntry itemEntryRetryableFailure(String itemId) {
+        return BulkItemResponseEntry.builder().raw(
+            ("        {\r\n" + //
+            "            \"index\": {\r\n" + //
+            "                \"_index\": \"movies\",\r\n" + //
+            "                \"_id\": \"{0}\",\r\n" + //
+            "                \"status\": 429,\r\n" + //
+            "                \"error\": {\r\n" + //
+            "                    \"type\": \"es_rejected_execution_exception\",\r\n" + //
+            "                    \"reason\": \"rejected execution of bulk request, queue capacity exceeded\",\r\n" + //
+            "                    \"index\": \"movies\",\r\n" + //
+            "                    \"shard\": \"0\"\r\n" + //
+            "                }\r\n" + //
+            "            }\r\n" + //
+            "        }\r\n")
+            .replaceAll("\\{0\\}", itemId))
+            .build();
+    }
+
     @Builder
     public static class BulkItemResponseEntry {
         private String raw;
