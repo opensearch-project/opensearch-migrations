@@ -11,7 +11,7 @@
 ## Service design
 - `LoadBalancer` Service named `<proxyName>` with NLB IP mode annotations
   - On EKS Auto Mode: annotations activate direct pod routing
-  - On minikube/standard K8s: annotations are ignored, standard LoadBalancer behavior
+  - On kind/standard K8s: annotations are ignored, standard LoadBalancer behavior
 - Deployment named `<proxyName>`, both use `action: apply` (idempotent)
 
 ## Changes

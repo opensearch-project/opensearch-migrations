@@ -37,7 +37,7 @@ spec:
         value: "false"
       - name: skip-approvals
         value: "true"
-      # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
+      # Registry prefix for custom ES images (e.g. "localhost:5000/" for kind)
       - name: image-registry-prefix
         value: ""
       # Any references to workflow.parameters must come from top level workflow

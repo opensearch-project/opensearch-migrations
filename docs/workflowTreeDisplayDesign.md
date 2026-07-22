@@ -919,7 +919,7 @@ automatically.
 2. Add `groupName` to key sub-phase templates
 3. Add `at_root_level` fallback to `filter_tree_nodes`
 4. Update affected test fixtures, add new ones
-5. Redeploy to minikube, resubmit workflow, verify output
+5. Redeploy to kind, resubmit workflow, verify output
 
 ### What this does NOT address (deferred)
 

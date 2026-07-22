@@ -130,7 +130,7 @@ Backfill can be performed via several mechanisms. The method supported by the co
 Depending on the purpose/deployment strategy, RFS can be used in various environments, including:
 1. Docker container environment, e.g. Docker compose setup
 2. AWS in an Elastic Container Service (ECS) deployment
-3. Kubernetes environment, e.g. Minikube environment
+3. Kubernetes environment, e.g. kind environment
 
 Most of the parameters for these options are the same, with some additional ones specific to the deployment.
 

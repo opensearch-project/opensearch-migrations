@@ -167,5 +167,5 @@ supported for backward compatibility but is not recommended for new deployments.
 
 ## Sample configurations
 
-- [`proxyWithSelfSignedTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithSelfSignedTls.wf.yaml) — local CA issuer (minikube, non-AWS)
+- [`proxyWithSelfSignedTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithSelfSignedTls.wf.yaml) — local CA issuer (kind, non-AWS)
 - [`proxyWithPcaTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithPcaTls.wf.yaml) — AWS PCA issuer (EKS)
