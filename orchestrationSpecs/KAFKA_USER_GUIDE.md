@@ -62,7 +62,7 @@ Implemented today:
 - console SCRAM support for workflow-managed Kafka, with the current console
   workflow-config reader deriving the managed bootstrap endpoint
   deterministically from the workflow config
-- end-to-end minikube validation of:
+- end-to-end kind validation of:
   - `proxyWithoutTls.wf.yaml`
   - `proxyWithoutTlsScram.wf.yaml`
 

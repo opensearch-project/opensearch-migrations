@@ -21,14 +21,14 @@ consuming standard PEM files directly via Netty.
 
 ## Supported TLS Modes — Status
 
-| Mode | `--tls-mode` | Status | Notes |
-|---|---|---|---|
-| **Self-signed** | `self-signed` | ✅ **Fully supported** | Works on minikube and EKS. Zero-config default. |
-| **AWS Private CA** | `pca-existing`, `pca-create` | 🚧 **In progress** | Blocked on cert-manager approval. See [PCA remaining work](#pca-remaining-work). |
-| **ACME / Let's Encrypt** | `lets-encrypt` *(not yet implemented)* | 📋 **Planned** | Requires public DNS. See [ACME remaining work](#acme-remaining-work). |
+| Mode | `--tls-mode` | Status | Notes                                                                                                                           |
+|---|---|---|---------------------------------------------------------------------------------------------------------------------------------|
+| **Self-signed** | `self-signed` | ✅ **Fully supported** | Works on kind and EKS. Zero-config default.                                                                                     |
+| **AWS Private CA** | `pca-existing`, `pca-create` | 🚧 **In progress** | Blocked on cert-manager approval. See [PCA remaining work](#pca-remaining-work).                                                |
+| **ACME / Let's Encrypt** | `lets-encrypt` *(not yet implemented)* | 📋 **Planned** | Requires public DNS. See [ACME remaining work](#acme-remaining-work).                                                           |
 | **ACM Exportable Public Certs** | `acm-exportable` *(not yet implemented)* | 📋 **Planned** | New AWS feature (2025). No cert-manager issuer exists yet. See [ACM Exportable remaining work](#acm-exportable-remaining-work). |
-| **Pre-existing secret** | N/A (schema `mode: existingSecret`) | ✅ **Fully supported** | User provides their own K8s TLS secret. |
-| **No TLS** | `none` | ✅ **Fully supported** | Omit `tls` from migration config. |
+| **Pre-existing secret** | N/A (schema `mode: existingSecret`) | ✅ **Fully supported** | User provides their own K8s TLS secret.                                                                                         |
+| **No TLS** | `none` | ✅ **Fully supported** | Omit `tls` from migration config.                                                                                               |
 
 ---
 
@@ -38,7 +38,7 @@ consuming standard PEM files directly via Netty.
 - **PCA can be created via ACK in helm** (opt-in) or user brings their own ARN.
 - **Pod Identity** (not IRSA) for controller AWS credentials. Associations are created in the
   CDK/CFN stack for AWS users, or manually by Terraform/CLI users.
-- **Self-signed ClusterIssuer** as the default for non-AWS / minikube / dev environments.
+- **Self-signed ClusterIssuer** as the default for non-AWS / kind / dev environments.
 - **No Bouncy Castle needed** — Netty's `SslContextBuilder` reads PEM natively.
 - **Validation before provisioning** — check CRDs and issuer readiness before creating Certificates.
 
@@ -248,7 +248,7 @@ const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 **User-facing config examples:**
 
 ```jsonc
-// Non-AWS / minikube (self-signed) — FULLY SUPPORTED
+// Non-AWS / kind (self-signed) — FULLY SUPPORTED
 "tls": {
   "mode": "certManager",
   "issuerRef": { "name": "migrations-ca" },
@@ -501,16 +501,16 @@ implementing this mode. Once that exists, the integration will be as clean as th
 
 ## User Experience by Environment
 
-| Environment | Layer 1 (CDK/CFN) | Layer 2 (Helm values) | Layer 3 (Migration config) | Status |
-|---|---|---|---|---|
-| **Minikube / non-AWS** | N/A | Defaults (cert-manager + self-signed) | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
-| **EKS, self-signed** | Default stack | Defaults | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
+| Environment                    | Layer 1 (CDK/CFN) | Layer 2 (Helm values) | Layer 3 (Migration config) | Status |
+|--------------------------------|---|---|---|---|
+| **kind / non-AWS**             | N/A | Defaults (cert-manager + self-signed) | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
+| **EKS, self-signed**           | Default stack | Defaults | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
 | **Any env, pre-existing cert** | N/A | Defaults | `mode: "existingSecret", secretName: "..."` | ✅ Supported |
-| **No TLS** | N/A | Defaults | Omit `tls` | ✅ Supported |
-| **EKS, existing PCA** | PCA permissions + Pod Identity for `aws-pca-issuer` | Enable `aws-privateca-issuer`, set `awsPrivateCA.arn` | `issuerRef: { name: "aws-pca-issuer", group: "awspca.cert-manager.io" }` | 🚧 In progress |
-| **EKS, new PCA via ACK** | PCA permissions + Pod Identity for both SAs | Enable both controllers, `awsPrivateCA.create: true` | Same as above | 🚧 In progress |
-| **EKS, Let's Encrypt** | Route53 permissions + Pod Identity for cert-manager | ACME ClusterIssuer (not yet implemented) | `issuerRef: { name: "lets-encrypt" }` + public dnsNames | 📋 Planned |
-| **EKS, ACM Exportable** | ACM + Route53 permissions | ACM issuer (not yet implemented) | TBD | 📋 Planned |
+| **No TLS**                     | N/A | Defaults | Omit `tls` | ✅ Supported |
+| **EKS, existing PCA**          | PCA permissions + Pod Identity for `aws-pca-issuer` | Enable `aws-privateca-issuer`, set `awsPrivateCA.arn` | `issuerRef: { name: "aws-pca-issuer", group: "awspca.cert-manager.io" }` | 🚧 In progress |
+| **EKS, new PCA via ACK**       | PCA permissions + Pod Identity for both SAs | Enable both controllers, `awsPrivateCA.create: true` | Same as above | 🚧 In progress |
+| **EKS, Let's Encrypt**         | Route53 permissions + Pod Identity for cert-manager | ACME ClusterIssuer (not yet implemented) | `issuerRef: { name: "lets-encrypt" }` + public dnsNames | 📋 Planned |
+| **EKS, ACM Exportable**        | ACM + Route53 permissions | ACM issuer (not yet implemented) | TBD | 📋 Planned |
 
 ## What is NOT needed
 

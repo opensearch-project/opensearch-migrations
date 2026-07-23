@@ -4,7 +4,7 @@
 # it provisions source + target clusters inline (via cluster-templates) AND wires up
 # the capture proxy + replayer for CDC traffic capture — all in a single workflow.
 #
-# Use this template for local (minikube / kind) CDC tests where no external CDK
+# Use this template for local kind CDC tests where no external CDK
 # deployment supplies cluster endpoints. Use cdc-full-e2e-imported-clusters when
 # clusters are pre-provisioned and their configs are supplied as inputs.
 #
@@ -50,7 +50,7 @@ spec:
         value: "false"
       - name: skip-approvals
         value: "true"
-      # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
+      # Registry prefix for custom ES images (e.g. "localhost:5000/" for kind)
       - name: image-registry-prefix
         value: ""
       - name: snapshot-configmap

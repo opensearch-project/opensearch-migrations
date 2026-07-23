@@ -227,25 +227,25 @@ class TestVersionCombinations:
 
 class TestSourceVersionArgParsing:
     def test_all_normalizes_to_lowercase(self):
-        args = parse_args(["--source-version", "all", "--kube-context", "minikube"])
+        args = parse_args(["--source-version", "all", "--kube-context", "kind-ma"])
         assert args.source_version == ["all"]
 
     def test_all_case_insensitive(self):
-        args = parse_args(["--source-version", "ALL", "--kube-context", "minikube"])
+        args = parse_args(["--source-version", "ALL", "--kube-context", "kind-ma"])
         assert args.source_version == ["all"]
 
     def test_all_expands_to_valid_source_versions(self):
-        args = parse_args(["--source-version", "all", "--kube-context", "minikube"])
+        args = parse_args(["--source-version", "all", "--kube-context", "kind-ma"])
         source_versions = VALID_SOURCE_VERSIONS if args.source_version == ["all"] else args.source_version
         assert source_versions == VALID_SOURCE_VERSIONS
 
     def test_multiple_specific_versions(self):
-        args = parse_args(["--source-version", "ES_7.10", "ES_8.19", "--kube-context", "minikube"])
+        args = parse_args(["--source-version", "ES_7.10", "ES_8.19", "--kube-context", "kind-ma"])
         assert args.source_version == ["ES_7.10", "ES_8.19"]
 
     def test_mixed_all_and_specific_is_rejected(self):
         """Mixing 'all' with specific versions must be caught and rejected at the call site."""
-        args = parse_args(["--source-version", "all", "ES_7.10", "--kube-context", "minikube"])
+        args = parse_args(["--source-version", "all", "ES_7.10", "--kube-context", "kind-ma"])
         # argparse accepts the list; the rejection happens in main() via sys.exit
         assert "all" in args.source_version
         assert len(args.source_version) > 1

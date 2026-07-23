@@ -51,7 +51,7 @@ def load_k8s_config():
         logger.info("Loaded in-cluster Kubernetes configuration")
     except config.ConfigException:
         try:
-            # Fall back to local kubeconfig (for development/minikube)
+            # Fall back to local kubeconfig (for development/kind)
             config.load_kube_config()
             logger.info("Loaded local Kubernetes configuration")
         except config.ConfigException as e:

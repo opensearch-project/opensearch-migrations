@@ -1,4 +1,4 @@
-# Capture proxy with self-signed TLS certificate (for minikube / non-AWS)
+# Capture proxy with self-signed TLS certificate (for kind / non-AWS)
 kafkaClusterConfiguration:
   default:
     autoCreate: {}

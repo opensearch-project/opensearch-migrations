@@ -1,7 +1,7 @@
 // Jest config for running integ tests against an existing cluster.
 // Usage: npm run test:integ:existing
 // Set KUBECONFIG, INTEG_TEST_NAMESPACE, INTEG_ARGO_NAMESPACE as needed.
-// Default Argo namespace is "ma" (matches minikube localTesting.sh setup).
+// Default Argo namespace is "ma" (matches kind kindTesting.sh setup).
 
 export default {
   preset: "ts-jest/presets/default-esm",
