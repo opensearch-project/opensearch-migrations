@@ -1,0 +1,17 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "@timestamp":  { "type": "date" },
+      "level":       { "type": "keyword" },
+      "service":     { "type": "keyword" },
+      "host":        { "type": "keyword" },
+      "message":     { "type": "text" },
+      "trace_id":    { "type": "keyword" },
+      "span_id":     { "type": "keyword" },
+      "duration_ms": { "type": "integer" },
+      "status_code": { "type": "integer" },
+      "environment": { "type": "keyword" }
+    }
+  }
+}

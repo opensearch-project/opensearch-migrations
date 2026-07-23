@@ -25,6 +25,7 @@ public class SolrSnapshotReader implements ClusterReader {
     private final Version version;
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
+    private final Map<String, String> dataDirByCollection;
 
     /**
      * Discover Solr collection names from a backup directory.
@@ -65,9 +66,17 @@ public class SolrSnapshotReader implements ClusterReader {
     }
 
     public SolrSnapshotReader(Version version, Path backupDir, Map<String, JsonNode> schemas) {
+        this(version, backupDir, schemas, Map.of());
+    }
+
+    public SolrSnapshotReader(
+        Version version, Path backupDir, Map<String, JsonNode> schemas,
+        Map<String, String> dataDirByCollection
+    ) {
         this.version = version;
         this.backupDir = backupDir;
         this.schemas = schemas;
+        this.dataDirByCollection = dataDirByCollection;
         log.info("Created SolrSnapshotReader for {} collection(s) from {}", schemas.size(), backupDir);
     }
 
@@ -93,7 +102,7 @@ public class SolrSnapshotReader implements ClusterReader {
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null);
+        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null, dataDirByCollection);
     }
 
     @Override
