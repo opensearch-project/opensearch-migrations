@@ -253,6 +253,8 @@ spec:
           - name: replayer-config
           - name: skip-approvals
             default: "true"
+          - name: require-begin-approval
+            default: "false"
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: bucketUri
@@ -293,6 +295,7 @@ spec:
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
             SKIP_APPROVALS='{{inputs.parameters.skip-approvals}}'
+            REQUIRE_BEGIN_APPROVAL='{{inputs.parameters.require-begin-approval}}'
             BUCKET_URI='{{inputs.parameters.bucketUri}}'
             BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
@@ -351,8 +354,10 @@ spec:
               --argjson target "$TARGET_CONFIG" \
               --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
               --argjson skipApprovals "$SKIP_APPROVALS" \
+              --argjson requireBeginApproval "$REQUIRE_BEGIN_APPROVAL" \
               '{
                 "skipApprovals": $skipApprovals,
+                "requireBeginApproval": $requireBeginApproval,
                 "sourceClusters": {
                   "source1": $source
                 },
