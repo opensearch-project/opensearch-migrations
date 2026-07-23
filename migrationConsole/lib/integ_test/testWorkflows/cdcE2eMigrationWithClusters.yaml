@@ -50,6 +50,8 @@ spec:
         value: "false"
       - name: skip-approvals
         value: "true"
+      - name: require-begin-approval
+        value: "false"
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
       - name: image-registry-prefix
         value: ""
@@ -170,6 +172,8 @@ spec:
                   value: "{{workflow.parameters.replayer-config}}"
                 - name: skip-approvals
                   value: "{{workflow.parameters.skip-approvals}}"
+                - name: require-begin-approval
+                  value: "{{workflow.parameters.require-begin-approval}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:

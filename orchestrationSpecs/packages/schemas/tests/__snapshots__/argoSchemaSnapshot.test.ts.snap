@@ -9,6 +9,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
       "items": {
         "type": "object",
         "properties": {
+          "requireBeginApproval": {
+            "type": "boolean"
+          },
           "kafkaClusters": {
             "type": "array",
             "items": {
@@ -1363,8 +1366,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "string"
                 },
                 "skipApproval": {
-                  "type": "boolean",
-                  "default": false
+                  "type": "boolean"
                 },
                 "resourceUid": {
                   "type": "string"
@@ -1380,6 +1382,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "topicConfigChecksum",
                 "checksumForSnapshot",
                 "checksumForReplayer",
+                "skipApproval",
                 "resourceUid"
               ]
             },
@@ -1968,12 +1971,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "skipEvaluateApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
+                      "type": "boolean"
                     },
                     "skipMigrateApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
+                      "type": "boolean"
                     },
                     "componentTemplateAllowlist": {
                       "type": "array",
@@ -2161,7 +2162,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     }
-                  }
+                  },
+                  "required": [
+                    "skipEvaluateApproval",
+                    "skipMigrateApproval"
+                  ]
                 },
                 "documentBackfillConfig": {
                   "type": "object",
@@ -2185,8 +2190,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "skipApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
+                      "type": "boolean"
                     },
                     "useTargetClusterForWorkCoordination": {
                       "type": "boolean",
@@ -2508,7 +2512,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     }
-                  }
+                  },
+                  "required": [
+                    "skipApproval"
+                  ]
                 },
                 "sourceConnectionIdentity": {
                   "type": "object",
@@ -3477,7 +3484,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "default": []
           }
-        }
+        },
+        "required": [
+          "requireBeginApproval"
+        ]
       }
     }
   },
@@ -3495,6 +3505,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "boolean",
       "default": false,
       "description": "Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."
+    },
+    "requireBeginApproval": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, requires a manual approval before the migration workflow begins."
     },
     "kafkaClusterConfiguration": {
       "type": "object",
