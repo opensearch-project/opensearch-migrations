@@ -326,6 +326,12 @@ public class RfsMigrateDocuments {
      */
     public static class FailedDocumentStreamArgs {
         @Parameter(required = false,
+            names = { "--failed-document-stream-enabled" },
+            arity = 1,
+            description = "Whether to record terminal document failures to the failed document stream. Default: true.")
+        public boolean failedDocumentStreamEnabled = true;
+
+        @Parameter(required = false,
             names = { "--failed-document-stream-s3-bucket" },
             description = "S3 bucket for durable failed document stream records. When unset, the failed document " +
                 "stream is disabled. The deployment-provisioned default is resolved before submission by the " +
@@ -607,6 +613,8 @@ public class RfsMigrateDocuments {
             // Expose the failed document stream location to the orchestrator on a dedicated line that the
             // workflow can capture as an output parameter (see Argo template).
             System.out.println("RFS_FAILED_DOCUMENT_STREAM_LOCATION=" + failedDocumentStreamSink.getLocation());
+        } else if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
+            log.atInfo().setMessage("failed document stream disabled: opted out via --failed-document-stream-enabled=false").log();
         } else {
             log.atInfo().setMessage("failed document stream disabled: no --failed-document-stream-s3-bucket configured").log();
         }
@@ -954,6 +962,10 @@ public class RfsMigrateDocuments {
      * The per-session prefix keeps failed document stream and snapshot objects in their own keyspace.
      */
     static FailedDocumentStreamSink buildFailedDocumentStreamSink(Args arguments, String workerId, String sessionId) {
+        // Opt-out wins over a resolved bucket; on AWS the default always resolves.
+        if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
+            return null;
+        }
         String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
         if (bucket == null || bucket.isBlank()) {
             return null;

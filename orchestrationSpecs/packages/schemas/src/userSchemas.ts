@@ -1030,6 +1030,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    failedDocumentStreamEnabled: z.boolean().default(true).optional()
+        .describe("Whether terminal document failures are recorded to the failed document stream."),
     failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
         .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
