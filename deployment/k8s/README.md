@@ -2,7 +2,7 @@
 
 Audience: This document is meant for **DEVELOPERS** looking to build/maintain a Kubernetes deployment of the Migration Assistant tools from this (opensearch-migrations) repository to support customers that want to Migrate their configurations and data from a source cluster to a target cluster.  End-users should consult the [project's wiki](https://github.com/opensearch-project/opensearch-migrations/wiki) for detailed instructions to deploy and operate a production environment.
 
-This README focuses on the helm installation of the [Migration Assistant](charts/aggregates/migrationAssistantWithArgo) chart, which will install the migration console and resources required for it to perform migrations (e.g. Argo Workflows, metrics collectors, etc). 
+This README focuses on the helm installation of the [Migration Assistant](charts/aggregates/migrationAssistantWithArgo) chart, which will install the migration console and resources required for it to perform migrations (e.g. Argo Workflows, metrics collectors, etc).
 
 
 ## Quick Start
@@ -48,6 +48,26 @@ echo "Will start minikube, build images, and install the MA helm chart for those
 $(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh
 ```
 
+By default this installs an **Elasticsearch** source/target test cluster
+alongside the Migration Assistant chart. Two flags let you change that:
+
+```bash
+# Test against a Solr source cluster instead of Elasticsearch
+$(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh --source=solr
+
+# Only install the Migration Assistant chart; skip test clusters entirely
+$(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh --no-test-clusters
+```
+
+The same behavior can also be controlled with environment variables
+(`TEST_CLUSTERS_SOURCE=elasticsearch|solr` and `INSTALL_TEST_CLUSTERS=true|false`),
+which is convenient for CI or other scripted invocations.
+
+The Migration Assistant chart and the test clusters chart install in
+**parallel**. A failure installing one does not block or fail the other —
+both results are reported in a summary once both installs finish, and the
+script only exits non-zero if at least one of them failed.
+
 ### kind
 
 Install prerequisites (see below), including `kind`.
@@ -61,6 +81,20 @@ Minikube flow.
 ```bash
 echo "Will create/reuse a kind cluster, build images, and install the MA helm chart for those images"
 $(git rev-parse --show-toplevel)/deployment/k8s/kindTesting.sh
+```
+
+`kindTesting.sh` shares the same underlying chart-install logic
+(`localTestingCommon.sh`) as `localTesting.sh`, so it supports the same
+`--source=elasticsearch|solr` / `--no-test-clusters` flags (and the
+equivalent `TEST_CLUSTERS_SOURCE` / `INSTALL_TEST_CLUSTERS` environment
+variables) described above:
+
+```bash
+# Test against a Solr source cluster instead of Elasticsearch
+$(git rev-parse --show-toplevel)/deployment/k8s/kindTesting.sh --source=solr
+
+# Only install the Migration Assistant chart; skip test clusters entirely
+$(git rev-parse --show-toplevel)/deployment/k8s/kindTesting.sh --no-test-clusters
 ```
 
 To fully clean up the `kind` test environment created by that workflow,
@@ -79,7 +113,7 @@ BuildKit cache. To force a cold reset of those volumes too, run:
 KIND_PRUNE_VOLUMES=true $(git rev-parse --show-toplevel)/deployment/k8s/kindCleanup.sh
 ```
 
-Run this to open the migration-console terminal so that you can run 
+Run this to open the migration-console terminal so that you can run
 `workflow commands`
 
 ```bash
@@ -93,7 +127,7 @@ E.g. so that http://localhost:2746/ will load the argo web-ui, etc, run
 $(git rev-parse --show-toplevel)/deployment/k8s/forwardAllServicePorts.sh
 ```
 
-## Prerequisites 
+## Prerequisites
 
 As a developer, you'll need to install
 * Java Development Kit (JDK) 11-17
@@ -155,38 +189,38 @@ switch the active Docker context before running the script so `docker` and
 
 The Migration Assistant is a solution that utilizes a number of different tools
 at different points in a migration - taking snapshots, migrating metadata,
-documents, and orchestrating live capture replays - all of which are done by 
-various containers that are orchestrated together with the help of Argo 
+documents, and orchestrating live capture replays - all of which are done by
+various containers that are orchestrated together with the help of Argo
 Workflows.  Migrations are performed by running argo workflows via the migration
-console.  Argo workflows manages deploying the resources for each of the 
-phases of a migration.  Helm manages bootstrapping the Argo Workflows 
+console.  Argo workflows manages deploying the resources for each of the
+phases of a migration.  Helm manages bootstrapping the Argo Workflows
 environment into the K8s cluster and configuring the other resources that are
 used by those workflows (configmaps, RBAC policies, and the migration console).
 
-Helm installations are unaware of the source and target environments 
-(unlike previous IAC in the MA ECS solution).  All of those are workflow 
+Helm installations are unaware of the source and target environments
+(unlike previous IAC in the MA ECS solution).  All of those are workflow
 configurations that are used dynamically every time that a workflow is executed.
-Configuration options for Helm include features like metrics & log management, 
+Configuration options for Helm include features like metrics & log management,
 test/diagnostic features (localstack, jaeger, etc.), and low-level
 configurations for Argo Workflows and other critical resources.
 
-Helm allows users to upgrade their charts - which means updating deployed 
-resources - by supplying new values to override the old ones.  Helm provides 
+Helm allows users to upgrade their charts - which means updating deployed
+resources - by supplying new values to override the old ones.  Helm provides
 a number of tools (optional flags) to understand how values affect the final
 resources.  However, this solution attempts to minimize what needs to be
-configured a priori, making volatile configurations to be managed dynamically 
+configured a priori, making volatile configurations to be managed dynamically
 by argo rather than by Helm.
 
-Lastly, to minimize the user-involvement in Helm even more, the 
+Lastly, to minimize the user-involvement in Helm even more, the
 migrationAssistantWithArgo chart itself has no direct dependencies, which can
 be burdensome to update and manage.  Instead, the top-level ("umbrella") chart
 installs dependent chart itself spins up a job to separately install each of
-the configured helm charts, followed by configuring its own resources 
+the configured helm charts, followed by configuring its own resources
 (workflow templates, configmaps, stateful sets, etc).
 
 ### Migration Assistant environment
 
-The [Migration Assistant](charts/aggregates/migrationAssistantWithArgo) helm 
+The [Migration Assistant](charts/aggregates/migrationAssistantWithArgo) helm
 chart consists of:
 * The Migration Console stateful set (a shell for users to run workflow commands to perform migration tasks)
 * Argo Workflows (used by the workflow commands to dynamically provision and manage resources that perform a migration)
@@ -217,6 +251,17 @@ There's also a utility chart to install source and target test clusters that can
 helm install tc -n ma charts/aggregates/testClusters
 ```
 
+By default that chart's base `values.yaml` stands up an Elasticsearch source
+and target cluster. To stand up a Solr source cluster instead, pass the
+`valuesSolrSource.yaml` overlay:
+
+```shell
+helm install tc -n ma charts/aggregates/testClusters -f charts/aggregates/testClusters/valuesSolrSource.yaml
+```
+
+(This is the same overlay selection that `localTesting.sh --source=solr` and
+the `TEST_CLUSTERS_SOURCE=solr` environment variable drive automatically.)
+
 Notice that all resources are deployed within the same namespace as that makes
 the authorization models easier to manage.
 
@@ -224,12 +269,12 @@ the authorization models easier to manage.
 
 Helm charts are configured by substituting values into yaml templates to produce
 K8s manifests (such as pods, configmaps, etc.).  Charts include default values
-in the chart's values.yaml file.  The migrationAssistantWithArgo chart provides 
-an alternate set of values 
-([valuesEks.yaml](../k8s/charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml)) 
-that can be specified with files that can be specified with the -f flag to 
-change how resources will be rendered.  Check the helm [documentation](https://helm.sh/docs/intro/using_helm#customizing-the-chart-before-installing) for more 
-details about configuring charts. 
+in the chart's values.yaml file.  The migrationAssistantWithArgo chart provides
+an alternate set of values
+([valuesEks.yaml](../k8s/charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml))
+that can be specified with files that can be specified with the -f flag to
+change how resources will be rendered.  Check the helm [documentation](https://helm.sh/docs/intro/using_helm#customizing-the-chart-before-installing) for more
+details about configuring charts.
 
 ## Uninstalling
 To show all helm deployments
