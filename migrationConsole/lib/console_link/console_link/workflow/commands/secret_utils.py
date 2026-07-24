@@ -95,7 +95,8 @@ def _notify_existing_secrets(existing, interactive: bool) -> None:
     if interactive:
         click.echo(msg)
     else:
-        logger.info(msg)
+        # Log only the count to keep names out of server logs.
+        logger.info("Found %d existing secret(s) for HTTP-Basic authentication of requests to clusters", len(existing))
 
 
 def _handle_missing_config_secrets(secret_store: SecretStore, missing, interactive: bool) -> None:
