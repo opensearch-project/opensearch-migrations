@@ -72,6 +72,11 @@ cloudProvider: ""
 gcp:
   project: ""
   serviceAccountEmail: ""
+  # GKE cluster name and location, used by the fluent-bit stackdriver output to
+  # tag Cloud Logging entries with the correct k8s_container resource. Populated
+  # from Terraform on GKE; empty elsewhere.
+  clusterName: ""
+  clusterLocation: ""
 
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
