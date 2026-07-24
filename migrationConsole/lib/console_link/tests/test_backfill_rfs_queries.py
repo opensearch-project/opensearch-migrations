@@ -11,6 +11,7 @@ import yaml
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_rfs import get_detailed_status_obj, BackfillOverallStatus
+from console_link.models.step_state import StepStateWithPause
 from tests.search_containers import SearchContainer, Version
 
 logging.basicConfig(level=logging.INFO)
@@ -292,3 +293,34 @@ def test_get_detailed_status_obj(env_with_cluster: Environment):
     assert status_obj.shard_in_progress == (IN_PROGRESS_DOC_COUNT * SHARD_COUNT +
                                             IN_PROGRESS_SUCCESSOR_COUNT), f"{status_obj}"
     assert status_obj.shard_waiting == UNCLAIMED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
+
+
+def create_all_completed_working_state(cluster: Cluster):
+    """Working state where every shard is completed (total == completed)."""
+    docs = [
+        WorkingStateDoc(index=f"index{i}", shard=shard, starting_doc_id=0,
+                        completed=True, expired=False, status="Completed")
+        for i in range(2) for shard in range(SHARD_COUNT)
+    ]
+    for doc in docs:
+        cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/{doc.get_id()}", HttpMethod.PUT,
+                         data=doc.body(), headers={"Content-Type": "application/json"})
+    cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/shard_setup", HttpMethod.PUT,
+                     data=json.dumps({"completedAt": current_time, "status": "completed"}),
+                     headers={"Content-Type": "application/json"})
+    cluster.call_api("/_refresh", HttpMethod.POST)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_get_detailed_status_obj_completed_with_failed_documents(env_with_cluster: Environment):
+    # End-to-end: a fully completed backfill is COMPLETED_WITH_ERRORS iff failed documents exist.
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    create_all_completed_working_state(target_cluster)
+
+    with_failures = get_detailed_status_obj(target_cluster, failed_document_count=3)
+    assert with_failures.status == StepStateWithPause.COMPLETED_WITH_ERRORS
+
+    without_failures = get_detailed_status_obj(target_cluster, failed_document_count=0)
+    assert without_failures.status == StepStateWithPause.COMPLETED

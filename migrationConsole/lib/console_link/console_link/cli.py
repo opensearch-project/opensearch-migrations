@@ -905,39 +905,38 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx, deep_check):
     logger.info(f"Called `console backfill status`, with {deep_check=}")
+    # Resolve once; threaded into both output formats.
+    cfg, count = _load_failed_document_stream()
     if ctx.json and deep_check:
         try:
-            payload = ctx.env.backfill.build_backfill_status().model_dump(mode="json")
+            payload = ctx.env.backfill.build_backfill_status(failed_document_count=count).model_dump(mode="json")
         except DeepStatusNotYetAvailable:
             payload = BackfillOverallStatus(
                 status=StepStateWithPause.PENDING,
                 percentage_completed=0.0,
             ).model_dump(mode="json")
-        _augment_status_with_failed_document_stream(payload)
+        if cfg is not None:
+            payload["failed_document_stream_location"] = cfg.location_uri
+            payload["failed_document_count"] = count
         click.echo(json.dumps(payload))
         return
-    exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
+    exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check, failed_document_count=count)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
     # Append failed document stream summary so operators see failed-document inventory without a second command.
-    try:
-        cfg = failed_document_stream_.load_config()
-        c = failed_document_stream_.safe_count(cfg)
+    if cfg is not None:
         click.echo(f"failed document stream location: {cfg.location_uri}")
-        click.echo(f"Failed document count: {c if c is not None else 'unavailable'}")
-    except failed_document_stream_.FailedDocumentStreamNotConfigured:
-        # failed document stream is optional; only surface when configured.
-        pass
+        click.echo(f"Failed document count: {count if count is not None else 'unavailable'}")
 
 
-def _augment_status_with_failed_document_stream(payload: dict) -> None:
+def _load_failed_document_stream():
+    """Return (config, count), (cfg, None) if the count is unavailable, or (None, None) if unconfigured."""
     try:
         cfg = failed_document_stream_.load_config()
     except failed_document_stream_.FailedDocumentStreamNotConfigured:
-        return
-    payload["failed_document_stream_location"] = cfg.location_uri
-    payload["failed_document_count"] = failed_document_stream_.safe_count(cfg)
+        return None, None
+    return cfg, failed_document_stream_.safe_count(cfg)
 
 
 # ##################### failed document stream (Reindex-from-Snapshot Failed Document Stream) ###################
