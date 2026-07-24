@@ -119,6 +119,24 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void failedDocumentStreamDisabledReason_reportsOptOut() {
+        var args = new RfsMigrateDocuments.Args();
+        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
+
+        assertThat(RfsMigrateDocuments.failedDocumentStreamDisabledReason(args),
+            equalTo("failed document stream disabled: opted out via --failed-document-stream-enabled=false"));
+    }
+
+    @Test
+    void failedDocumentStreamDisabledReason_reportsMissingBucketWhenEnabled() {
+        var args = new RfsMigrateDocuments.Args();
+        // Enabled but no bucket configured is the other reason the sink is absent.
+
+        assertThat(RfsMigrateDocuments.failedDocumentStreamDisabledReason(args),
+            equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+    }
+
+    @Test
     void buildFailedDocumentStreamSink_returnsNullWhenOptedOutDespiteResolvedBucket() {
         // On AWS a bucket always resolves, so opting out is the only way off.
         var args = new RfsMigrateDocuments.Args();

@@ -613,10 +613,8 @@ public class RfsMigrateDocuments {
             // Expose the failed document stream location to the orchestrator on a dedicated line that the
             // workflow can capture as an output parameter (see Argo template).
             System.out.println("RFS_FAILED_DOCUMENT_STREAM_LOCATION=" + failedDocumentStreamSink.getLocation());
-        } else if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
-            log.atInfo().setMessage("failed document stream disabled: opted out via --failed-document-stream-enabled=false").log();
         } else {
-            log.atInfo().setMessage("failed document stream disabled: no --failed-document-stream-s3-bucket configured").log();
+            log.atInfo().setMessage(failedDocumentStreamDisabledReason(arguments)).log();
         }
 
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
@@ -952,6 +950,17 @@ public class RfsMigrateDocuments {
             return fromEnv;
         }
         return "worker-" + workerId;
+    }
+
+    /**
+     * The info-log reason a failed document stream sink was not built, distinguishing an explicit opt-out
+     * from a missing bucket. Extracted so the branch is unit-testable without running the full migration.
+     */
+    static String failedDocumentStreamDisabledReason(Args arguments) {
+        if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
+            return "failed document stream disabled: opted out via --failed-document-stream-enabled=false";
+        }
+        return "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
     }
 
     /**
