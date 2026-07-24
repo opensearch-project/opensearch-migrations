@@ -1,0 +1,48 @@
+{
+    "skipApprovals": true,
+    "sourceClusters": {
+      "source": {
+        "endpoint": "http://chorus.dev.o19s.com:8983",
+        "version": "SOLR 8.11.2",
+        "snapshotInfo": {
+          "repos": {
+            "migration-repo": {
+              "awsRegion": "us-east-1",
+              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/standalone"
+            }
+          },
+          "snapshots": {
+            "snapshot": {
+              "repoName": "migration-repo",
+              "config": {
+                "externallyManagedSnapshotName": "snapshot.nyc_taxis_8"
+              }
+            }
+          }
+        }
+      }
+    },
+    "targetClusters": {
+      "target": {
+        "endpoint": "http://3.89.224.100:9200"
+      }
+    },
+    "snapshotMigrationConfigs": [
+      {
+        "fromSource": "source",
+        "toTarget": "target",
+        "perSnapshotConfig": {
+          "snapshot": [
+            {
+              "metadataMigrationConfig": {},
+              "documentBackfillConfig": {
+                "podReplicas": 1,
+                "documentsPerBulkRequest": 500,
+                "allowedDocExceptionTypes": ["mapper_parsing_exception"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
