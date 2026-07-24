@@ -35,7 +35,7 @@ console --json failed-document-stream list --limit 100
 ```
 
 A deep status check also appends a failed-document summary. The last two lines are the failed document
-stream; everything above them is the usual backfill status.
+stream. Everything above them is the usual backfill status.
 
 ```
 console backfill status --deep-check
@@ -66,8 +66,8 @@ If the stream is not configured, both failed-document lines are omitted. If the 
 example, missing S3 permissions), it renders as `Failed document count: unavailable`.
 
 In JSON mode (`console --json backfill status --deep-check`) it adds `failed_document_stream_location` and
-`failed_document_count` (the latter is `null` if currently unavailable). The command emits a single line;
-it is pretty-printed here for readability.
+`failed_document_count` (the latter is `null` if currently unavailable). The command emits a single line.
+It is pretty-printed here for readability.
 
 ```json
 {
@@ -101,18 +101,19 @@ console backfill reset --include-failed-document-stream
 
 ## Configuration
 
-The failed document stream is enabled by default. When you omit `failedDocumentStreamS3Bucket`, it falls
-back to the deployment's default S3 bucket (from `migrations-default-s3-config`). AWS deployments always
-provision that default bucket, so the stream is effectively always on there. It is disabled only when no
-bucket resolves at all, which happens on a non-AWS deployment that provisions no default bucket and where
-no `failedDocumentStreamS3Bucket` was set. In that case the console commands report that it is not
-configured. The destination is set under a migration's `documentBackfillConfig`, where all fields are
-optional.
+The failed document stream is enabled by default. Set `failedDocumentStreamEnabled: false` to turn it off.
+Disabling records nothing at all, so a failed migration leaves no inventory of which documents did not
+land.
+
+When you omit `failedDocumentStreamS3Bucket`, it falls back to the deployment's default S3 bucket (from
+`migrations-default-s3-config`). The destination is set under a migration's `documentBackfillConfig`, where
+all fields are optional.
 
 | Option                              | Default                        | Description                                                    |
 |-------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `failedDocumentStreamS3Bucket`      | deployment default bucket      | Bucket for records; set to use a separate one.                 |
-| `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix; each run writes under `<prefix>/session=<uid>/`.   |
+| `failedDocumentStreamEnabled`       | `true`                         | Set to `false` to turn the stream off.                         |
+| `failedDocumentStreamS3Bucket`      | deployment default bucket      | Bucket for records. Set to use a separate one.                 |
+| `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
 | `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket.                                         |
 | `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack).                           |
 | `failedDocumentStreamMaxBufferBytes`| `67108864` (64 MiB)            | Max in-memory bytes per index before rotating to a new object. |

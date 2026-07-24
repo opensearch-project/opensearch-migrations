@@ -2384,6 +2384,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
+                    "failedDocumentStreamEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
                     "failedDocumentStreamS3Prefix": {
                       "type": "string",
                       "default": "rfs-failed-document-stream/"
@@ -5307,6 +5311,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "changeRestriction": "impossible"
+                      },
+                      "failedDocumentStreamEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether terminal document failures are recorded to the failed document stream."
                       },
                       "failedDocumentStreamS3Prefix": {
                         "type": "string",

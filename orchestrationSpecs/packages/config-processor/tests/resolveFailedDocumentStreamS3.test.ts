@@ -65,4 +65,16 @@ describe("resolveFailedDocumentStreamS3", () => {
             resolveFailedDocumentStreamS3({failedDocumentStreamS3Bucket: "user-bucket"}, undefined, {})
         ).toThrow(/no region could be determined/);
     });
+
+    it("still resolves bucket/region when the stream is disabled", () => {
+        // Opting out is enforced by the worker, not by clearing S3 config, so run history keeps
+        // a record of which bucket would have been used.
+        const out = resolveFailedDocumentStreamS3(
+            {failedDocumentStreamEnabled: false, failedDocumentStreamS3Bucket: "user-bucket"},
+            undefined,
+            {defaultS3Region: "us-east-1"}
+        );
+        expect(out.failedDocumentStreamS3Bucket).toBe("user-bucket");
+        expect(out.failedDocumentStreamS3Region).toBe("us-east-1");
+    });
 });
