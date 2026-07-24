@@ -311,6 +311,15 @@ export class EKSInfra extends Construct {
                     'acm-pca:TagCertificateAuthority',
                 ],
                 resources: ['*'],
+            }),
+            // Read-only CloudFormation access so pods can resolve stack export values
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'cloudformation:ListExports',
+                    'cloudformation:DescribeStacks',
+                ],
+                resources: ['*'],
             })
         );
         return podIdentityRole
