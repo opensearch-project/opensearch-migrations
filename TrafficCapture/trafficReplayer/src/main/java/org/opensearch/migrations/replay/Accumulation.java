@@ -44,10 +44,11 @@ public class Accumulation {
     public final ITrafficStreamKey trafficChannelKey;
     private RequestResponsePacketPairWithCallback rrPairWithCallback;
     AtomicLong newestPacketTimestampInMillis;
-    State state;
+    final AtomicLong lastWallClockUpdateMillis;
+    volatile State state;
     AtomicInteger numberOfResets;
     int startingSourceRequestIndex;
-    private boolean hasBeenExpired;
+    private volatile boolean hasBeenExpired;
     final int sourceGeneration;
     /** True when this connection was mid-flight during a partition reassignment (resumed). */
     final boolean isResumedConnection;
@@ -103,6 +104,7 @@ public class Accumulation {
         this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
         this.newestPacketTimestampInMillis = new AtomicLong(0);
+        this.lastWallClockUpdateMillis = new AtomicLong(System.currentTimeMillis());
         this.startingSourceRequestIndex = startingSourceRequestIndex;
         this.state = dropObservationsLeftoverFromPrevious
             ? State.IGNORING_LAST_REQUEST
@@ -170,6 +172,14 @@ public class Accumulation {
 
     public AtomicLong getNewestPacketTimestampInMillisReference() {
         return newestPacketTimestampInMillis;
+    }
+
+    public long getLastWallClockUpdateMillis() {
+        return lastWallClockUpdateMillis.get();
+    }
+
+    public void touchWallClock() {
+        lastWallClockUpdateMillis.set(System.currentTimeMillis());
     }
 
     @Override

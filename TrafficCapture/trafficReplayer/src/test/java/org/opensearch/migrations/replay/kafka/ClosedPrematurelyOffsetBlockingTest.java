@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -8,11 +8,14 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.replay.AccumulationCallbacks;
+import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
+import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -22,37 +25,50 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Verifies that TrafficReplayerCore.commitTrafficStreams() with CLOSED_PREMATURELY status
- * properly closes traffic stream contexts.
+ * Regression test for the head-of-line offset blocking bug.
  *
- * This test verifies that traffic stream contexts are always closed, even when
- * the status is CLOSED_PREMATURELY.
+ * When incomplete data reaches CLOSED_PREMATURELY status, suppressing the Kafka offset
+ * commit leaves it stuck at the head of OffsetLifecycleTracker's PriorityQueue, blocking
+ * all subsequent offsets on that partition from advancing.
+ *
+ * This class tests two things:
+ * 1. The accumulator correctly fires CLOSED_PREMATURELY when closed with incomplete streams.
+ * 2. OffsetLifecycleTracker's head-of-line blocking mechanism (the PriorityQueue semantics
+ *    that make the commit-on-CLOSED_PREMATURELY fix necessary).
+ *
+ * The commit-behavior itself (that CLOSED_PREMATURELY status triggers commitTrafficStream)
+ * is tested in CommitTrafficStreamsStatusTest, which exercises the actual production code path.
  */
-@Slf4j
-public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
+class ClosedPrematurelyOffsetBlockingTest extends InstrumentationTest {
 
     @Override
     protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);
     }
 
+    /**
+     * Verifies that the accumulator fires CLOSED_PREMATURELY when closed with incomplete data.
+     * This is the precondition for the offset-blocking bug: the status must actually be produced
+     * by the accumulator for it to reach commitTrafficStreams().
+     *
+     * The commit behavior for this status is tested in CommitTrafficStreamsStatusTest.
+     */
     @Test
-    void closedPrematurelyStatus_closesTrafficStreamContext() {
+    @DisplayName("Accumulator closing with incomplete stream fires CLOSED_PREMATURELY")
+    void accumulatorClose_withIncompleteStream_firesClosedPrematurelyStatus() {
         var baseTime = Instant.now();
         var ts = Timestamp.newBuilder()
             .setSeconds(baseTime.getEpochSecond())
             .setNanos(baseTime.getNano())
             .build();
 
-        // Create a TrafficStream with a Read but NO EOM — this will be "closed prematurely"
-        // when the accumulator is closed
         var trafficStream = TrafficStream.newBuilder()
-            .setConnectionId("leak-conn")
+            .setConnectionId("stuck-conn")
             .setNodeId("test-node")
             .setNumberOfThisLastChunk(0)
             .addSubStream(TrafficObservation.newBuilder().setTs(ts)
@@ -61,7 +77,6 @@ public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
                         StandardCharsets.UTF_8))))
             .build();
 
-        // Track what happens in the callbacks
         AtomicReference<RequestResponsePacketPair.ReconstructionStatus> capturedStatus = new AtomicReference<>();
         List<ITrafficStreamKey> capturedKeys = new ArrayList<>();
 
@@ -84,8 +99,6 @@ public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
                 ) {
                     capturedStatus.set(status);
                     capturedKeys.addAll(trafficStreamKeysBeingHeld);
-                    // Replicate the commitTrafficStreams behavior:
-                    // always close contexts, only skip commit when CLOSED_PREMATURELY
                     if (trafficStreamKeysBeingHeld != null) {
                         for (var tsk : trafficStreamKeysBeingHeld) {
                             tsk.getTrafficStreamsContext().close();
@@ -108,22 +121,43 @@ public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
             trafficStream,
             PojoTrafficStreamKeyAndContext.build(trafficStream, rootContext::createTrafficStreamContextForTest)
         ));
-        // Close the accumulator while the request is still incomplete — triggers CLOSED_PREMATURELY
         accumulator.close();
 
-        // Verify the callback was called with CLOSED_PREMATURELY
         Assertions.assertEquals(RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
             capturedStatus.get(), "Status should be CLOSED_PREMATURELY for incomplete request");
-        Assertions.assertFalse(capturedKeys.isEmpty(), "Should have captured traffic stream keys");
+        Assertions.assertFalse(capturedKeys.isEmpty(),
+            "Traffic stream keys should be passed to the callback for commit handling");
+    }
 
-        // Check the metric for trafficStreamLifetime — if the context was closed,
-        // the counter is incremented when the context is properly closed.
-        var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
-        long lifecycleCount = InMemoryInstrumentationBundle.getMetricValueOrZero(
-            metrics, "trafficStreamLifetimeCount");
+    /**
+     * Verifies the OffsetLifecycleTracker head-of-line blocking directly:
+     * when the head offset is never removed, subsequent offsets cannot advance.
+     */
+    @Test
+    void offsetLifecycleTracker_headBlocksSubsequentCommits() {
+        var tracker = new OffsetLifecycleTracker(1);
 
-        // The traffic stream context is closed even for CLOSED_PREMATURELY
-        Assertions.assertTrue(lifecycleCount > 0,
-            "trafficStreamLifetimeCount should be > 0 because contexts are always closed");
+        // Simulate 3 records polled: offsets 100, 101, 102
+        tracker.add(100, "conn-A");
+        tracker.add(101, "conn-B");
+        tracker.add(102, "conn-C");
+
+        // Record at offset 101 completes first — but 100 is the head, so no commit advances
+        var result101 = tracker.removeAndReturnNewHead(101);
+        Assertions.assertTrue(result101.isEmpty(),
+            "Removing non-head offset should NOT advance the commit pointer");
+
+        // Record at offset 102 completes — still blocked by 100
+        var result102 = tracker.removeAndReturnNewHead(102);
+        Assertions.assertTrue(result102.isEmpty(),
+            "Removing non-head offset should NOT advance the commit pointer (still blocked by 100)");
+
+        // Finally, record at offset 100 completes (the fix ensures this happens for CLOSED_PREMATURELY)
+        // Now the pointer jumps all the way to 103 (next after all removed offsets)
+        var result100 = tracker.removeAndReturnNewHead(100);
+        Assertions.assertTrue(result100.isPresent(),
+            "Removing head offset MUST advance the commit pointer");
+        Assertions.assertEquals(103L, result100.get(),
+            "Commit pointer should advance to cursorHighWatermark+1 (103) since all offsets are now removed");
     }
 }
