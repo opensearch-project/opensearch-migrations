@@ -14,7 +14,7 @@ else
   # The "kind" network only exists once a cluster has been created, so we
   # do a throwaway create/delete pass first, same as the old minikube dance.
   kind create cluster --name "${CLUSTER_NAME}"
-  HOST_IP_FROM_WITHIN_KIND=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}}{{"\n"}}{{end}}' | grep -v ':')
+  HOST_IP_FROM_WITHIN_KIND=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}}{{"\n"}}{{end}}' | grep -v ':'  | awk NF)
   export HOST_IP_FROM_WITHIN_KIND
   kind delete cluster --name "${CLUSTER_NAME}"
 
@@ -23,13 +23,14 @@ else
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
-    - role: control-plane
-    - role: worker
-    - role: worker
+  - role: control-plane
+  - role: worker
+  - role: worker
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."${HOST_IP_FROM_WITHIN_KIND}:5001"]
       endpoint = ["http://${HOST_IP_FROM_WITHIN_KIND}:5001"]
+
     [plugins."io.containerd.grpc.v1.cri".registry.configs."${HOST_IP_FROM_WITHIN_KIND}:5001".tls]
       insecure_skip_verify = true
 EOF
