@@ -1,7 +1,7 @@
 # conftest.py
 #
 # Test ID naming convention:
-#   0001-0009  Basic tests (single doc backfill, coordinator cluster)
+#   0001-0009  Basic tests (single doc backfill, coordinator cluster, optional stage skipping)
 #   0004-0005  Multi-type index tests (union, split)
 #   0006       Benchmark backfill (OpenSearch Benchmark)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
