@@ -81,7 +81,7 @@ def test_dump_helm_debug_info_selects_installer_pod_by_release_instance():
     with patch("k8s_service.subprocess.run", side_effect=fake_run):
         service._dump_helm_debug_info(release_name="ma")
 
-    pod_log_selectors = [s for s in kubectl_gets if s.startswith("app.kubernetes.io/")]
-    assert "app.kubernetes.io/instance=ma" in pod_log_selectors
+    # The pod-log query must select by the release-instance label the installer Job stamps.
+    assert "app.kubernetes.io/instance=ma" in kubectl_gets
     # The mangled selector from the original bug must never be emitted.
     assert all("migrationAssistantWithArgo" not in s for s in kubectl_gets)
