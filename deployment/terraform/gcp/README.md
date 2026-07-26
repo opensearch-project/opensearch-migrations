@@ -4,13 +4,35 @@ Provisions GCP infrastructure for the OpenSearch Migration Assistant.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6 (native `terraform test` is used for validation)
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated with `gcloud auth application-default login`
 - GCP project with billing enabled
 - Required APIs enabled:
   ```
   gcloud services enable container.googleapis.com storage.googleapis.com
   ```
+
+## Container images
+
+The Migration Assistant images (migration console, reindex-from-snapshot, and — for
+live capture-and-replay — the capture proxy and traffic replayer) must be available in
+a container registry your GKE cluster can pull from (e.g. Artifact Registry in the same
+project). Build and push them from the repo root, for example:
+
+```bash
+./gradlew buildImagesToRegistry -PregistryEndpoint=REGION-docker.pkg.dev/PROJECT
+```
+
+**Image reference caveat.** The Helm chart's default image `repository` values are
+*unqualified* (e.g. `migrations/capture_proxy`). Kubernetes resolves an unqualified
+repository against Docker Hub (`docker.io/...`), where these images do not exist, so
+pods fail with `ImagePullBackOff`. Until the chart gains a first-class registry-prefix
+setting, **every image must be given a fully-qualified `repository` at deploy time.**
+This module does that for you via the Helm `set` overrides in `main.tf`
+(`images.<name>.repository`); if you deploy the chart directly, pass equivalent
+`--set images.<name>.repository=...` values for each image. Note the built image names
+use underscores (`capture_proxy`, `traffic_replayer`) while the console/RFS repositories
+are hyphenated — match whatever your build actually publishes.
 
 ## Usage
 
@@ -69,6 +91,16 @@ terraform destroy -var="project=my-project"
 | `node_iam_roles` | `["roles/storage.admin"]` | IAM roles for the node SA |
 | `workload_identity_namespace` | `migration` | Kubernetes namespace containing Migration Assistant service accounts |
 | `additional_workload_identity_service_accounts` | `["migration-console-access-role","argo-workflow-executor","argo-workflow-controller","argo-controller"]` | Additional Kubernetes service accounts that can use the GCP migration service account |
+| `source_connectivity` | `{mode = "none"}` | Private connectivity for source cluster read traffic; `mode = "none"` (default, public internet), `"psc_consumer"` (Private Service Connect), or `"vpc_peering"` |
+| `target_connectivity` | `{mode = "none"}` | Private connectivity for target cluster write traffic; same modes as `source_connectivity` |
+| `gcs_connectivity` | `{mode = "private_google_access"}` | Private Google Access for Cloud Storage snapshot traffic; `mode = "private_google_access"` (default, private path) or `"none"` (public internet) |
+| `enable_private_endpoint` | `false` | Restrict GKE control plane to private IP only (no public endpoint); requires VPN or bastion for kubectl access |
+
+## Private networking
+
+To run a migration with no public-internet data path (private source/target connectivity,
+private Cloud Storage access, and a private control plane), see
+[Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md).
 
 ## Notes
 
@@ -162,9 +194,11 @@ To switch it from "create-and-migrate" to BYOS, set:
   name of the snapshot inside that repo (for the bundled test snapshot, this
   is `rfs-snapshot`).
 
-When `externallyManagedSnapshotName` is set, the workflow **skips snapshot
-creation** and goes directly to metadata + reindex-from-snapshot using the
-provided repo URI.
+When `externallyManagedSnapshotName` is set for Elasticsearch/OpenSearch, the
+workflow **skips snapshot creation** and goes directly to metadata +
+reindex-from-snapshot using the provided repo URI. Solr external backups use
+the Solr `snapshotInfo.backups` shape and run a lightweight prepare/validation
+step before metadata + reindex-from-snapshot.
 
 ### Caveats
 
@@ -173,3 +207,8 @@ provided repo URI.
   under 5 GiB, so a lowered `maxShardSizeBytes` of `5368709120` is sufficient.
 - The bucket region should match the GKE region for best performance;
   cross-region reads work but are slower and incur egress.
+- When the workflow **creates** the snapshot (not BYOS), the **source** cluster must
+  support GCS snapshot repositories. Elasticsearch 8.0+ and OpenSearch bundle this;
+  Elasticsearch 7.x requires the `repository-gcs` plugin on every source node, or
+  snapshot registration fails with `repository type [gcs] does not exist`. See
+  [Private Networking for GCP Migrations](../../../docs/gcpPrivateNetworking.md#snapshot-storage-cloud-storage).

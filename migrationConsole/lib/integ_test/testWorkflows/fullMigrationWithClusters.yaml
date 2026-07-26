@@ -253,6 +253,8 @@ spec:
           - name: replayer-config
           - name: skip-approvals
             default: "true"
+          - name: require-begin-approval
+            default: "false"
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: bucketUri
@@ -293,12 +295,19 @@ spec:
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
             SKIP_APPROVALS='{{inputs.parameters.skip-approvals}}'
+            REQUIRE_BEGIN_APPROVAL='{{inputs.parameters.require-begin-approval}}'
             BUCKET_URI='{{inputs.parameters.bucketUri}}'
             BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             AWS_REGION='{{inputs.parameters.awsRegion}}'
 
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].snapshotConfig.snapshotNameConfig // {"createSnapshotConfig": {}}
+            ')
+            SOLR_BACKUP_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].snapshotConfig.solrBackupConfig // {"createBackupConfig": {}}
+            ')
 
             # Build snapshot repo config from the full URI (s3://... or gs://...)
             SNAPSHOT_REPO=$(jq -n \
@@ -314,17 +323,26 @@ spec:
               + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)
               + (if $region != "" then {"awsRegion": $region} else {} end)')
             
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
-              # Add snapshotInfo with repo and snapshot definition
-              . + {"snapshotInfo": {
-                "repos": {"default": $repo},
-                "snapshots": {
-                  "testsnapshot": {
-                    "repoName": "default",
-                    "config": {"createSnapshotConfig": {}}
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" --argjson snapshotNameConfig "$SNAPSHOT_NAME_CONFIG" --argjson solrBackupConfig "$SOLR_BACKUP_CONFIG" '
+              # Add source-specific snapshotInfo with repo and snapshot/backup definition
+              if ((.version // "" | gsub("_"; " ")) | startswith("SOLR ")) then
+                . + {"snapshotInfo": {
+                  "repos": {"default": $repo},
+                  "backups": {
+                    "testsnapshot": ($solrBackupConfig + {"repoName": "default"})
                   }
-                }
-              }}
+                }}
+              else
+                . + {"snapshotInfo": {
+                  "repos": {"default": $repo},
+                  "snapshots": {
+                    "testsnapshot": {
+                      "repoName": "default",
+                      "config": $snapshotNameConfig
+                    }
+                  }
+                }}
+              end
             ')
             
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
@@ -336,8 +354,10 @@ spec:
               --argjson target "$TARGET_CONFIG" \
               --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
               --argjson skipApprovals "$SKIP_APPROVALS" \
+              --argjson requireBeginApproval "$REQUIRE_BEGIN_APPROVAL" \
               '{
                 "skipApprovals": $skipApprovals,
+                "requireBeginApproval": $requireBeginApproval,
                 "sourceClusters": {
                   "source1": $source
                 },

@@ -111,14 +111,31 @@ public class SolrStandaloneBackupCreator {
         return true;
     }
 
-    /** Extract a value from a Solr NamedList JSON array: ["key1","val1","key2","val2",...] */
+    /**
+     * Extract a value from Solr's replication "backup" payload, which differs by version:
+     * <ul>
+     *   <li>Solr 8 serializes the NamedList as a flat JSON array:
+     *       {@code ["status","success","snapshotCompletedAt","...",...]}.</li>
+     *   <li>Solr 9 serializes it as a JSON object:
+     *       {@code {"status":"success","snapshotCompletedAt":"...",...}}.</li>
+     * </ul>
+     * Returns the string value for {@code key}, or null if absent.
+     */
     private static String extractNamedListValue(JsonNode namedList, String key) {
-        if (namedList == null || !namedList.isArray()) {
+        if (namedList == null) {
             return null;
         }
-        for (int i = 0; i < namedList.size() - 1; i++) {
-            if (key.equals(namedList.get(i).asText())) {
-                return namedList.get(i + 1).asText();
+        // Solr 9+: object form.
+        if (namedList.isObject()) {
+            var value = namedList.get(key);
+            return value != null ? value.asText() : null;
+        }
+        // Solr 8: NamedList serialized as ["key1","val1","key2","val2",...].
+        if (namedList.isArray()) {
+            for (int i = 0; i < namedList.size() - 1; i++) {
+                if (key.equals(namedList.get(i).asText())) {
+                    return namedList.get(i + 1).asText();
+                }
             }
         }
         return null;

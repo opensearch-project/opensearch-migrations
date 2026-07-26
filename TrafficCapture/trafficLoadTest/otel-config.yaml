@@ -1,0 +1,42 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: :4317
+      http:
+        endpoint: :4318
+  kafkametrics:
+    brokers: ["kafka:9092"]
+    protocol_version: 3.0.0
+    collection_interval: 15s
+    scrapers:
+      - brokers
+      - topics
+      - consumers
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 8192
+    send_batch_max_size: 10000
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    metric_expiration: 10m
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, kafkametrics]
+      processors: [batch]
+      exporters: [prometheus, debug]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

@@ -1,7 +1,12 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -15,8 +20,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
+import org.opensearch.migrations.testutils.SelfSignedSSLContextBuilder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
@@ -94,46 +101,97 @@ class NettyScanningHttpProxyTest {
             inMemoryInstrumentationBundle.openTelemetrySdk,
             IContextTracker.DO_NOTHING_TRACKER
         );
-        var servers = startServers(rootCtx, captureFactory);
-
-        try (var client = new SimpleHttpClientForTesting()) {
-            var nettyEndpoint = URI.create("http://localhost:" + servers.getKey().getProxyPort() + "/");
+        try (var servers = startServers(rootCtx, captureFactory);
+             var client = new SimpleHttpClientForTesting()) {
+            var nettyEndpoint = servers.proxyEndpoint();
             for (int i = 0; i < NUM_INTERACTIONS; ++i) {
                 var responseBody = makeTestRequestViaClient(client, nettyEndpoint);
                 Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
             }
-        }
-        interactionsCapturedCountdown.await();
-        var recordedStreams = captureFactory.getRecordedStreams();
-        Assertions.assertEquals(1, recordedStreams.size());
-        var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
-        Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
-        log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
-        var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
-        Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
-        int counter = 0;
-        final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
-        for (var httpMessage : coalescedTrafficList) {
-            var normalizedMessage = normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8));
-            if (counter % 2 == 0) {
-                Assertions.assertTrue(EXPECTED_REQUEST_PATTERN.matcher(normalizedMessage).matches());
-            } else {
-                Assertions.assertEquals(expectedResponseMessage, normalizedMessage);
-            }
-            counter++;
-        }
 
-        var observations = recordedTrafficStreams[0].getSubStreamList();
-        var eomIndices = IntStream.range(0, observations.size())
-            .filter(i -> observations.get(i).hasEndOfMessageIndicator())
-            .toArray();
-        Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
-        for (int eomIndex : eomIndices) {
-            Assertions.assertTrue(observations.get(eomIndex - 1).hasRead());
-            Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
-            var eom = observations.get(eomIndex).getEndOfMessageIndicator();
-            Assertions.assertEquals(14, eom.getFirstLineByteLength());
-            Assertions.assertEquals(711, eom.getHeadersByteLength());
+            interactionsCapturedCountdown.await();
+            var recordedStreams = captureFactory.getRecordedStreams();
+            Assertions.assertEquals(1, recordedStreams.size());
+            var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
+            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
+            log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
+            var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
+            Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
+            int counter = 0;
+            final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
+            for (var httpMessage : coalescedTrafficList) {
+                var normalizedMessage = normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8));
+                if (counter % 2 == 0) {
+                    Assertions.assertTrue(EXPECTED_REQUEST_PATTERN.matcher(normalizedMessage).matches());
+                } else {
+                    Assertions.assertEquals(expectedResponseMessage, normalizedMessage);
+                }
+                counter++;
+            }
+
+            var observations = recordedTrafficStreams[0].getSubStreamList();
+            var eomIndices = IntStream.range(0, observations.size())
+                .filter(i -> observations.get(i).hasEndOfMessageIndicator())
+                .toArray();
+            Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
+            for (int eomIndex : eomIndices) {
+                Assertions.assertTrue(observations.get(eomIndex - 1).hasRead());
+                Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
+                var eom = observations.get(eomIndex).getEndOfMessageIndicator();
+                Assertions.assertEquals(14, eom.getFirstLineByteLength());
+                Assertions.assertEquals(711, eom.getHeadersByteLength());
+            }
+        }
+    }
+
+    @Test
+    public void testTlsHandshakeFailureIsLoggedAndProxyStaysAlive() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+        var sslEngineSupplier = makeServerSslEngineSupplier(sslContext);
+
+        try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
+             var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+
+            assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+
+            var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
+            Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        }
+    }
+
+    @Test
+    public void testTlsHandshakeFailureLogsAreDedupedWithinWindow() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+        var sslEngineSupplier = makeServerSslEngineSupplier(sslContext);
+
+        try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
+             var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            Thread.sleep(250);
+
+            Assertions.assertEquals(1, countLogEventsContaining(
+                closeableLogSetup,
+                ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE
+            ));
+
+            var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
+            Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
         }
     }
 
@@ -178,9 +236,25 @@ class NettyScanningHttpProxyTest {
         return responseBody;
     }
 
-    private static Map.Entry<NettyScanningHttpProxy, Integer> startServers(
+    private static String makeTestRequestViaHttpsClient(URI endpoint, SSLContext sslContext) throws Exception {
+        var connection = (HttpsURLConnection) endpoint.toURL().openConnection();
+        connection.setSSLSocketFactory(sslContext.getSocketFactory());
+        connection.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+        connection.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+        return new String(connection.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static RunningProxyServers startServers(
         RootWireLoggingContext rootCtx,
         IConnectionCaptureFactory connectionCaptureFactory
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return startServers(rootCtx, connectionCaptureFactory, null);
+    }
+
+    private static RunningProxyServers startServers(
+        RootWireLoggingContext rootCtx,
+        IConnectionCaptureFactory connectionCaptureFactory,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var nshp = new AtomicReference<NettyScanningHttpProxy>();
         var upstreamTestServer = new AtomicReference<SimpleHttpServer>();
@@ -206,7 +280,7 @@ class NettyScanningHttpProxyTest {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
-                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, null,
+                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, sslEngineSupplier,
                         connectionCaptureFactory, new RequestCapturePredicate()), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
@@ -214,7 +288,7 @@ class NettyScanningHttpProxyTest {
                 throw Lombok.sneakyThrow(e);
             }
         });
-        return Map.entry(nshp.get(), underlyingPort);
+        return new RunningProxyServers(nshp.get(), upstreamTestServer.get(), sslEngineSupplier != null);
     }
 
     private static SimpleHttpResponse makeContext(HttpRequest request) {
@@ -228,5 +302,65 @@ class NettyScanningHttpProxyTest {
         );
         var payloadBytes = UPSTREAM_SERVER_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
+    }
+
+    private static java.util.function.Supplier<SSLEngine> makeServerSslEngineSupplier(SSLContext sslContext) {
+        return () -> {
+            var engine = sslContext.createSSLEngine();
+            engine.setUseClientMode(false);
+            return engine;
+        };
+    }
+
+    private static void sendPlaintextToTlsEndpoint(int port) throws IOException {
+        try (var socket = new Socket(SimpleHttpServer.LOCALHOST, port)) {
+            socket.getOutputStream().write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                .getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+        }
+    }
+
+    private static void assertEventuallyLogged(CloseableLogSetup logSetup, String expectedMessage)
+        throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (countLogEventsContaining(logSetup, expectedMessage) > 0) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        Assertions.fail("Expected log message containing: " + expectedMessage
+            + ". Actual log messages: " + logSetup.getLogEvents());
+    }
+
+    private static long countLogEventsContaining(CloseableLogSetup logSetup, String expectedMessage) {
+        return new ArrayList<>(logSetup.getLogEvents()).stream()
+            .filter(e -> e.contains(expectedMessage))
+            .count();
+    }
+
+    private static class RunningProxyServers implements AutoCloseable {
+        private final NettyScanningHttpProxy proxy;
+        private final SimpleHttpServer upstreamServer;
+        private final boolean useTls;
+
+        private RunningProxyServers(NettyScanningHttpProxy proxy, SimpleHttpServer upstreamServer, boolean useTls) {
+            this.proxy = proxy;
+            this.upstreamServer = upstreamServer;
+            this.useTls = useTls;
+        }
+
+        private URI proxyEndpoint() {
+            return URI.create((useTls ? "https" : "http") + "://localhost:" + proxy.getProxyPort() + "/");
+        }
+
+        @Override
+        public void close() throws InterruptedException {
+            try {
+                proxy.stop();
+            } finally {
+                upstreamServer.close();
+            }
+        }
     }
 }

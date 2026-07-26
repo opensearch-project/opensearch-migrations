@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Pipeline component metrics (Capture Proxy, Replayer) via OTEL collector
+  - job_name: 'otel-collector'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['otel-collector:8889']

@@ -1,0 +1,30 @@
+sourceClusters:
+  solr-source:
+    endpoint: https://solr.example.com:8983
+    allowInsecure: false
+    version: SOLR 8.11.4
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: us-east-1
+          repoPathUri: s3://customer-solr-backups/migration
+      backups:
+        customerBackup:
+          repoName: default
+          externalBackupName: ext-s1
+          collectionAllowlist:
+            - orders
+            - products
+
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+    allowInsecure: false
+
+snapshotMigrationConfigs:
+  - fromSource: solr-source
+    toTarget: target
+    perSnapshotConfig:
+      customerBackup:
+        - metadataMigrationConfig: {}
+          documentBackfillConfig: {}

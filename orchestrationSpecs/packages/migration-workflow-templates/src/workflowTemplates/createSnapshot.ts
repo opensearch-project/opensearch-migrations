@@ -41,9 +41,13 @@ export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.in
 function makeParamsDict(
     sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>>
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>>,
+    // Extra CreateSnapshot CLI params (as a dict expression) merged on top — e.g. {sourceType: "solr"}
+    // for the Solr import path, which must declare its source type explicitly rather than relying on
+    // live cluster-version detection.
+    extraParams?: BaseExpression<Record<string, any>>
 ) {
-    return expr.mergeDicts(
+    const base = expr.mergeDicts(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
             expr.mergeDicts(
@@ -64,6 +68,7 @@ function makeParamsDict(
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), false)
         )
     );
+    return extraParams ? expr.mergeDicts(base, extraParams) : base;
 }
 
 
@@ -83,6 +88,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "snapshot")
+        // Explicit CreateSnapshot --source-type. Empty (default) lets the Java side auto-detect the
+        // source engine via live cluster-version detection (the create path's behavior). The Solr
+        // import path sets this to "solr" so --mode import routes correctly without relying on
+        // detection against a possibly-unusual external setup.
+        .addOptionalInput("sourceType", c => "")
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -113,7 +123,14 @@ export const CreateSnapshot = WorkflowBuilder.create({
             .addArgs([
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
-                    makeParamsDict(b.inputs.sourceConfig, b.inputs.snapshotConfig, b.inputs.createSnapshotConfig)
+                    makeParamsDict(b.inputs.sourceConfig, b.inputs.snapshotConfig, b.inputs.createSnapshotConfig,
+                        // Only add sourceType when explicitly set, so the create path's empty-string
+                        // default never emits a "sourceType" key (preserving live auto-detection).
+                        expr.ternary(
+                            expr.equals(b.inputs.sourceType, ""),
+                            expr.makeDict({}),
+                            expr.makeDict({sourceType: b.inputs.sourceType})
+                        ))
                 ))
             ])
             .addPodMetadata(({inputs}) => ({
@@ -166,6 +183,13 @@ export const CreateSnapshot = WorkflowBuilder.create({
     )
 
 
+    // Unified snapshot workflow handling both the CREATE path (produce a backup, then let the
+    // snapshot-monitor cronjob patch the DataSnapshot CR Completed) and the Solr IMPORT path
+    // (no backup: CreateSnapshot --mode import uploads the source schema into the externally-managed
+    // snapshot's repo, then we patch the CR Completed directly). The two paths are mutually exclusive
+    // and selected by createSnapshotConfig.mode: "create" (default) runs the backup path, "import"
+    // runs the import-prepare path. A single template keeps one snapshot semaphore (the synchronization
+    // validator requires each configMapKeyRef to be unique across the workflow).
     .addTemplate("snapshotWorkflow", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
@@ -175,16 +199,27 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("dataSnapshotName", typeToken<string>())
         .addRequiredInput("dataSnapshotUid", typeToken<string>())
+        // Explicit CreateSnapshot --source-type. This is forwarded to Java when set, but workflow
+        // branching is controlled by createSnapshotConfig.mode.
+        .addOptionalInput("sourceType", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            const snapshotMode = expr.dig(expr.deserializeRecord(b.inputs.createSnapshotConfig), ["mode"], "create");
+            const isImport = expr.equals(snapshotMode, expr.literal("import"));
+            const notImport = expr.not(isImport);
+            return b
+            // ── CREATE path ──────────────────────────────────────────────────
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
-                }))
+                }),
+                {when: () => ({templateExp: notImport})})
 
+            // getConsoleConfig runs on both paths (cheap read); applySnapshotDoneCronJob below
+            // references its output, so keeping it unconditional avoids a skipped-step output reference.
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
@@ -200,15 +235,47 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     configChecksum: b.inputs.configChecksum,
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
-                }))
+                }),
+                {when: () => ({templateExp: notImport})})
+
+            // ── IMPORT path ──────────────────────────────────────────────────
+            // CreateSnapshot --mode import (carried in createSnapshotConfig) with an explicit
+            // --source-type. It uploads each collection/core's schema into the repo and fails
+            // (non-zero exit) if the schema cannot be obtained, so a green run guarantees it landed.
+            .addStep("runImport", INTERNAL, "runCreateSnapshot", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    taskK8sLabel: expr.literal("snapshot-import"),
+                    sourceType: b.inputs.sourceType,
+                }),
+                {when: () => ({templateExp: isImport})})
+
+            // No backup ran and no monitor cronjob was installed, so patch the CR Completed directly.
+            // checksumForSnapshotMigration == configChecksum is exactly what the migration side's
+            // waitIndefinitelyForDataSnapshot releases on.
+            .addStep("markSnapshotImported", ResourceManagement, "patchDataSnapshotCompleted", c =>
+                c.register({
+                    resourceName: b.inputs.dataSnapshotName,
+                    phase: expr.literal("Completed"),
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshotMigration: b.inputs.configChecksum,
+                }),
+                {when: () => ({templateExp: isImport})})
+
+            // CREATE path waits for the cronjob-driven completion. The import path has already
+            // patched the CR Completed above, so it skips this wait.
             .addStep("waitIndefinitelyForCompletion", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.dataSnapshotName,
                     configChecksum: b.inputs.configChecksum,
                     checksumField: expr.literal("checksumForSnapshotMigration"),
-                }))
-        )
+                }),
+                {when: () => ({templateExp: notImport})})
+        })
         .addSynchronization(c => ({
             semaphores: [{
                 configMapKeyRef: {

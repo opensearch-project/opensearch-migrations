@@ -37,6 +37,8 @@ describe("migration resource projections", () => {
         expect(projectedByPath.get("ApprovalGate:dependsOn")).toBeUndefined();
 
         expect(projectedByPath.get("CapturedTraffic:kafkaClusterName")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("CapturedTraffic:kafkaBrokers")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("CapturedTraffic:kafkaAuthType")?.changeRestriction).toBe("impossible");
         expect(projectedByPath.get("CapturedTraffic:topicName")?.changeRestriction).toBe("impossible");
 
         const partitions = projectedByPath.get("CapturedTraffic:partitions");
@@ -44,7 +46,22 @@ describe("migration resource projections", () => {
         expect(partitions?.invariant).toBe("nonDecreasing");
 
         expect(projectedByPath.get("KafkaCluster:auth.type")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("KafkaCluster:clusterSpecOverrides")?.changeRestriction).toBe("gated");
         expect(projectedByPath.get("KafkaCluster:nodePool.storage.size")?.changeRestriction).toBe("gated");
+    });
+
+    test("projects connection identity for resources with direct cluster dependencies", () => {
+        expect(projectedByPath.get("CaptureProxy:sourceEndpoint")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("CaptureProxy:sourceAuthBasicSecretName")?.changeRestriction).toBe("impossible");
+
+        expect(projectedByPath.get("SnapshotMigration:sourceEndpoint")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("SnapshotMigration:targetEndpoint")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("SnapshotMigration:snapshotSourceType")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("SnapshotMigration:snapshotRepoPathUri")?.changeRestriction).toBe("impossible");
+
+        expect(projectedByPath.get("TrafficReplay:fromCapturedTraffic")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("TrafficReplay:targetEndpoint")?.changeRestriction).toBe("impossible");
+        expect(projectedByPath.get("TrafficReplay:targetAuthType")?.changeRestriction).toBe("impossible");
     });
 
     test("every checksum-relevant projected field has an explicit change policy decision", () => {

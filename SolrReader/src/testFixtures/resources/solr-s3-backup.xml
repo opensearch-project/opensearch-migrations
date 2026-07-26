@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <solr>
   <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
-  <str name="sharedLib">/opt/solr/contrib/s3-repository/lib</str>
+  <!--
+    Solr's S3 repository jars live under different paths by major version: /opt/solr/contrib/s3-repository/lib
+    on Solr 8 (contrib) and /opt/solr/modules/s3-repository/lib on Solr 9 (modules). The container fixture
+    supplies the right directory via -DsharedLib in SOLR_OPTS, defaulting to the Solr 8 contrib path here.
+  -->
+  <str name="sharedLib">${sharedLib:/opt/solr/contrib/s3-repository/lib}</str>
   <str name="allowPaths">${solr.allowPaths:}</str>
 
   <solrcloud>

@@ -62,6 +62,7 @@ class WorkflowTreeApp(App):
 
         # Exposed Metadata
         self.current_run_id: Optional[str] = None
+        self.last_known_phase: str = ""
         self.is_exiting = False
 
         # Injected Services
@@ -159,6 +160,7 @@ class WorkflowTreeApp(App):
 
     def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
         """Handle pre-built resource sections on the main thread."""
+        self._update_last_known_phase(workflow_data)
         if not sections:
             self._tree_state.reset(LOADING_ROOT_LABEL)
             self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
@@ -181,6 +183,7 @@ class WorkflowTreeApp(App):
 
     def _handle_workflow_data(self, new_data: Dict, force_reload: bool = False) -> None:
         """The Conductor routes data to the relevant managers."""
+        self._update_last_known_phase(new_data)
         if not new_data:
             self._tree_state.reset(LOADING_ROOT_LABEL)
             self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
@@ -201,6 +204,11 @@ class WorkflowTreeApp(App):
         self.update_pod_status()
         self._update_dynamic_bindings()
         self.set_timer(self._refresh_interval, self.action_refresh_workflow)
+
+    def _update_last_known_phase(self, workflow_data: Dict) -> None:
+        phase = workflow_data.get('status', {}).get('phase') if workflow_data else None
+        if phase:
+            self.last_known_phase = phase
 
     def _wait_for_workflow_worker(self) -> None:
         """Lightweight worker: monitors memory event, triggers refresh on find."""

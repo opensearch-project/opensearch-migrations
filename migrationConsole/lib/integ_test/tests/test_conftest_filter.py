@@ -91,6 +91,16 @@ def test_aoss_pipeline_id_set_resolves_expected_classes():
     assert "Test0042CdcFullE2eMountableTransforms" not in selected
 
 
+def test_solr_pipeline_id_set_resolves_expected_classes():
+    cases = _filter_test_cases(["0070", "0071"])
+    selected = _names(cases)
+    expected = {
+        "Test0070SolrExternalBackupImport",
+        "Test0071SolrCreateBackupBackfill",
+    }
+    assert expected.issubset(set(selected))
+
+
 def test_all_test_cases_have_test_prefix():
     # Sanity: the filter relies on every collected class starting with 'Test'.
     for case in ALL_TEST_CASES:

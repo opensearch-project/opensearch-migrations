@@ -1894,3 +1894,414 @@ def test_cli_integration_with_exception_verbose_mode(runner, mocker):
         ]
     )
     assert exit_code == 1
+
+
+# ##################### failed document stream CLI commands ###################
+#
+# These cover the failed_document_stream subgroup (location/count/list) and the related
+# additions to backfill (the new `reset` command + failed document stream summary appended
+# to `backfill status`). Coverage gap was introduced by the failed document stream branch.
+
+# Bare-minimum services file: just a target cluster is enough for the failed_document_stream
+# group, since none of the failed_document_stream commands touch the configured backfill.
+TARGET_ONLY_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
+
+
+def _fake_failed_document_stream_cfg(cli_module_=None):
+    """Construct a real FailedDocumentStreamConfig (frozen dataclass) for stubbing load_config.
+    Going through the actual class keeps the tests honest if its shape
+    changes."""
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamConfig
+    return FailedDocumentStreamConfig(bucket="b", prefix="rfs-failed-document-stream/",
+                                      session_id="sess-A", region=None)
+
+
+def test_failed_document_stream_location_prints_session_uri(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
+
+
+def test_failed_document_stream_location_passes_migration_override(runner, mocker):
+    # --migration is the operator's way to choose which SnapshotMigration's stream to inspect
+    # when several exist (or to target a specific historical backfill).
+    load_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                                    return_value=_fake_failed_document_stream_cfg())
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location', '--migration', 'backfill-1'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    load_mock.assert_called_once_with(migration_override='backfill-1')
+
+
+def test_failed_document_stream_location_when_not_configured_raises_click_exception(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("no bucket"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'location'],
+                           catch_exceptions=False)
+    # ClickException exits with code 1 and prints the message via Error: prefix.
+    assert result.exit_code == 1
+    assert "no bucket" in result.output
+
+
+def test_failed_document_stream_count_prints_count(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "count", return_value=7)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'count'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "7" in result.output
+
+
+def test_failed_document_stream_count_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("no session"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'count'],
+                           catch_exceptions=False)
+    assert result.exit_code == 1
+    assert "no session" in result.output
+
+
+def test_failed_document_stream_list_text_mode_renders_tab_table(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    records = [
+        {"timestamp": "2026-05-01T00:00:00Z", "targetIndex": "movies",
+         "documentId": "doc-1", "failureClass": "NON_RETRYABLE",
+         "failureType": "mapper_parsing_exception"},
+        # second record missing some fields — verifies the `r.get(..., '-')`
+        # fallback path renders '-' rather than blowing up.
+        {"timestamp": "2026-05-02T00:00:00Z", "documentId": "doc-2"},
+    ]
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=records)
+
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    # Each record on its own line, tab-separated.
+    assert "doc-1" in result.output
+    assert "NON_RETRYABLE" in result.output
+    assert "movies" in result.output
+    # The missing fields render as '-'
+    assert "doc-2\t-\t-" in result.output
+
+
+def test_failed_document_stream_list_json_mode_emits_json_array(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    records = [{"documentId": "doc-1"}, {"documentId": "doc-2"}]
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=records)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(VALID_SERVICES_YAML), '--json', 'failed-document-stream', 'list'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    # The --json path should round-trip cleanly.
+    assert json.loads(result.output) == records
+
+
+def test_failed_document_stream_list_empty_shows_no_records_message(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=[])
+
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "no failed document stream records" in result.output
+
+
+def test_failed_document_stream_list_passes_limit_through_to_middleware(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    list_mock = mocker.patch.object(cli_module.failed_document_stream_, "list_records", return_value=[])
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list', '--limit', '5'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    # Confirm Click parsed --limit as int and forwarded it.
+    list_mock.assert_called_once()
+    assert list_mock.call_args.kwargs == {"limit": 5}
+
+
+def test_failed_document_stream_list_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nope"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'list'],
+                           catch_exceptions=False)
+    assert result.exit_code == 1
+    assert "nope" in result.output
+
+
+# ----- backfill status: failed document stream summary append --------------------------------
+
+def test_backfill_status_appends_failed_document_stream_summary_when_configured(runner, mocker):
+    # Stub the underlying ECS lookup so we hit SUCCESS in status_backfill_cmd,
+    # then verify the failed document stream tail is appended.
+    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                        return_value=DeploymentStatus(desired=1, running=1, pending=0))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=4)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "failed document stream location: s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
+    assert "Failed document count: 4" in result.output
+
+
+def test_backfill_status_failed_document_stream_count_unavailable_renders_placeholder(runner, mocker):
+    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                        return_value=DeploymentStatus(desired=1, running=1, pending=0))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    # safe_count returning None means S3 was unreachable — we mustn't crash.
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=None)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "Failed document count: unavailable" in result.output
+
+
+def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
+    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                        return_value=DeploymentStatus(desired=1, running=1, pending=0))
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nothing"))
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status'],
+                           catch_exceptions=False)
+    assert result.exit_code == 0
+    # failed document stream block is intentionally absent when failed document stream isn't configured.
+    assert "failed document stream location:" not in result.output
+    assert "Failed document count:" not in result.output
+
+
+def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(runner, mocker):
+    """The --json --deep-check path goes through _augment_status_with_failed_document_stream
+    rather than the trailing click.echo block."""
+    mocked_status = {
+        "status": "Completed",
+        "percentage_completed": 100.0,
+        "eta_ms": None,
+        "started": "2026-04-19T21:40:01+00:00",
+        "finished": "2026-04-19T21:40:01+00:00",
+        "shard_total": 0,
+        "shard_complete": 0,
+        "shard_in_progress": 0,
+        "shard_waiting": 0,
+    }
+    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                        return_value=cli_module.BackfillOverallStatus(**mocked_status))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=2)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["failed_document_stream_location"] == "s3://b/rfs-failed-document-stream/session=sess-A/"
+    assert payload["failed_document_count"] == 2
+
+
+def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocked_status = cli_module.BackfillOverallStatus(
+        status=cli_module.StepStateWithPause.PENDING, percentage_completed=0.0,
+    )
+    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                        return_value=mocked_status)
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("missing"))
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "failed_document_stream_location" not in payload
+    assert "failed_document_count" not in payload
+
+
+def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
+    # When build_backfill_status raises DeepStatusNotYetAvailable, the command
+    # should emit a PENDING fallback payload (still augmented with failed document stream keys
+    # when configured).
+    from console_link.cli import DeepStatusNotYetAvailable
+    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                        side_effect=DeepStatusNotYetAvailable("not yet"))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=0)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "Pending"
+    assert payload["percentage_completed"] == 0.0
+    assert payload["failed_document_count"] == 0
+
+
+# ----- backfill reset ------------------------------------------------------
+
+def test_backfill_reset_default_preserves_failed_document_stream(runner, mocker):
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=True, value="/path/to/archive.json"))
+    # Without --include-failed-document-stream, the failed_document_stream middleware should never be loaded.
+    load_cfg_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config")
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session")
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "Backfill working state archived" in result.output
+    assert "failed document stream records preserved" in result.output
+    load_cfg_mock.assert_not_called()
+    delete_mock.assert_not_called()
+
+
+def test_backfill_reset_with_include_failed_document_stream_deletes_session(runner, mocker):
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=True, value="/path/to/archive.json"))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session", return_value=3)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset', '--include-failed-document-stream', '--yes'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "Deleted 3 failed document stream object(s)" in result.output
+    delete_mock.assert_called_once()
+
+
+def test_backfill_reset_include_failed_document_stream_prompts_without_yes(runner, mocker):
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=True, value="/path/to/archive.json"))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session", return_value=0)
+
+    # Send 'n' to abort the click.confirm prompt — verifies the abort path.
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset', '--include-failed-document-stream'],
+        input="n\n",
+        catch_exceptions=False,
+    )
+    # `confirm(..., abort=True)` raises click.Abort -> exit code 1.
+    assert result.exit_code == 1
+    delete_mock.assert_not_called()
+
+
+def test_backfill_reset_include_failed_document_stream_when_failed_document_stream_not_configured(runner, mocker):
+    from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=True, value="/path/to/archive.json"))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        side_effect=FailedDocumentStreamNotConfigured("nothing here"))
+    delete_mock = mocker.patch.object(cli_module.failed_document_stream_, "delete_session")
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset', '--include-failed-document-stream', '--yes'],
+        catch_exceptions=False,
+    )
+    # No failed document stream configured ⇒ informative message, exit cleanly, no delete call.
+    assert result.exit_code == 0
+    assert "failed document stream not configured" in result.output
+    delete_mock.assert_not_called()
+
+
+def test_backfill_reset_when_index_doesnt_exist(runner, mocker):
+    # WorkingIndexDoesntExist short-circuits the archive flow.
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=False,
+                                                   value=WorkingIndexDoesntExist("idx")))
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "Working state index doesn't exist" in result.output
+
+
+def test_backfill_reset_waits_for_workers_in_progress(runner, mocker):
+    # First archive call says "still running", second succeeds — reset_backfill_cmd
+    # should poll until the work is done.
+    archive_sequence = [
+        CommandResult(success=False, value=RfsWorkersInProgress()),
+        CommandResult(success=True, value="/path/to/archive.json"),
+    ]
+    archive_mock = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                                       side_effect=archive_sequence)
+    mocker.patch.object(time, 'sleep', autospec=True)  # don't actually wait 5s
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert archive_mock.call_count == 2
+    assert "RFS Workers are still running" in result.output
+
+
+def test_backfill_reset_archive_failure_raises(runner, mocker):
+    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+                        return_value=CommandResult(success=False, value="archive blew up"))
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         'backfill', 'reset'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 1
+    assert "archive blew up" in result.output

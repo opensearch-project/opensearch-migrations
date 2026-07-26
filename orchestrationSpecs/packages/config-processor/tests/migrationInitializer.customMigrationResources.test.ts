@@ -114,6 +114,10 @@ describe('migration initializer CRD resource generation', () => {
             // Topic and proxy VAP retry gates
             'capturedtraffic.source-proxy-topic.vapretry',
             'captureproxy.source-proxy.vapretry',
+            // DataSnapshot CR reconcile VAP retry gate
+            'datasnapshot.source-snap1.vapretry',
+            // SnapshotMigration CR reconcile VAP retry gate
+            'snapshotmigration.source-target-snap1-migration-0.vapretry',
             // Replay VAP retry gate
             'trafficreplay.source-proxy-target-target-replay.vapretry',
         ]));
@@ -121,8 +125,11 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toBeUndefined();
         expect(getResource('CapturedTraffic', 'source-proxy-topic')?.spec.dependsOn).toEqual(['default']);
         expect(getResource('CaptureProxy', 'source-proxy')?.spec.dependsOn).toEqual(['source-proxy-topic']);
-        expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
-        expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toEqual(['source-snap1']);
+        // Terminal resources (DataSnapshot, SnapshotMigration) intentionally omit dependsOn from the
+        // initializer bootstrap spec: the reset-DAG edge must reflect the established graph, so the
+        // workflow's tryApply is its sole writer (see makeSnapshotMigrationManifest / upsertDataSnapshotResource).
+        expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toBeUndefined();
+        expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual([
             'source-proxy',
             'source-target-snap1-migration-0',
@@ -331,6 +338,49 @@ describe('migration initializer CRD resource generation', () => {
                 `kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${gate.metadata.name} --ignore-not-found`
             );
         }
+    });
+
+    it('creates the opt-in begin approval gate for the migration run', async () => {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+            requireBeginApproval: true,
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
+                        snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
+                    }
+                }
+            },
+            targetClusters: { target: { endpoint: "https://target.example.com" } },
+            snapshotMigrationConfigs: [{
+                fromSource: "source",
+                toTarget: "target",
+                perSnapshotConfig: {
+                    "snap1": [{ metadataMigrationConfig: {} }]
+                }
+            }]
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config, 'my-workflow', {
+            runNumber: 52,
+            timestamp: new Date('2026-05-18T11:44:15Z'),
+        });
+        const beginGate = bundle.customMigrationResources.items.find(
+            (item: any) => item.kind === 'ApprovalGate' && item.metadata.name === 'begin'
+        );
+
+        expect(bundle.workflows.requireBeginApproval).toBe(true);
+        expect(beginGate).toBeDefined();
+        expect(beginGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: 'my-workflow',
+            [MigrationInitializer.WORKFLOW_NAME_LABEL]: 'my-workflow',
+            [MigrationInitializer.RUN_NUMBER_LABEL]: '52',
+            [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'MigrationRun',
+            [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: 'my-workflow-run-52',
+        });
     });
 
     it('sanitizes MigrationRun names without regex backtracking on slash-heavy workflow names', async () => {

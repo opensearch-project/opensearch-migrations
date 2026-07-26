@@ -181,6 +181,43 @@ class SolrStandaloneBackupCreatorTest {
     }
 
     @Test
+    void isBackupFinished_returnsTrueOnSuccess_solr9ObjectFormat(@TempDir Path tempDir) {
+        // Solr 9 serializes the backup details NamedList as a JSON OBJECT, not the Solr 8
+        // array form. The creator must read both. (Regression: object form was parsed as
+        // null status, causing isBackupFinished to poll forever against Solr 9.)
+        getResponses.put("/solr/core1/replication",
+            "{\"details\":{\"backup\":{"
+                + "\"startTime\":\"2026-01-01T00:00:00Z\","
+                + "\"snapshotName\":\"snap\","
+                + "\"directoryName\":\"snapshot.snap\","
+                + "\"status\":\"success\""
+                + "}}}");
+
+        var creator = new SolrStandaloneBackupCreator(
+            baseUrl, "snap", tempDir.toString(),
+            List.of("core1"), noAuthContext(baseUrl));
+        assertTrue(creator.isBackupFinished());
+    }
+
+    @Test
+    void isBackupFinished_throwsWhenStatusIsFailed_solr9ObjectFormat(@TempDir Path tempDir) {
+        getResponses.put("/solr/core1/replication",
+            "{\"details\":{\"backup\":{"
+                + "\"snapshotName\":\"snap\","
+                + "\"status\":\"failed\","
+                + "\"exception\":\"disk full\""
+                + "}}}");
+
+        var creator = new SolrStandaloneBackupCreator(
+            baseUrl, "snap", tempDir.toString(),
+            List.of("core1"), noAuthContext(baseUrl));
+
+        var ex = assertThrows(SolrSnapshotCreator.SolrBackupFailed.class, creator::isBackupFinished);
+        assertThat(ex.getMessage(), containsString("core1"));
+        assertThat(ex.getMessage(), containsString("disk full"));
+    }
+
+    @Test
     void isBackupFinished_returnsFalseWhileInProgress(@TempDir Path tempDir) {
         getResponses.put("/solr/core1/replication",
             "{\"details\":{\"backup\":["
@@ -261,11 +298,11 @@ class SolrStandaloneBackupCreatorTest {
     }
 
     @Test
-    void isBackupFinished_nonArrayBackupNodeIsTreatedAsInProgress(@TempDir Path tempDir) {
-        // backup is a JSON object, not the expected NamedList array. The non-array
-        // branch in extractNamedListValue returns null and we fall through to in-progress.
+    void isBackupFinished_objectBackupNodeWithoutStatusIsTreatedAsInProgress(@TempDir Path tempDir) {
+        // backup is a JSON object (Solr 9 form) but has no status yet — treat as in-progress.
+        // (The success/failed object-form cases are covered by the *_solr9ObjectFormat tests.)
         getResponses.put("/solr/core1/replication",
-            "{\"details\":{\"backup\":{\"status\":\"success\"}}}");
+            "{\"details\":{\"backup\":{\"startTime\":\"2026-01-01T00:00:00Z\"}}}");
 
         var creator = new SolrStandaloneBackupCreator(
             baseUrl, "snap", tempDir.toString(),

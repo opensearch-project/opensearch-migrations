@@ -127,6 +127,14 @@ Resources declare dependencies via `spec.dependsOn` on their CRDs. The CLI
 builds a DAG and deletes in dependency-safe order: a resource is only deleted
 after all its dependents are gone. Independent branches proceed in parallel.
 
+All migration resources populate `spec.dependsOn`, including the terminal
+`DataSnapshot` and `SnapshotMigration` (a DataSnapshot points at its proxy setups; a
+SnapshotMigration points at its DataSnapshot, or nothing for an externally-managed ES/OS
+snapshot). The workflow's `tryApply` step is the sole writer of this field on the live CR;
+the initializer intentionally omits it from the terminal-resource bootstrap spec so the
+graph reflects only edges the workflow has actually established (see
+[reconfiguringWorkflows.md](reconfiguringWorkflows.md)).
+
 ### Relationship to workflow submission
 
 Reset does **not** stop or delete the Argo workflow. It only deletes migration

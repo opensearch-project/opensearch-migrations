@@ -43,14 +43,14 @@ jobs:
           getent hosts docker-registry
           curl -sS http://docker-registry:5000/v2/ || true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-env
 
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Buildx builder (BuildKit)
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
         with:
           driver: docker-container
           buildkitd-flags: --debug
@@ -101,7 +101,7 @@ jobs:
           STACK_NAME_SUFFIX="" ./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
 
       - name: Install Helm
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
 
       - name: Package Helm chart
         run: |

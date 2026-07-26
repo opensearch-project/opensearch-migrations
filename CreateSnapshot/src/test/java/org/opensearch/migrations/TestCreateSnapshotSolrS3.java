@@ -889,7 +889,7 @@ public class TestCreateSnapshotSolrS3 {
      * G1: When the S3 bucket referenced by s3RepoUri does not exist, {@code ensureS3LocationExists}
      * must swallow the resulting exception (HeadObject/PutObject against a missing bucket throws
      * a non-NoSuchKey S3Exception, exercising the outer {@code catch (Exception e)} branch that
-     * rethrow-cases in {@code s3DirectoryMarkerExists} ultimately fall into) and emit a WARN
+     * rethrow-cases in {@code s3ObjectExists} ultimately fall into) and emit a WARN
      * log. The surrounding cloud backup will then proceed and fail downstream when Solr itself
      * tries to access the bucket — but the marker helper must not abort the run.
      *
@@ -1039,7 +1039,7 @@ public class TestCreateSnapshotSolrS3 {
     }
 
     /**
-     * G5: Exercise {@code s3DirectoryMarkerExists} third catch branch — an {@link S3Exception}
+     * G5: Exercise {@code s3ObjectExists} third catch branch — an {@link S3Exception}
      * whose {@code statusCode()} is NOT 404 must be rethrown (not swallowed as "marker
      * absent"). We invoke the private method reflectively via a JDK dynamic proxy S3Client that
      * throws a synthesized 403 S3Exception from {@code headObject}. The method is expected to
@@ -1050,7 +1050,7 @@ public class TestCreateSnapshotSolrS3 {
     @Test
     void s3DirectoryMarkerExists_non404S3Exception_isRethrown() throws Exception {
         Method exists = SolrBackupStrategy.class.getDeclaredMethod(
-            "s3DirectoryMarkerExists", S3Client.class, String.class, String.class);
+            "s3ObjectExists", S3Client.class, String.class, String.class);
         exists.setAccessible(true);
 
         S3Exception status403 = (S3Exception) S3Exception.builder()
@@ -1086,7 +1086,7 @@ public class TestCreateSnapshotSolrS3 {
     }
 
     /**
-     * G6: Exercise {@code s3DirectoryMarkerExists} second catch branch — a plain
+     * G6: Exercise {@code s3ObjectExists} second catch branch — a plain
      * {@link S3Exception} with {@code statusCode()==404} that is NOT a {@link NoSuchKeyException}
      * must be treated as "marker absent" (return false). Some S3-compatible stores and certain
      * SDK wrapping layers surface missing-object as a bare S3Exception with status 404 rather
@@ -1097,7 +1097,7 @@ public class TestCreateSnapshotSolrS3 {
     @Test
     void s3DirectoryMarkerExists_status404S3Exception_treatedAsAbsent() throws Exception {
         Method exists = SolrBackupStrategy.class.getDeclaredMethod(
-            "s3DirectoryMarkerExists", S3Client.class, String.class, String.class);
+            "s3ObjectExists", S3Client.class, String.class, String.class);
         exists.setAccessible(true);
 
         S3Exception status404 = (S3Exception) S3Exception.builder()

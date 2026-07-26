@@ -69,10 +69,9 @@ functionName(jobName: jobNameOverride ?: null)
 
 **Special case for matrix tests:**
 - Use `JOB_NAME_OVERRIDE` for matrix parent webhook routing
-- Use `CHILD_JOB_NAME_OVERRIDE` parameter
-- Pass as `childJobName` to the vars function
-- Default child job path follows parent job name:
-  - `childJobName` must be specified explicitly; there is no longer a default child job
+- The matrix parent routes each selected source version to the matching per-source local k8s child job
+- `CHILD_JOB_NAME_OVERRIDE` is accepted only for compatibility with existing Jenkins job configs and is ignored by the shared library
+- Clear stale `CHILD_JOB_NAME_OVERRIDE` values such as `main/main-k8s-local-integ-test`; that aggregate child job has been replaced by per-source jobs
 - Periodic schedules are defined in `vars/periodicCron.groovy` (dispatch table keyed on job name). `pr-*` jobs never have a cadence; `main-*` and `release-*` jobs pick their cadence from the table
 
 ### Supported Cover Files
@@ -100,7 +99,7 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalOpensearch1xTestCover.groovy | k8sLocalOpensearch1xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
-| k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE + CHILD_JOB_NAME_OVERRIDE |
+| k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE |
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 
