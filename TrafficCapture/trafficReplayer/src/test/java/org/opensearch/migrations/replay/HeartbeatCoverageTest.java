@@ -130,7 +130,7 @@ class HeartbeatCoverageTest {
         engine.scheduleTransformationWork(ctx, Instant.now().minusSeconds(90), () ->
             new TextTrackedFuture<>(completableFuture, () -> "task"));
 
-        // Complete the work so lastCompletedWallClockMs is set (simulating stale state)
+        // Complete the work so lastCompletedWallClockMs is set
         completableFuture.complete(null);
         Thread.sleep(10);
 
@@ -149,6 +149,13 @@ class HeartbeatCoverageTest {
             new TextTrackedFuture<>(new java.util.concurrent.CompletableFuture<>(), () -> "task2"));
 
         Assertions.assertTrue(engine.isWorkOutstanding());
+
+        // Backdate lastCompletedWallClockMs to 2 minutes ago so staleDuration > 1 minute
+        var wallClockField = ReplayEngine.class.getDeclaredField("lastCompletedWallClockMs");
+        wallClockField.setAccessible(true);
+        var wallClockAtomicLong = (java.util.concurrent.atomic.AtomicLong) wallClockField.get(engine);
+        wallClockAtomicLong.set(System.currentTimeMillis() - 120_000);
+
         Assertions.assertDoesNotThrow(engine::logHeartbeat);
     }
 }
