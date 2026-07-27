@@ -107,7 +107,7 @@ solr-orbit run \
 Now trigger a backup of the core.
 
 ```
-curl "http://localhost:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_7&wt=json"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_7&wt=json"
 ```
 
 Finally, shut down the node
@@ -180,7 +180,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --allow-unsupported-user-managed \
@@ -191,7 +191,7 @@ solr-orbit run \
 Now trigger a backup of the core.
 
 ```
-curl "http://localhost:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_8&wt=json"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_8&wt=json"
 ```
 
 Finally, shut down the node
@@ -265,7 +265,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --allow-unsupported-user-managed \
@@ -276,19 +276,19 @@ solr-orbit run \
 Now trigger a backup of the core.
 
 ```
-curl "http://localhost:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_9&wt=json"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_9&wt=json"
 ```
 
 We want a single segment version as well:
 
 ```
-curl "http://localhost:8983/solr/nyc_taxis/update?optimize=true&maxSegments=1"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/update?optimize=true&maxSegments=1"
 ```
 
 Now trigger a backup of the core with one segment.
 
 ```
-curl "http://localhost:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_9_onesegment&wt=json"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/replication?command=backup&location=/backups/standalone&name=nyc_taxis_9_onesegment&wt=json"
 ```
 
 Finally, shut down the node

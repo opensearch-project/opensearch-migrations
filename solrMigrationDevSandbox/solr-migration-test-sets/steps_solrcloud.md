@@ -35,7 +35,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --test-mode \
@@ -46,7 +46,7 @@ solr-orbit run \
 Now trigger a backup of the three shard collection.
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_6&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
+curl "http://127.0.0.1:8983/solr/admin/collections?action=BACKUP&name=nyc_taxis_6&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
 ```
 
 Finally, shut down the cluster
@@ -81,7 +81,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --test-mode \
@@ -92,7 +92,7 @@ solr-orbit run \
 Now trigger a backup of the three shard collection.
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_7&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
+curl "http://127.0.0.1:8983/solr/admin/collections?action=BACKUP&name=nyc_taxis_7&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
 ```
 
 Finally, shut down the cluster
@@ -127,7 +127,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --test-mode \
@@ -138,8 +138,8 @@ solr-orbit run \
 Now trigger a backup of the three shard collection.
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_8&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
-curl "http://chorus.dev.o19s.com:8983/solr/nyc_taxis_shard3_replica_n4/replication?command=backup&location=/backups/solrcloud/&name=main-snapshot&wt=json"
+curl "http://127.0.0.1:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_8&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
+curl "http://127.0.0.1:8983/solr/nyc_taxis_shard3_replica_n4/replication?command=backup&location=/backups/solrcloud/&name=main-snapshot&wt=json"
 ```
 
 Finally, shut down the cluster
@@ -172,7 +172,7 @@ Now run solr-orbit to load the data.
 ```
 solr-orbit run \
   --pipeline=benchmark-only \
-  --target-host=localhost:8983 \
+  --target-host=127.0.0.1:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
   --include-tasks="check-cluster-health,index"
@@ -182,19 +182,19 @@ solr-orbit run \
 Now trigger a backup of the three shard collection.
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_9&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
+curl "http://127.0.0.1:8983/solr/admin/collections?action=BACKUP&name=nyc_taxis_9&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
 ```
 
 We want a single segment version as well:
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/nyc_taxis/update?optimize=true&maxSegments=1"
+curl "http://127.0.0.1:8983/solr/nyc_taxis/update?optimize=true&maxSegments=1"
 ```
 
 Now trigger a backup of the three shard collection with one segment per shard.
 
 ```
-curl "http://chorus.dev.o19s.com:8985/solr/admin/collections?action=BACKUP&name=nyc_taxis_9_onesegment&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
+curl "http://127.0.0.1:8983/solr/admin/collections?action=BACKUP&name=nyc_taxis_9_onesegment&collection=nyc_taxis&location=/backups/solrcloud&wt=json"
 ```
 
 
