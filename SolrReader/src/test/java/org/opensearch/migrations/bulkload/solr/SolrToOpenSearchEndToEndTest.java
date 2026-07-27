@@ -1163,7 +1163,140 @@ public class SolrToOpenSearchEndToEndTest {
         }
     }
 
+    /**
+     * Issue #3147 — proves the bare SolrCloud 7 backup layout (no per-collection wrapper directory)
+     * is classified correctly straight from real Solr 7 BACKUP output, with NO manual reshape step.
+     *
+     * <p>This is the trustworthy counterpart to {@code SolrBareBackupLayoutTest}'s synthetic fixture:
+     * it captures the actual on-disk tree Solr 7 produces and, crucially, validates that the
+     * collection name is recoverable from the real {@code backup.properties} (confirming the property
+     * key the synthetic fixture assumes).
+     */
+    @ParameterizedTest(name = "SolrCloud bare layout classifies from real backup: {0}")
+    @MethodSource("solr6And7ToOpenSearch")
+    void solrCloudBareLayout_classifiesFromRealBackup_andRecoversCollectionName(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion ignoredTarget
+    ) throws Exception {
+        try (var solr = SolrClusterContainer.cloud(solrVersion)) {
+            solr.start();
+
+            var collection = "cloud_test";
+            var numShards = 2;
+            var backupRoot = createAndCopyCloudBackup(solr, solrVersion, collection, "cloud_backup", numShards);
+
+            // Sanity-check the captured tree IS bare (data at the root, no <collection>/ wrapper).
+            assertTrue(Files.exists(backupRoot.resolve("backup.properties")),
+                "Real Solr " + solrVersion + " BACKUP should write backup.properties at the root");
+
+            var layout = SolrBackupLayout.classifyBareBackup(backupRoot);
+            assertThat("real bare SolrCloud backup should be classified", layout, notNullValue());
+            assertThat(layout.mode(), equalTo(SolrBackupLayout.SolrBackupMode.CLOUD));
+            // The whole point: name recovered from the REAL backup.properties matches the collection.
+            assertThat("collection name recovered from real backup.properties",
+                layout.collectionName(), equalTo(collection));
+            assertThat("shards counted as one collection, not separate collections",
+                SolrBackupLayout.countShards(layout.resolveFrom(backupRoot)), equalTo(numShards));
+        }
+    }
+
+    /**
+     * Proves a real standalone Solr 7 replication backup is classified as STANDALONE. The core name
+     * is not stored anywhere in the backup, so the target index name is derived from the backup
+     * root's final path segment; here we assert that derivation and that the index reads as a single
+     * shard.
+     */
+    @ParameterizedTest(name = "standalone Solr classifies from real backup: {0}")
+    @MethodSource("solr6And7ToOpenSearch")
+    void standaloneLayout_classifiesFromRealBackup(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion ignoredTarget
+    ) throws Exception {
+        try (var solr = new SolrClusterContainer(solrVersion)) {
+            solr.start();
+
+            var core = "standalone_core";
+            createSolrCollection(solr, core);
+            populateSolrDocuments(solr, core, 5);
+            var backupRoot = createAndCopyBackup(solr, core, "standalone_backup");
+
+            var layout = SolrBackupLayout.classifyBareBackup(backupRoot);
+            assertThat("real standalone backup should be classified", layout, notNullValue());
+            assertThat("no SolrCloud markers => STANDALONE",
+                layout.mode(), equalTo(SolrBackupLayout.SolrBackupMode.STANDALONE));
+            assertThat("core name derived from the backup root directory name",
+                layout.collectionName(), equalTo(backupRoot.getFileName().toString()));
+            assertThat("standalone backup is a single shard",
+                SolrBackupLayout.countShards(layout.resolveFrom(backupRoot)), equalTo(1));
+        }
+    }
+
     // --- Helpers ---
+
+    /**
+     * Creates a SolrCloud collection, indexes docs, runs a Collections-API BACKUP, and mirrors the
+     * backup tree to a local directory <em>verbatim</em> (no reshape). For Solr 6/7 this yields the
+     * bare layout: {@code <root>/{backup.properties, snapshot.shardN/, zk_backup/}}.
+     */
+    private Path createAndCopyCloudBackup(
+        SolrClusterContainer solr, SolrClusterContainer.SolrVersion solrVersion,
+        String collection, String backupName, int numShards
+    ) throws Exception {
+        // Solr 6 SolrCloud does not auto-upload a configset; upconfig _default first (Solr 7+ auto-uploads).
+        if (solrVersion.major() == 6) {
+            var up = solr.execInContainer(
+                "/opt/solr/bin/solr", "zk", "upconfig", "-n", "_default",
+                "-d", "/opt/solr/server/solr/configsets/data_driven_schema_configs",
+                "-z", "localhost:9983");
+            if (up.getExitCode() != 0) {
+                throw new RuntimeException("Solr 6 upconfig failed: " + up.getStderr());
+            }
+        }
+
+        var createResult = solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=CREATE"
+                + "&name=" + collection
+                + "&numShards=" + numShards
+                + "&replicationFactor=1"
+                + (solrVersion.major() < 9 ? "&maxShardsPerNode=" + numShards : "")
+                + (solrVersion.major() == 6 ? "&collection.configName=_default" : "")
+                + "&wt=json");
+        log.atInfo().setMessage("Create collection response: {}").addArgument(createResult.getStdout()).log();
+        waitForCollectionActive(solr, collection, numShards, 60);
+        populateSolrDocuments(solr, collection, 20);
+
+        var probe = solr.execInContainer("sh", "-c",
+            "for d in /var/solr/data /opt/solr/server/solr; do "
+            + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; done");
+        var solrDataDir = probe.getStdout().trim();
+        if (solrDataDir.isEmpty()) {
+            throw new RuntimeException("No writable Solr data directory found in container");
+        }
+        var backupLocation = solrDataDir + "/backups";
+        var mkdir = solr.execInContainer("mkdir", "-p", backupLocation);
+        if (mkdir.getExitCode() != 0) {
+            throw new RuntimeException("Failed to mkdir " + backupLocation + ": " + mkdir.getStderr());
+        }
+
+        var backupResult = solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                + "&name=" + backupName
+                + "&collection=" + collection
+                + "&location=" + backupLocation
+                + "&wt=json");
+        log.atInfo().setMessage("Backup response: {}").addArgument(backupResult.getStdout()).log();
+        if (backupResult.getStdout().contains("\"status\":500")
+            || backupResult.getStdout().contains("\"status\":400")) {
+            throw new IllegalStateException("BACKUP failed for " + solrVersion + ": " + backupResult.getStdout());
+        }
+
+        var localBackupRoot = tempDir.toPath().resolve("cloud_backup_" + backupName);
+        copyDirectoryFromContainer(solr, backupLocation + "/" + backupName, localBackupRoot);
+        try (var walk = Files.walk(localBackupRoot, 3)) {
+            walk.forEach(p -> log.atInfo().setMessage("Captured cloud backup tree: {}").addArgument(p).log());
+        }
+        return localBackupRoot;
+    }
 
     /** POST a JSON document array to a Solr collection's /update endpoint with commit. */
     private static void indexSolrDocs(SolrClusterContainer solr, String collection, String jsonDocsArray)

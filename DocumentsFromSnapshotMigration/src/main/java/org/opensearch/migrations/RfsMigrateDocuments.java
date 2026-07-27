@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -11,12 +10,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -42,12 +39,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
-import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
-import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
-import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -83,7 +77,6 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -1397,81 +1390,7 @@ public class RfsMigrateDocuments {
                 );
             }
 
-            var schemas = new LinkedHashMap<String, JsonNode>();
-            final List<String> collections;
-            if (s3Repo != null) {
-                collections = new ArrayList<>(s3Repo.listTopLevelDirectories());
-            } else {
-                collections = new ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
-            }
-            if (!arguments.indexAllowlist.isEmpty()) {
-                collections.retainAll(arguments.indexAllowlist);
-            }
-            for (var collection : collections) {
-                schemas.put(collection, null);
-            }
-
-            final S3Repo finalS3Repo = s3Repo;
-            final Path finalBackupDir = backupDir;
-            final Map<String, String> dataPrefixByCollection = new ConcurrentHashMap<>();
-            Consumer<String> collectionPreparer = collection -> {
-                if (finalS3Repo != null) {
-                    var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
-                        collection, finalS3Repo::listSubDirectories);
-                    if (resolved != null) {
-                        dataPrefixByCollection.put(collection, resolved.dataPrefix());
-                        var dataRoot = resolved.joinWith(collection);
-                        finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
-                        log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                        finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
-                        // Solr 6: create local stub dirs for snapshot.shardN/ so shard
-                        // discovery can count them before index files are downloaded.
-                        finalS3Repo.listSubDirectories(dataRoot).stream()
-                            .filter(name -> name.startsWith("snapshot."))
-                            .forEach(snapshotDirName -> {
-                                try {
-                                    Files.createDirectories(finalBackupDir.resolve(dataRoot).resolve(snapshotDirName));
-                                } catch (IOException e) {
-                                    log.warn("Failed to create snapshot stub dir {}/{}", dataRoot, snapshotDirName, e);
-                                }
-                            });
-                    } else {
-                        log.warn("No zk_backup directories found for collection '{}' in S3", collection);
-                    }
-                }
-                var collectionRoot = finalBackupDir.resolve(collection);
-                var dataPrefix = dataPrefixByCollection.getOrDefault(collection, "");
-                var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
-                schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
-            };
-            // Only S3 needs lazy per-shard downloads; filesystem backups are already local
-            Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
-                var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
-                var collectionDataPrefix = dataPrefix.isEmpty()
-                    ? partition.collection()
-                    : partition.collection() + "/" + dataPrefix;
-                var mapping = partition.fileNameMapping();
-                if (mapping != null) {
-                    log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
-                        .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    for (var uuid : mapping.values()) {
-                        finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
-                    }
-                } else {
-                    // Non-UUID layout: Solr 6 uses snapshot.shardN/ dirs at the collection
-                    // root; Solr 8 non-incremental uses a single index/ dir.
-                    log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
-                        .addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    var shardPath = partition.shard().startsWith("snapshot.")
-                        ? collectionDataPrefix + "/" + partition.shard()
-                        : collectionDataPrefix + "/index";
-                    finalS3Repo.downloadPrefix(shardPath);
-                }
-            } : null;
-
-            var solrMajor = arguments.sourceVersion.getMajor();
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
+            var documentSource = buildSolrDocumentSource(arguments, backupDir, s3Repo);
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
@@ -1480,6 +1399,21 @@ public class RfsMigrateDocuments {
         };
     }
 
+    static SolrMultiCollectionSource buildSolrDocumentSource(Args arguments, Path backupDir, S3Repo s3Repo)
+        throws IOException {
+        var discovery = SolrBackupDiscovery.discover(
+            s3Repo, backupDir, arguments.indexAllowlist);
+        var schemas = discovery.schemas();
+        var dataDirByCollection = discovery.dataDirByCollection();
+
+        Consumer<String> collectionPreparer = discovery::prepareCollection;
+        Consumer<SolrShardPartition> shardPreparer = discovery.shardPreparationNeeded()
+            ? discovery::prepareShard : null;
+
+        var solrMajor = arguments.sourceVersion.getMajor();
+        return new SolrMultiCollectionSource(
+            backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
+    }
 
     /**
      * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep

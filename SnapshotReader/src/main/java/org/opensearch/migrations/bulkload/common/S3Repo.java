@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
 
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
+
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -206,7 +208,7 @@ public class S3Repo implements SourceRepo, AutoCloseable {
         return new S3Uri(fullUri);
     }
 
-    protected List<String> listFilesInS3Root() {
+    public List<String> listFilesInS3Root() {
         // Normalise the repository prefix and remove trailing “/” if present
         String prefixKey = s3RepoUri.key;
         if (prefixKey.endsWith("/")) {
@@ -269,6 +271,22 @@ public class S3Repo implements SourceRepo, AutoCloseable {
      */
     public List<String> listTopLevelDirectories() {
         return listSubDirectories("");
+    }
+
+    /**
+     * Adapts this repo to {@link SolrBackupLayout#detectBareLayout}.
+     * @return the bare layout, or {@code null} if the root is not a bare single-collection backup
+     */
+    public SolrBackupLayout.BareBackupLayout detectBareSolrLayout() {
+        return SolrBackupLayout.detectBareLayout(
+            this::listTopLevelDirectories,
+            this::listFilesInS3Root,
+            () -> {
+                downloadFile("backup.properties");
+                return getRepoRootDir();
+            },
+            () -> getS3RepoUri().key
+        );
     }
 
     /**

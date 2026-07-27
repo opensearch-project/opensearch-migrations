@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -9,10 +10,13 @@ import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotListObjectsInS3;
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout.SolrBackupMode;
+import org.opensearch.migrations.bulkload.solr.SolrBackupReadException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -22,7 +26,9 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.*;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
@@ -49,6 +55,9 @@ public class S3RepoTest {
     @Mock
     private SnapshotFileFinder mockFileFinder;
 
+    @TempDir
+    Path tempDir;
+
     class TestableS3Repo extends S3Repo {
         public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
             super(s3LocalDir, s3RepoUri, s3Region, s3Client, fileFinder);
@@ -60,7 +69,7 @@ public class S3RepoTest {
         }
 
         @Override
-        protected List<String> listFilesInS3Root() {
+        public List<String> listFilesInS3Root() {
             return super.listFilesInS3Root();
         }
     }
@@ -381,6 +390,90 @@ public class S3RepoTest {
         // Assertions
         assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
         assertThat(thrown.getMessage(), containsString(testRepoUri.key));
+    }
+
+    // ---- detectBareSolrLayout ----
+
+    @Test
+    void detectBareSolrLayout_cloudRecoversNameFromBackupProperties() throws IOException {
+        Files.writeString(tempDir.resolve("backup.properties"), "collection=events\n");
+        doReturn(List.of("zk_backup")).when(testRepo).listTopLevelDirectories();
+        doReturn(tempDir).when(testRepo).getRepoRootDir();
+        doReturn(tempDir.resolve("backup.properties")).when(testRepo).downloadFile("backup.properties");
+
+        var bare = testRepo.detectBareSolrLayout();
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(bare.collectionName(), equalTo("events"));
+        verify(testRepo).downloadFile("backup.properties");
+    }
+
+    @Test
+    void detectBareSolrLayout_flatRootStandaloneDerivesNameFromKey() {
+        doReturn(List.of()).when(testRepo).listTopLevelDirectories();
+        doReturn(List.of("segments_2", "_0.si")).when(testRepo).listFilesInS3Root();
+        doReturn(new S3Uri("s3://bucket/backups/standalone/snapshot.nyc_taxis_7")).when(testRepo).getS3RepoUri();
+
+        var bare = testRepo.detectBareSolrLayout();
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(bare.collectionName(), equalTo("nyc_taxis_7"));
+        assertThat(bare.dataPath(), equalTo(""));
+    }
+
+    @Test
+    void detectBareSolrLayout_atBucketRoot_emptyKeyRejected() {
+        doReturn(List.of()).when(testRepo).listTopLevelDirectories();
+        doReturn(List.of("segments_2")).when(testRepo).listFilesInS3Root();
+        doReturn(new S3Uri("s3://bucket")).when(testRepo).getS3RepoUri();
+
+        assertThrows(SolrBackupReadException.class, () -> testRepo.detectBareSolrLayout());
+    }
+
+    @Test
+    void detectBareSolrLayout_nullWhenNoSubdirsAndNoRootSegments() {
+        doReturn(List.of()).when(testRepo).listTopLevelDirectories();
+        doReturn(List.of("notes.txt")).when(testRepo).listFilesInS3Root();
+        doReturn(new S3Uri("s3://bucket/empty")).when(testRepo).getS3RepoUri();
+
+        assertThat(testRepo.detectBareSolrLayout(), nullValue());
+    }
+
+    @Test
+    void detectBareSolrLayout_nullWhenRootListingFails() {
+        doReturn(List.of()).when(testRepo).listTopLevelDirectories();
+        doThrow(new RuntimeException("cannot list root")).when(testRepo).listFilesInS3Root();
+
+        assertThat(testRepo.detectBareSolrLayout(), nullValue());
+    }
+
+    @Test
+    void detectBareSolrLayout_standalone() {
+        doReturn(List.of("snapshot.products")).when(testRepo).listTopLevelDirectories();
+
+        var bare = testRepo.detectBareSolrLayout();
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.STANDALONE));
+        assertThat(bare.collectionName(), equalTo("products"));
+        assertThat(bare.dataPath(), equalTo("snapshot.products"));
+    }
+
+    @Test
+    void detectBareSolrLayout_nullForWrapped() {
+        doReturn(List.of("col_a", "col_b")).when(testRepo).listTopLevelDirectories();
+
+        assertThat(testRepo.detectBareSolrLayout(), nullValue());
+    }
+
+    @Test
+    void detectBareSolrLayout_propertiesFailureLeavesNameNull() {
+        doReturn(List.of("zk_backup")).when(testRepo).listTopLevelDirectories();
+        doThrow(new RuntimeException("boom")).when(testRepo).downloadFile("backup.properties");
+
+        var bare = testRepo.detectBareSolrLayout();
+
+        assertThat(bare.mode(), equalTo(SolrBackupMode.CLOUD));
+        assertThat(bare.collectionName(), nullValue());
     }
 
     // ---------- close ----------------------------------------------------
