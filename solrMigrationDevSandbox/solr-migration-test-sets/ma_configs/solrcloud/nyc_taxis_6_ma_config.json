@@ -2,7 +2,7 @@
     "skipApprovals": true,
     "sourceClusters": {
       "source": {
-        "endpoint": "http://chorus.dev.o19s.com:8983",
+        "endpoint": "http://127.0.0.1:8983",
         "version": "SOLR 6.6.6",
         "snapshotInfo": {
           "repos": {
