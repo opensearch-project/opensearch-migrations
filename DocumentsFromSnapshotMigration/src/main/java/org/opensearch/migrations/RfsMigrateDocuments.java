@@ -319,7 +319,9 @@ public class RfsMigrateDocuments {
 
     /**
      * Configuration for the durable failed document stream where terminal document failures are persisted.
-     * The failed document stream is enabled when --failed-document-stream-s3-bucket is provided. The
+     * The failed document stream is enabled when --failed-document-stream-enabled is true (the default) and
+     * --failed-document-stream-s3-bucket is provided. Passing --failed-document-stream-enabled=false opts out
+     * even when a bucket resolves, which is how deployments that always provision one turn the stream off. The
      * deployment-provisioned default is resolved upstream by the config processor and passed in
      * explicitly; RFS does not read defaults from the pod environment. When no bucket is provided,
      * terminal failures are not captured to a sink.
@@ -964,7 +966,8 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Build the S3 failed document stream sink, or return null when no bucket is configured. The bucket,
+     * Build the S3 failed document stream sink, or return null when the stream is opted out of via
+     * --failed-document-stream-enabled=false or no bucket is configured. The bucket,
      * region, and endpoint are explicit configuration passed via the --failed-document-stream-s3-* args.
      * The deployment-provisioned default is resolved upstream by the config processor (and recorded in
      * run history) and passed in explicitly, so RFS does not read defaults from the pod environment.
