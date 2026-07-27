@@ -47,9 +47,9 @@ solr-orbit run \
   --target-host=localhost:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
+  --allow-unsupported-user-managed \
   --test-mode \
   --include-tasks="check-cluster-health,index"
-
 ```
 
 Now trigger a backup of the core (standalone replication-handler backup). This is
@@ -99,9 +99,9 @@ solr-orbit run \
   --target-host=localhost:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
+  --allow-unsupported-user-managed \
   --test-mode \
   --include-tasks="check-cluster-health,index"
-
 ```
 
 Now trigger a backup of the core.
@@ -183,9 +183,9 @@ solr-orbit run \
   --target-host=localhost:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
+  --allow-unsupported-user-managed \
   --test-mode \
   --include-tasks="check-cluster-health,index"
-
 ```
 
 Now trigger a backup of the core.
@@ -249,7 +249,6 @@ docker run -d \
     -e SOLR_OPTS=-Dsolr.allowPaths=/backups \
     -v "$(pwd)/backups:/backups" \
     solr:9.10
-
 ```
 
 Create a core called `nyc_taxis` using the `./solr_configsets/nyc_taxis_9` config:
@@ -269,9 +268,9 @@ solr-orbit run \
   --target-host=localhost:8983 \
   --kill-running-processes \
   --workload=nyc_taxis \
+  --allow-unsupported-user-managed \
   --test-mode \
   --include-tasks="check-cluster-health,index"
-
 ```
 
 Now trigger a backup of the core.
