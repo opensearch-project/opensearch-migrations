@@ -22,6 +22,7 @@ from .commands.log import log_command
 from .commands.show import show_command
 from .commands.manage import manage_command
 from .commands.reset import reset_command
+from .commands.k6 import k6_group
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ workflow_cli.add_command(log_command)
 workflow_cli.add_command(show_command)
 workflow_cli.add_command(manage_command)
 workflow_cli.add_command(reset_command)
+workflow_cli.add_command(k6_group)
 workflow_cli.add_command(util_group)
 _enable_short_help(workflow_cli)
 

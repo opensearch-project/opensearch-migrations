@@ -92,15 +92,50 @@ def get_workflow(namespace, name):
         raise
 
 
-def list_workflows(namespace):
-    """List all Argo workflows in the namespace."""
+def list_workflows(namespace, label_selector=None):
+    """List Argo workflows in the namespace, optionally filtered by a label selector."""
     custom = client.CustomObjectsApi()
+    kwargs = {}
+    if label_selector:
+        kwargs['label_selector'] = label_selector
     try:
         return custom.list_namespaced_custom_object(
             group=ARGO_GROUP,
             version=ARGO_VERSION,
             namespace=namespace,
             plural='workflows',
+            **kwargs,
         ).get('items', [])
     except ApiException:
         return []
+
+
+def submit_workflow_from_template(namespace, template_name, parameters=None,
+                                  labels=None, service_account=None, generate_name='wf-'):
+    """Submit a Workflow that references an existing WorkflowTemplate.
+
+    Mirrors `argo submit --from workflowtemplate/<name> -p k=v ...` but via the k8s API, so it
+    needs no Argo Server URL/token. Returns the server-assigned (generateName) workflow name.
+    """
+    spec = {'workflowTemplateRef': {'name': template_name}}
+    if service_account:
+        spec['serviceAccountName'] = service_account
+    if parameters:
+        spec['arguments'] = {
+            'parameters': [{'name': k, 'value': v} for k, v in parameters.items()]
+        }
+    body = {
+        'apiVersion': f'{ARGO_GROUP}/{ARGO_VERSION}',
+        'kind': 'Workflow',
+        'metadata': {'generateName': generate_name, 'labels': labels or {}},
+        'spec': spec,
+    }
+    custom = client.CustomObjectsApi()
+    created = custom.create_namespaced_custom_object(
+        group=ARGO_GROUP,
+        version=ARGO_VERSION,
+        namespace=namespace,
+        plural='workflows',
+        body=body,
+    )
+    return created.get('metadata', {}).get('name', '')

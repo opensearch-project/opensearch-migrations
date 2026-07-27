@@ -1,7 +1,8 @@
-# Running the k6 load test in Kubernetes (Increment 1)
+# Running the k6 load test in Kubernetes
 
 This runs the scenarios in [`../`](../) as short-lived **Argo workflows** inside the
-migration deployment.
+migration deployment. Drive them from the migration console (`workflow k6 …`, the friendly
+front-end) or with raw `argo submit` — both target the same `k6-load-test` WorkflowTemplate.
 
 > **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It relies
 > on the infra already deployed by a migration and only needs a reachable **Capture Proxy URL**
@@ -57,7 +58,38 @@ PROXY=https://<proxy-svc>.ma.svc.cluster.local:9200
 
 ---
 
-## Run scenarios
+## From the migration console (`workflow k6`)
+
+The console wraps submit/list/logs/stop over the same WorkflowTemplate — no `argo` CLI needed.
+Run these inside the migration-console pod (or anywhere with the cluster context).
+
+```bash
+# Submit (every preset value is overridable; --override is repeatable)
+workflow k6 run --scenario ingest --config ingest-steady --target "$PROXY"
+workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
+workflow k6 run --scenario mixed --registry-enabled -o INGEST_RATE=80 -o SEARCH_RATE=40 --target "$PROXY"
+workflow k6 run --scenario ingest --config ingest-burst --extra-args --no-thresholds --target "$PROXY"
+workflow k6 run --scenario ingest --target "$PROXY" --wait        # block until it finishes
+
+# Observe
+workflow k6 list                       # NAME / SCENARIO / PHASE / PROGRESS / AGE
+workflow k6 list --scenario mixed
+workflow k6 logs <run-name> -f         # follow the k6 container
+
+# Kill
+workflow k6 stop <run-name>
+workflow k6 stop --scenario mixed --delete
+workflow k6 stop --all
+```
+
+Options mirror the WorkflowTemplate parameter contract (see **Parameters** below): `--scenario`,
+`--config`, `--target`, `--rate`, `--duration`, `--vus`, `--registry-enabled/--no-…`,
+`--control-enabled/--no-…`, `--override/-o KEY=VALUE` (repeatable), `--extra-args`. Omitted
+options keep the preset's value.
+
+---
+
+## Run scenarios (raw `argo submit`)
 
 ### Ingest (steady preset)
 ```bash
