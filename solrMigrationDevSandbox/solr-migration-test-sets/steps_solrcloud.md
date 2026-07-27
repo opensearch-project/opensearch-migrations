@@ -43,6 +43,13 @@ solr-orbit run \
 
 ```
 
+Before triggering the backup you may have to commit the changes in Solr 6 to ensure the latest state is commited
+so that it is included in the backup.
+
+```
+curl -fsS "http://127.0.0.1:8983/solr/nyc_taxis/update?commit=true&openSearcher=true"
+```
+
 Now trigger a backup of the three shard collection.
 
 ```
