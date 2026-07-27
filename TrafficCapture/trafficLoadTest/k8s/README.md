@@ -1,8 +1,7 @@
 # Running the k6 load test in Kubernetes
 
 This runs the scenarios in [`../`](../) as short-lived **Argo workflows** inside the
-migration deployment. Drive them from the migration console (`workflow k6 …`, the friendly
-front-end) or with raw `argo submit` — both target the same `k6-load-test` WorkflowTemplate.
+migration deployment. Drive them from the migration console (`workflow k6 …`) or with raw `argo submit` — both target the same `k6-load-test` WorkflowTemplate.
 
 > **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It relies
 > on the infra already deployed by a migration and only needs a reachable **Capture Proxy URL**
@@ -10,13 +9,79 @@ front-end) or with raw `argo submit` — both target the same `k6-load-test` Wor
 
 ---
 
+## How it fits together — from definition to run
+
+```text
+DEFINITION ──► INSTALL   (build time, once per deployment)
+────────────────────────────────────────────────────────────────
+  k6LoadTest.ts [1]   (WorkflowBuilder DSL)
+        │  registered in allWorkflowTemplates.ts [2]
+        ▼
+  makeTemplates [3]  ──►  k6-load-test.yaml
+        │  render+stage gradle task, then image COPY → /root/workflows [4]
+        ▼
+  helm install/upgrade  ──►  migrationsResources Job [5]  ──►  kubectl apply
+        ▼
+  WorkflowTemplate/k6-load-test   (lives in the cluster)
+        image ref ◄─ migration-image-config [6] ◄─ k6Image ◄─ migrations/k6
+
+  (alongside)  Dockerfile [7] bakes  scenarios/ + k6-config/  presets
+               into the  migrations/k6  image (built by gradle [7])
+
+                              │  submit a run
+                              ▼
+USAGE   (run time, from the migration console)
+────────────────────────────────────────────────────────────────
+  workflow k6 run … [8]          press  k  in  workflow manage [9]
+   (CLI)                          (TUI panel: launch · list · stop)
+        └───────────────┬───────────────┘
+                        ▼  submit_workflow_from_template [10]
+   Workflow   (workflowTemplateRef: k6-load-test)
+     args: scenario · configName · targetUrl · rate · overrides · …
+                        ▼
+               k6 pod   (migrations/k6)
+        ┌───────────────┴────────────────┐
+   HTTPS│                                │ OTLP :4317
+        ▼                                ▼
+  Capture Proxy                    otel-collector ─► Prometheus ─► Grafana [11]
+        │                                             (k6-load-test dashboard)
+        ▼
+  Kafka ─► … (migration pipeline)
+
+  observe / manage:   workflow k6 list · logs · stop [8]     (or the Argo UI)
+```
+
+**Where each step lives** (paths repo-relative; `mawa/` = `deployment/k8s/charts/aggregates/migrationAssistantWithArgo`):
+
+| # | Step / call | Source |
+|---|---|---|
+| 1 | `K6LoadTest` template definition | `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/k6LoadTest.ts` |
+| 2 | Registration in `AllWorkflowTemplates` | `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/allWorkflowTemplates.ts` |
+| 3 | Render to YAML (`writeAllWorkflows`) | `orchestrationSpecs/packages/migration-workflow-templates/src/makeTemplates.ts` (run via `makeTemplates.cjs`) |
+| 4 | Render+stage gradle task → image `COPY` | `migrationConsole/build.gradle` (`makeAndStageWorkflowTemplates`) → `migrationConsole/Dockerfile` (`COPY nodeStaging/workflowTemplates /root/workflows`) |
+| 5 | Install Job (`apply_workflows "workflows"`) | `mawa/templates/migrationsResources.yaml` |
+| 6 | Image ConfigMap (`k6Image` / `k6PullPolicy`) | `mawa/templates/resources/imageConfigmap.yaml` (values `images.k6` in `mawa/values.yaml`) |
+| 7 | k6 image build (`migrations/k6`) | `TrafficCapture/trafficLoadTest/Dockerfile` + `buildImages/build.gradle` (buildKit `serviceName: "k6"`) |
+| 8 | `workflow k6 run` / `list` / `logs` / `stop` (CLI) | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
+| 9 | TUI k6 panel (`k` → `action_k6_panel`) | `migrationConsole/lib/console_link/console_link/workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
+| 10 | `submit_workflow_from_template` (creates the `Workflow`) | `migrationConsole/lib/console_link/console_link/workflow/commands/argo_utils.py` |
+| 11 | Grafana dashboard ConfigMap | `mawa/templates/resources/k6/grafanaDashboard.yaml` |
+
+The template is **defined once** in TypeScript and installed the standard way; every **run** is a
+separate short-lived Argo `Workflow` submitted by name from the console (CLI or TUI) — decoupled
+from any migration workflow.
+
+---
+
 ## What gets deployed
 
-Enabling `k6.enabled` in the `migration-assistant` chart adds, gated and namespaced:
+The `k6-load-test` **WorkflowTemplate** is generated from `k6LoadTest.ts` and installed with every
+deployment (baked into the migration-console image, applied by the `migrationsResources` Job) —
+it's inert until a run is submitted. Enabling `k6.enabled` in the `migration-assistant` chart adds,
+gated and namespaced:
 
 | Resource | Purpose |
 |---|---|
-| `WorkflowTemplate/k6-load-test` | the reusable run definition (`argo submit --from` this) |
 | `ConfigMap/k6-load-test-dashboard` | Grafana dashboard (auto-imported by the kube-prometheus-stack sidecar) |
 | `Deployment/Service redis` + `webdis` | only when `k6.registry.enabled=true` — needed by the `mixed` & chaos scenarios |
 
