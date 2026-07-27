@@ -17,3 +17,5 @@ data:
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
   coordinatorClusterImage: "{{ .Values.images.coordinatorCluster.repository }}:{{ .Values.images.coordinatorCluster.tag }}"
   coordinatorClusterPullPolicy: "{{ .Values.images.coordinatorCluster.pullPolicy }}"
+  k6Image: "{{ include "migration.image" (dict "root" . "image" .Values.images.k6) }}"
+  k6PullPolicy: "{{ .Values.images.k6.pullPolicy }}"

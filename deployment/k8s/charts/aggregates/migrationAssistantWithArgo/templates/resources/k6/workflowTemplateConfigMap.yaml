@@ -1,0 +1,15 @@
+{{- if .Values.k6.enabled }}
+# Carries the example k6 WorkflowTemplate (files/k6/workflowTemplate.yaml) verbatim so the
+# apply Job can `kubectl apply` it after the Argo CRD exists. .Files.Get inserts the file as raw
+# data, so its Argo substitution expressions are NOT interpreted by Helm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-load-test-workflowtemplate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+data:
+  workflowTemplate.yaml: |
+{{ .Files.Get "files/k6/workflowTemplate.yaml" | indent 4 }}
+{{- end }}

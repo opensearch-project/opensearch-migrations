@@ -123,6 +123,17 @@ def buildKitProjects = [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
+        ],
+        [
+                // Load-test traffic generator (k6) for the Kubernetes/Argo integration.
+                // Bakes TrafficCapture/trafficLoadTest scenarios + configs into /scripts.
+                serviceName: "k6",
+                contextDir: "TrafficCapture/trafficLoadTest",
+                imageName:  "k6",
+                imageTag:   "latest",
+                buildArgs: [
+                        BASE_IMAGE: ptc.rewrite("docker.io/grafana/k6:latest"),
+                ]
         ]
 ]
 

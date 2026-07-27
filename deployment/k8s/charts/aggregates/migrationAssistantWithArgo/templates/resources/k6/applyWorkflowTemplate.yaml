@@ -1,0 +1,65 @@
+{{- if .Values.k6.enabled }}
+# Applies the k6 WorkflowTemplate after Argo's CRDs exist. Helm caches API discovery before hooks
+# run, so a plain templated WorkflowTemplate would fail on a fresh install; a post-install/upgrade
+# Job that waits for the CRD and kubectl-applies sidesteps that (same tactic as the otel
+# ServiceMonitor Job and migrationsResources). Runs at hook-weight 6 — after migrationsResources (5).
+# The template is labelled managed-by=<release>, so the existing pre-delete
+# `<release>-remove-argo-migration-templates` Job cleans it up on uninstall.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-apply-k6-workflowtemplate
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: apply-k6-workflowtemplate
+          operator: NotIn
+          values: [0]
+  template:
+    metadata:
+      labels:
+        app: apply-k6-workflowtemplate
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: Never
+      containers:
+        - name: apply-k6-workflowtemplate
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
+          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              set -eux
+              echo "Waiting for the Argo WorkflowTemplate CRD to be established..."
+              kubectl wait --for=condition=Established \
+                crd/workflowtemplates.argoproj.io --timeout=120s
+              echo "Applying the k6-load-test WorkflowTemplate..."
+              kubectl apply -n "{{ .Release.Namespace }}" -f /manifests/workflowTemplate.yaml
+              # Label so the standard pre-delete cleanup Job removes it on uninstall.
+              kubectl label -n "{{ .Release.Namespace }}" workflowtemplate.argoproj.io/k6-load-test \
+                managed-by="{{ .Release.Name }}" app=k6-load-test --overwrite
+              echo "k6-load-test WorkflowTemplate applied."
+          volumeMounts:
+            - name: k6-workflowtemplate
+              mountPath: /manifests
+              readOnly: true
+      volumes:
+        - name: k6-workflowtemplate
+          configMap:
+            name: k6-load-test-workflowtemplate
+{{- end }}
