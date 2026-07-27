@@ -62,7 +62,7 @@ export const K6LoadTest = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageK6Location, b.inputs.imageK6PullPolicy)
             .addResources({
                 requests: {cpu: "500m", memory: "512Mi"},
-                limits: {cpu: "2", memory: "1Gi"},
+                limits: {cpu: "2", memory: "4Gi"},
             })
             // grafana/k6's default ENTRYPOINT is ["k6"]; override with a POSIX-sh wrapper that
             // sources the preset, applies overrides in precedence order, then execs k6.
