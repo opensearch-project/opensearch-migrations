@@ -87,6 +87,12 @@ Options mirror the WorkflowTemplate parameter contract (see **Parameters** below
 `--control-enabled/--no-…`, `--override/-o KEY=VALUE` (repeatable), `--extra-args`. Omitted
 options keep the preset's value.
 
+**From the TUI:** in `workflow manage`, press **`k`** to open the k6 panel — it both **launches**
+a new run (scenario, config, target, rate/duration/vus, registry/control toggles, overrides box)
+and **lists the running** runs with per-run **Stop** (plus **Stop all** and a "delete after stop"
+toggle). It uses the identical submit/stop paths as `workflow k6`. k6 runs are standalone Argo
+Workflows, so launching or stopping one never affects the migration workflow you're managing.
+
 ---
 
 ## Run scenarios (raw `argo submit`)
@@ -138,7 +144,6 @@ argo logs -n ma @latest                                     # live logs of the n
 kubectl -n ma port-forward service/argo-server 8001:2746    # Argo UI at https://localhost:8001
 ```
 Metrics land in the existing Grafana (kube-prometheus-stack); open the **k6-load-test** dashboard.
-Metric names are identical to the POC (`http_req_duration_milliseconds_*`, `ingest_bulk_requests_total`, …).
 
 ---
 

@@ -16,6 +16,7 @@ from textual.widgets import Footer, Header, Static, Tree
 
 from .confirm_modal import ConfirmModal
 from .container_select_modal import ContainerSelectModal
+from .k6_panel_modal import K6PanelModal
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
@@ -442,6 +443,43 @@ class WorkflowTreeApp(App):
             self.push_screen(ConfirmModal(msg),
                              lambda confirmed: self._execute_approval(node) if confirmed else None)
 
+    def action_k6_panel(self) -> None:
+        """Open the k6 panel: launch a new run and/or stop currently-running ones.
+
+        k6 runs are standalone Argo Workflows; launching/stopping/failing one never affects the
+        migration workflow this TUI is managing. All actions are wrapped below so a k6-side error
+        only raises a notification — it can't disturb the managed workflow or the UI.
+        """
+        from ..commands.k6 import list_active_k6_runs
+        try:
+            runs = list_active_k6_runs(self._namespace)
+        except Exception as e:
+            self.notify(f"Could not list k6 runs: {e}", severity="error")
+            runs = []
+        self.push_screen(K6PanelModal(runs), self._on_k6_action)
+
+    def _on_k6_action(self, result: Optional[Dict]) -> None:
+        if not result:
+            return
+        from ..commands.k6 import build_k6_parameters, submit_k6_run
+        from ..commands.argo_utils import stop_workflow, delete_workflow
+        try:
+            if result.get("kind") == "launch":
+                name = submit_k6_run(self._namespace, build_k6_parameters(**result["fields"]))
+                self.notify(f"✅ Submitted k6 run: {name}")
+            elif result.get("kind") == "stop":
+                names = [n for n in result.get("names", []) if n]
+                stopped = sum(1 for n in names if stop_workflow(self._namespace, n))
+                if result.get("delete"):
+                    for n in names:
+                        delete_workflow(self._namespace, n)
+                suffix = " (deleted)" if result.get("delete") else ""
+                self.notify(f"⏹ Stopped {stopped}/{len(names)} k6 run(s){suffix}")
+        except ValueError as e:
+            self.notify(f"Invalid override: {e}", severity="error")
+        except Exception as e:
+            self.notify(f"k6 action failed: {e}", severity="error")
+
     def _execute_approval(self, node_data: Dict) -> None:
         try:
             res = self._argo_service.approve_step(self._namespace, self._workflow_name, node_data)
@@ -493,6 +531,7 @@ class WorkflowTreeApp(App):
 
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "manual_refresh", description="Refresh")
+        self.bind("k", "k6_panel", description="k6 load tests")
         self.bind("q", "quit", description="Quit")
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)

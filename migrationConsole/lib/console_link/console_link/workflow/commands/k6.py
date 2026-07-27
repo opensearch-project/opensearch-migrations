@@ -16,7 +16,7 @@ import time
 import click
 
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
-from ..services.workflow_service import WorkflowService
+from ..services.workflow_service import WorkflowService, ENDING_PHASES
 from .argo_utils import (
     submit_workflow_from_template,
     list_workflows,
@@ -64,6 +64,72 @@ def _k6_workflows(namespace, scenario=None):
     return list_workflows(namespace, label_selector=selector)
 
 
+def build_k6_parameters(scenario, config_name=None, target_url=None, rate=None, duration=None,
+                        vus=None, registry_enabled=None, control_enabled=None,
+                        overrides_text=None, extra_args=None):
+    """Map run inputs to the WorkflowTemplate parameter dict (shared by the CLI and the TUI).
+
+    Empty/None values are omitted so the preset's value is kept. `overrides_text` is a
+    newline-separated KEY=VALUE bag applied last; a line without '=' raises ValueError.
+    """
+    params = {"scenario": scenario, "configName": config_name or f"{scenario}-steady"}
+    if target_url:
+        params["targetUrl"] = target_url
+    if rate:
+        params["rate"] = rate
+    if duration:
+        params["duration"] = duration
+    if vus:
+        params["vus"] = vus
+    if registry_enabled is not None:
+        params["registryEnabled"] = str(registry_enabled).lower()
+    if control_enabled is not None:
+        params["controlEnabled"] = str(control_enabled).lower()
+    if extra_args:
+        params["extraArgs"] = extra_args
+    if overrides_text:
+        lines = [ln.strip() for ln in overrides_text.splitlines() if ln.strip()]
+        for ln in lines:
+            if '=' not in ln:
+                raise ValueError(f"override must be KEY=VALUE, got '{ln}'")
+        if lines:
+            params["overrides"] = "\n".join(lines)
+    return params
+
+
+def submit_k6_run(namespace, parameters):
+    """Submit a k6 run from the k6-load-test WorkflowTemplate. Returns the generated name.
+
+    The run is a **standalone** Argo Workflow: no `ownerReferences` back to any migration
+    workflow, its own `generateName`, and its own `app=k6-load-test` labels. Argo never
+    aggregates sibling Workflows, so a k6 run failing/stopping cannot fail a migration workflow.
+    """
+    return submit_workflow_from_template(
+        namespace, K6_TEMPLATE, parameters=parameters,
+        labels={"app": K6_APP_LABEL, "k6-scenario": parameters["scenario"]},
+        service_account=K6_SERVICE_ACCOUNT, generate_name=K6_GENERATE_NAME,
+    )
+
+
+def list_active_k6_runs(namespace):
+    """Active (non-terminal) k6 runs as UI-friendly dicts: name/scenario/phase/age."""
+    out = []
+    for wf in _k6_workflows(namespace):
+        status = wf.get("status", {})
+        phase = status.get("phase", "Unknown")
+        if phase in ENDING_PHASES:
+            continue
+        meta = wf.get("metadata", {})
+        out.append({
+            "name": meta.get("name", ""),
+            "scenario": meta.get("labels", {}).get("k6-scenario", "?"),
+            "phase": phase,
+            "age": _age(meta.get("creationTimestamp")),
+        })
+    out.sort(key=lambda r: r["name"])
+    return out
+
+
 @click.group(name="k6")
 def k6_group():
     """Submit and manage k6 load-test runs (Argo workflows)."""
@@ -103,40 +169,22 @@ def k6_run(ctx, scenario, config_name, target_url, rate, duration, vus,
       workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
       workflow k6 run --scenario mixed --registry-enabled -o INGEST_RATE=80 -o SEARCH_RATE=40
     """
-    config_name = config_name or f"{scenario}-steady"
-
-    # Validate + join the override bag (one KEY=VALUE per line, applied last by the workflow).
-    for kv in overrides:
-        if '=' not in kv:
-            click.echo(f"Error: --override must be KEY=VALUE, got '{kv}'", err=True)
-            ctx.exit(ExitCode.INVALID_INPUT.value)
-
-    parameters = {"scenario": scenario, "configName": config_name}
-    if target_url:
-        parameters["targetUrl"] = target_url
-    if rate:
-        parameters["rate"] = rate
-    if duration:
-        parameters["duration"] = duration
-    if vus:
-        parameters["vus"] = vus
-    if registry_enabled is not None:
-        parameters["registryEnabled"] = str(registry_enabled).lower()
-    if control_enabled is not None:
-        parameters["controlEnabled"] = str(control_enabled).lower()
-    if overrides:
-        parameters["overrides"] = "\n".join(overrides)
-    if extra_args:
-        parameters["extraArgs"] = extra_args
-
-    labels = {"app": K6_APP_LABEL, "k6-scenario": scenario}
+    try:
+        parameters = build_k6_parameters(
+            scenario=scenario, config_name=config_name, target_url=target_url,
+            rate=rate, duration=duration, vus=vus,
+            registry_enabled=registry_enabled, control_enabled=control_enabled,
+            overrides_text=("\n".join(overrides) if overrides else None), extra_args=extra_args,
+        )
+    except ValueError as e:
+        click.echo(f"Error: --override {e}", err=True)
+        ctx.exit(ExitCode.INVALID_INPUT.value)
+        return
+    config_name = parameters["configName"]
 
     try:
         load_k8s_config()
-        name = submit_workflow_from_template(
-            namespace, K6_TEMPLATE, parameters=parameters, labels=labels,
-            service_account=K6_SERVICE_ACCOUNT, generate_name=K6_GENERATE_NAME,
-        )
+        name = submit_k6_run(namespace, parameters)
     except Exception as e:
         click.echo(f"Error submitting k6 run: {e}", err=True)
         click.echo("\nIs the k6-load-test WorkflowTemplate installed? "
