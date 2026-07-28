@@ -398,9 +398,9 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
 
     reports {
         xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        xml.outputLocation = layout.buildDirectory.file("reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
+        html.outputLocation = layout.buildDirectory.dir("reports/jacoco/mergedReport/html")
     }
 
     doLast {
@@ -520,12 +520,12 @@ tasks.register('gatherJacocoExecForMerging', Sync) {
     description = 'Local troubleshooting, gathers coverage all exec files in build/jacocoMerged/*.exec into to be consumed by jacocoAggregateReport'
 
     from subprojects.collect { proj ->
-        fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
+        fileTree(dir: proj.layout.buildDirectory, include: 'jacoco/*.exec')
     }
-    into "$buildDir/jacocoMerged"
+    into layout.buildDirectory.dir("jacocoMerged")
 
     // Explicit outputs for incremental build support
-    outputs.dir("$buildDir/jacocoMerged")
+    outputs.dir(layout.buildDirectory.dir("jacocoMerged"))
 }
 
 tasks.register('mergeJacocoReports') {
