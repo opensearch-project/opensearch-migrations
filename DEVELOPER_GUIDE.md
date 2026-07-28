@@ -9,7 +9,7 @@
 - [Running Tests](#running-tests)
 - [Code Style](#code-style)
 - [Pre-Commit Hooks](#pre-commit-hooks)
-- [Publishing](#publishing)
+- [Publishing](#publishing-images)
 - [Development Environments](#development-environments)
   - [VSCode](#vscode)
     - [Python](#python)
