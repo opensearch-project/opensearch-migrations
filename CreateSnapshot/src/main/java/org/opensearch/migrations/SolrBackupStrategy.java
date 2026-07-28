@@ -549,7 +549,14 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+    public enum SolrTopology {
+        SOLR_CLOUD,
+        STANDALONE,
+        /** Reachable, but the response does not identify either topology. */
+        UNKNOWN
+    }
+
+    static SolrTopology detectTopology(String solrUrl, SolrHttpClient httpClient) {
         var listUrl = solrUrl + "/solr/admin/collections?action=LIST&wt=json";
         HttpResponse<String> response;
         try {
@@ -567,7 +574,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
         int status = response.statusCode();
         if (status == 200) {
-            return true;
+            return SolrTopology.SOLR_CLOUD;
         }
         if (status == 401 || status == 403) {
             // Access-controlled: can't read the Collections API to decide, so don't guess standalone.
@@ -575,10 +582,24 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 "Solr authentication/authorization failed (HTTP " + status + ") while detecting topology at "
                     + solrUrl + "; cannot determine SolrCloud vs standalone");
         }
-        // Reachable non-200 (standalone Solr returns HTTP 400 "not running in SolrCloud mode").
-        log.info("Solr topology detection: HTTP {} from Collections API at {} — treating as standalone",
+        if (status == 400) {
+            // Standalone answers the Collections API with HTTP 400 "not running in SolrCloud mode".
+            return SolrTopology.STANDALONE;
+        }
+        // 3xx, 404 (proxied base path), 5xx: reachable but uninformative — do not assume standalone.
+        log.info("Solr topology detection: HTTP {} from Collections API at {} — topology undetermined",
             status, solrUrl);
-        return false;
+        return SolrTopology.UNKNOWN;
+    }
+
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+        var topology = detectTopology(solrUrl, httpClient);
+        if (topology == SolrTopology.UNKNOWN) {
+            throw new SolrTopologyDetectionException(
+                "Could not determine SolrCloud vs standalone topology at " + solrUrl
+                    + "; the Collections API response was neither a SolrCloud nor a standalone reply");
+        }
+        return topology == SolrTopology.SOLR_CLOUD;
     }
 
     // ---- Collection / core discovery ----

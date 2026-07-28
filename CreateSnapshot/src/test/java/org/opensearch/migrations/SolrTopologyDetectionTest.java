@@ -7,8 +7,11 @@ import java.time.Duration;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,7 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Container-free unit tests for {@link SolrBackupStrategy#isSolrCloud}, covering the status/exception
+ * Container-free unit tests for {@link SolrBackupStrategy#detectTopology}, covering the status/exception
  * branches (auth, unreachable) that the live-container tests in TestCreateSnapshotSolr can't reproduce.
  */
 public class SolrTopologyDetectionTest {
@@ -44,17 +47,31 @@ public class SolrTopologyDetectionTest {
     @Test
     void http200_isSolrCloud() throws Exception {
         assertTrue(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200)));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200)),
+            is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
     }
 
     @Test
     void http400_isStandalone() throws Exception {
         // Standalone Solr answers the Collections API with HTTP 400 "not running in SolrCloud mode".
         assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(400)));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400)),
+            is(SolrBackupStrategy.SolrTopology.STANDALONE));
     }
 
-    @Test
-    void http404_isStandalone() throws Exception {
-        assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(404)));
+    @ParameterizedTest
+    @ValueSource(ints = {301, 302, 404, 500, 503})
+    void reachableButUninformativeStatus_isUnknown(int status) throws Exception {
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status)),
+            is(SolrBackupStrategy.SolrTopology.UNKNOWN));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {301, 302, 404, 500, 503})
+    void unknownTopology_throwsInsteadOfAssumingStandalone(int status) throws Exception {
+        var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
+            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(status)));
+        assertThat(ex.getMessage(), containsString(URL));
     }
 
     @Test
