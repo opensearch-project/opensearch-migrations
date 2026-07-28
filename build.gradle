@@ -68,7 +68,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
 
     }
@@ -78,7 +78,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
     }
     json {
@@ -135,7 +135,7 @@ subprojects {
                         'org.opensearch',
                         '',
                         '\\#')
-                indentWithSpaces()
+                leadingTabsToSpaces()
                 endWithNewline()
                 removeUnusedImports()
             }
