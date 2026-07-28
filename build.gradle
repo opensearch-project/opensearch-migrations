@@ -141,12 +141,12 @@ subprojects {
             }
         }
 
-        tasks.withType(Test) {
+        tasks.withType(Test).configureEach {
             // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
             dependsOn project.javadoc
         }
         if (!sourceSets.test.allSource.files.isEmpty()) {
-            tasks.withType(Test) {
+            tasks.withType(Test).configureEach {
                 testLogging {
                     events = ["passed", "skipped", "failed"]
                     exceptionFormat = "full"
@@ -242,7 +242,7 @@ subprojects {
                 dependsOn isolatedTest
             }
         } else {
-            tasks.withType(Test) {
+            tasks.withType(Test).configureEach {
                 jacoco {
                     enabled = false
                 }
