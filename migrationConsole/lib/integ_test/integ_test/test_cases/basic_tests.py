@@ -5,6 +5,7 @@ import time
 import uuid
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
+from .cdc_base import wait_for_proxy_ready
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.workflow_template = "cdc-e2e-migration-with-clusters"
         self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
         self.parameters["skip-approvals"] = "false"
+        self.parameters["require-begin-approval"] = "true"
 
     def prepare_workflow_snapshot_and_migration_config(self):
         self.workflow_snapshot_and_migration_config = [{
@@ -133,6 +135,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
 
     def _approval_gate_names(self):
         return [
+            "begin",
             "captureproxysetup.capture-proxy",
             f"evaluatemetadata.{self.snapshot_migration_name}",
             f"migratemetadata.{self.snapshot_migration_name}",
@@ -145,15 +148,67 @@ class Test0003ApprovalGateIntegration(MATestBase):
             self._assert_gate_prerequisite_completed(gate_name)
             self._approve_step_gate(gate_name)
             self._wait_for_step_gate(gate_name, "approved", timeout_seconds)
+            if gate_name.startswith("captureproxysetup."):
+                wait_for_proxy_ready(self.argo_service.namespace, timeout_seconds)
 
     def _assert_gate_prerequisite_completed(self, gate_name: str):
-        if gate_name.startswith("evaluatemetadata."):
+        if gate_name == "begin":
+            self._assert_capture_proxy_not_started()
+        elif gate_name.startswith("captureproxysetup."):
+            self._assert_capture_proxy_setup_pending()
+        elif gate_name.startswith("evaluatemetadata."):
             self._assert_workflow_show_output_available("evaluatemetadata")
         elif gate_name.startswith("migratemetadata."):
             self._assert_workflow_show_output_available("migratemetadata")
             self._assert_document_backfill_not_started()
         elif gate_name.startswith("documentbackfill."):
             self._assert_document_backfill_completed()
+
+    def _get_capture_proxy(self):
+        result = subprocess.run(
+            [
+                "kubectl", "get", "captureproxy", "capture-proxy",
+                "-n", self.argo_service.namespace,
+                "-o", "json",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Failed to inspect CaptureProxy "
+                f"(rc={result.returncode}). stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise AssertionError(
+                f"Failed to parse CaptureProxy JSON: {e}. "
+                f"stdout={result.stdout!r}"
+            ) from e
+
+    def _assert_capture_proxy_not_started(self):
+        capture_proxy = self._get_capture_proxy()
+        phase = capture_proxy.get("status", {}).get("phase")
+        status = capture_proxy.get("status", {})
+        if phase != "Created":
+            raise AssertionError(
+                f"CaptureProxy phase before begin approval was {phase!r}, expected 'Created': {status}"
+            )
+        if status.get("configChecksum"):
+            raise AssertionError(f"CaptureProxy configChecksum was set before begin approval: {status}")
+        if status.get("serviceEndpoint") or status.get("loadBalancerEndpoint"):
+            raise AssertionError(f"CaptureProxy endpoint was set before begin approval: {status}")
+        logger.info("CaptureProxy is still Created before begin approval")
+
+    def _assert_capture_proxy_setup_pending(self):
+        capture_proxy = self._get_capture_proxy()
+        phase = capture_proxy.get("status", {}).get("phase")
+        if phase != "Pending":
+            raise AssertionError(
+                f"CaptureProxy phase before proxy setup approval was {phase!r}, expected 'Pending': "
+                f"{capture_proxy.get('status')}"
+            )
+        logger.info("CaptureProxy is Pending before proxy setup approval")
 
     def _assert_workflow_show_output_available(self, task_name: str):
         result = subprocess.run(

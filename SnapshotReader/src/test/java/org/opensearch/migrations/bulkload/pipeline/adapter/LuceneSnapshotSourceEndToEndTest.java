@@ -8,6 +8,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.SupportedClusters;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
@@ -17,7 +18,9 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +33,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -43,6 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 public class LuceneSnapshotSourceEndToEndTest {
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
+    private static final String SNAPSHOT_V1 = "test_snapshot_v1";
+    private static final String SNAPSHOT_V2 = "test_snapshot_v2";
     private static final String REPO_NAME = "test_repo";
     private static final String INDEX_NAME = "pipeline_source_test";
 
@@ -178,6 +184,101 @@ public class LuceneSnapshotSourceEndToEndTest {
                 var resumed = source2.readDocuments(partition, 2).collectList().block();
                 assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));
                 assertThat(resumed.get(0).id(), equalTo(allDocs.get(2).id()));
+            } finally {
+                deleteDir(workDir2);
+            }
+        } finally {
+            deleteDir(workDir);
+        }
+    }
+
+    /**
+     * Creates two snapshots in the same repo: v1 with docs 1-3, then v2 after adding docs 4-5.
+     * A delta read of v2-relative-to-v1 therefore yields the additions (docs 4-5), which is what
+     * the delta-mode resume test consumes.
+     */
+    private SnapshotExtractor createDeltaSnapshots(ContainerVersion sourceVersion) throws Exception {
+        String cacheKey = sourceVersion.getVersion() + "-pipeline-source-delta";
+        Path snapshotDir = localDirectory.toPath();
+
+        if (fixtureCache.restoreIfCached(cacheKey, snapshotDir)) {
+            return SnapshotExtractor.forLocalSnapshot(snapshotDir, sourceVersion.getVersion());
+        }
+
+        try (var cluster = new SearchClusterContainer(sourceVersion)) {
+            cluster.start();
+            var ops = new ClusterOperations(cluster);
+
+            ops.createIndex(INDEX_NAME, "{"
+                + "\"settings\": {"
+                + "  \"number_of_shards\": 1,"
+                + "  \"number_of_replicas\": 0"
+                + "}"
+                + "}");
+            ops.createDocument(INDEX_NAME, "doc1", "{\"title\": \"First\", \"value\": 1}");
+            ops.createDocument(INDEX_NAME, "doc2", "{\"title\": \"Second\", \"value\": 2}");
+            ops.createDocument(INDEX_NAME, "doc3", "{\"title\": \"Third\", \"value\": 3}");
+            ops.post("/" + INDEX_NAME + "/_refresh", null);
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
+            var client = clientFactory.determineVersionAndCreate();
+
+            SnapshotRunner.runAndWaitForCompletion(new SnapshotCreator(
+                SNAPSHOT_V1, REPO_NAME, client, RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
+                snapshotContext.createSnapshotCreateContext()));
+
+            // Add two more docs and snapshot again — these become the delta additions.
+            ops.createDocument(INDEX_NAME, "doc4", "{\"title\": \"Fourth\", \"value\": 4}");
+            ops.createDocument(INDEX_NAME, "doc5", "{\"title\": \"Fifth\", \"value\": 5}");
+            ops.post("/" + INDEX_NAME + "/_refresh", null);
+
+            SnapshotRunner.runAndWaitForCompletion(new SnapshotCreator(
+                SNAPSHOT_V2, REPO_NAME, client, RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
+                snapshotContext.createSnapshotCreateContext()));
+
+            cluster.copySnapshotData(localDirectory.toString());
+            fixtureCache.store(cacheKey, snapshotDir);
+        }
+
+        return SnapshotExtractor.forLocalSnapshot(snapshotDir, sourceVersion.getVersion());
+    }
+
+    @ParameterizedTest(name = "resume from offset in delta mode on {0}")
+    @MethodSource("supportedSources")
+    void resumeFromOffsetInDeltaModeOnRealSnapshot(ContainerVersion sourceVersion) throws Exception {
+        // Delta mode resumes via Flux.skip(offset) over the delta stream rather than the
+        // segment-base binary search the full-read path uses, so it needs its own coverage:
+        // the delta stream order must be stable across reads for the skip to land on the same doc.
+        var extractor = createDeltaSnapshots(sourceVersion);
+        var rootCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+        Path workDir = Files.createTempDirectory("pipeline_source_delta_resume");
+        try {
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir)
+                .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
+                    () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
+                .build();
+            var partition = source.listPartitions(INDEX_NAME).get(0);
+
+            var allDelta = source.readDocuments(partition, 0).collectList().block();
+            // Need at least two delta docs for the resume-from-offset-1 assertion to be meaningful.
+            assertThat(allDelta.size(), greaterThanOrEqualTo(2));
+
+            Path workDir2 = Files.createTempDirectory("pipeline_source_delta_resume2");
+            try {
+                var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir2)
+                    .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
+                        () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
+                    .build();
+                source2.listPartitions(INDEX_NAME); // populate previous-shard cache for delta mode
+                var resumed = source2.readDocuments(partition, 1).collectList().block();
+
+                // Resuming from offset 1 must yield exactly the full delta stream minus its first
+                // doc, in the same order — proving the skip lands deterministically.
+                var expectedSuffixIds = allDelta.stream().skip(1).map(Document::id).toList();
+                var resumedIds = resumed.stream().map(Document::id).toList();
+                assertThat(resumedIds, equalTo(expectedSuffixIds));
             } finally {
                 deleteDir(workDir2);
             }

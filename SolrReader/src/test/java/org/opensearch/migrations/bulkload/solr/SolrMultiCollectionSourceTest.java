@@ -157,6 +157,41 @@ class SolrMultiCollectionSourceTest {
         assertThat(preparerCalls.get(), equalTo(1));
     }
 
+    @Test
+    void bareCloudLayout_resolvesDataAtRoot_whenCollectionNameIsNotASubdir() throws IOException {
+        // Bare SolrCloud 7: shards live at the backup root; the collection name is not a subdir.
+        for (var shard : new String[]{"snapshot.shard1", "snapshot.shard2"}) {
+            var shardDir = tempDir.resolve(shard);
+            Files.createDirectories(shardDir);
+            Files.createFile(shardDir.resolve("segments_1"));
+        }
+        var schemas = Map.<String, JsonNode>of("nyc_taxis", schemaWrapper());
+
+        try (var source = new SolrMultiCollectionSource(
+                tempDir, schemas, null, null, 7, Map.of("nyc_taxis", ""))) {
+            var partitions = source.listPartitions("nyc_taxis");
+            assertThat(partitions.size(), equalTo(2));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void bareStandaloneLayout_resolvesDataUnderSnapshotDir() throws IOException {
+        var snapshotDir = tempDir.resolve("snapshot.nyc_taxis");
+        Files.createDirectories(snapshotDir);
+        Files.createFile(snapshotDir.resolve("segments_1"));
+        var schemas = Map.<String, JsonNode>of("nyc_taxis", schemaWrapper());
+
+        try (var source = new SolrMultiCollectionSource(
+                tempDir, schemas, null, null, 7, Map.of("nyc_taxis", "snapshot.nyc_taxis"))) {
+            var partitions = source.listPartitions("nyc_taxis");
+            assertThat(partitions.size(), equalTo(1));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static void seedSingleShardBackup(Path collDir) throws IOException {
         Files.createDirectories(collDir);
         Files.createFile(collDir.resolve("segments_1"));

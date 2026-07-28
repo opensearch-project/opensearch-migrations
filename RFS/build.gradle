@@ -19,6 +19,9 @@ dependencies {
     api project(':SearchSnapshotExtractor')
     implementation project(':awsUtilities')
     implementation project(':coreUtilities')
+    // api (not implementation): RotatingGzipS3ObjectWriter types appear in S3FailedDocumentStreamSink's
+    // public builder/uploader API, so consumers (e.g. DocumentsFromSnapshotMigration) compile against them.
+    api project(':s3Common')
     implementation project(':transformation')
 
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
@@ -76,6 +79,8 @@ dependencies {
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.localstack
     testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testRuntimeOnly libs.junit.jupiter.engine
