@@ -1,3 +1,5 @@
+import org.gradle.internal.jvm.Jvm
+
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
@@ -37,7 +39,7 @@ tasks.register('generateGraalPyLauncher') {
     outputs.file graalPyScript
     doLast {
         def cp = configurations.graalPyRuntime.asPath
-        def java = org.gradle.internal.jvm.Jvm.current().javaExecutable.absolutePath
+        def java = Jvm.current().javaExecutable.absolutePath
         graalPyScript.text = """\
 #!/usr/bin/env bash
 ${java} --enable-native-access=ALL-UNNAMED -classpath ${cp} com.oracle.graal.python.shell.GraalPythonMain --python.Executable="\$0" "\$@"
