@@ -20,11 +20,6 @@ welcome feedback and contributions to optimize costs.
 If you're looking to use EKS as your Kubernetes cluster, follow the
 [instructions here](aws/README.md).
 
-### AWS CDK Resources
-
-If you're looking for the CDK resources for ECS deployments, read
-[AWS CDK Deployment Resources](../cdk/opensearch-service-migration/README.md).
-
 ### GKE
 
 If you're looking to use Google Kubernetes Engine (GKE) as your Kubernetes cluster,
@@ -44,11 +39,6 @@ helm install --create-namespace -n ma ma \
 
 GCS snapshot repositories are configured per-workflow at workflow-submission time (via the `gcs` snapshot type in the
 workflow config) rather than at Helm-install time, in the same way S3 repositories are configured for EKS deployments.
-
-### Migration Assistant Solution
-
-Details regarding the deployment of the Migration Assistant solution can be found in
-[Migration Assistant Solution Deployment](../migration-assistant-solution/README.md).
 
 ### Local Deployment with kind
 
