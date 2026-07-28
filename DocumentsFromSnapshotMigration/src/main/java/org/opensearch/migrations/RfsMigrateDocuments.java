@@ -607,17 +607,7 @@ public class RfsMigrateDocuments {
         var resolvedSessionId = resolveSessionId(arguments, workerId);
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
-        if (failedDocumentStreamSink != null) {
-            log.atInfo().setMessage("failed document stream enabled: sessionId={} location={}")
-                .addArgument(resolvedSessionId)
-                .addArgument(failedDocumentStreamSink.getLocation())
-                .log();
-            // Expose the failed document stream location to the orchestrator on a dedicated line that the
-            // workflow can capture as an output parameter (see Argo template).
-            System.out.println("RFS_FAILED_DOCUMENT_STREAM_LOCATION=" + failedDocumentStreamSink.getLocation());
-        } else {
-            log.atInfo().setMessage(failedDocumentStreamDisabledReason(arguments)).log();
-        }
+        logFailedDocumentStreamStatus(failedDocumentStreamSink, arguments, resolvedSessionId);
 
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
             case ALWAYS -> true;
@@ -954,15 +944,25 @@ public class RfsMigrateDocuments {
         return "worker-" + workerId;
     }
 
-    /**
-     * The info-log reason a failed document stream sink was not built, distinguishing an explicit opt-out
-     * from a missing bucket. Extracted so the branch is unit-testable without running the full migration.
-     */
+    // Keyed by whether the stream was enabled.
+    private static final Map<Boolean, String> FAILED_DOCUMENT_STREAM_DISABLED_REASONS = Map.of(
+        Boolean.FALSE, "failed document stream disabled: opted out via --failed-document-stream-enabled=false",
+        Boolean.TRUE, "failed document stream disabled: no --failed-document-stream-s3-bucket configured");
+
     static String failedDocumentStreamDisabledReason(Args arguments) {
-        if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
-            return "failed document stream disabled: opted out via --failed-document-stream-enabled=false";
+        return FAILED_DOCUMENT_STREAM_DISABLED_REASONS.get(
+            arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled);
+    }
+
+    static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, Args arguments, String sessionId) {
+        if (sink == null) {
+            log.atInfo().setMessage(failedDocumentStreamDisabledReason(arguments)).log();
+            return;
         }
-        return "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
+        log.atInfo().setMessage("failed document stream enabled: sessionId={} location={}")
+            .addArgument(sessionId)
+            .addArgument(sink.getLocation())
+            .log();
     }
 
     /**

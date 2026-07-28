@@ -27,7 +27,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -134,6 +136,24 @@ class RfsMigrateDocumentsHelpersTest {
 
         assertThat(RfsMigrateDocuments.failedDocumentStreamDisabledReason(args),
             equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+    }
+
+    @Test
+    void logFailedDocumentStreamStatus_reportsDisabledWhenSinkAbsent() {
+        var args = new RfsMigrateDocuments.Args();
+        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(null, args, "sess-A"));
+    }
+
+    @Test
+    void logFailedDocumentStreamStatus_emitsLocationWhenSinkPresent() {
+        var args = new RfsMigrateDocuments.Args();
+        var sink = mock(FailedDocumentStreamSink.class);
+        when(sink.getLocation()).thenReturn("s3://bucket/prefix");
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(sink, args, "sess-A"));
+        verify(sink, atLeastOnce()).getLocation();
     }
 
     @Test
