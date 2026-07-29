@@ -12,7 +12,7 @@ import reactor.core.publisher.Mono;
  */
 public interface ShardDocCountSink extends AutoCloseable {
 
-    Mono<Void> write(ShardDocCountRecord record);
+    Mono<Void> write(ShardDocCountRecord countRecord);
 
     Mono<Void> flush();
 

@@ -88,14 +88,14 @@ public class S3ShardDocCountSink implements ShardDocCountSink {
     }
 
     @Override
-    public Mono<Void> write(ShardDocCountRecord record) {
+    public Mono<Void> write(ShardDocCountRecord countRecord) {
         if (closeRequested.get()) {
             return Mono.error(new IllegalStateException("S3ShardDocCountSink is closed"));
         }
         var result = new CompletableFuture<Void>();
         runOnWorker(() -> {
             try {
-                var objectFuture = writer.write(record);
+                var objectFuture = writer.write(countRecord);
                 // The append is buffered; durability is gated by flush(). A synchronous failure
                 // surfaces here and is also retained so the gating flush() fails again.
                 if (objectFuture.isCompletedExceptionally()) {

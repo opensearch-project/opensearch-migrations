@@ -59,7 +59,7 @@ class S3ShardDocCountSinkTest {
         }
     }
 
-    private static ShardDocCountRecord record(String index, int shard, long total) {
+    private static ShardDocCountRecord countRecord(String index, int shard, long total) {
         return ShardDocCountRecord.builder()
             .sessionId("sess-1")
             .workerId("worker-1")
@@ -91,8 +91,8 @@ class S3ShardDocCountSinkTest {
         try (var s = sink(uploader)) {
             Assertions.assertEquals("s3://my-bucket/counts/session=sess-1/", s.getLocation(),
                 "location must point at the session prefix and normalize the missing trailing slash");
-            s.write(record("idx", 0, 5)).block();
-            s.write(record("idx", 1, 7)).block();
+            s.write(countRecord("idx", 0, 5)).block();
+            s.write(countRecord("idx", 1, 7)).block();
             s.flush().block();
         }
 
@@ -110,7 +110,7 @@ class S3ShardDocCountSinkTest {
     void keyLayoutIsSessionAndWorkerScoped() throws Exception {
         var uploader = new CapturingUploader();
         try (var s = sink(uploader)) {
-            s.write(record("idx", 0, 1)).block();
+            s.write(countRecord("idx", 0, 1)).block();
             s.flush().block();
         }
         Assertions.assertEquals(1, uploader.keys.size());
@@ -125,7 +125,7 @@ class S3ShardDocCountSinkTest {
         var uploader = new CapturingUploader();
         uploader.fail = true;
         try (var s = sink(uploader)) {
-            s.write(record("idx", 0, 5)).block();
+            s.write(countRecord("idx", 0, 5)).block();
             // The gating flush must surface the upload failure. Swallowing it here would let the
             // caller mark the work item complete and silently lose the count.
             Assertions.assertThrows(Exception.class, () -> s.flush().block(),
@@ -139,7 +139,7 @@ class S3ShardDocCountSinkTest {
         var s = sink(uploader);
         s.close();
         Assertions.assertThrows(IllegalStateException.class,
-            () -> s.write(record("idx", 0, 1)).block(),
+            () -> s.write(countRecord("idx", 0, 1)).block(),
             "writes after close must fail rather than being silently dropped");
     }
 
@@ -159,7 +159,7 @@ class S3ShardDocCountSinkTest {
             .region("us-east-1").uploader(uploader.asUploader()).build();
         try (s) {
             Assertions.assertEquals("s3://b/session=s/", s.getLocation());
-            s.write(record("idx", 0, 1)).block();
+            s.write(countRecord("idx", 0, 1)).block();
             s.flush().block();
         }
         Assertions.assertTrue(uploader.keys.get(0).startsWith("session=s/worker=w/"),

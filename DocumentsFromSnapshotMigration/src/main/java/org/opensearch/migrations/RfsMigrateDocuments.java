@@ -57,11 +57,11 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
-import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
-import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.doccount.S3ShardDocCountSink;
 import org.opensearch.migrations.reindexer.doccount.ShardDocCountRecord;
 import org.opensearch.migrations.reindexer.doccount.ShardDocCountSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -323,32 +323,14 @@ public class RfsMigrateDocuments {
 
     }
 
-    /**
-     * The count is always computed and logged; these args only control whether it is additionally
-     * written to S3. Enabled when --shard-doc-count-s3-bucket is provided.
-     */
     public static class ShardDocCountArgs {
         @Parameter(required = false,
-            names = { "--shard-doc-count-s3-bucket" },
-            description = "S3 bucket for durable per-shard live document count records. When unset, counts are "
-                + "only logged. One record is written per shard, so volume is bounded by shard count.")
-        public String shardDocCountS3Bucket = null;
-
-        @Parameter(required = false,
             names = { "--shard-doc-count-s3-prefix" },
-            description = "S3 key prefix under the shard doc count bucket. Records are written to "
-                + "<prefix>/session=<sessionId>/worker=<workerId>/... Default: \"rfs-shard-doc-counts/\".")
+            description = "S3 key prefix for per-shard live document count records, written under the same "
+                + "bucket/region/endpoint already resolved for the failed document stream. Records land at "
+                + "<prefix>/session=<sessionId>/worker=<workerId>/... One record per shard, so volume is bounded "
+                + "by shard count. Counts are always logged regardless of this setting.")
         public String shardDocCountS3Prefix = "rfs-shard-doc-counts/";
-
-        @Parameter(required = false,
-            names = { "--shard-doc-count-s3-region" },
-            description = "AWS region for the shard doc count bucket. Defaults to the same region as --s3-region when present.")
-        public String shardDocCountS3Region = null;
-
-        @Parameter(required = false,
-            names = { "--shard-doc-count-s3-endpoint" },
-            description = "Optional S3 endpoint override for shard doc count uploads (e.g. for localstack in tests).")
-        public String shardDocCountS3Endpoint = null;
     }
 
     /**
@@ -953,7 +935,7 @@ public class RfsMigrateDocuments {
         }
         var workerId = ProcessHelpers.getNodeInstanceName();
         return (index, shard, total, thisGen, priorGen) -> {
-            var record = ShardDocCountRecord.builder()
+            var countRecord = ShardDocCountRecord.builder()
                 .workerId(workerId)
                 .indexName(index)
                 .shardNumber(shard)
@@ -963,7 +945,7 @@ public class RfsMigrateDocuments {
                 .shardComplete(true)
                 .timestamp(Instant.now().toString())
                 .build();
-            sink.write(record).then(sink.flush()).block(Duration.ofMinutes(5));
+            sink.write(countRecord).then(sink.flush()).block(Duration.ofMinutes(5));
         };
     }
 
@@ -1071,28 +1053,25 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Returns null when --shard-doc-count-s3-bucket is unset. Region and endpoint fall back to the
-     * snapshot's --s3-region / --s3-endpoint so a custom-S3 deployment (LocalStack/MinIO) does not
-     * silently upload to the default AWS endpoint while snapshot reads use the override.
+     * Reuses the bucket/region/endpoint already resolved for the failed document stream, so counts land
+     * in the deployment's artifacts bucket without a second set of S3 flags. Returns null only when no
+     * bucket is resolvable at all, in which case counts are still logged.
      */
     static ShardDocCountSink buildShardDocCountSink(Args arguments, String workerId, String sessionId) {
-        String bucket = arguments.shardDocCountArgs.shardDocCountS3Bucket;
+        String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
         if (bucket == null || bucket.isBlank()) {
             return null;
         }
-        var region = arguments.shardDocCountArgs.shardDocCountS3Region != null
-            ? arguments.shardDocCountArgs.shardDocCountS3Region
+        var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
             : arguments.s3Region;
         if (region == null) {
-            throw new ParameterException(
-                "--shard-doc-count-s3-region (or --s3-region) is required when --shard-doc-count-s3-bucket is set");
+            return null;
         }
-        log.atInfo().setMessage("shard doc count config: region={} bucket={}")
-            .addArgument(region).addArgument(bucket).log();
 
         var s3ClientBuilder = S3AsyncClient.builder().region(Region.of(region));
-        var endpoint = arguments.shardDocCountArgs.shardDocCountS3Endpoint != null
-            ? arguments.shardDocCountArgs.shardDocCountS3Endpoint
+        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
             : arguments.endpoint;
         if (endpoint != null && !endpoint.isBlank()) {
             s3ClientBuilder.endpointOverride(URI.create(endpoint));
