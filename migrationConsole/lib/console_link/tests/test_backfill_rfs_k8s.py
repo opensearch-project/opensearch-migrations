@@ -170,16 +170,16 @@ def test_k8s_rfs_get_status_deep_check(k8s_rfs_backfill, mocker):
     assert str(total_shards) in value.value[1]
 
 
-def test_k8s_rfs_get_status_threads_failed_document_count(k8s_rfs_backfill, mocker):
-    # Count must reach get_detailed_status on the K8s path too.
+def test_k8s_rfs_get_status_threads_has_failed_documents(k8s_rfs_backfill, mocker):
+    # Presence must reach get_detailed_status on the K8s path too.
     mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
                                  autospec=True, return_value="detail")
 
-    k8s_rfs_backfill.get_status(failed_document_count=3)
+    k8s_rfs_backfill.get_status(has_failed_documents=True)
 
-    assert mock_detailed.call_args.kwargs["failed_document_count"] == 3
+    assert mock_detailed.call_args.kwargs["has_failed_documents"] is True
 
 
 def test_k8s_rfs_deep_status_check_failure(k8s_rfs_backfill, mocker, caplog):

@@ -291,14 +291,14 @@ status_json=$(console --config-file=/config/migration_services.yaml --json backf
 status=$(echo "$status_json" | jq -r '.status')
 
 failed_document_stream_loc=$(echo "$status_json" | jq -r '.failed_document_stream_location // empty')
-failed_document_stream_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
+failed_documents_present=$(echo "$status_json" | jq -r '.failed_documents_present | tostring')
 failed_document_stream_suffix=""
 if [[ -n "$failed_document_stream_loc" ]]; then
-    if [[ -n "$failed_document_stream_count" && "$failed_document_stream_count" != "null" ]]; then
-        failed_document_stream_suffix="; failed document stream: $failed_document_stream_count failed doc(s) at $failed_document_stream_loc"
-    else
-        failed_document_stream_suffix="; failed document stream location: $failed_document_stream_loc (count unavailable)"
-    fi
+    case "$failed_documents_present" in
+        true)  failed_document_stream_suffix="; failed documents recorded at $failed_document_stream_loc" ;;
+        false) ;;
+        *)     failed_document_stream_suffix="; failed document stream location: $failed_document_stream_loc (unavailable)" ;;
+    esac
 fi
 
 # Check if initializing

@@ -319,8 +319,8 @@ def test_get_detailed_status_obj_completed_with_failed_documents(env_with_cluste
     create_working_state_index(target_cluster)
     create_all_completed_working_state(target_cluster)
 
-    with_failures = get_detailed_status_obj(target_cluster, failed_document_count=3)
+    with_failures = get_detailed_status_obj(target_cluster, has_failed_documents=True)
     assert with_failures.status == StepStateWithPause.COMPLETED_WITH_ERRORS
 
-    without_failures = get_detailed_status_obj(target_cluster, failed_document_count=0)
+    without_failures = get_detailed_status_obj(target_cluster, has_failed_documents=False)
     assert without_failures.status == StepStateWithPause.COMPLETED
