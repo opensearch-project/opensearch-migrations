@@ -218,14 +218,23 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
+            // shardLiveLuceneDocs is the whole shard, matching _cat/indices docs.count: nested
+            // children are separate Lucene documents and are counted. The other figures cover only
+            // this lease generation, so they are named accordingly -- a shard that outlives its
+            // lease is reported once per generation and the values must not be summed.
+            // -1 means the source cannot report the count cheaply.
+            long shardLiveLuceneDocs = documentSource.countLiveDocuments(partition).orElse(-1L);
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
+                .setMessage("Partition migration stats: index={}, shard={}, docsThisGeneration={}, "
+                    + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
+                    + "shardLiveLuceneDocs={}")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
+                .addArgument(shardLiveLuceneDocs)
                 .log();
 
             var error = migrationError.get();
