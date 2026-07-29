@@ -81,11 +81,12 @@ public class DocumentMigrationBootstrap {
      * implementation that persists the count can fail the shard and let a successor re-emit.
      */
     @Builder.Default
-    private final ShardDocCountReporter shardDocCountReporter = (index, shard, total, thisGen, priorGen) -> {};
+    private final ShardDocCountReporter shardDocCountReporter =
+        (index, shard, total, luceneTotal, thisGen, priorGen) -> {};
 
     @FunctionalInterface
     public interface ShardDocCountReporter {
-        void report(String indexName, int shardNumber, long liveDocCount,
+        void report(String indexName, int shardNumber, long liveDocCount, long liveLuceneDocCount,
                     long docsThisGeneration, long docsPriorGenerations);
     }
 
@@ -231,36 +232,35 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
-            log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
-                .addArgument(wi.getIndexName())
-                .addArgument(wi.getShardNumber())
-                .addArgument(totalDocsMigrated::get)
-                .addArgument(totalBytesMigrated::get)
-                .addArgument(batchCount::get)
-                .addArgument(durationMs)
-                .log();
-
             var error = migrationError.get();
             if (error != null) {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
 
-            // Comparable to the source's <index>/_count for a completed shard: nested children are
-            // read but never emitted, so they are excluded here and from _count alike.
-            long liveDocCount = docsAlreadyEmitted + totalDocsMigrated.get();
+            // shardMigratedDocs spans every lease generation, so on a completed shard it is
+            // comparable to the source's <index>/_count: nested children are read but never emitted
+            // and so are excluded from both. shardLiveLuceneDocs counts them, matching
+            // _cat/indices docs.count. Both are whole-shard; the docsThisGeneration/bytes/batches
+            // figures cover only this generation. -1 means the source cannot report the count.
+            long shardMigratedDocs = docsAlreadyEmitted + totalDocsMigrated.get();
+            long shardLiveLuceneDocs = documentSource.countLiveDocuments(partition).orElse(-1L);
             log.atInfo()
-                .setMessage("Shard doc count: index={}, shard={}, liveDocCount={}, "
-                    + "docsThisGeneration={}, docsPriorGenerations={}")
+                .setMessage("Partition migration stats: index={}, shard={}, shardMigratedDocs={}, "
+                    + "shardLiveLuceneDocs={}, docsThisGeneration={}, docsPriorGenerations={}, "
+                    + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
-                .addArgument(liveDocCount)
+                .addArgument(shardMigratedDocs)
+                .addArgument(shardLiveLuceneDocs)
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(docsAlreadyEmitted)
+                .addArgument(totalBytesMigrated::get)
+                .addArgument(batchCount::get)
+                .addArgument(durationMs)
                 .log();
-            shardDocCountReporter.report(wi.getIndexName(), wi.getShardNumber(), liveDocCount,
-                totalDocsMigrated.get(), docsAlreadyEmitted);
+            shardDocCountReporter.report(wi.getIndexName(), wi.getShardNumber(), shardMigratedDocs,
+                Math.max(0L, shardLiveLuceneDocs), totalDocsMigrated.get(), docsAlreadyEmitted);
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());

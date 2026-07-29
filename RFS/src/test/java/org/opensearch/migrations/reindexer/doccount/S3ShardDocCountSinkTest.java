@@ -60,6 +60,11 @@ class S3ShardDocCountSinkTest {
     }
 
     private static ShardDocCountRecord countRecord(String index, int shard, long total) {
+        // Lucene total exceeds the root total, as it does on any shard with nested documents.
+        return countRecord(index, shard, total, total * 3);
+    }
+
+    private static ShardDocCountRecord countRecord(String index, int shard, long total, long luceneTotal) {
         return ShardDocCountRecord.builder()
             .sessionId("sess-1")
             .workerId("worker-1")
@@ -67,6 +72,7 @@ class S3ShardDocCountSinkTest {
             .indexName(index)
             .shardNumber(shard)
             .liveDocCount(total)
+            .liveLuceneDocCount(luceneTotal)
             .docsThisGeneration(total)
             .docsPriorGenerations(0)
             .shardComplete(true)
@@ -104,6 +110,14 @@ class S3ShardDocCountSinkTest {
         Assertions.assertEquals(1, records.get(1).get("shardNumber").asInt());
         Assertions.assertEquals("idx", records.get(0).get("indexName").asText());
         Assertions.assertTrue(records.get(0).get("shardComplete").asBoolean());
+
+        // Both counts must round-trip: the root count comparable to _count, and the Lucene count
+        // comparable to _cat/indices docs.count.
+        Assertions.assertEquals(15, records.get(0).get("liveLuceneDocCount").asLong());
+        Assertions.assertEquals(21, records.get(1).get("liveLuceneDocCount").asLong());
+        Assertions.assertTrue(
+            records.get(0).get("liveLuceneDocCount").asLong() > records.get(0).get("liveDocCount").asLong(),
+            "the Lucene count must be able to exceed the root count in the serialized record");
     }
 
     @Test

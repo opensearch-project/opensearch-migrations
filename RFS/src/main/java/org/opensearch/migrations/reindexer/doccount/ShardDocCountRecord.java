@@ -6,10 +6,10 @@ import lombok.Value;
 /**
  * The live non-nested document count for one shard, emitted once when a worker finishes it.
  *
- * <p>{@link #liveDocCount} spans every lease generation the shard needed, so for a completed shard
- * it is directly comparable to the source's {@code <index>/_count}. Nested child documents are
- * excluded because they carry no stored {@code _id} and are never sent to the target, which is also
- * why this is lower than {@code _cat/indices docs.count} on an index containing nested documents.
+ * <p>Carries both counts a cluster reports. {@link #liveDocCount} spans every lease generation the
+ * shard needed and is comparable to the source's {@code <index>/_count}: nested children carry no
+ * stored {@code _id}, are never sent to the target, and so are excluded. {@link #liveLuceneDocCount}
+ * counts them, and is comparable to {@code _cat/indices docs.count}.
  */
 @Value
 @Builder
@@ -20,6 +20,11 @@ public class ShardDocCountRecord {
     String indexName;
     int shardNumber;
     long liveDocCount;
+    /**
+     * Live Lucene documents in the shard, counting nested children — matches
+     * {@code _cat/indices docs.count}. 0 when the source cannot report it.
+     */
+    long liveLuceneDocCount;
     long docsThisGeneration;
     long docsPriorGenerations;
     /**

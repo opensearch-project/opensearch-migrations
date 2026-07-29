@@ -4,6 +4,8 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -185,6 +187,15 @@ public class LuceneSnapshotSource implements DocumentSource {
         return IndexMetadataConverter.convert(collectionName, meta);
     }
 
+    /** Live Lucene doc count per partition, captured while the reader was open during the read. */
+    private final Map<String, Long> liveDocCounts = new ConcurrentHashMap<>();
+
+    @Override
+    public OptionalLong countLiveDocuments(Partition partition) {
+        var cached = liveDocCounts.get(partition.name());
+        return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
+    }
+
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingPosition) {
         var esPartition = (EsShardPartition) partition;
@@ -227,7 +238,8 @@ public class LuceneSnapshotSource implements DocumentSource {
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
+                count -> liveDocCounts.put(partition.name(), count))
             .map(luceneAdapter::fromLucene);
     }
 
@@ -246,5 +258,6 @@ public class LuceneSnapshotSource implements DocumentSource {
     public void close() {
         shardEntryCache.clear();
         previousShardEntryCache.clear();
+        liveDocCounts.clear();
     }
 }

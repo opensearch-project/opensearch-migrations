@@ -931,15 +931,16 @@ public class RfsMigrateDocuments {
      */
     static DocumentMigrationBootstrap.ShardDocCountReporter shardDocCountReporter(ShardDocCountSink sink) {
         if (sink == null) {
-            return (index, shard, total, thisGen, priorGen) -> { };
+            return (index, shard, total, luceneTotal, thisGen, priorGen) -> { };
         }
         var workerId = ProcessHelpers.getNodeInstanceName();
-        return (index, shard, total, thisGen, priorGen) -> {
+        return (index, shard, total, luceneTotal, thisGen, priorGen) -> {
             var countRecord = ShardDocCountRecord.builder()
                 .workerId(workerId)
                 .indexName(index)
                 .shardNumber(shard)
                 .liveDocCount(total)
+                .liveLuceneDocCount(luceneTotal)
                 .docsThisGeneration(thisGen)
                 .docsPriorGenerations(priorGen)
                 .shardComplete(true)
