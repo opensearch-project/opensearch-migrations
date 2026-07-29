@@ -194,7 +194,8 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
+                    cursorConsumer.accept(
+                        new WorkItemCursor(cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted()));
                 },
                 error -> {
                     log.atError()
