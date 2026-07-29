@@ -26,40 +26,97 @@ def workflowTemplatesStagingP =
 def migrationResourcesStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/migrationResources")
 
+// Root-level tsconfig files that affect compilation
+def rootTsConfigFiles = [
+        orchestrationSpecsDirP.file("tsconfig.base.json"),
+        orchestrationSpecsDirP.file("tsconfig.json"),
+        orchestrationSpecsDirP.file("tsconfig.workspaces.json")
+]
+
+def configureWorkflowTemplateTask = { task ->
+    task.dependsOn installDependencies
+
+    // Source files
+    task.inputs.dir(workflowTemplatesP.dir("src"))
+    // Resource files embedded in templates
+    task.inputs.dir(workflowTemplatesP.dir("resources"))
+    // Dependency packages whose source affects template generation
+    task.inputs.dir(orchestrationSpecsDirP.dir("packages/argo-workflow-builders/src"))
+    task.inputs.dir(schemasP.dir("src"))
+
+    // Package-level config files
+    task.inputs.files(
+        workflowTemplatesP.file("package.json"),
+        workflowTemplatesP.file("tsconfig.json"),
+        workflowTemplatesP.file("makeTemplates.cjs")
+    )
+
+    task.inputs.files(rootTsConfigFiles)
+}
+
+def configureConfigProcessorTask = { task ->
+    task.dependsOn installDependencies
+
+    // Source files
+    task.inputs.dir(configProcessorP.dir("src"))
+    // Shell scripts copied into the config-processor bundle
+    task.inputs.dir(configProcessorP.dir("scripts"))
+
+    task.inputs.files(
+        // Build script
+        configProcessorP.file("makeBundle.js"),
+        // Package-level config files
+        configProcessorP.file("package.json"),
+        configProcessorP.file("tsconfig.json"),
+    )
+
+    task.inputs.files(
+        // Build script
+        configProcessorP.file("makeBundle.js"),
+        // Package-level config files
+        configProcessorP.file("package.json"),
+        configProcessorP.file("tsconfig.json"),
+    )
+
+    task.inputs.files(rootTsConfigFiles)
+}
+
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
     workingDir = orchestrationSpecsDirP.asFile
     args = ['ci', '--force']
 
-    inputs.file(orchestrationSpecsDirP.file("package.json"))
-    inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    inputs.files(
+        orchestrationSpecsDirP.file("package.json"),
+        orchestrationSpecsDirP.file("package-lock.json"),
+        orchestrationSpecsDirP.file("tsconfig.base.json"),
+        orchestrationSpecsDirP.file("tsconfig.json"),
+        orchestrationSpecsDirP.file("tsconfig.workspaces.json"),
+    )
     outputs.dir(orchestrationSpecsDirP.dir("node_modules"))
+}
+
+tasks.register('typeCheckWorkflowTemplates', NpmTask) {
+    description = 'Check the workflow templates from their TypeScript definitions'
+    workingDir = workflowTemplatesP.asFile
+    args = ['run', 'type-check-all']
+    configureWorkflowTemplateTask(delegate)
+}
+
+tasks.register('testWorkflowTemplates', NpmTask) {
+    description = 'Check the workflow templates from their TypeScript definitions'
+    workingDir = workflowTemplatesP.asFile
+    args = ['run', 'test-all']
+
+    configureWorkflowTemplateTask(delegate)
 }
 
 tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     description = 'Build the workflow templates from their TypeScript definitions'
     workingDir = workflowTemplatesP.asFile
-    args = ['run', 'check-and-make-templates', '--', '--outputDirectory', workflowTemplatesStagingP.get().asFile.absolutePath]
-    dependsOn installDependencies
+    args = ['run', 'make-templates', '--', '--outputDirectory', workflowTemplatesStagingP.get().asFile.absolutePath]
 
-    // Source files
-    inputs.dir(workflowTemplatesP.dir("src"))
-    // Resource files embedded in templates
-    inputs.dir(workflowTemplatesP.dir("resources"))
-    // Dependency packages whose source affects template generation
-    inputs.dir(orchestrationSpecsDirP.dir("packages/argo-workflow-builders/src"))
-    inputs.dir(orchestrationSpecsDirP.dir("packages/schemas/src"))
-    // Package-level config files
-    inputs.file(workflowTemplatesP.file("package.json"))
-    inputs.file(workflowTemplatesP.file("tsconfig.json"))
-    inputs.file(workflowTemplatesP.file("makeTemplates.cjs"))
-    // Root-level tsconfig files that affect compilation
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    configureWorkflowTemplateTask(delegate)
     outputs.dir(workflowTemplatesStagingP)
 
     doFirst {
@@ -67,30 +124,40 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     }
 }
 
+tasks.register('typeCheckConfigProcessor', NpmTask) {
+    description = 'type-check the config-processor TypeScript package'
+    workingDir = configProcessorP.asFile
+    args = ['run', 'type-check']
+
+    configureConfigProcessorTask(delegate)
+}
+
+tasks.register('testConfigProcessor', NpmTask) {
+    description = 'Test the config-processor TypeScript package'
+    workingDir = configProcessorP.asFile
+    args = ['run', 'test']
+
+    configureConfigProcessorTask(delegate)
+}
+
 tasks.register('buildAndStageConfigProcessor', NpmTask) {
     description = 'Build and stage the config-processor TypeScript package directly to staging'
     workingDir = configProcessorP.asFile
-    args = ['run', 'check-and-bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
-    dependsOn installDependencies
+    args = ['run', 'bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
 
-    // Source files
-    inputs.dir(configProcessorP.dir("src"))
-    // Shell scripts copied into the config-processor bundle
-    inputs.dir(configProcessorP.dir("scripts"))
-    // Build script
-    inputs.file(configProcessorP.file("makeBundle.js"))
-    // Package-level config files
-    inputs.file(configProcessorP.file("package.json"))
-    inputs.file(configProcessorP.file("tsconfig.json"))
-    // Root-level tsconfig files that affect compilation
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    configureConfigProcessorTask(delegate)
     outputs.dir(configProcessorStagingP)
 
     doFirst {
         configProcessorStagingP.get().asFile.mkdirs()
     }
+}
+
+tasks.named("test") {
+    dependsOn("typeCheckWorkflowTemplates")
+    dependsOn("testWorkflowTemplates")
+    dependsOn("typeCheckConfigProcessor")
+    dependsOn("testConfigProcessor")
 }
 
 tasks.register('buildAndStageMigrationResources', NpmTask) {
@@ -100,12 +167,14 @@ tasks.register('buildAndStageMigrationResources', NpmTask) {
     dependsOn installDependencies
 
     inputs.dir(schemasP.dir("src"))
-    inputs.file(schemasP.file("package.json"))
-    inputs.file(orchestrationSpecsDirP.file("package.json"))
-    inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
-    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    inputs.files(
+        schemasP.file("package.json"),
+        orchestrationSpecsDirP.file("package.json"),
+        orchestrationSpecsDirP.file("package-lock.json"),
+        orchestrationSpecsDirP.file("tsconfig.base.json"),
+        orchestrationSpecsDirP.file("tsconfig.json"),
+        orchestrationSpecsDirP.file("tsconfig.workspaces.json"),
+    )
     outputs.dir(migrationResourcesStagingP)
 
     doFirst {
