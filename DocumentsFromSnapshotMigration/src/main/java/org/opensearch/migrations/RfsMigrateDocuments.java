@@ -59,6 +59,9 @@ import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.doccount.S3ShardDocCountSink;
+import org.opensearch.migrations.reindexer.doccount.ShardDocCountRecord;
+import org.opensearch.migrations.reindexer.doccount.ShardDocCountSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -315,6 +318,37 @@ public class RfsMigrateDocuments {
         @ParametersDelegate
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
 
+        @ParametersDelegate
+        public ShardDocCountArgs shardDocCountArgs = new ShardDocCountArgs();
+
+    }
+
+    /**
+     * The count is always computed and logged; these args only control whether it is additionally
+     * written to S3. Enabled when --shard-doc-count-s3-bucket is provided.
+     */
+    public static class ShardDocCountArgs {
+        @Parameter(required = false,
+            names = { "--shard-doc-count-s3-bucket" },
+            description = "S3 bucket for durable per-shard live document count records. When unset, counts are "
+                + "only logged. One record is written per shard, so volume is bounded by shard count.")
+        public String shardDocCountS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--shard-doc-count-s3-prefix" },
+            description = "S3 key prefix under the shard doc count bucket. Records are written to "
+                + "<prefix>/session=<sessionId>/worker=<workerId>/... Default: \"rfs-shard-doc-counts/\".")
+        public String shardDocCountS3Prefix = "rfs-shard-doc-counts/";
+
+        @Parameter(required = false,
+            names = { "--shard-doc-count-s3-region" },
+            description = "AWS region for the shard doc count bucket. Defaults to the same region as --s3-region when present.")
+        public String shardDocCountS3Region = null;
+
+        @Parameter(required = false,
+            names = { "--shard-doc-count-s3-endpoint" },
+            description = "Optional S3 endpoint override for shard doc count uploads (e.g. for localstack in tests).")
+        public String shardDocCountS3Endpoint = null;
     }
 
     /**
@@ -868,6 +902,15 @@ public class RfsMigrateDocuments {
             workCoordinator, processManager, documentSource,
             arguments.indexAllowlist, context);
 
+        var workerId = ProcessHelpers.getNodeInstanceName();
+        var shardDocCountSink = buildShardDocCountSink(
+            arguments, workerId, resolveSessionId(arguments, workerId));
+        if (shardDocCountSink != null) {
+            log.atInfo().setMessage("shard doc count sink enabled: location={}")
+                .addArgument(shardDocCountSink.getLocation()).log();
+            System.out.println("RFS_SHARD_DOC_COUNT_LOCATION=" + shardDocCountSink.getLocation());
+        }
+
         var runner = DocumentMigrationBootstrap.builder()
             .documentSource(documentSource)
             .targetClient(targetClient)
@@ -882,9 +925,46 @@ public class RfsMigrateDocuments {
             .maxInitialLeaseDuration(arguments.initialLeaseDuration)
             .cursorConsumer(progressCursor::set)
             .cancellationTriggerConsumer(cancellationRunnableRef::set)
+            .shardDocCountReporter(shardDocCountReporter(shardDocCountSink))
             .build();
 
-        return runner.migrateOneShard(context::createReindexContext);
+        try {
+            return runner.migrateOneShard(context::createReindexContext);
+        } finally {
+            if (shardDocCountSink != null) {
+                try {
+                    shardDocCountSink.close();
+                } catch (Exception e) {
+                    log.atWarn().setCause(e)
+                        .setMessage("Error closing shard doc count sink").log();
+                }
+            }
+        }
+    }
+
+    /**
+     * No-op when the sink is disabled. The flush is synchronous and failures propagate: the reporter
+     * runs before the work item is marked complete, so a failed flush aborts the shard and a
+     * successor re-emits rather than the record being lost.
+     */
+    static DocumentMigrationBootstrap.ShardDocCountReporter shardDocCountReporter(ShardDocCountSink sink) {
+        if (sink == null) {
+            return (index, shard, total, thisGen, priorGen) -> { };
+        }
+        var workerId = ProcessHelpers.getNodeInstanceName();
+        return (index, shard, total, thisGen, priorGen) -> {
+            var record = ShardDocCountRecord.builder()
+                .workerId(workerId)
+                .indexName(index)
+                .shardNumber(shard)
+                .liveDocCount(total)
+                .docsThisGeneration(thisGen)
+                .docsPriorGenerations(priorGen)
+                .shardComplete(true)
+                .timestamp(Instant.now().toString())
+                .build();
+            sink.write(record).then(sink.flush()).block(Duration.ofMinutes(5));
+        };
     }
 
     @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
@@ -987,6 +1067,45 @@ public class RfsMigrateDocuments {
             .region(region)
             .uploader(S3FailedDocumentStreamSink.s3ClientUploader(s3Client))
             .maxBufferBytes(arguments.failedDocumentStreamArgs.failedDocumentStreamMaxBufferBytes)
+            .build();
+    }
+
+    /**
+     * Returns null when --shard-doc-count-s3-bucket is unset. Region and endpoint fall back to the
+     * snapshot's --s3-region / --s3-endpoint so a custom-S3 deployment (LocalStack/MinIO) does not
+     * silently upload to the default AWS endpoint while snapshot reads use the override.
+     */
+    static ShardDocCountSink buildShardDocCountSink(Args arguments, String workerId, String sessionId) {
+        String bucket = arguments.shardDocCountArgs.shardDocCountS3Bucket;
+        if (bucket == null || bucket.isBlank()) {
+            return null;
+        }
+        var region = arguments.shardDocCountArgs.shardDocCountS3Region != null
+            ? arguments.shardDocCountArgs.shardDocCountS3Region
+            : arguments.s3Region;
+        if (region == null) {
+            throw new ParameterException(
+                "--shard-doc-count-s3-region (or --s3-region) is required when --shard-doc-count-s3-bucket is set");
+        }
+        log.atInfo().setMessage("shard doc count config: region={} bucket={}")
+            .addArgument(region).addArgument(bucket).log();
+
+        var s3ClientBuilder = S3AsyncClient.builder().region(Region.of(region));
+        var endpoint = arguments.shardDocCountArgs.shardDocCountS3Endpoint != null
+            ? arguments.shardDocCountArgs.shardDocCountS3Endpoint
+            : arguments.endpoint;
+        if (endpoint != null && !endpoint.isBlank()) {
+            s3ClientBuilder.endpointOverride(URI.create(endpoint));
+        }
+        var s3Client = s3ClientBuilder.build();
+
+        return S3ShardDocCountSink.builder()
+            .bucket(bucket)
+            .prefix(arguments.shardDocCountArgs.shardDocCountS3Prefix)
+            .sessionId(sessionId)
+            .workerId(workerId)
+            .region(region)
+            .uploader(S3ShardDocCountSink.s3ClientUploader(s3Client))
             .build();
     }
 
@@ -1129,13 +1248,9 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * The emitted-document total to stamp on a successor work item.
-     *
-     * <p>The successor restarts AT the checkpoint position rather than after it (see
-     * {@link #getSuccessorWorkItemIds}), so it will re-emit the documents in the checkpoint
-     * batch. Those must therefore be excluded from the carried total or they would be counted
-     * twice. Subtracting the checkpoint batch keeps the total exact under any number of lease
-     * handoffs.
+     * The successor restarts at the checkpoint position (see {@link #getSuccessorWorkItemIds}) and
+     * re-emits its batch, so that batch is excluded from the carried total to keep it exact across
+     * any number of lease handoffs.
      */
     static long docsEmittedForSuccessor(WorkItemCursor cursor) {
         return Math.max(0L, cursor.getDocsEmitted() - cursor.getDocsInCheckpointBatch());

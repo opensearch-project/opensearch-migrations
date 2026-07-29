@@ -208,12 +208,9 @@ public class LuceneSnapshotSource implements DocumentSource {
                 return readRegularDocuments(entry, partition, startingPosition);
             }
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
-            // The checkpoint is a Lucene doc number, not an ordinal into this stream, so
-            // filter by position rather than skip(n). The delta reader already resumes each
-            // segment at the checkpoint, but the change streams interleave additions and
-            // deletions, so re-filter here to drop anything at or before the checkpoint's
-            // predecessor. Documents exactly AT the checkpoint are retained: successors
-            // deliberately restart at the last processed position to handle 1:many splits.
+            // The checkpoint is a Lucene doc number, not an ordinal into this stream, so filter by
+            // position rather than skip(n). Documents exactly at the checkpoint are retained:
+            // successors restart at the last processed position to handle 1:many doc splits.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
                 .filter(change -> change.getLuceneDocNumber() >= startingPosition)
                 .map(luceneAdapter::fromLucene);

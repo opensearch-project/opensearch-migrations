@@ -144,14 +144,11 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
-     * Same as above, additionally carrying forward the number of documents already emitted
-     * for this work item so the successor continues one running total for the shard instead
-     * of restarting the count.
+     * Same as above, carrying forward the shard's emitted-document total so the successor
+     * continues one running count.
      *
-     * <p>{@code docsEmitted} must be the total as of {@code lastDocProcessed} EXCLUSIVE of
-     * the checkpoint document itself, because successors deliberately re-process the
-     * checkpoint and would otherwise count it twice. It is written as an absolute value so
-     * that a retried successor creation is idempotent.
+     * <p>{@code docsEmitted} must exclude the checkpoint batch, since successors re-process the
+     * checkpoint and would otherwise count it twice. Written absolutely so retries are idempotent.
      */
     void createSuccessorWorkItemsAndMarkComplete(
         String workItemId,
@@ -233,11 +230,7 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final Instant leaseExpirationTime;
         final WorkItem workItem;
-        /**
-         * Documents already emitted to the target for this work item by previous lease
-         * generations; 0 when unknown (a first generation, or an item created before this
-         * field existed). Lets a resumed worker continue one running total for the shard.
-         */
+        /** Emitted-document total inherited from previous lease generations; 0 when unknown. */
         final long docsEmitted;
 
         public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem) {

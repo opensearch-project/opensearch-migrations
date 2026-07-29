@@ -136,10 +136,9 @@ public class DocumentMigrationPipeline {
      * @param partition        the partition to migrate
      * @param collectionName   the target collection name
      * @param startingPosition the source position to resume from (0 for start)
-     * @param docsAlreadyEmitted documents already emitted for this partition by previous
-     *                           lease generations, so
-     *                           {@link ProgressCursor#cumulativeDocsEmitted()} is a
-     *                           partition-wide total rather than a per-generation subtotal
+     * @param docsAlreadyEmitted documents already emitted for this partition by previous lease
+     *                           generations, making {@link ProgressCursor#cumulativeDocsEmitted()}
+     *                           a partition-wide total rather than a per-generation subtotal
      * @return a Flux of progress cursors, one per batch written
      */
     public Flux<ProgressCursor> migratePartition(
@@ -148,9 +147,8 @@ public class DocumentMigrationPipeline {
         if (docsAlreadyEmitted < 0) {
             throw new IllegalArgumentException("docsAlreadyEmitted must be >= 0, got " + docsAlreadyEmitted);
         }
-        // Emitted-document total for this partition (carried in + this generation).
         final long[] emitted = { docsAlreadyEmitted };
-        // Seek-position fallback for sources that expose no position (see Document#position()).
+        // Used only when the source exposes no position; see Document#position().
         final long[] fallbackPosition = { startingPosition };
         return Flux.defer(() -> {
             currentPartition.set(partition);
@@ -159,8 +157,8 @@ public class DocumentMigrationPipeline {
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    // Capture the batch's last source position BEFORE the write, so the
-                    // cursor reflects what was read even if the sink reorders internally.
+                    // Captured before the write so the cursor reflects what was read even if the
+                    // sink reorders internally.
                     var lastPosition = batch.get(batch.size() - 1).position();
                     return sink.writeBatch(collectionName, batch)
                         .map(result -> {

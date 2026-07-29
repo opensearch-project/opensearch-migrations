@@ -76,6 +76,18 @@ public class DocumentMigrationBootstrap {
     private final Consumer<WorkItemCursor> cursorConsumer = cursor -> {};
     @Builder.Default
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
+    /**
+     * Invoked when a shard finishes. Runs before the work item is marked complete, so an
+     * implementation that persists the count can fail the shard and let a successor re-emit.
+     */
+    @Builder.Default
+    private final ShardDocCountReporter shardDocCountReporter = (index, shard, total, thisGen, priorGen) -> {};
+
+    @FunctionalInterface
+    public interface ShardDocCountReporter {
+        void report(String indexName, int shardNumber, long liveDocCount,
+                    long docsThisGeneration, long docsPriorGenerations);
+    }
 
     /**
      * Acquire and migrate a single shard via work coordination.
@@ -160,8 +172,6 @@ public class DocumentMigrationBootstrap {
         var partition = resolvePartition(wi);
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
-        // Documents this shard already sent to the target under earlier leases, so the
-        // per-shard total spans the whole shard rather than just this generation.
         long docsAlreadyEmitted = workItem.getDocsEmitted();
 
         var pipeline = new DocumentMigrationPipeline(
@@ -237,13 +247,8 @@ public class DocumentMigrationBootstrap {
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
 
-            // Shard-level document accounting. liveDocCount is the cumulative number of live
-            // non-nested documents this shard has sent to the target across every lease
-            // generation, so for a completed shard it is directly comparable to the source's
-            // <index>/_count. Nested child documents are excluded because they are read but
-            // never emitted (they carry no stored _id, so LuceneReader.getDocument skips them),
-            // which is also why this number is lower than _cat/indices docs.count on a nested
-            // index.
+            // Comparable to the source's <index>/_count for a completed shard: nested children are
+            // read but never emitted, so they are excluded here and from _count alike.
             long liveDocCount = docsAlreadyEmitted + totalDocsMigrated.get();
             log.atInfo()
                 .setMessage("Shard doc count: index={}, shard={}, liveDocCount={}, "
@@ -254,6 +259,8 @@ public class DocumentMigrationBootstrap {
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(docsAlreadyEmitted)
                 .log();
+            shardDocCountReporter.report(wi.getIndexName(), wi.getShardNumber(), liveDocCount,
+                totalDocsMigrated.get(), docsAlreadyEmitted);
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());

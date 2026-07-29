@@ -55,13 +55,9 @@ public record Document(
     }
 
     /**
-     * The source-defined position of this document within its partition, used as the
-     * resume checkpoint. For Lucene-backed sources this is the Lucene doc number carried
-     * in {@link #SOURCE_META_LUCENE_DOC_NUMBER}.
-     *
-     * <p>Returns an empty {@link java.util.Optional} for sources that do not expose a
-     * position (e.g. synthetic or streaming sources), which lets the pipeline fall back to
-     * counting emitted documents for those.
+     * Position of this document within its partition, used as the resume checkpoint. Empty for
+     * sources that expose no position, which makes the pipeline fall back to counting emitted
+     * documents for those.
      */
     public java.util.Optional<Long> position() {
         var raw = sourceMetadata.get(SOURCE_META_LUCENE_DOC_NUMBER);

@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -48,6 +49,7 @@ import org.testcontainers.lifecycle.Startables;
  * could pass against a fixture that never had nested children at all.
  */
 @Slf4j
+@Tag("isolatedTest")
 public class NestedDocCountTest extends SourceTestBase {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
