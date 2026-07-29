@@ -186,7 +186,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public Flux<Document> readDocuments(Partition partition, long startingPosition) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
@@ -205,26 +205,32 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                return readRegularDocuments(entry, partition, startingDocOffset);
+                return readRegularDocuments(entry, partition, startingPosition);
             }
-            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
+            log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
+            // The checkpoint is a Lucene doc number, not an ordinal into this stream, so
+            // filter by position rather than skip(n). The delta reader already resumes each
+            // segment at the checkpoint, but the change streams interleave additions and
+            // deletions, so re-filter here to drop anything at or before the checkpoint's
+            // predecessor. Documents exactly AT the checkpoint are retained: successors
+            // deliberately restart at the last processed position to handle 1:many splits.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .skip(startingDocOffset)
+                .filter(change -> change.getLuceneDocNumber() >= startingPosition)
                 .map(luceneAdapter::fromLucene);
         }
 
-        return readRegularDocuments(entry, partition, startingDocOffset);
+        return readRegularDocuments(entry, partition, startingPosition);
     }
 
     private Flux<Document> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
+        SnapshotExtractor.ShardEntry entry, Partition partition, long startingPosition
     ) {
-        log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
+        log.info("Reading documents from {} starting at Lucene docId {}", partition, startingPosition);
         var esPartition = (EsShardPartition) partition;
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource)
             .map(luceneAdapter::fromLucene);
     }
 
