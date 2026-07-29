@@ -72,7 +72,9 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 <tr><td>Apache Solr 6.x–9.x*</td><td></td><td></td><td>✅</td></tr>
 </table>
 
-\* Backfill only — Capture and Replay is not supported for these source versions.
+\* Backfill only — Capture and Replay is not supported for these source versions. See
+[Solr Backup Layouts](docs/SolrBackupLayouts.md) for the supported backup directory structures
+(no manual reshaping required).
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 

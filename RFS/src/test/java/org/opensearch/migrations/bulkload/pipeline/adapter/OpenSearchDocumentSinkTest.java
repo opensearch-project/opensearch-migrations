@@ -155,6 +155,59 @@ class OpenSearchDocumentSinkTest {
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    void writeBatch_transformerModifiesDocs_preservesOriginalSourceOnOps() {
+        // The transformed body is what's sent, but each op must retain the original
+        // (pre-transformation) source so a failed document stream record can report the source document.
+        org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
+            org.mockito.ArgumentCaptor.forClass(List.class);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+
+        // Transformer mutates the document body in place.
+        IJsonTransformer mutate = input -> {
+            for (var m : (List<Map<String, Object>>) input) {
+                ((Map<String, Object>) m.get("document")).put("a", 2);
+            }
+            return input;
+        };
+        var sink = new OpenSearchDocumentSink(client, () -> mutate, false, DocumentExceptionAllowlist.empty(), null);
+
+        sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"))).block();
+
+        var sentOps = captor.getValue();
+        assertEquals(1, sentOps.size());
+        var op = sentOps.get(0);
+        assertEquals(2, op.getDocument().get("a"), "sent (transformed) body should reflect the mutation");
+        assertEquals(1, op.getOriginalSource().get("a"), "originalSource should retain the pre-transform body");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void writeBatch_transformerChangesId_leavesOriginalSourceNull() {
+        // When the transformer changes the document id, the transformed op can no longer
+        // be correlated back to a source document, so originalSource stays null and the
+        // failed document stream will fall back to the transformed body.
+        org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
+            org.mockito.ArgumentCaptor.forClass(List.class);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+
+        IJsonTransformer renamer = input -> {
+            for (var m : (List<Map<String, Object>>) input) {
+                ((Map<String, Object>) m.get("operation")).put("_id", "renamed");
+            }
+            return input;
+        };
+        var sink = new OpenSearchDocumentSink(client, () -> renamer, false, DocumentExceptionAllowlist.empty(), null);
+
+        sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"))).block();
+
+        var op = captor.getValue().get(0);
+        org.junit.jupiter.api.Assertions.assertNull(op.getOriginalSource(),
+            "no source correlates to the renamed id");
+        assertEquals("renamed", op.getOperation().getId());
+    }
+
     private static Document doc(String id, String json) {
         return new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of());
     }
