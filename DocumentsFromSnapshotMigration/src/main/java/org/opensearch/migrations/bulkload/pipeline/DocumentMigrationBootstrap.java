@@ -160,6 +160,9 @@ public class DocumentMigrationBootstrap {
         var partition = resolvePartition(wi);
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
+        // Documents this shard already sent to the target under earlier leases, so the
+        // per-shard total spans the whole shard rather than just this generation.
+        long docsAlreadyEmitted = workItem.getDocsEmitted();
 
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
@@ -175,7 +178,7 @@ public class DocumentMigrationBootstrap {
         var migrationError = new AtomicReference<Throwable>();
         var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
-        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset)
+        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset, docsAlreadyEmitted)
             .subscribeOn(finishScheduler)
             .doFirst(() -> {
                 if (workItemTimeProvider != null) {
@@ -194,8 +197,8 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(
-                        new WorkItemCursor(cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted()));
+                    cursorConsumer.accept(new WorkItemCursor(
+                        cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted(), cursor.docsInBatch()));
                 },
                 error -> {
                     log.atError()
@@ -233,6 +236,24 @@ public class DocumentMigrationBootstrap {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
+
+            // Shard-level document accounting. liveDocCount is the cumulative number of live
+            // non-nested documents this shard has sent to the target across every lease
+            // generation, so for a completed shard it is directly comparable to the source's
+            // <index>/_count. Nested child documents are excluded because they are read but
+            // never emitted (they carry no stored _id, so LuceneReader.getDocument skips them),
+            // which is also why this number is lower than _cat/indices docs.count on a nested
+            // index.
+            long liveDocCount = docsAlreadyEmitted + totalDocsMigrated.get();
+            log.atInfo()
+                .setMessage("Shard doc count: index={}, shard={}, liveDocCount={}, "
+                    + "docsThisGeneration={}, docsPriorGenerations={}")
+                .addArgument(wi.getIndexName())
+                .addArgument(wi.getShardNumber())
+                .addArgument(liveDocCount)
+                .addArgument(totalDocsMigrated::get)
+                .addArgument(docsAlreadyEmitted)
+                .log();
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());

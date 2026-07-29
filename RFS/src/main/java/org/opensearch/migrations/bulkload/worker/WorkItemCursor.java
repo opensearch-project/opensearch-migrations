@@ -5,24 +5,28 @@ import lombok.Value;
 /**
  * Checkpoint handed from the document pipeline to the work coordinator after each batch.
  *
- * <p>Carries two deliberately-separate quantities. Collapsing them into one is what made
- * resume incorrect on nested indices: a document count was written to the checkpoint and
- * then read back as a seek position.
+ * <p>Carries the seek position and the document accounting as separate values. Collapsing
+ * them into one is what made resume incorrect on nested indices: a document count was
+ * written to the checkpoint and then read back as a seek position.
  *
  * <ul>
  *   <li>{@code progressCheckpointNum} — SEEK POSITION. The source position (Lucene doc
  *       number) of the last processed document. This is what a successor work item resumes
  *       from, and the only value readers can seek with.</li>
- *   <li>{@code docsEmitted} — ACCOUNTING. Partition-wide running total of documents
- *       actually emitted to the target, carried across lease generations. For ES/OS sources
- *       this is the count of live non-nested (root) documents, because nested child
- *       documents are read but never emitted (they carry no stored {@code _id}).</li>
+ *   <li>{@code docsEmitted} — ACCOUNTING. Partition-wide running total of documents actually
+ *       emitted to the target, carried across lease generations. For ES/OS sources this is
+ *       the count of live non-nested (root) documents, because nested child documents are
+ *       read but never emitted (they carry no stored {@code _id}).</li>
+ *   <li>{@code docsInCheckpointBatch} — documents emitted in the batch that produced this
+ *       checkpoint. A successor restarts AT the checkpoint and re-emits that batch, so this
+ *       is subtracted when carrying the total forward to avoid double-counting.</li>
  * </ul>
  */
 @Value
 public class WorkItemCursor {
     long progressCheckpointNum;
     long docsEmitted;
+    long docsInCheckpointBatch;
 
     /**
      * Position-only checkpoint, for callers that do not track document totals.
@@ -30,11 +34,12 @@ public class WorkItemCursor {
      * available" rather than "zero documents".
      */
     public WorkItemCursor(long progressCheckpointNum) {
-        this(progressCheckpointNum, 0L);
+        this(progressCheckpointNum, 0L, 0L);
     }
 
-    public WorkItemCursor(long progressCheckpointNum, long docsEmitted) {
+    public WorkItemCursor(long progressCheckpointNum, long docsEmitted, long docsInCheckpointBatch) {
         this.progressCheckpointNum = progressCheckpointNum;
         this.docsEmitted = docsEmitted;
+        this.docsInCheckpointBatch = docsInCheckpointBatch;
     }
 }

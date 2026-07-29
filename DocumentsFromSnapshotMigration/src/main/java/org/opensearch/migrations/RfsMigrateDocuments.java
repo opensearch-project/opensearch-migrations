@@ -1121,9 +1121,24 @@ public class RfsMigrateDocuments {
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, failedDocumentStreamWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemId, successorWorkItem, 1, contextSupplier
+                workItemId, successorWorkItem, 1, null,
+                docsEmittedForSuccessor(failedDocumentStreamWatermark),
+                contextSupplier
         );
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * The emitted-document total to stamp on a successor work item.
+     *
+     * <p>The successor restarts AT the checkpoint position rather than after it (see
+     * {@link #getSuccessorWorkItemIds}), so it will re-emit the documents in the checkpoint
+     * batch. Those must therefore be excluded from the carried total or they would be counted
+     * twice. Subtracting the checkpoint batch keeps the total exact under any number of lease
+     * handoffs.
+     */
+    static long docsEmittedForSuccessor(WorkItemCursor cursor) {
+        return Math.max(0L, cursor.getDocsEmitted() - cursor.getDocsInCheckpointBatch());
     }
 
     /**
@@ -1229,6 +1244,7 @@ public class RfsMigrateDocuments {
                             successorWorkItemIds,
                             successorNextAcquisitionLeaseExponent,
                             workItemAndDuration.getLeaseExpirationTime(),
+                            docsEmittedForSuccessor(progressCursorRef.get()),
                             contextSupplier
                     );
                 }
