@@ -21,7 +21,7 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
-  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for kind testing
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for local testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false

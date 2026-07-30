@@ -1,6 +1,6 @@
 # Testing (local)
 
-First, make sure your docker runtime is already up. See the notes below in case you're using colima.
+First, make sure your docker runtime is already up.
 
 The [quickstart](quickstart.md) will guide you through to set up a local test environment.
 
@@ -28,7 +28,7 @@ So to start fresh, you would do`./kindTesting.sh` to deploy the entire stack loc
         - ```workflow reset --all --include-proxies --delete-storage --namespace ma```
         - ```console clusters clear-indices --cluster target```
 
-Alternatively you can start tests without ssh into the micrationConsole via:
+Alternatively you can start tests without ssh into the migrationConsole via:
 
 - from libraries/testAutomation/testAutomation folder (see test_runner.py):
   `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix [your reachable docker registry ip]:[docker registry port]/`
@@ -73,11 +73,6 @@ update them without touching the other setup with:
       `curl -X get http://localhost:8983/solr/admin/info/system?wt=json`
       and tries to parse `lucene.solr-spec-version` to determine solr version to use (NOTE: Solr version 7.x and higher
       default to json output, Solr 6.x needs the wt=json parameter)
-- in case you use colima and are getting connection / dns issues: `colima start --dns 1.1.1.1 --dns 8.8.8.8`
-- in case you use colima, start colima with `colima start --edit` and make sure the below resources are configured for
-  colima:
-    - kyverno, argo, argo-workflow-controller, cert-manager, fluent, jaeger, localhost, ma-helm-installer,
-      strimzi-cluster-operator kube-prometheus, kube-grafana, otel service manager, s3 bucket (e.g localstack)
 - redeploy migrationConsole only:
 
 ```
