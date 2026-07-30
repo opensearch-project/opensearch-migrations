@@ -35,7 +35,7 @@ require_eks_context() {
   context="$(get_k8s_build_context)"
   if [[ ! "${context}" =~ ${EKS_CONTEXT_PATTERN} ]]; then
     echo "ERROR: eksKubernetesBuildkit.sh requires a cloud K8s context matching ${EKS_CONTEXT_PATTERN}." >&2
-    echo "Current context: '${context}'. Use buildImages/backends/dockerHostedBuildkit.sh for kind." >&2
+    echo "Current context: '${context}'. Otherwise, use buildImages/backends/dockerHostedBuildkit.sh." >&2
     return 1
   fi
 }

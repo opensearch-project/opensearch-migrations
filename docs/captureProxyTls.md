@@ -148,8 +148,7 @@ in your proxy config.
 external issuers process them. The built-in approver does not auto-approve for the
 `awspca.cert-manager.io` group. You may need to install the
 [cert-manager-approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
-controller and create a policy that allows the PCA issuer. See the
-[plan document](../orchestrationSpecs/PLAN_proxy_tls_certificate_management.md) for details.
+controller and create a policy that allows the PCA issuer.
 
 ## Non-K8s deployments
 
