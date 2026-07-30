@@ -2,8 +2,10 @@
 
 set -eo pipefail
 
+MIGRATIONS_REPO_ROOT_DIR="$(git rev-parse --show-toplevel)"
+
 # NOTE: the below only creates resources if they dont already exist. If you want any of those recreated,
-# need to remove first.
+# you have to remove them first.
 # Example for removing builder to rebuild in the below:
 # docker buildx rm local-remote-builder 2>/dev/null || true
 
@@ -49,8 +51,7 @@ case $(uname -m) in
 esac
 
 echo "Building general and test images"
-../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
-
+"$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
 
 echo "Registry contents:"
 curl http://localhost:5001/v2/_catalog

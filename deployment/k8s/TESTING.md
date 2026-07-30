@@ -1,25 +1,17 @@
-### kind Test Setup
+# Testing (local)
 
 First, make sure your docker runtime is already up. See the notes below in case you're using colima.
 
-In `buildImages/scripts` you will find a bunch of scripts helping with local kind setup / commands.
+The [quickstart](quickstart.md) will guide you through to set up a local test environment.
 
 - `fillLocalRegistry.sh`: setup of local registry and building of needed images and pushing to that local registry
     - for faster update times comment out all unneeded images in `build.gradle` testBuildKitProjects array. e.g if you
       work only on solr source tests, you can comment all other images out.
-- `startKind.sh`: script to startup local kind
-- `startKindAndDeployCharts.sh`: combines `startKind.sh` with chart deployments
-- `updateArgoWorkflowTempate.sh`: simply updates `clusterWorkflows.yaml` in case changes were made to it and need
-  update  
+- `updateArgoWorkflowTempate.sh`: simply updates `clusterWorkflows.yaml` in case changes were made to it and need update
   in running argo
 - `redeployMigrationConsole.sh`: removal of possible image caching in kind and `helm upgrade` call
 
-So to start fresh, you would do (from inside `buildImages` folder):
-
-1. `./scripts/fillLocalRegistry.sh`
-2. `./scripts/startKindAndDeployCharts.sh`
-
-Then you would run tests via:
+So to start fresh, you would do`./kindTesting.sh` to deploy the entire stack locally. Then you would run tests via:
 
 - ssh into migrationConsole pod:
   `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash`
@@ -47,7 +39,7 @@ For updates after changes:
 - if all is running and you make changes to `clusterWorkflows.yaml` or migrationConsole in general:
     - `fillLocalRegistry.sh`
     - `redeployMigrationConsole.sh`
-        - try `deleteMigrationConsolePod.sh` first
+        - try `kubectl delete pod migration-console-0 -n ma` first
         - (just deleting the pod such that it restarts should be enough if ImagePullPolicy = 'Always', yet if kind cache
           provides old image, might need to run `redeployMigrationConsole.sh` )
 - run tests as described above
@@ -68,7 +60,7 @@ runnable workflow by itself.
 
 If you make changes to clusterWorkflow (such as for adjustment or addition of source / target systems), you can simply
 update them without touching the other setup with:
-`kubectl apply -f ../migrationConsole/lib/integ_test/testWorkflows/clusterWorkflows.yaml -n ma`
+`kubectl apply -f "$(git rev-parse --show-toplevel)/migrationConsole/lib/integ_test/testWorkflows/clusterWorkflows.yaml" -n ma`
 
 ### NOTES
 
@@ -82,15 +74,17 @@ update them without touching the other setup with:
       and tries to parse `lucene.solr-spec-version` to determine solr version to use (NOTE: Solr version 7.x and higher
       default to json output, Solr 6.x needs the wt=json parameter)
 - in case you use colima and are getting connection / dns issues: `colima start --dns 1.1.1.1 --dns 8.8.8.8`
-- in case you use colima, start colima with `colima start --edit` and make sure the resources in the
-  `startKindAndDeployCharts.sh`. script are less or equal the resources configured for colima.
+- in case you use colima, start colima with `colima start --edit` and make sure the below resources are configured for
+  colima:
+    - kyverno, argo, argo-workflow-controller, cert-manager, fluent, jaeger, localhost, ma-helm-installer,
+      strimzi-cluster-operator kube-prometheus, kube-grafana, otel service manager, s3 bucket (e.g localstack)
 - redeploy migrationConsole only:
 
 ```
-helm template ma ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo \                                                                    
+helm template ma ./charts/aggregates/migrationAssistantWithArgo \                                                                    
     -n ma \       
     --show-only templates/resources/migrationConsole.yaml \                                                                                            
-    -f <(envsubst < ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8sWithEnvSubst.yaml) \
+    -f <(envsubst < ./charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8sWithEnvSubst.yaml) \
     | kubectl apply -n ma -f -
 ```
 
@@ -103,7 +97,7 @@ helm template ma ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo 
 #### Port Forwarding
 
 - argo server only: `kubectl -n ma  port-forward service/argo-server 8001:2746`
-- all services: `../deployment/k8s/forwardAllServicePorts.sh`
+- all services: `./forwardAllServicePorts.sh`
 
 #### Commands
 

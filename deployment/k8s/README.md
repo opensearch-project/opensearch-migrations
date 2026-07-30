@@ -13,6 +13,24 @@ Workflows, metrics collectors, etc).
 **Notice**: The user is responsible for the cost of any underlying infrastructure required to operate the solution. We
 welcome feedback and contributions to optimize costs.
 
+## Scripts
+
+| Script                            | Purpose                                                                                         |
+|-----------------------------------|-------------------------------------------------------------------------------------------------|
+| buildSolr6Image.sh                | Builds a custom solr image and deploys it to the local image registry                           |
+| fillLocalRegistry.sh              | Sets up local registry, builds and pushes images to that local registry                         |
+| forwardAllServicePorts.sh         | Port-forwards all services to localhost to make them accessible from the host machine           |
+| generateWorkflowSchemaArtifact.sh | Generates the workflow schema artifact                                                          |
+| kindCleanup.sh                    | Cleanups the loal kind deployment                                                               |
+| kindTesting.sh                    | (Re)deploys a local kind cluster and installs the migration assistant with a source and target  |
+| localTestingCommon.sh             | Contains shared code for kindTesting.sh and kindCleanup.sh                                      |
+| package-transoforms.sh            | Builds and pushes an OCI image containing user transform files                                  |
+| redeployMigrationConsole.sh       | Removes possible image cache in kind and calls `helm upgrade` to redeploy the migration console |
+| update_deps.sh                    | Updates dependencies of helm charts                                                             |
+| updateArgoWorkflowTemplate.sh     | Updates `clusterWorkflows.yaml` in case changes were made to it and need update in running argo |
+
+See the [kind instructions](#install-kind) below for more details about specific scripts.
+
 ## Quick Start
 
 ### EKS
@@ -181,8 +199,8 @@ helm uninstall <deployment_name>
 
 ## Manual AWS Add-ons Setup
 
-The [CloudFormation](#eks) generated and deployed will configure all the interfaces that the
-Migration Assistant needs. Here are some examples of how to configure K8s drivers/providers manually.
+The [CloudFormation](#eks) generated and deployed will configure all the interfaces that the Migration Assistant needs.
+Here are some examples of how to configure K8s drivers/providers manually.
 
 #### Setting up EBS driver to dynamically provision PVs
 
