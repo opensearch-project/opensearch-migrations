@@ -3,6 +3,127 @@
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay
 pipeline.
 
+There are two ways to run it:
+
+- **Kubernetes / Argo** — k6 runs as a short-lived Argo Workflow inside the migration's
+  minikube (or EKS) deployment, submitted from the `k6-load-test` WorkflowTemplate via the
+  `workflow k6` console CLI / TUI. See [Running in Kubernetes](#running-in-kubernetes-minikube--argo)
+  directly below. Deeper reference (WorkflowTemplate parameters, `argo submit`, TUI `k` panel):
+  [`k8s/README.md`](k8s/README.md).
+- **Docker Compose** — standalone local stack for developing the scenarios themselves.
+  Everything from [Prerequisites](#prerequisites) onward.
+
+---
+
+## Running in Kubernetes (minikube + Argo)
+
+End-to-end walkthrough: build images → start minikube + deploy the chart → bring up a data
+plane → fire a k6 run → validate → tear down. Traffic flows
+**k6 → capture-proxy → opensearch-source**, and **capture-proxy → kafka → replayer →
+opensearch-target** — the same capture-and-replay pipeline a real migration exercises.
+
+> Run the two build/deploy scripts from the **`buildImages/`** directory (they use paths
+> relative to it); run `deployWorkflowComponents.sh` and the `workflow k6` commands from
+> anywhere with cluster context.
+
+### 1. Build & push all images to the local registry
+
+Builds every image — including `migrations/k6` and the migration-console image (which bakes in
+the generated `k6-load-test` WorkflowTemplate) — and pushes them to `localhost:5001`:
+
+```bash
+cd buildImages
+./scripts/fillLocalRegistry.sh
+```
+
+### 2. Start minikube and deploy the charts
+
+```bash
+# still in buildImages/
+./scripts/startMinikubeAndDeployCharts.sh
+```
+
+This installs the migration-assistant chart. On deploy the console install Job applies
+`/root/workflows/*.yaml`, so the `k6-load-test` WorkflowTemplate is registered automatically —
+no manual `kubectl apply` needed. `k6Image` / `k6PullPolicy` come from the `migration-image-config`
+ConfigMap (rendered from chart `values.yaml`).
+
+### 3. Bring up the data plane
+
+`startMinikubeAndDeployCharts.sh` installs the control plane but does **not** run a migration.
+`deployWorkflowComponents.sh` deploys a minimal, fully-wired data plane (OpenSearch source +
+target, single-node Kafka, capture proxy, replayer) so k6 has a Capture Proxy to target — all
+labeled `part-of=k6-dataplane`, with **no** migration workflow involved.
+
+```bash
+cd ..    # back to repo root
+./buildImages/scripts/deployWorkflowComponents.sh up       # deploy + wait until ready
+./buildImages/scripts/deployWorkflowComponents.sh status   # show state + the proxy URL
+```
+
+When ready it prints the proxy URL for k6: `https://capture-proxy:9200` (namespace `ma`).
+Override the target cluster with `CONTEXT=<kube-context>` / `NAMESPACE=<ns>` env vars.
+
+### 4. Run a k6 load test
+
+Submit runs with the `workflow k6` CLI from inside the migration console pod. Each run is an
+independent Argo Workflow — start several, list them, and stop any or all without touching a
+migration:
+
+```bash
+C="kubectl -n ma exec migration-console-0 --"
+
+# Submit a run against the capture proxy
+$C workflow k6 run --scenario ingest --config ingest-steady \
+     --target https://capture-proxy:9200 --duration 30s --rate 10
+
+# List active runs
+$C workflow k6 list
+
+# Stream logs of one run (name from `list`)
+$C workflow k6 logs -f <run-name>
+
+# Stop one run, or all of them
+$C workflow k6 stop <run-name>
+$C workflow k6 stop --all
+```
+
+Any preset value is overridable per run: `--rate` / `--duration` / `--vus`, or the generic
+`-o KEY=VALUE` bag (repeatable), and `--extra-args` for raw `k6 run` flags. On a
+resource-constrained minikube the default latency thresholds may breach (k6 exits non-zero) even
+though every request succeeds — pass `--extra-args --no-thresholds` for a clean run.
+
+You can also launch/monitor runs from the TUI (`workflow manage`, then press **`k`**) or submit
+directly with `argo submit --from workflowtemplate/k6-load-test` — see
+[`k8s/README.md`](k8s/README.md).
+
+### 5. Validate the pipeline
+
+```bash
+S="kubectl -n ma exec deploy/opensearch-source --"
+T="kubectl -n ma exec deploy/opensearch-target --"
+
+# k6 wrote through the proxy to the source:
+$S curl -s localhost:9200/nyc_taxis/_count
+
+# the proxy captured the traffic to Kafka (end offset > 0):
+kubectl -n ma exec deploy/kafka -- \
+  /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic logging-traffic-topic
+
+# the replayer replayed it to the target (count converges to the source):
+$T curl -s localhost:9200/nyc_taxis/_count
+```
+
+### 6. Tear down
+
+```bash
+# remove just the data plane (leaves minikube + the chart running):
+./buildImages/scripts/deployWorkflowComponents.sh down
+
+# or stop the whole cluster:
+minikube stop      # or: minikube delete
+```
+
 ---
 
 ## Prerequisites
