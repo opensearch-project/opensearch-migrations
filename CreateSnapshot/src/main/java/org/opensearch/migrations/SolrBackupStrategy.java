@@ -562,8 +562,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private static final String MODE_SOLR_CLOUD = "solrcloud";
     private static final String MODE_STANDALONE = "std";
 
+    private static final String SYSTEM_INFO_PATH = "/solr/admin/info/system";
+    /** Solr's predefined permission guarding {@link #SYSTEM_INFO_PATH}. */
+    private static final String SYSTEM_INFO_PERMISSION = "config-read";
+
     static SolrTopology detectTopology(String solrUrl, SolrHttpClient httpClient) {
-        var infoUrl = solrUrl + "/solr/admin/info/system?wt=json";
+        var infoUrl = solrUrl + SYSTEM_INFO_PATH + "?wt=json";
         HttpResponse<String> response;
         try {
             response = httpClient.getRaw(infoUrl, DETECTION_TIMEOUT);
@@ -579,11 +583,17 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         int status = response.statusCode();
-        if (status == 401 || status == 403) {
-            // Access-controlled: can't read the system info to decide, so don't guess standalone.
+        if (status == 401) {
             throw new SolrTopologyDetectionException(
-                "Solr authentication/authorization failed (HTTP " + status + ") while detecting topology at "
-                    + solrUrl + "; cannot determine SolrCloud vs standalone");
+                "Solr authentication failed (HTTP 401) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Check the source credentials.");
+        }
+        if (status == 403) {
+            // Authenticated but not permitted: name the permission so the failure is self-diagnosing.
+            throw new SolrTopologyDetectionException(
+                "Solr authorization failed (HTTP 403) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Reading " + SYSTEM_INFO_PATH
+                    + " requires the '" + SYSTEM_INFO_PERMISSION + "' permission — grant it to the source user.");
         }
         if (status != 200) {
             // 3xx, 404 (proxied base path), 5xx: reachable but uninformative — do not assume standalone.

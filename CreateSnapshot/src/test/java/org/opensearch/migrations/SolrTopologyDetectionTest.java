@@ -138,12 +138,17 @@ public class SolrTopologyDetectionTest {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
             () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(401)));
         assertThat(ex.getMessage(), containsString("401"));
+        assertThat(ex.getMessage(), containsString("credentials"));
     }
 
     @Test
-    void http403_throwsInsteadOfGuessing() throws Exception {
-        assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
+    void http403_namesTheRequiredPermission() throws Exception {
+        // The system info endpoint needs 'config-read', which the other Solr calls don't — say so.
+        var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
             () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(403)));
+        assertThat(ex.getMessage(), containsString("403"));
+        assertThat(ex.getMessage(), containsString("config-read"));
+        assertThat(ex.getMessage(), containsString("/solr/admin/info/system"));
     }
 
     @Test
