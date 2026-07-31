@@ -13,5 +13,5 @@ metadata:
     app: k6-load-test
 data:
   k6-load-test.json: |
-{{ .Files.Get "files/k6/load-test.json" | indent 4 }}
+{{ .Files.Get "files/grafana/load-test.json" | indent 4 }}
 {{- end }}
