@@ -8,6 +8,7 @@
 {{- $pull := .Values.image.pullPolicy }}
 {{- $parallelism := .Values.testRun.parallelism | int }}
 {{- $separate := .Values.testRun.separate }}
+{{- $cleanup := .Values.testRun.cleanup }}
 {{- $otel := list
       (dict "name" "K6_OUT" "value" "opentelemetry")
       (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
@@ -27,12 +28,14 @@ data:
   {{- $runner := dict "image" $image "imagePullPolicy" $pull "volumeMounts" (list $mount) "volumes" (list $volume)
         "envFrom" (list (dict "configMapRef" (dict "name" (printf "k6-preset-%s-steady" $scenario))))
         "env" $otel }}
+  {{- $spec := dict "parallelism" $parallelism "separate" $separate
+        "script" (dict "localFile" (printf "/scripts/SCENARIO_%s.js" $scenario))
+        "initializer" $initializer "runner" $runner }}
+  {{- if $cleanup }}{{- $_ := set $spec "cleanup" $cleanup }}{{- end }}
   {{- $testrun := dict
         "apiVersion" "k6.io/v1alpha1" "kind" "TestRun"
         "metadata" (dict "generateName" "k6-run-" "labels" (dict "app" "k6-load-test" "k6-scenario" $scenario))
-        "spec" (dict "parallelism" $parallelism "separate" $separate
-                     "script" (dict "localFile" (printf "/scripts/SCENARIO_%s.js" $scenario))
-                     "initializer" $initializer "runner" $runner) }}
+        "spec" $spec }}
   {{ $scenario }}: |-
 {{ $testrun | toJson | indent 4 }}
 {{- end }}

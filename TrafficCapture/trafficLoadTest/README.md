@@ -18,6 +18,7 @@ scenarios (as ConfigMaps), and the console's RBAC — ships in one **standalone,
 
 - [How it fits together](#how-it-fits-together)
 - [Install the load-test chart (opt-in)](#install-the-load-test-chart-opt-in)
+- [Updating scenarios, presets & other resources](#updating-scenarios-presets--other-resources)
 - [Find the Capture Proxy endpoint](#find-the-capture-proxy-endpoint)
 - [Running a load test](#running-a-load-test)
 - [CLI / run-input reference](#cli--run-input-reference)
@@ -119,6 +120,52 @@ On EKS the operator + runner images are mirrored to ECR via
 
 ---
 
+## Updating scenarios, presets & other resources
+
+Everything k6 runs is a chart-rendered **ConfigMap** — the scenario scripts, the presets, the example
+TestRuns, and the Grafana dashboard. So there is **no image to rebuild**: after editing a source file
+you re-render the ConfigMaps with a `helm upgrade`, and the **next** run picks up the change.
+
+| Edit this | Source path | Rendered into | Template |
+|---|---|---|---|
+| Scenario / lib / generator / schema JS | `files/k6/scripts/*` | `k6-scenarios` ConfigMap (mounted at `/scripts`) | `k6-scenarios-configmap.yaml` |
+| Preset load-shape/config | `files/k6/k6-config/*.env` | one `k6-preset-<name>` ConfigMap each (`envFrom`) | `k6-presets-configmap.yaml` |
+| Grafana dashboard | `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `grafanaDashboard.yaml` |
+| Run distribution defaults (`parallelism`/`separate`/`cleanup`) | `values.yaml` (`testRun.*`) | `k6-testrun-examples` ConfigMap | `k6-testrun-examples.yaml` |
+
+**Apply the edit** — re-render into the same release (namespace `ma`):
+
+```bash
+CHART=deployment/k8s/charts/components/k6LoadTest
+helm upgrade k6-load-test "$CHART" -n ma \
+  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest --set image.pullPolicy=IfNotPresent
+```
+
+Then verify the ConfigMap actually changed and submit a fresh run:
+
+```bash
+kubectl -n ma get cm k6-scenarios -o "jsonpath={.data.SCENARIO_ingest\.js}" | head   # spot-check content
+./scripts/k6-run.sh ingest --config ingest-steady                                     # new run uses the new content
+```
+
+Notes:
+- **In-flight runs are not affected.** ConfigMaps are read when the runner/initializer pods start, so
+  a run that is already going keeps the old scripts/presets — only runs submitted *after* the upgrade
+  see the edit. (This is also why editing is safe mid-test.)
+- **Re-supply the image values** on the `helm upgrade` (as shown). Do **not** use `--reuse-values` on
+  this release — it predates the `testRun` block and errors with a nil-pointer; pass the `--set
+  image.*` overrides explicitly instead.
+- **Adding/removing a preset or scenario file** adds/removes its ConfigMap on the next upgrade (presets
+  are one ConfigMap per `.env`; scenarios share the flat `k6-scenarios` map).
+- **No `helm dependency build` needed** for file edits — that step only re-vendors the k6-operator
+  subchart, which is unchanged when you edit scenarios/presets.
+- **Grafana dashboard** edits are imported by the kube-prometheus-stack Grafana sidecar a few seconds
+  after the ConfigMap updates — no pod restart required.
+
+This ConfigMap-not-baked-image workflow is deliberate; see [Design decisions](#design-decisions) (§3).
+
+---
+
 ## Find the Capture Proxy endpoint
 
 ```bash
@@ -145,8 +192,9 @@ Both fields are baked into every example from chart values (`templates/k6-testru
 
 | Chart value | Default | TestRun field | Effect |
 |---|---|---|---|
-| `testRun.parallelism` | `4` | `spec.parallelism` | Runner pods the load is split across (k6 execution segments). `--rate`/`--vus` are **global totals** divided among them. |
+| `testRun.parallelism` | `1` | `spec.parallelism` | Runner pods the load is split across (k6 execution segments). `--rate`/`--vus` are **global totals** divided among them. |
 | `testRun.separate` | `false` | `spec.separate` | Operator shorthand for **required** node anti-affinity — forces each runner pod onto a distinct node. |
+| `testRun.cleanup` | `""` (off) | `spec.cleanup` | `post` makes the operator tear down the **entire** run on finish — pods **and** the TestRun CR. Off by default because it races the `stage=finished` polling below (see the warning). |
 
 > **`separate: true` needs at least `parallelism` schedulable nodes.** It uses
 > `requiredDuringSchedulingIgnoredDuringExecution`, so if nodes < parallelism the surplus runner
@@ -159,11 +207,16 @@ Both fields are baked into every example from chart values (`templates/k6-testru
 > `separate` is valid on the vendored **k6-operator chart 4.5.0 / operator v1.5.0** TestRun CRD.
 
 **Overriding per run — behavior differs by submission path:**
-- **kubectl** / **`k6-run.sh`**: inherit the example's `parallelism` (4) and `separate` unless you
-  pass `--parallelism` (patch `.spec.parallelism` / `.spec.separate` by hand for `separate`).
+- **kubectl** / **`k6-run.sh`**: inherit the example's `parallelism`, `separate`, and `cleanup` unless
+  you pass `--parallelism` (patch `.spec.separate` / `.spec.cleanup` by hand).
 - **`workflow k6`**: **always** sets `spec.parallelism` (its own default is `1`), so it overrides the
-  example's 4 unless you pass `--parallelism`. Neither CLI exposes `--separate`; it always comes from
-  the baked-in example value.
+  example unless you pass `--parallelism`. Neither CLI exposes `--separate` or `--cleanup`; those
+  always come from the baked-in example value.
+
+> **`cleanup: post` conflicts with waiting for a run.** The operator deletes the TestRun CR the
+> instant it reaches `finished`, so any flow that polls for completion — `run_test.sh --run`,
+> `workflow k6 run --wait`, the `Test0050` integ test — will see the CR vanish mid-poll and time out.
+> Only enable it for fire-and-forget submissions you don't wait on.
 
 ### 1. kubectl (no console, no extra tooling)
 
@@ -375,6 +428,12 @@ Control commands are written to a Redis key (via Webdis) and polled by VUs mid-r
 kubectl -n ma get testrun -l app=k6-load-test
 kubectl -n ma logs -l k6_cr=<run-name>,runner=true -c k6 --prefix -f
 ```
+
+> **`kubectl logs` only works while the pods exist.** If you opt into `testRun.cleanup=post`, the
+> operator deletes the runner pods (and the whole TestRun) the moment the run finishes — so tail logs
+> *during* the run. With the default (`cleanup` off) the pods linger for post-run inspection. Metrics
+> land in Grafana either way.
+
 Metrics land in the existing Grafana (kube-prometheus-stack); open the **k6-load-test** dashboard.
 k6 pushes OTLP gRPC to the otel-collector (`K6_OUT=opentelemetry`,
 `K6_OTEL_GRPC_EXPORTER_ENDPOINT=otel-collector:4317`); the collector exposes a Prometheus scrape
