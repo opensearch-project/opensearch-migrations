@@ -48,21 +48,15 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
 /**
- * Proves --failed-document-stream-enabled=false writes nothing to S3 even when a bucket resolves,
- * which is the case the opt-out exists for (on AWS the deployment default always resolves).
- *
- * <p>The opt-out run goes through the real production path: options arrive as the orchestrator sends
- * them (---INLINE-JSON), {@link RfsMigrateDocuments#buildFailedDocumentStreamSink} decides, and the
- * resulting sink is installed on a real client that then takes terminal bulk failures.
- *
- * <p>An enabled control runs the identical failure flow against a working sink. Without it, the
- * empty-prefix assertion would also pass if the harness simply produced no failures.
+ * A migration that names no failed-document-stream bucket must write nothing to S3, even with every other
+ * failed-document-stream setting present. The enabled control runs the identical failure flow against a
+ * working sink, so the empty-prefix assertion can't pass vacuously.
  */
 @Tag("isolatedTest")
 @Testcontainers
-class RfsMigrateDocumentsFailedDocumentStreamOptOutLocalStackTest {
+class RfsMigrateDocumentsFailedDocumentStreamDisabledLocalStackTest {
 
-    private static final String BUCKET = "rfs-fds-opt-out-test";
+    private static final String BUCKET = "rfs-fds-disabled-test";
     private static final String PREFIX = "rfs-failed-document-stream/";
 
     @Container
@@ -92,26 +86,24 @@ class RfsMigrateDocumentsFailedDocumentStreamOptOutLocalStackTest {
     }
 
     @Test
-    void optedOutBackfillWritesNothingToS3() throws Exception {
-        var sessionId = "sess-opt-out";
+    void backfillWithoutBucketWritesNothingToS3() throws Exception {
+        var sessionId = "sess-no-bucket";
 
-        // Options exactly as the orchestrator sends them: a fully resolved bucket AND the opt-out.
+        // Everything but the bucket resolves, so only its absence can keep the stream off.
         var args = new RfsMigrateDocuments.Args();
         JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[]{
             "---INLINE-JSON",
-            "{\"failedDocumentStreamEnabled\": false,"
-                + "\"failedDocumentStreamS3Bucket\": \"" + BUCKET + "\","
-                + "\"failedDocumentStreamS3Prefix\": \"" + PREFIX + "\","
+            "{\"failedDocumentStreamS3Prefix\": \"" + PREFIX + "\","
                 + "\"failedDocumentStreamS3Region\": \"" + LOCAL_STACK.getRegion() + "\","
                 + "\"failedDocumentStreamS3Endpoint\": \"" + LOCAL_STACK.getEndpoint() + "\"}"
         });
 
         var sink = RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "worker-1", sessionId);
-        assertThat("opt-out must yield no sink even with a resolved bucket", sink, is(nullValue()));
+        assertThat("no bucket must yield no sink", sink, is(nullValue()));
 
         driveTerminalBulkFailures(sink, sessionId);
 
-        assertThat("opted-out run must leave the session prefix empty",
+        assertThat("a run with no bucket configured must write nothing",
             listSessionKeys(sessionId), is(empty()));
     }
 

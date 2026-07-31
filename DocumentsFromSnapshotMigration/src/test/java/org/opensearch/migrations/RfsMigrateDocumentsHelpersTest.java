@@ -102,79 +102,55 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void failedDocumentStreamEnabled_bindsFromInlineJsonConfig() {
-        // The orchestrator passes options as ---INLINE-JSON with camelCase keys, so the schema
-        // field name must reach the flag.
+    void buildFailedDocumentStreamSink_bucketFromInlineJsonConfigTurnsTheStreamOn() {
+        // The orchestrator sends options as ---INLINE-JSON with camelCase keys.
         var args = new RfsMigrateDocuments.Args();
         JsonCommandLineParser.newBuilder().addObject(args).build()
-            .parse(new String[]{"---INLINE-JSON", "{\"failedDocumentStreamEnabled\": false}"});
+            .parse(new String[]{"---INLINE-JSON",
+                "{\"failedDocumentStreamS3Bucket\": \"from-json\", \"failedDocumentStreamS3Region\": \"us-east-1\"}"});
 
-        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamEnabled, equalTo(false));
+        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket, equalTo("from-json"));
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), notNullValue());
+    }
+
+    @Test
+    void buildFailedDocumentStreamSink_inlineJsonWithoutBucketLeavesTheStreamOff() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"failedDocumentStreamS3Region\": \"us-east-1\"}"});
+
+        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket, nullValue());
         assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), nullValue());
     }
 
     @Test
-    void buildFailedDocumentStreamSink_defaultsToEnabled() {
-        // Unset flag must leave the stream on.
+    void buildFailedDocumentStreamSink_returnsNullWhenBucketIsBlank() {
+        // A blank bucket reads as "not configured".
         var args = new RfsMigrateDocuments.Args();
-        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamEnabled, equalTo(true));
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "   ";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Region = "us-east-1";
+
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), nullValue());
     }
 
     @Test
-    void failedDocumentStreamDisabledReason_reportsOptOut() {
-        var args = new RfsMigrateDocuments.Args();
-        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
-
-        assertThat(RfsMigrateDocuments.failedDocumentStreamDisabledReason(args),
-            equalTo("failed document stream disabled: opted out via --failed-document-stream-enabled=false"));
-    }
-
-    @Test
-    void failedDocumentStreamDisabledReason_reportsMissingBucketWhenEnabled() {
-        var args = new RfsMigrateDocuments.Args();
-        // Enabled but no bucket configured is the other reason the sink is absent.
-
-        assertThat(RfsMigrateDocuments.failedDocumentStreamDisabledReason(args),
+    void failedDocumentStreamDisabledReason_namesTheMissingBucket() {
+        assertThat(RfsMigrateDocuments.FAILED_DOCUMENT_STREAM_DISABLED_REASON,
             equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
     }
 
     @Test
     void logFailedDocumentStreamStatus_reportsDisabledWhenSinkAbsent() {
-        var args = new RfsMigrateDocuments.Args();
-        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
-
-        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(null, args, "sess-A"));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(null, "sess-A"));
     }
 
     @Test
     void logFailedDocumentStreamStatus_emitsLocationWhenSinkPresent() {
-        var args = new RfsMigrateDocuments.Args();
         var sink = mock(FailedDocumentStreamSink.class);
         when(sink.getLocation()).thenReturn("s3://bucket/prefix");
 
-        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(sink, args, "sess-A"));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(sink, "sess-A"));
         verify(sink, atLeastOnce()).getLocation();
-    }
-
-    @Test
-    void buildFailedDocumentStreamSink_returnsNullWhenOptedOutDespiteResolvedBucket() {
-        // On AWS a bucket always resolves, so opting out is the only way off.
-        var args = new RfsMigrateDocuments.Args();
-        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
-        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "my-failed-document-stream-bucket";
-        args.failedDocumentStreamArgs.failedDocumentStreamS3Region = "us-east-1";
-
-        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "worker-1", "sess-A"), nullValue());
-    }
-
-    @Test
-    void buildFailedDocumentStreamSink_optOutTakesPrecedenceOverMissingRegion() {
-        // Opt-out short-circuits before region validation, which would otherwise throw.
-        var args = new RfsMigrateDocuments.Args();
-        args.failedDocumentStreamArgs.failedDocumentStreamEnabled = false;
-        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "b";   // region left unset everywhere
-
-        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), nullValue());
     }
 
     @Test

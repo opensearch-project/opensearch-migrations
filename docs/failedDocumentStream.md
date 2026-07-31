@@ -101,19 +101,26 @@ console backfill reset --include-failed-document-stream
 
 ## Configuration
 
-The failed document stream is enabled by default. Set `failedDocumentStreamEnabled: false` to turn it off.
-Disabling records nothing at all, so a failed migration leaves no inventory of which documents did not
-land.
+`failedDocumentStreamS3Bucket` is the stream's on/off switch. Set it and terminal document failures are
+recorded to that bucket; leave it out and nothing is recorded, so a failed migration leaves no inventory
+of which documents did not land. There is no separate enable flag and no default bucket — a migration
+only writes failures to a bucket its own config names.
 
-When you omit `failedDocumentStreamS3Bucket`, it falls back to the deployment's default S3 bucket (from
-`migrations-default-s3-config`). The destination is set under a migration's `documentBackfillConfig`, where
-all fields are optional.
+The destination is set under a migration's `documentBackfillConfig`, where all fields are optional:
+
+```yaml
+documentBackfillConfig:
+  failedDocumentStreamS3Bucket: my-failed-documents-bucket
+```
 
 | Option                              | Default                        | Description                                                    |
 |-------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `failedDocumentStreamEnabled`       | `true`                         | Set to `false` to turn the stream off.                         |
-| `failedDocumentStreamS3Bucket`      | deployment default bucket      | Bucket for records. Set to use a separate one.                 |
+| `failedDocumentStreamS3Bucket`      | none — stream off              | Bucket for records. Setting it enables the stream.             |
 | `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
-| `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket.                                         |
-| `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack).                           |
+| `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket. Ignored without a bucket.               |
+| `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack). Ignored without a bucket. |
 | `failedDocumentStreamMaxBufferBytes`| `67108864` (64 MiB)            | Max in-memory bytes per index before rotating to a new object. |
+
+The region and endpoint are still resolved for you when the bucket is set: the config processor takes your
+value if given, else the snapshot repo's, else the deployment default, and records the result in run
+history rather than leaving RFS to discover it at runtime.

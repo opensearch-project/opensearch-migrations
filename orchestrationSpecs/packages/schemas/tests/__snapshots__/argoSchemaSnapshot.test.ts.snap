@@ -2384,25 +2384,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "failedDocumentStreamEnabled": {
-                      "type": "boolean",
-                      "default": true
-                    },
                     "failedDocumentStreamS3Prefix": {
                       "type": "string",
                       "default": "rfs-failed-document-stream/"
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                      "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
                     },
                     "failedDocumentStreamS3Region": {
                       "type": "string",
-                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
                     },
                     "failedDocumentStreamS3Endpoint": {
                       "type": "string",
-                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
                     },
                     "failedDocumentStreamMaxBufferBytes": {
                       "type": "number",
@@ -5312,11 +5308,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "changeRestriction": "impossible"
                       },
-                      "failedDocumentStreamEnabled": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Whether terminal document failures are recorded to the failed document stream."
-                      },
                       "failedDocumentStreamS3Prefix": {
                         "type": "string",
                         "default": "rfs-failed-document-stream/",
@@ -5324,15 +5315,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                        "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
                       },
                       "failedDocumentStreamS3Region": {
                         "type": "string",
-                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
                       },
                       "failedDocumentStreamS3Endpoint": {
                         "type": "string",
-                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
                       },
                       "failedDocumentStreamMaxBufferBytes": {
                         "type": "number",

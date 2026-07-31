@@ -318,26 +318,14 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Configuration for the durable failed document stream where terminal document failures are persisted.
-     * The failed document stream is enabled when --failed-document-stream-enabled is true (the default) and
-     * --failed-document-stream-s3-bucket is provided. Passing --failed-document-stream-enabled=false opts out
-     * even when a bucket resolves, which is how deployments that always provision one turn the stream off. The
-     * deployment-provisioned default is resolved upstream by the config processor and passed in
-     * explicitly; RFS does not read defaults from the pod environment. When no bucket is provided,
-     * terminal failures are not captured to a sink.
+     * Configuration for the durable failed document stream. The S3 bucket is the on/off switch: no bucket,
+     * no stream. There is no enable flag and no default bucket.
      */
     public static class FailedDocumentStreamArgs {
         @Parameter(required = false,
-            names = { "--failed-document-stream-enabled" },
-            arity = 1,
-            description = "Whether to record terminal document failures to the failed document stream. Default: true.")
-        public boolean failedDocumentStreamEnabled = true;
-
-        @Parameter(required = false,
             names = { "--failed-document-stream-s3-bucket" },
-            description = "S3 bucket for durable failed document stream records. When unset, the failed document " +
-                "stream is disabled. The deployment-provisioned default is resolved before submission by the " +
-                "config processor and passed in explicitly (RFS does not read it from the pod environment).")
+            description = "S3 bucket for durable failed document stream records, and the switch that enables the " +
+                "stream. When unset, terminal failures are not recorded.")
         public String failedDocumentStreamS3Bucket = null;
 
         @Parameter(required = false,
@@ -607,7 +595,7 @@ public class RfsMigrateDocuments {
         var resolvedSessionId = resolveSessionId(arguments, workerId);
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
-        logFailedDocumentStreamStatus(failedDocumentStreamSink, arguments, resolvedSessionId);
+        logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
             case ALWAYS -> true;
@@ -944,19 +932,12 @@ public class RfsMigrateDocuments {
         return "worker-" + workerId;
     }
 
-    // Keyed by whether the stream was enabled.
-    private static final Map<Boolean, String> FAILED_DOCUMENT_STREAM_DISABLED_REASONS = Map.of(
-        Boolean.FALSE, "failed document stream disabled: opted out via --failed-document-stream-enabled=false",
-        Boolean.TRUE, "failed document stream disabled: no --failed-document-stream-s3-bucket configured");
+    static final String FAILED_DOCUMENT_STREAM_DISABLED_REASON =
+        "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
 
-    static String failedDocumentStreamDisabledReason(Args arguments) {
-        return FAILED_DOCUMENT_STREAM_DISABLED_REASONS.get(
-            arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled);
-    }
-
-    static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, Args arguments, String sessionId) {
+    static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, String sessionId) {
         if (sink == null) {
-            log.atInfo().setMessage(failedDocumentStreamDisabledReason(arguments)).log();
+            log.atInfo().setMessage(FAILED_DOCUMENT_STREAM_DISABLED_REASON).log();
             return;
         }
         log.atInfo().setMessage("failed document stream enabled: sessionId={} location={}")
@@ -966,18 +947,10 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Build the S3 failed document stream sink, or return null when the stream is opted out of via
-     * --failed-document-stream-enabled=false or no bucket is configured. The bucket,
-     * region, and endpoint are explicit configuration passed via the --failed-document-stream-s3-* args.
-     * The deployment-provisioned default is resolved upstream by the config processor (and recorded in
-     * run history) and passed in explicitly, so RFS does not read defaults from the pod environment.
-     * The per-session prefix keeps failed document stream and snapshot objects in their own keyspace.
+     * Build the S3 failed document stream sink, or null when no bucket is configured. Bucket, region and
+     * endpoint come from the --failed-document-stream-s3-* args, resolved by the config processor.
      */
     static FailedDocumentStreamSink buildFailedDocumentStreamSink(Args arguments, String workerId, String sessionId) {
-        // Opt-out wins over a resolved bucket; on AWS the default always resolves.
-        if (!arguments.failedDocumentStreamArgs.failedDocumentStreamEnabled) {
-            return null;
-        }
         String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
         if (bucket == null || bucket.isBlank()) {
             return null;
