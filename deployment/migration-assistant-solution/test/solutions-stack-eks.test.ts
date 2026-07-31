@@ -3,6 +3,20 @@ import {Template} from 'aws-cdk-lib/assertions';
 import { App } from 'aws-cdk-lib';
 import {SolutionsInfrastructureEKSStack} from "../lib/solutions-stack-eks";
 
+interface IamPolicyStatement {
+    Action: string | string[];
+    Resource: unknown;
+}
+
+interface IamPolicyResource {
+    Properties?: {
+        PolicyName?: string;
+        PolicyDocument?: {
+            Statement?: IamPolicyStatement[];
+        };
+    };
+}
+
 describe('Solutions stack', () => {
     const defaultProperties = {
         solutionId: 'SO0000',
@@ -81,6 +95,33 @@ describe('Solutions stack', () => {
         });
         const template = Template.fromStack(stack).toJSON();
         expect(template).toMatchSnapshot();
+    });
+
+    test('Migrations pod policy only uses wildcard resources when required', () => {
+        const stack = new SolutionsInfrastructureEKSStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
+        const template = Template.fromStack(stack);
+        const policies = template.findResources('AWS::IAM::Policy') as Record<string, IamPolicyResource>;
+        const migrationsPolicy = Object.values(policies)
+            .find(policy => policy.Properties?.PolicyName === 'MigrationsPodPolicy');
+
+        expect(migrationsPolicy).toBeDefined();
+        const wildcardActions = migrationsPolicy?.Properties?.PolicyDocument?.Statement
+            ?.filter(statement =>
+                statement.Resource === '*'
+                || (Array.isArray(statement.Resource) && statement.Resource.includes('*'))
+            )
+            .flatMap(statement => Array.isArray(statement.Action) ? statement.Action : [statement.Action])
+            .sort();
+
+        expect(wildcardActions).toEqual([
+            'acm-pca:CreateCertificateAuthority',
+            'acm-pca:ListCertificateAuthorities',
+            'cloudwatch:GetMetricData',
+            'cloudwatch:ListMetrics',
+            'ecr:GetAuthorizationToken',
+            'xray:PutTelemetryRecords',
+            'xray:PutTraceSegments',
+        ]);
     });
 
     function verifyResources(template: Template, props: { vpcCount: number, vpcEndpointCount: number,

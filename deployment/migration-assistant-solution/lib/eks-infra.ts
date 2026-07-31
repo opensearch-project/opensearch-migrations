@@ -4,7 +4,7 @@ import * as eks from 'aws-cdk-lib/aws-eks-v2';
 import {IVpc, Subnet} from 'aws-cdk-lib/aws-ec2';
 import {
     Effect,
-    ManagedPolicy, Policy,
+    Policy,
     PolicyStatement,
     Role,
     ServicePrincipal,
@@ -17,7 +17,7 @@ export interface EKSInfraProps {
     vpc: IVpc;
     clusterName: string;
     ecrRepoName: string;
-    stackName: string;
+    stageName: string;
     vpcSubnetIds?: string[];
     namespace?: string;
     buildImagesServiceAccountName?: string;
@@ -82,7 +82,14 @@ export class EKSInfra extends Construct {
             })],
         );
 
-        const podIdentityRole = this.createDefaultPodIdentityRole(props.clusterName)
+        const stack = Stack.of(this);
+        const migrationsBucketArn =
+            `arn:${Aws.PARTITION}:s3:::migrations-default-${stack.account}-${props.stageName}-${stack.region}`;
+        const podIdentityRole = this.createDefaultPodIdentityRole(
+            props.clusterName,
+            props.stageName,
+            migrationsBucketArn
+        )
         this.snapshotRole = new Role(scope, `SnapshotRole`, {
             assumedBy: new ServicePrincipal('es.amazonaws.com'),  // Note that snapshots are not currently possible on AOSS
             description: 'Role that grants OpenSearch Service permissions to access S3 to create snapshots',
@@ -91,12 +98,12 @@ export class EKSInfra extends Construct {
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:ListBucket'],
-            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*`],
+            resources: [migrationsBucketArn],
         }));
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*/*`],
+            resources: [`${migrationsBucketArn}/*`],
         }));
         this.snapshotRole.grantPassRole(podIdentityRole);
 
@@ -173,14 +180,17 @@ export class EKSInfra extends Construct {
         }
     }
 
-    createDefaultPodIdentityRole(clusterName: string) {
+    createDefaultPodIdentityRole(clusterName: string, stageName: string, migrationsBucketArn: string) {
+        const stack = Stack.of(this);
+        const account = stack.account;
+        const region = stack.region;
+        const migrationLogGroupArn =
+            `arn:${Aws.PARTITION}:logs:${region}:${account}:log-group:/migration-assistant-${stageName}-${region}/logs`;
+
         const podIdentityRole = new Role(this, 'MigrationsPodIdentityRole', {
             roleName: `${clusterName}-migrations-role`,
             description: 'Migrations IAM role assumed by pods via EKS Pod Identity',
             assumedBy: new ServicePrincipal('pods.eks.amazonaws.com'),
-            managedPolicies: [
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryFullAccess'),
-            ],
         });
         podIdentityRole.assumeRolePolicy?.addStatements(
             new PolicyStatement({
@@ -194,71 +204,88 @@ export class EKSInfra extends Construct {
             roles: [podIdentityRole],
         });
         podIdentityPolicy.addStatements(
+            // ECR authorization tokens do not support resource-level permissions.
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ['ecr:GetAuthorizationToken'],
+                resources: ['*'],
+                conditions: {
+                    StringEquals: {
+                        'aws:RequestedRegion': region,
+                    },
+                },
+            }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
-                    'ecr:GetAuthorizationToken',
                     'ecr:BatchGetImage',
                     'ecr:GetDownloadUrlForLayer',
-                    'ecr:DescribeRepositories',
                     'ecr:BatchCheckLayerAvailability',
                     'ecr:CompleteLayerUpload',
                     'ecr:InitiateLayerUpload',
                     'ecr:PutImage',
                     'ecr:UploadLayerPart',
                 ],
-                resources: ['*'],
+                resources: [this.ecrRepo.repositoryArn],
             }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
-                actions: [
-                    'elasticfilesystem:ClientMount',
-                    'elasticfilesystem:ClientWrite',
+                actions: ['es:ESHttp*'],
+                resources: [
+                    `arn:${Aws.PARTITION}:es:${region}:${account}:domain/*/*`
                 ],
-                resources: ['*'],
             }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
-                actions: ['es:ESHttp*', 'aoss:APIAccessAll'],
-                resources: ['*'],
+                actions: ['aoss:APIAccessAll'],
+                resources: [
+                    `arn:${Aws.PARTITION}:aoss:${region}:${account}:collection/*`
+                ],
             }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
                     'secretsmanager:GetSecretValue',
                     'secretsmanager:DescribeSecret',
-                    'secretsmanager:ListSecrets',
                 ],
-                resources: ['*'],
+                resources: [
+                    `arn:${Aws.PARTITION}:secretsmanager:${region}:${account}:secret:*`
+                ],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    's3:ListBucket',
+                    "s3:CreateBucket",
+                    "s3:DeleteBucket",
+                ],
+                resources: [migrationsBucketArn],
             }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
                     's3:GetObject',
                     's3:PutObject',
-                    's3:ListBucket',
-                    's3:ListAllMyBuckets',
                     's3:DeleteObject',
-                    "s3:DeleteObjectVersion",
-                    "s3:ListBucketVersions",
-                    "s3:ListBucketMultipartUploads",
                     "s3:AbortMultipartUpload",
-                    "s3:CreateBucket",
-                    "s3:DeleteBucket",
-                    "s3:ListBucket"
                 ],
-                resources: ['*'],
+                resources: [`${migrationsBucketArn}/*`],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "logs:DescribeLogStreams",
+                    "logs:CreateLogGroup",
+                ],
+                resources: [migrationLogGroupArn],
             }),
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
                     "logs:PutLogEvents",
-                    "logs:DescribeLogStreams",
-                    "logs:DescribeLogGroups",
-                    "logs:CreateLogGroup",
                     "logs:CreateLogStream"
                 ],
-                resources: ['*'],
+                resources: [`${migrationLogGroupArn}:log-stream:*`],
             }),
             // Allow Console/tests to verify emitted CloudWatch application metrics
             new PolicyStatement({
@@ -267,7 +294,13 @@ export class EKSInfra extends Construct {
                     "cloudwatch:ListMetrics",
                     "cloudwatch:GetMetricData"
                 ],
+                // Classic CloudWatch metric queries require a wildcard resource.
                 resources: ['*'],
+                conditions: {
+                    StringEquals: {
+                        'aws:RequestedRegion': region,
+                    },
+                },
             }),
             // Sending traces to xray
             new PolicyStatement({
@@ -276,16 +309,15 @@ export class EKSInfra extends Construct {
                     "xray:PutTraceSegments",
                     "xray:PutTelemetryRecords"
                 ],
+                // These X-Ray actions do not support resource-level permissions.
                 resources: ['*'],
-            }),
-            // Allow passing default or user-provided snapshot role to OpenSearch service
-            new PolicyStatement({
-                effect: Effect.ALLOW,
-                actions: ['iam:PassRole'],
-                resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
+                conditions: {
+                    StringEquals: {
+                        'aws:RequestedRegion': region,
+                    },
+                },
             }),
             // CloudWatch dashboard management for Helm post-install/pre-delete hooks
-            // Note: dashboard resource type has no condition keys in IAM; scoped by ARN prefix MA-*
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
@@ -294,7 +326,8 @@ export class EKSInfra extends Construct {
                     'cloudwatch:DeleteDashboards',
                 ],
                 resources: [
-                    `arn:${Aws.PARTITION}:cloudwatch::${Stack.of(this).account}:dashboard/MA-*`
+                    `arn:${Aws.PARTITION}:cloudwatch::${account}:dashboard/MA-${stageName}-${region}-CaptureReplay`,
+                    `arn:${Aws.PARTITION}:cloudwatch::${account}:dashboard/MA-${stageName}-${region}-ReindexFromSnapshot`
                 ],
             }),
             // ACM PCA permissions for TLS certificate issuance via cert-manager
@@ -304,13 +337,27 @@ export class EKSInfra extends Construct {
                     'acm-pca:IssueCertificate',
                     'acm-pca:GetCertificate',
                     'acm-pca:DescribeCertificateAuthority',
-                    'acm-pca:ListCertificateAuthorities',
-                    'acm-pca:CreateCertificateAuthority',
                     'acm-pca:DeleteCertificateAuthority',
                     'acm-pca:UpdateCertificateAuthority',
                     'acm-pca:TagCertificateAuthority',
                 ],
+                resources: [
+                    `arn:${Aws.PARTITION}:acm-pca:${region}:${account}:certificate-authority/*`
+                ],
+            }),
+            // These PCA actions do not support resource-level permissions.
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'acm-pca:ListCertificateAuthorities',
+                    'acm-pca:CreateCertificateAuthority',
+                ],
                 resources: ['*'],
+                conditions: {
+                    StringEquals: {
+                        'aws:RequestedRegion': region,
+                    },
+                },
             })
         );
         return podIdentityRole

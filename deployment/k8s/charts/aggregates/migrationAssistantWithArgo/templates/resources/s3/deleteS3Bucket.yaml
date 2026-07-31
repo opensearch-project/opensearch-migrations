@@ -79,7 +79,7 @@ spec:
 
               # Wait for S3 to be available
               retry_count=0
-              while ! check_s3_available; do
+              while ! check_s3_available "$BUCKET_NAME"; do
                 retry_count=$((retry_count + 1))
                 if [ $retry_count -ge $MAX_RETRIES ]; then
                   echo "S3 endpoint not available after $MAX_RETRIES attempts. Exiting."
