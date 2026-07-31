@@ -37,15 +37,15 @@ info()   { echo -e "  ${YELLOW}ℹ${NC}      $1"; }
 header() { echo -e "\n${BOLD}$1${NC}"; }
 
 # ── k6 runs (console-independent, via k6-run.sh + kubectl) ─────────────────────
-# The scripts call these with console-style flags; we translate to k6-run.sh args. Supported:
-#   --scenario X  --config PRESET  --parallelism N  --registry-enabled  --extra-args STR  -o KEY=VAL
+# The scripts call these with console-style flags, passed straight through to k6-run.sh. Supported:
+#   --scenario X  --config NAME  --parallelism N  --registry-enabled  --extra-args STR  -o KEY=VAL
 submit_k6() {
   # Submit a k6 run WITHOUT waiting; echo the generated run name.
-  local scenario="" preset="" parallelism="" extra=""; local -a extra_env=()
+  local scenario="" config="" parallelism="" extra=""; local -a extra_env=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scenario) scenario="$2"; shift ;;
-      --config) preset="$2"; shift ;;
+      --config) config="$2"; shift ;;
       --parallelism) parallelism="$2"; shift ;;
       --registry-enabled) extra_env+=(-e REGISTRY_ENABLED=true) ;;
       --extra-args) extra="$2"; shift ;;
@@ -55,7 +55,7 @@ submit_k6() {
     shift
   done
   local -a args=("$scenario" --target "$PROXY_URL")
-  [[ -n "$preset" ]] && args+=(--preset "$preset")
+  [[ -n "$config" ]] && args+=(--config "$config")
   [[ -n "$parallelism" ]] && args+=(--parallelism "$parallelism")
   [[ -n "$extra" ]] && args+=(--extra-args "$extra")
   [[ ${#extra_env[@]} -gt 0 ]] && args+=("${extra_env[@]}")

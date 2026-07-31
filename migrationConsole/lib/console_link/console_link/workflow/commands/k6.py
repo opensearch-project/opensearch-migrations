@@ -9,7 +9,7 @@ Load is spread across `--parallelism` runner pods by k6 execution segments.
 
 Because the infra is a separate opt-in, these commands are inert (and hidden from `--help`) unless
 the TestRun CRD is present in the namespace — so a normal migration deployment cannot trigger a
-load test. See TrafficCapture/trafficLoadTest/k8s/README.md for the deployment side.
+load test. See TrafficCapture/trafficLoadTest/README.md for the deployment side.
 """
 
 import calendar

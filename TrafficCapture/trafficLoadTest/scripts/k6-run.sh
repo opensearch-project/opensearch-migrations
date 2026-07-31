@@ -6,9 +6,12 @@
 # image, K6_OUT metrics, and a default preset via envFrom; this only patches per-run bits.
 #
 # Usage:
-#   ./k6-run.sh <ingest|search|mixed> [--preset NAME] [--parallelism N] [--target URL]
+#   ./k6-run.sh <ingest|search|mixed> [--config NAME] [--parallelism N] [--target URL]
 #               [--extra-args STR] [-e KEY=VALUE]...
-#   CONTEXT=<ctx> NAMESPACE=ma ./k6-run.sh ingest --preset ingest-burst -e SEED_DOC_COUNT=0
+#   CONTEXT=<ctx> NAMESPACE=ma ./k6-run.sh ingest --config ingest-burst -e SEED_DOC_COUNT=0
+#
+# --config NAME selects a k6-config/*.env preset (rendered by the chart into the
+# k6-preset-<NAME> ConfigMap, consumed via envFrom).
 #
 # Prints the generated run name on success.
 
@@ -17,7 +20,7 @@ CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
 NAMESPACE="${NAMESPACE:-ma}"
 
 usage() {
-  echo "usage: k6-run.sh <ingest|search|mixed> [--preset NAME] [--parallelism N] [--target URL] [--extra-args STR] [-e KEY=VALUE]..." >&2
+  echo "usage: k6-run.sh <ingest|search|mixed> [--config NAME] [--parallelism N] [--target URL] [--extra-args STR] [-e KEY=VALUE]..." >&2
   exit 2
 }
 
@@ -25,10 +28,10 @@ usage() {
 SCENARIO="$1"; shift
 case "$SCENARIO" in ingest|search|mixed) ;; *) echo "unknown scenario: $SCENARIO" >&2; usage ;; esac
 
-PRESET=""; PARALLELISM=""; TARGET=""; EXTRA=""; ENVS=()
+CONFIG=""; PARALLELISM=""; TARGET=""; EXTRA=""; ENVS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --preset)      PRESET="$2"; shift ;;
+    --config)      CONFIG="$2"; shift ;;
     --parallelism) PARALLELISM="$2"; shift ;;
     --target)      TARGET="$2"; shift ;;
     --extra-args)  EXTRA="$2"; shift ;;
@@ -55,9 +58,9 @@ for kv in "${ENVS[@]:-}"; do
 done
 
 echo "$example" \
-  | jq --argjson envadd "$env_json" --arg preset "$PRESET" --arg par "$PARALLELISM" --arg extra "$EXTRA" '
+  | jq --argjson envadd "$env_json" --arg config "$CONFIG" --arg par "$PARALLELISM" --arg extra "$EXTRA" '
       .spec.runner.env += $envadd
-      | (if $preset != "" then .spec.runner.envFrom[0].configMapRef.name = "k6-preset-\($preset)" else . end)
+      | (if $config != "" then .spec.runner.envFrom[0].configMapRef.name = "k6-preset-\($config)" else . end)
       | (if $par    != "" then .spec.parallelism = ($par|tonumber) else . end)
       | (if $extra  != "" then .spec.arguments = $extra else . end)' \
   | K create -f - -o jsonpath='{.metadata.name}'

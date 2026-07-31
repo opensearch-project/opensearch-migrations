@@ -6,6 +6,8 @@
 # Override defaults by swapping the envFrom preset name or adding runner.env entries (env wins).
 {{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
 {{- $pull := .Values.image.pullPolicy }}
+{{- $parallelism := .Values.testRun.parallelism | int }}
+{{- $separate := .Values.testRun.separate }}
 {{- $otel := list
       (dict "name" "K6_OUT" "value" "opentelemetry")
       (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
@@ -28,7 +30,8 @@ data:
   {{- $testrun := dict
         "apiVersion" "k6.io/v1alpha1" "kind" "TestRun"
         "metadata" (dict "generateName" "k6-run-" "labels" (dict "app" "k6-load-test" "k6-scenario" $scenario))
-        "spec" (dict "parallelism" 1 "script" (dict "localFile" (printf "/scripts/SCENARIO_%s.js" $scenario))
+        "spec" (dict "parallelism" $parallelism "separate" $separate
+                     "script" (dict "localFile" (printf "/scripts/SCENARIO_%s.js" $scenario))
                      "initializer" $initializer "runner" $runner) }}
   {{ $scenario }}: |-
 {{ $testrun | toJson | indent 4 }}

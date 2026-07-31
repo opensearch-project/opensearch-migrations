@@ -20,6 +20,16 @@ k6-operator:
   namespace:
     create: false
 
+# TestRun distribution defaults baked into the k6-testrun-examples ConfigMap. `parallelism` splits
+# each scenario's load across that many runner pods (the operator shards the script's executors).
+# `separate: true` is the operator's shorthand for REQUIRED node anti-affinity — it forces the runner
+# pods onto distinct nodes. Only meaningful when parallelism > 1, and it needs at least `parallelism`
+# schedulable nodes or the surplus pods stay Pending forever — so keep it false on single-node
+# clusters (e.g. local minikube).
+testRun:
+  parallelism: 1
+  separate: false
+
 # Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
 # Off by default; those scenarios degrade gracefully to flat searches when absent.
 registry:
