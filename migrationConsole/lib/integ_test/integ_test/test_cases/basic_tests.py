@@ -85,25 +85,29 @@ class Test0008OptionalSnapshotStages(MATestBase):
     """Verifies that omitting metadataMigrationConfig or documentBackfillConfig skips the
     corresponding workflow step rather than running it.
 
-    After a successful baseline run (both stages), two additional workflows are submitted
-    against the same provisioned clusters using externallyManagedSnapshotName pointing at
-    the snapshot the baseline run created.  No new snapshot is taken; the existing one is
-    reused, so both extra runs complete quickly.
+    Regression coverage for the `when` gate on the metadataMigrate / bulkLoadDocuments
+    steps. Before the fix, an absent config was defaulted to `{}`, which serialized to
+    the non-empty string "{}" and so always evaluated truthy — every stage ran
+    regardless of whether the user asked for it.
+
+    After the baseline run (both stages, verified end-to-end), two more workflows are
+    submitted against the same provisioned clusters. Each seeds its own fresh index and
+    is scoped with indexAllowlist so the runs cannot interfere with each other or with
+    the baseline. Each extra run takes its own snapshot: the repo path is suffixed with
+    the workflow uid (see fullMigrationImportedClusters.yaml), so a snapshot from one
+    workflow is not readable by another and reuse is not an option.
 
     - metadata-only run: metadataMigrationConfig present, documentBackfillConfig absent.
-      metadataMigrate should Succeed. bulkLoadDocuments should be Skipped.
+      metadataMigrate Succeeds, bulkLoadDocuments is Skipped. The index mappings land on
+      the target but the document does not — the functional proof that backfill was
+      genuinely skipped rather than merely reported as such.
 
     - backfill-only run: documentBackfillConfig present, metadataMigrationConfig absent.
-      metadataMigrate should be Skipped. bulkLoadDocuments should Succeed (idempotent
-      reindex of the same doc).
+      metadataMigrate is Skipped, bulkLoadDocuments Succeeds.
 
-    Both extra runs rely on the real snapshot so all steps that DO run can succeed,
-    keeping the assertion clean: Skipped means the when-condition fired correctly.
+    Both extra runs are expected to succeed overall, so a Skipped phase is unambiguous
+    evidence the gate fired rather than a side effect of some upstream failure.
     """
-
-    # The test workflow always names the snapshot "testsnapshot" (hardcoded in
-    # fullMigrationWithClusters.yaml). We reuse that name for the extra runs.
-    _SNAPSHOT_NAME = "testsnapshot"
 
     def __init__(self, user_args: MATestUserArguments):
         description = (
@@ -116,7 +120,12 @@ class Test0008OptionalSnapshotStages(MATestBase):
             migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
             allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS,
         )
-        self.index_name = f"test_0008_{self.unique_id}-{uuid.uuid4().hex[:4]}"
+        run_suffix = uuid.uuid4().hex[:4]
+        self.index_name = f"test_0008_{self.unique_id}-{run_suffix}"
+        # Each extra run gets its own index so the runs stay independent of one another
+        # and of the baseline (metadata migration fails on an already-existing index).
+        self.metadata_only_index = f"test_0008_meta_{self.unique_id}-{run_suffix}"
+        self.backfill_only_index = f"test_0008_backfill_{self.unique_id}-{run_suffix}"
         self.doc_id = "test_0008_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
@@ -124,10 +133,11 @@ class Test0008OptionalSnapshotStages(MATestBase):
         self._extra_workflow_names: list[str] = []
 
     def prepare_clusters(self):
-        self.source_operations.create_document(
-            cluster=self.source_cluster, index_name=self.index_name,
-            doc_id=self.doc_id, doc_type=self.doc_type,
-        )
+        for index_name in (self.index_name, self.metadata_only_index, self.backfill_only_index):
+            self.source_operations.create_document(
+                cluster=self.source_cluster, index_name=index_name,
+                doc_id=self.doc_id, doc_type=self.doc_type,
+            )
 
     def verify_clusters(self):
         # Baseline: both stages ran and the document arrived on target.
@@ -136,7 +146,6 @@ class Test0008OptionalSnapshotStages(MATestBase):
             doc_id=self.doc_id, max_attempts=10, delay=3.0,
         )
 
-        # Additional runs reuse the same provisioned clusters and snapshot.
         self._run_and_assert_metadata_only()
         self._run_and_assert_backfill_only()
 
@@ -153,21 +162,16 @@ class Test0008OptionalSnapshotStages(MATestBase):
     # ------------------------------------------------------------------
 
     def _extra_run_parameters(self, migration_config: dict) -> dict:
-        """Build parameters for an extra run reusing the baseline snapshot.
+        """Build parameters for an extra run against the already-provisioned clusters.
 
-        Uses imported-clusters mode against the already-provisioned source/target
-        clusters.  externallyManagedSnapshotName skips the createSnapshot step and
-        points directly at the snapshot the baseline run left behind.
+        Uses imported-clusters mode so no new clusters are stood up. The run creates its
+        own snapshot (the repo path is per-workflow, so the baseline's snapshot is not
+        reachable from here).
         """
         return {
             "source-configs": [{
                 "source": self.source_cluster.config,
                 "snapshot-and-migration-configs": [{
-                    "snapshotConfig": {
-                        "snapshotNameConfig": {
-                            "externallyManagedSnapshotName": self._SNAPSHOT_NAME,
-                        },
-                    },
                     "migrations": [migration_config],
                 }],
             }],
@@ -190,7 +194,19 @@ class Test0008OptionalSnapshotStages(MATestBase):
             workflow_name=wf_name,
             timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
         )
-        return self.argo_service._get_workflow_status_json(wf_name)
+        workflow_json = self.argo_service._get_workflow_status_json(wf_name)
+        phase = workflow_json.get("status", {}).get("phase")
+        # Log every node phase before asserting so a failure here is diagnosable from
+        # the Jenkins console alone, without re-running against a live cluster.
+        logger.info("%s: workflow %s ended in phase=%s; node phases: %s",
+                    label, wf_name, phase,
+                    json.dumps(self._node_phases_by_display_name(workflow_json), indent=2, sort_keys=True))
+        assert phase == "Succeeded", (
+            f"{label}: workflow {wf_name} ended in phase {phase!r}, expected 'Succeeded'. "
+            f"A non-Succeeded run makes 'Skipped' assertions meaningless, since a step can "
+            f"also be skipped as a consequence of an upstream failure."
+        )
+        return workflow_json
 
     @staticmethod
     def _node_phases_by_display_name(workflow_json: dict) -> dict[str, str]:
@@ -212,23 +228,41 @@ class Test0008OptionalSnapshotStages(MATestBase):
         for name, phase in matching.items():
             if phase != expected:
                 raise AssertionError(
-                    f"{label}: node '{name}' phase={phase!r}, expected {expected!r}"
+                    f"{label}: node '{name}' phase={phase!r}, expected {expected!r}. "
+                    f"All node phases: {phases}"
                 )
-        logger.info("%s: node(s) matching '%s' all have phase=%s ✓", label, step_name, expected)
+        logger.info("%s: node(s) matching '%s' all have phase=%s", label, step_name, expected)
 
     def _run_and_assert_metadata_only(self):
         label = "metadata-only"
-        params = self._extra_run_parameters({"metadataMigrationConfig": {}})
+        allowlist = [self.metadata_only_index]
+        params = self._extra_run_parameters({
+            "metadataMigrationConfig": {"indexAllowlist": allowlist},
+        })
         wf = self._submit_and_wait(params, label)
         phases = self._node_phases_by_display_name(wf)
-        logger.info("%s: node phases: %s", label, {k: v for k, v in phases.items() if v})
         self._assert_node_phase(phases, "metadataMigrate", "Succeeded", label)
         self._assert_node_phase(phases, "bulkLoadDocuments", "Skipped", label)
 
+        # Functional confirmation: metadata created the index on the target, but with
+        # backfill skipped the document itself must not have been copied.
+        self.target_operations.get_index(
+            cluster=self.target_cluster, index_name=self.metadata_only_index,
+            max_attempts=10, delay=3.0,
+        )
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.metadata_only_index,
+            doc_id=self.doc_id, doc_type=self.doc_type,
+            expected_status_code=404, max_attempts=3, delay=2.0,
+        )
+        logger.info("%s: target index exists with no documents backfilled", label)
+
     def _run_and_assert_backfill_only(self):
         label = "backfill-only"
+        allowlist = [self.backfill_only_index]
         params = self._extra_run_parameters({
             "documentBackfillConfig": {
+                "indexAllowlist": allowlist,
                 "maxShardSizeBytes": 16000000,
                 "resources": {
                     "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
@@ -238,7 +272,6 @@ class Test0008OptionalSnapshotStages(MATestBase):
         })
         wf = self._submit_and_wait(params, label)
         phases = self._node_phases_by_display_name(wf)
-        logger.info("%s: node phases: %s", label, {k: v for k, v in phases.items() if v})
         self._assert_node_phase(phases, "metadataMigrate", "Skipped", label)
         self._assert_node_phase(phases, "bulkLoadDocuments", "Succeeded", label)
 
