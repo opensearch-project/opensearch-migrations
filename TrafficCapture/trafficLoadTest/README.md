@@ -481,7 +481,10 @@ Why the current setup looks the way it does (decision → rationale → alternat
    `infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's mirror manifest so k6
    mirroring is also opt-in.
 
-8. **Validation scripts assume a running data plane and drive through the console.**
-   `scripts/run_test_*.sh` submit k6 via `workflow k6 run` and assert against the in-cluster
-   services with `kubectl` (Kafka/OpenSearch), console-pod `curl` (proxy, Webdis), and PromQL
-   against `kube-prometheus-stack`. Setup/teardown is `deployWorkflowComponents.sh up`/`down`.
+8. **Validation scripts assume a running data plane.** A single parameterized
+   `scripts/run_test.sh --scenario ingest|search|mixed|sequences [--shape steady|ramp|burst] [--run]`
+   submits a k6 run (console-independently, via `k6-run.sh`) and asserts against the in-cluster
+   services with `kubectl` (Kafka/OpenSearch), in-cluster `curl` (proxy, Webdis), and PromQL against
+   `kube-prometheus-stack`. The runtime control plane (pause/resume/set-rate) is a distinct
+   behavioural test kept separate as `scripts/run_test_chaos.sh`. Setup/teardown is
+   `deployWorkflowComponents.sh up`/`down`.
