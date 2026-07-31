@@ -9,6 +9,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.bulkload.common.RepoUri;
@@ -19,6 +20,7 @@ import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -556,11 +558,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         UNKNOWN
     }
 
+    // Solr's SystemInfoHandler reports "solrcloud" when ZooKeeper-aware, "std" otherwise.
+    private static final String MODE_SOLR_CLOUD = "solrcloud";
+    private static final String MODE_STANDALONE = "std";
+
     static SolrTopology detectTopology(String solrUrl, SolrHttpClient httpClient) {
-        var listUrl = solrUrl + "/solr/admin/collections?action=LIST&wt=json";
+        var infoUrl = solrUrl + "/solr/admin/info/system?wt=json";
         HttpResponse<String> response;
         try {
-            response = httpClient.getRaw(listUrl, DETECTION_TIMEOUT);
+            response = httpClient.getRaw(infoUrl, DETECTION_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SolrTopologyDetectionException(
@@ -573,23 +579,43 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         int status = response.statusCode();
-        if (status == 200) {
-            return SolrTopology.SOLR_CLOUD;
-        }
         if (status == 401 || status == 403) {
-            // Access-controlled: can't read the Collections API to decide, so don't guess standalone.
+            // Access-controlled: can't read the system info to decide, so don't guess standalone.
             throw new SolrTopologyDetectionException(
                 "Solr authentication/authorization failed (HTTP " + status + ") while detecting topology at "
                     + solrUrl + "; cannot determine SolrCloud vs standalone");
         }
-        if (status == 400) {
-            // Standalone answers the Collections API with HTTP 400 "not running in SolrCloud mode".
+        if (status != 200) {
+            // 3xx, 404 (proxied base path), 5xx: reachable but uninformative — do not assume standalone.
+            log.info("Solr topology detection: HTTP {} from system info at {} — topology undetermined",
+                status, solrUrl);
+            return SolrTopology.UNKNOWN;
+        }
+
+        var mode = readMode(response.body());
+        if (MODE_SOLR_CLOUD.equals(mode)) {
+            return SolrTopology.SOLR_CLOUD;
+        }
+        if (MODE_STANDALONE.equals(mode)) {
             return SolrTopology.STANDALONE;
         }
-        // 3xx, 404 (proxied base path), 5xx: reachable but uninformative — do not assume standalone.
-        log.info("Solr topology detection: HTTP {} from Collections API at {} — topology undetermined",
-            status, solrUrl);
+        log.info("Solr topology detection: system info at {} reported mode '{}' — topology undetermined",
+            solrUrl, mode);
         return SolrTopology.UNKNOWN;
+    }
+
+    /** The lower-cased {@code mode} property, or "" when the body is absent, unparseable, or lacks it. */
+    private static String readMode(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        try {
+            return MAPPER.readTree(body).path("mode").asText("").trim().toLowerCase(Locale.ROOT);
+        } catch (JsonProcessingException e) {
+            log.atInfo().setMessage("Could not parse Solr system info response: {}")
+                .addArgument(e.getMessage()).log();
+            return "";
+        }
     }
 
     static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
@@ -597,7 +623,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         if (topology == SolrTopology.UNKNOWN) {
             throw new SolrTopologyDetectionException(
                 "Could not determine SolrCloud vs standalone topology at " + solrUrl
-                    + "; the Collections API response was neither a SolrCloud nor a standalone reply");
+                    + "; the system info response did not report a recognized mode");
         }
         return topology == SolrTopology.SOLR_CLOUD;
     }
