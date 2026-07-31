@@ -51,14 +51,14 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
-import * as logsDocs         from '../lib/data/logs_data/documents.js';
-import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
-import * as logsQueries      from '../lib/data/logs_data/queries.js';
-import { runSequence } from '../lib/sequences.js';
-import { pinned, spread } from '../lib/connection-control.js';
-import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
-import { checkControl } from '../lib/control.js';
+import * as nycTaxisDocs    from './GENERATOR_nyc_taxis_documents.js';
+import * as logsDocs         from './GENERATOR_logs_data_documents.js';
+import * as nycTaxisQueries  from './GENERATOR_nyc_taxis_queries.js';
+import * as logsQueries      from './GENERATOR_logs_data_queries.js';
+import { runSequence } from './LIB_sequences.js';
+import { pinned, spread } from './LIB_connection-control.js';
+import { registryFlush, registryWrite, registryRead } from './LIB_id-registry.js';
+import { checkControl } from './LIB_control.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends type suffixes; names here must NOT include them.
@@ -87,8 +87,8 @@ const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
 
 const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
+  nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
+  logs_data: open('./SCHEMA_logs_data.json'),
 };
 const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
 

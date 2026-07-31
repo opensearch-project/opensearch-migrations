@@ -22,7 +22,7 @@ INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
   deployment/k8s/charts/components/k6LoadTest [1]
     ├── Chart dependency: grafana/k6-operator [2]  ──►  TestRun CRD + controller
-    ├── ConfigMap/k6-scenarios [3]         (scenarios/ + lib/ + data/, "/"→"__" keys)
+    ├── ConfigMap/k6-scenarios [3]         (flat, type-prefixed files/k6/scripts/* → mounts at /scripts)
     ├── ConfigMap/k6-preset-<name> [4]     (one per k6-config/*.env, one key per var → envFrom)
     ├── ConfigMap/k6-testrun-examples [5]  (one ready-to-run TestRun JSON per scenario)
     └── Role/RoleBinding [6]               (grants the console SA rights on testruns.k6.io)
@@ -33,9 +33,9 @@ USAGE  (console optional — the example is the definition)
         └──────────────────┬───────────────┴──────────────────┘
                            ▼  load k6-testrun-examples.<scenario>, patch env/preset/parallelism
    TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
-     spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
+     spec.parallelism · script.localFile=/scripts/SCENARIO_<scenario>.js
      runner.envFrom ◄─ k6-preset-<config>   ;   runner.env ◄─ overrides (win) + K6_OUT
-     runner/initializer volumes ◄─ k6-scenarios (items projection → /scripts)
+     runner/initializer volumes ◄─ k6-scenarios (flat ConfigMap mounted at /scripts)
                            ▼  (operator: initializer → N runner pods)
                k6 runner pods  (stock grafana/k6)
         ┌───────────────┴────────────────┐
@@ -53,7 +53,7 @@ USAGE  (console optional — the example is the definition)
 |---|---|---|
 | 1 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
 | 2 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
-| 3 | Scenario code ConfigMap | `templates/k6-scenarios-configmap.yaml` (from `files/k6/`) |
+| 3 | Scenario code ConfigMap (flat) | `templates/k6-scenarios-configmap.yaml` (from `files/k6/scripts/`) |
 | 4 | Per-preset `envFrom` ConfigMaps | `templates/k6-presets-configmap.yaml` (parses `files/k6/k6-config/*.env`) |
 | 5 | Example TestRuns (the run definition) | `templates/k6-testrun-examples.yaml` |
 | 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
@@ -207,7 +207,7 @@ helm uninstall k6-load-test -n ma        # removes operator + scenarios + RBAC
 
 | Input | Default | Meaning |
 |---|---|---|
-| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
+| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/SCENARIO_<scenario>.js`) |
 | `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`) |
 | `--parallelism` | `1` | runner pods; k6 splits `--rate`/`--vus` across them |
 | `--target` | preset's `CAPTURE_PROXY_URL` | Capture Proxy endpoint |
@@ -256,12 +256,15 @@ Why the current setup looks the way it does (decision → rationale → alternat
 
 3. **Scenarios as a ConfigMap tree — not a baked custom image.** k6 runs on the **stock**
    `grafana/k6` image; the scenarios ship as the `k6-scenarios` ConfigMap. Editing a scenario is a
-   `helm upgrade`, not an image rebuild. *Mechanism:* ConfigMap keys can't contain `/`, so each
-   file's path is stored with `/`→`__` and **Helm** renders the `items[]` volume projection into the
-   example TestRun (below) at `/scripts` on **both** the runner and the initializer (so imports and
-   `open()` resolve). Total size (~130 KB) is well under the 1 MiB ConfigMap limit. *Rejected:* a
-   PVC (needs ReadWriteMany for multi-node parallelism, unavailable on minikube's default storage)
-   and a `k6 archive` tarball (reintroduces a build step and yields a non-editable binary blob).
+   `helm upgrade`, not an image rebuild. *Mechanism:* the scenario tree is **flattened** into one
+   directory (`files/k6/scripts/`), so ConfigMap keys are plain filenames and the ConfigMap
+   **mounts directly at `/scripts`** on both the runner and the initializer — no `items` projection.
+   Imports and `open()` are all `./`-relative. Because the flat dir mixes types, each file carries a
+   **`TYPE_` prefix** (`SCENARIO_`, `LIB_`, `GENERATOR_` for the doc/query builders, `SCHEMA_` for
+   the index-mapping JSON) — this also resolves the former `documents.js`/`queries.js`/`mapping.json`
+   name collisions. Total size (~130 KB) is well under the 1 MiB limit.
+   *Rejected:* a PVC (needs ReadWriteMany for multi-node parallelism, unavailable on minikube's
+   default storage) and a `k6 archive` tarball (reintroduces a build step, non-editable blob).
 
 4. **Presets are `envFrom` ConfigMaps; overrides are `env`; metrics via `K6_OUT`, not `--out`.**
    Each `k6-config/*.env` is rendered into a `k6-preset-<name>` ConfigMap (one key per var) and
@@ -272,15 +275,14 @@ Why the current setup looks the way it does (decision → rationale → alternat
 
 5. **Helm-rendered example TestRuns are the single definition; runs are kubectl-native; the console
    is optional.** The chart renders one ready-to-run TestRun per scenario into
-   `k6-testrun-examples` (items mount, image, `K6_OUT`, default `envFrom` preset, labels,
-   `generateName`). A run is `kubectl create` from that example (optionally patched), so it works
-   with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it, and
-   `workflow k6` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`, TUI),
-   guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no spec-builder to
-   keep in sync. *Rejected:* the console CLI as the *only* submission path (couples every run to a
-   current console image) and hand-written per-scenario manifests (the `items[]` list would drift
-   from the scenario files — Helm regenerates it). *Note:* `kubectl create` (not `apply`), because
-   the examples use `generateName`.
+   `k6-testrun-examples` (the flat `/scripts` mount, image, `K6_OUT`, default `envFrom` preset,
+   labels, `generateName`). A run is `kubectl create` from that example (optionally patched), so it
+   works with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it,
+   and `workflow k6` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`,
+   TUI), guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no
+   spec-builder to keep in sync. *Rejected:* the console CLI as the *only* submission path (couples
+   every run to a current console image). *Note:* `kubectl create` (not `apply`), because the
+   examples use `generateName`.
 
 6. **`--parallelism` splits global load.** `--rate` / `--vus` are totals divided across runner pods
    by k6 execution segments — surfaced explicitly so results aren't misread as per-pod.

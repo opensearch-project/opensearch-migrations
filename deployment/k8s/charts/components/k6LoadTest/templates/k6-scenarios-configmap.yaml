@@ -1,8 +1,6 @@
-# The full scenario tree (scenarios/ + lib/ + data/) as a single ConfigMap. ConfigMap keys cannot
-# contain "/", so each file's relative path (under files/k6/) is encoded with "/" -> "__". The
-# console decodes the keys back into a volume `items[].path` projection mounted at /scripts on both
-# the TestRun initializer and runner, reconstructing the tree so imports ("../lib/...") and
-# open("../data/...") resolve. Total size is well under the 1 MiB ConfigMap limit.
+# The scenario code + data (files/k6/scripts/*) as a flat ConfigMap. The tree was flattened to a
+# single directory with unique filenames, so keys are plain filenames (no "/") and the ConfigMap
+# mounts directly at /scripts — no `items` projection needed. Total size is well under 1 MiB.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,15 +9,7 @@ metadata:
   labels:
     app: k6-load-test
 data:
-{{- range $path, $bytes := .Files.Glob "files/k6/scenarios/**" }}
-  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
-{{ $bytes | toString | indent 4 }}
-{{- end }}
-{{- range $path, $bytes := .Files.Glob "files/k6/lib/**" }}
-  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
-{{ $bytes | toString | indent 4 }}
-{{- end }}
-{{- range $path, $bytes := .Files.Glob "files/k6/data/**" }}
-  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
+{{- range $path, $bytes := .Files.Glob "files/k6/scripts/*" }}
+  {{ base $path }}: |-
 {{ $bytes | toString | indent 4 }}
 {{- end }}

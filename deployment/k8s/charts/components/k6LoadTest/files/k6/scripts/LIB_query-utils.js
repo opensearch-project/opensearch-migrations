@@ -1,5 +1,5 @@
 /**
- * Shared query execution helpers used by all schema modules in lib/data/.
+ * Shared query execution helpers used by the flat schema modules (*_documents.js / *_queries.js).
  *
  * The low-level functions (flatSearch, aggSearch, scrollSequence, searchAfterSequence)
  * handle HTTP calls and k6 checks.  The factory functions (makeFlatSearch, makeAggSearch,

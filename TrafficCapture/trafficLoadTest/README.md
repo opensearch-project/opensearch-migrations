@@ -157,9 +157,10 @@ console-CLI-vs-kubectl submission, etc. — see **[k8s/README.md → Design deci
   needs only new `lib/data/<name>/{documents,queries}.js` + `data/<name>/mapping.json`.
 - **ID registry (mixed).** Cross-VU write-then-read state uses a Redis list via a Webdis HTTP proxy
   — k6's built-in `http` module calls Webdis (`GET /LPUSH/key/val`), so no xk6/native Redis build.
-- **Scenario storage.** Scenarios ship as a ConfigMap (`k6-scenarios`) mounted into the runner via
-  an `items` projection, not baked into a custom image — so editing a scenario is a `helm upgrade`,
-  not an image rebuild. Each preset becomes a `k6-preset-<name>` ConfigMap consumed via `envFrom`
+- **Scenario storage.** Scenarios live in one flat directory (`files/k6/scripts/`) and ship as a
+  ConfigMap (`k6-scenarios`) mounted directly at `/scripts`, not baked into a custom image — so
+  editing a scenario is a `helm upgrade`, not an image rebuild. Each preset becomes a
+  `k6-preset-<name>` ConfigMap consumed via `envFrom`
   (defaults), with per-run `runner.env` overrides winning natively. Runs are `kubectl create`d from
   chart-rendered example TestRuns (`k6-testrun-examples`); the console is optional. See
   [`k8s/README.md`](k8s/README.md).

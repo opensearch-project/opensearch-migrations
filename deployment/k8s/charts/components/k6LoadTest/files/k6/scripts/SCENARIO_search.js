@@ -39,11 +39,11 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
-import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
-import * as logsDocs         from '../lib/data/logs_data/documents.js';
-import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
-import * as logsQueries      from '../lib/data/logs_data/queries.js';
-import { pinned, spread } from '../lib/connection-control.js';
+import * as nycTaxisDocs    from './GENERATOR_nyc_taxis_documents.js';
+import * as logsDocs         from './GENERATOR_logs_data_documents.js';
+import * as nycTaxisQueries  from './GENERATOR_nyc_taxis_queries.js';
+import * as logsQueries      from './GENERATOR_logs_data_queries.js';
+import { pinned, spread } from './LIB_connection-control.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends the type suffix; names here must NOT include suffixes.
@@ -66,8 +66,8 @@ const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
 const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
 
 const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
+  nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
+  logs_data: open('./SCHEMA_logs_data.json'),
 };
 const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
 

@@ -20,11 +20,8 @@ ENV = {"K6_LOADTEST_ENABLED": "true", "WORKFLOW_NAMESPACE": "ma"}
 
 
 def _example(scenario):
-    """A minimal stand-in for what the chart renders into k6-testrun-examples."""
-    vol = {"name": "scenarios", "configMap": {"name": "k6-scenarios", "items": [
-        {"key": f"scenarios__{scenario}.js", "path": f"scenarios/{scenario}.js"},
-        {"key": "lib__data__nyc_taxis__documents.js", "path": "lib/data/nyc_taxis/documents.js"},
-    ]}}
+    """A minimal stand-in for what the chart renders into k6-testrun-examples (flat mount)."""
+    vol = {"name": "scenarios", "configMap": {"name": "k6-scenarios"}}
     mount = {"name": "scenarios", "mountPath": "/scripts"}
     pod = {"image": "grafana/k6:1.0", "imagePullPolicy": "IfNotPresent",
            "volumeMounts": [mount], "volumes": [vol]}
@@ -34,7 +31,7 @@ def _example(scenario):
                      "labels": {"app": "k6-load-test", "k6-scenario": scenario}},
         "spec": {
             "parallelism": 1,
-            "script": {"localFile": f"/scripts/scenarios/{scenario}.js"},
+            "script": {"localFile": f"/scripts/SCENARIO_{scenario}.js"},
             "initializer": dict(pod),
             "runner": dict(pod,
                            envFrom=[{"configMapRef": {"name": f"k6-preset-{scenario}-steady"}}],
@@ -113,8 +110,8 @@ class TestK6Run:
         spec = body["spec"]
         # example structure preserved
         assert body["kind"] == "TestRun"
-        assert spec["script"]["localFile"] == "/scripts/scenarios/ingest.js"
-        assert spec["runner"]["volumes"][0]["configMap"]["name"] == "k6-scenarios"  # items mount kept
+        assert spec["script"]["localFile"] == "/scripts/SCENARIO_ingest.js"
+        assert spec["runner"]["volumes"][0]["configMap"]["name"] == "k6-scenarios"  # flat mount kept
         assert spec["initializer"]["volumes"] == spec["runner"]["volumes"]
         # patched bits
         assert spec["parallelism"] == 3

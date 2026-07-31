@@ -10,9 +10,9 @@ import {
   makeAggSearch,
   makeSearchAfterSequence,
   scrollSequence,
-} from '../../query-utils.js';
+} from './LIB_query-utils.js';
 
-import { LEVELS, SERVICES } from './documents.js';
+import { LEVELS, SERVICES } from './GENERATOR_logs_data_documents.js';
 
 export { scrollSequence };
 

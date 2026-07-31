@@ -6,7 +6,7 @@
  * Date format matches fieldDateISO(): "yyyy-MM-dd HH:mm:ss".
  */
 
-import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
+import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from './LIB_doc-utils.js';
 
 export const TRIP_TYPES      = ['1', '2'];
 export const PAYMENT_TYPES   = ['1', '2', '3', '4'];

@@ -10,9 +10,9 @@ import {
   makeAggSearch,
   makeSearchAfterSequence,
   scrollSequence,
-} from '../../query-utils.js';
+} from './LIB_query-utils.js';
 
-import { VENDOR_IDS, PAYMENT_TYPES, FARE_AMOUNT_RANGE, TRIP_DISTANCE_RANGE } from './documents.js';
+import { VENDOR_IDS, PAYMENT_TYPES, FARE_AMOUNT_RANGE, TRIP_DISTANCE_RANGE } from './GENERATOR_nyc_taxis_documents.js';
 
 export { scrollSequence };
 
