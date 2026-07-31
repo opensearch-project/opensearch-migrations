@@ -446,9 +446,9 @@ class WorkflowTreeApp(App):
     def action_k6_panel(self) -> None:
         """Open the k6 panel: launch a new run and/or stop currently-running ones.
 
-        k6 runs are standalone Argo Workflows; launching/stopping/failing one never affects the
-        migration workflow this TUI is managing. All actions are wrapped below so a k6-side error
-        only raises a notification — it can't disturb the managed workflow or the UI.
+        k6 runs are standalone TestRun CRs (k6-operator); launching/stopping/failing one never
+        affects the migration workflow this TUI is managing. All actions are wrapped below so a
+        k6-side error only raises a notification — it can't disturb the managed workflow or the UI.
         """
         from ..commands.k6 import list_active_k6_runs
         try:
@@ -462,19 +462,16 @@ class WorkflowTreeApp(App):
         if not result:
             return
         from ..commands.k6 import build_k6_parameters, submit_k6_run
-        from ..commands.argo_utils import stop_workflow, delete_workflow
+        from ..commands.testrun_utils import delete_testrun
         try:
             if result.get("kind") == "launch":
                 name = submit_k6_run(self._namespace, build_k6_parameters(**result["fields"]))
                 self.notify(f"✅ Submitted k6 run: {name}")
             elif result.get("kind") == "stop":
                 names = [n for n in result.get("names", []) if n]
-                stopped = sum(1 for n in names if stop_workflow(self._namespace, n))
-                if result.get("delete"):
-                    for n in names:
-                        delete_workflow(self._namespace, n)
-                suffix = " (deleted)" if result.get("delete") else ""
-                self.notify(f"⏹ Stopped {stopped}/{len(names)} k6 run(s){suffix}")
+                # Stopping a TestRun deletes the CR; the operator tears down its pods.
+                stopped = sum(1 for n in names if delete_testrun(self._namespace, n))
+                self.notify(f"⏹ Stopped {stopped}/{len(names)} k6 run(s)")
         except ValueError as e:
             self.notify(f"Invalid override: {e}", severity="error")
         except Exception as e:

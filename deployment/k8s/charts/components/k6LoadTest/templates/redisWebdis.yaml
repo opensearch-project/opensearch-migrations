@@ -1,8 +1,8 @@
-{{- if and .Values.k6.enabled .Values.k6.registry.enabled }}
+{{- if .Values.registry.enabled }}
 # Redis + Webdis for the k6 mixed (write-then-read consistency ring buffer) and chaos
 # (pause/resume/set-rate control bus) scenarios. k6 talks to Webdis over plain HTTP (no Redis
 # client / xk6 build needed). Off by default; the scenarios degrade to flat searches when absent.
-# The WorkflowTemplate's default WEBDIS_URL (http://webdis:7379) resolves to the Webdis Service below.
+# The default WEBDIS_URL (http://webdis:7379) resolves to the Webdis Service below.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

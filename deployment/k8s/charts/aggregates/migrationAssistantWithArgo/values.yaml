@@ -60,11 +60,6 @@ images:
     repository: mirror.gcr.io/opensearchproject/opensearch
     tag: "3.1.0"
     pullPolicy: IfNotPresent
-  # Load-test traffic generator (k6). Empty tag defaults to Chart.appVersion, same as the others.
-  k6:
-    repository: migrations/k6
-    tag: ""
-    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -255,19 +250,6 @@ metrics:
           processors:
           exporters: [ debug ]
 
-# Load testing (k6). Runs are short-lived Argo workflows submitted from the
-# `k6-load-test` WorkflowTemplate;
-# k6 relies on the Capture Proxy + downstream infra deployed by the migration; it only needs a
-# reachable targetUrl (passed per run) and pushes metrics to the existing otel-collector via OTLP.
-k6:
-  enabled: false
-  # Redis + Webdis, required only by the mixed (write-then-read) and chaos scenarios.
-  # Off by default; the scenarios degrade gracefully to flat searches when absent.
-  registry:
-    enabled: false
-  # Per-run defaults live in the baked k6-config/*.env presets and the WorkflowTemplate's
-  # parameter defaults, so they can be overridden per submit. Container resource requests/limits
-  # are set in the WorkflowTemplate.
 
 tracing:
   enabled: false

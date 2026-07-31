@@ -37,6 +37,13 @@ KAFKA_TOPIC="logging-traffic-topic"
 DP_LABEL="part-of=k6-dataplane"
 CONSOLE_POD="migration-console-0"
 
+# k6 load-test chart (operator + scenarios + RBAC). Installed here — NOT by the migration deploy.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+K6_CHART="${SCRIPT_DIR}/../../deployment/k8s/charts/components/k6LoadTest"
+K6_RELEASE="k6-load-test"
+# Stock grafana/k6, pulled through GCR's Docker Hub mirror (same pattern as OS_IMAGE/KAFKA_IMAGE).
+K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6:latest}"
+
 K() { kubectl --context "$CONTEXT" -n "$NAMESPACE" "$@"; }
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 ok()  { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
@@ -212,6 +219,22 @@ spec:
 YAML
 }
 
+install_k6_chart() {
+  say "Install k6 load-test chart (operator + scenarios + RBAC)"
+  command -v helm >/dev/null || die "helm not found (needed to install the k6LoadTest chart)"
+  helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
+  # Vendor the k6-operator subchart: offline from Chart.lock if already vendored, else fetch it.
+  helm dependency build "$K6_CHART" >/dev/null 2>&1 \
+    || helm dependency update "$K6_CHART" >/dev/null 2>&1 \
+    || die "helm dependency build failed for $K6_CHART"
+  local repo="${K6_IMAGE%:*}" tag="${K6_IMAGE##*:}"
+  helm --kube-context "$CONTEXT" upgrade --install "$K6_RELEASE" "$K6_CHART" -n "$NAMESPACE" \
+    --set image.repository="$repo" --set image.tag="$tag" --set image.pullPolicy=IfNotPresent \
+    --timeout 300s 2>&1 | sed 's/^/  /'
+  K rollout status deploy -l app.kubernetes.io/name=k6-operator --timeout=180s 2>&1 | tail -1 | sed 's/^/  /' || true
+  ok "k6 operator + scenarios installed (runner image: $K6_IMAGE)"
+}
+
 cmd_up() {
   say "Preflight (context=$CONTEXT namespace=$NAMESPACE)"
   kubectl --context "$CONTEXT" get ns "$NAMESPACE" >/dev/null 2>&1 || die "namespace $NAMESPACE not found"
@@ -244,6 +267,8 @@ cmd_up() {
   K rollout status deploy/replayer --timeout=300s
   ok "capture proxy + replayer ready"
 
+  install_k6_chart
+
   cmd_status
   say "Ready — run a load test"
   cat <<EOF
@@ -266,9 +291,13 @@ cmd_status() {
 }
 
 cmd_down() {
+  say "Uninstall k6 load-test chart (operator + scenarios + RBAC)"
+  if command -v helm >/dev/null; then
+    helm --kube-context "$CONTEXT" uninstall "$K6_RELEASE" -n "$NAMESPACE" 2>&1 | sed 's/^/  /' || true
+  fi
   say "Delete the data plane (Deployments + Services)"
   K delete deploy,svc -l "$DP_LABEL" --ignore-not-found 2>&1 | sed 's/^/  /' || true
-  ok "data plane torn down (control plane left intact)"
+  ok "data plane + k6 chart torn down (control plane left intact)"
 }
 
 case "${1:-up}" in

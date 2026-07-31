@@ -1,0 +1,25 @@
+# The full scenario tree (scenarios/ + lib/ + data/) as a single ConfigMap. ConfigMap keys cannot
+# contain "/", so each file's relative path (under files/k6/) is encoded with "/" -> "__". The
+# console decodes the keys back into a volume `items[].path` projection mounted at /scripts on both
+# the TestRun initializer and runner, reconstructing the tree so imports ("../lib/...") and
+# open("../data/...") resolve. Total size is well under the 1 MiB ConfigMap limit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-scenarios
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+data:
+{{- range $path, $bytes := .Files.Glob "files/k6/scenarios/**" }}
+  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
+{{ $bytes | toString | indent 4 }}
+{{- end }}
+{{- range $path, $bytes := .Files.Glob "files/k6/lib/**" }}
+  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
+{{ $bytes | toString | indent 4 }}
+{{- end }}
+{{- range $path, $bytes := .Files.Glob "files/k6/data/**" }}
+  {{ $path | trimPrefix "files/k6/" | replace "/" "__" }}: |-
+{{ $bytes | toString | indent 4 }}
+{{- end }}

@@ -46,6 +46,7 @@ def test_launch_via_ctrl_s():
     def steps(m):
         m.query_one("#config", Input).value = "ingest-burst"
         m.query_one("#rate", Input).value = "100"
+        m.query_one("#parallelism", Input).value = "4"
         m.query_one("#registry", Checkbox).value = True
         m.query_one("#overrides", TextArea).load_text("FOO=bar")
     res = _drive(RUNS, steps, key="ctrl+s")
@@ -53,20 +54,21 @@ def test_launch_via_ctrl_s():
     f = res["fields"]
     assert f["scenario"] == "ingest" and f["config_name"] == "ingest-burst"
     assert f["rate"] == "100" and f["registry_enabled"] is True
+    assert f["parallelism"] == "4"
     assert f["overrides_text"] == "FOO=bar"
     assert f["duration"] is None and f["control_enabled"] is None
 
 
+def test_parallelism_defaults_to_one():
+    # empty parallelism input -> 1 (build_k6_parameters coerces to int)
+    res = _drive(RUNS, lambda m: None, key="ctrl+s")
+    assert res["fields"]["parallelism"] == 1
+
+
 def test_stop_one():
+    # stopping deletes the TestRun; no separate delete flag
     res = _drive(RUNS, lambda m: None, click="#stop-0")
-    assert res == {"kind": "stop", "names": ["k6-run-a"], "delete": False}
-
-
-def test_stop_one_with_delete():
-    def steps(m):
-        m.query_one("#delete", Checkbox).value = True
-    res = _drive(RUNS, steps, click="#stop-1")
-    assert res["kind"] == "stop" and res["names"] == ["k6-run-b"] and res["delete"] is True
+    assert res == {"kind": "stop", "names": ["k6-run-a"]}
 
 
 def test_stop_all():

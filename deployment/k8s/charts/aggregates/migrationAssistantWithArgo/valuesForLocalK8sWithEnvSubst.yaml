@@ -26,14 +26,6 @@ images:
   installer:
     repository: ${imageRegistryPrefix}migrations/migration_console
     pullPolicy: Always
-  k6:
-    repository: ${imageRegistryPrefix}migrations/k6
-    pullPolicy: Always
-
-# Enable the k6 load-test WorkflowTemplate for local development. Requires the
-# migrations/k6 image in the local registry (built by buildImages/scripts/fillLocalRegistry.sh).
-k6:
-  enabled: true
 
 # Kyverno chart configuration
 charts:

@@ -1,123 +1,112 @@
 # Running the k6 load test in Kubernetes
 
-This runs the scenarios in [`../`](../) as short-lived **Argo workflows** inside the
-migration deployment. Drive them from the migration console (`workflow k6 …`) or with raw `argo submit` — both target the same `k6-load-test` WorkflowTemplate.
+The scenarios in [`../`](../) run as **k6-operator `TestRun`** CRs, driven from the migration
+console (`workflow k6 …`) or the TUI. Everything k6 needs — the operator, the scenarios (as
+ConfigMaps), and the console's RBAC — ships in one **standalone, opt-in** chart:
+`deployment/k8s/charts/components/k6LoadTest`.
 
-> **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It relies
-> on the infra already deployed by a migration and only needs a reachable **Capture Proxy URL**
-> plus the in-cluster **otel-collector** (both already present in the `ma` namespace).
+> **Deliberately separate from the migration.** The chart is **not** a dependency of any migration
+> aggregate, so a normal migration deployment contains no operator, no scenarios, no RBAC, and the
+> `workflow k6` commands are hidden/inert. Load testing only becomes possible after you explicitly
+> install this chart — nothing (and no agent) can trigger a load test by accident.
+
+> **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It targets
+> a reachable **Capture Proxy URL** and pushes metrics to the in-cluster **otel-collector**.
 
 ---
 
-## How it fits together — from definition to run
+## How it fits together
 
 ```text
-DEFINITION ──► INSTALL   (build time, once per deployment)
-────────────────────────────────────────────────────────────────
-  k6LoadTest.ts [1]   (WorkflowBuilder DSL)
-        │  registered in allWorkflowTemplates.ts [2]
-        ▼
-  makeTemplates [3]  ──►  k6-load-test.yaml
-        │  render+stage gradle task, then image COPY → /root/workflows [4]
-        ▼
-  helm install/upgrade  ──►  migrationsResources Job [5]  ──►  kubectl apply
-        ▼
-  WorkflowTemplate/k6-load-test   (lives in the cluster)
-        image ref ◄─ migration-image-config [6] ◄─ k6Image ◄─ migrations/k6
+INSTALL  (opt-in, separate from the migration)
+──────────────────────────────────────────────────────────────
+  deployment/k8s/charts/components/k6LoadTest [1]
+    ├── Chart dependency: grafana/k6-operator [2]  ──►  TestRun CRD + controller
+    ├── ConfigMap/k6-scenarios [3]   (scenarios/ + lib/ + data/, "/"→"__" keys)
+    ├── ConfigMap/k6-presets   [3]   (k6-config/*.env)
+    ├── ConfigMap/k6-image-config    (runner image ref → stock grafana/k6)
+    └── Role/RoleBinding [4]         (grants the console SA rights on testruns.k6.io)
 
-  (alongside)  Dockerfile [7] bakes  scenarios/ + k6-config/  presets
-               into the  migrations/k6  image (built by gradle [7])
-
-                              │  submit a run
-                              ▼
-USAGE   (run time, from the migration console)
-────────────────────────────────────────────────────────────────
-  workflow k6 run … [8]          press  k  in  workflow manage [9]
-   (CLI)                          (TUI panel: launch · list · stop)
+USAGE  (from the migration console)
+──────────────────────────────────────────────────────────────
+  workflow k6 run … [5]           press  k  in  workflow manage [6]
+   (CLI, --parallelism N)          (TUI panel: launch · list · stop)
         └───────────────┬───────────────┘
-                        ▼  submit_workflow_from_template [10]
-   Workflow   (workflowTemplateRef: k6-load-test)
-     args: scenario · configName · targetUrl · rate · overrides · …
-                        ▼
-               k6 pod   (migrations/k6)
+                        ▼  build_testrun_spec + create_testrun [7]
+   TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
+     spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
+     runner.env ◄─ preset (k6-presets) + overrides ;  runner.image ◄─ k6-image-config
+     runner/initializer volumes ◄─ k6-scenarios (items projection → /scripts)
+                        ▼  (operator: initializer → N runner pods)
+               k6 runner pods  (stock grafana/k6)
         ┌───────────────┴────────────────┐
-   HTTPS│                                │ OTLP :4317
+   HTTPS│                                │ OTLP :4317  (K6_OUT=opentelemetry)
         ▼                                ▼
-  Capture Proxy                    otel-collector ─► Prometheus ─► Grafana [11]
+  Capture Proxy                    otel-collector ─► Prometheus ─► Grafana [8]
         │                                             (k6-load-test dashboard)
         ▼
-  Kafka ─► … (migration pipeline)
+  Kafka ─► replayer ─► target      (migration capture-and-replay pipeline)
 
-  observe / manage:   workflow k6 list · logs · stop [8]     (or the Argo UI)
+  observe / manage:   workflow k6 list · logs · stop [5]
 ```
 
-**Where each step lives** (paths repo-relative; `mawa/` = `deployment/k8s/charts/aggregates/migrationAssistantWithArgo`):
-
-| # | Step / call | Source |
+| # | Piece | Source |
 |---|---|---|
-| 1 | `K6LoadTest` template definition | `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/k6LoadTest.ts` |
-| 2 | Registration in `AllWorkflowTemplates` | `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/allWorkflowTemplates.ts` |
-| 3 | Render to YAML (`writeAllWorkflows`) | `orchestrationSpecs/packages/migration-workflow-templates/src/makeTemplates.ts` (run via `makeTemplates.cjs`) |
-| 4 | Render+stage gradle task → image `COPY` | `migrationConsole/build.gradle` (`makeAndStageWorkflowTemplates`) → `migrationConsole/Dockerfile` (`COPY nodeStaging/workflowTemplates /root/workflows`) |
-| 5 | Install Job (`apply_workflows "workflows"`) | `mawa/templates/migrationsResources.yaml` |
-| 6 | Image ConfigMap (`k6Image` / `k6PullPolicy`) | `mawa/templates/resources/imageConfigmap.yaml` (values `images.k6` in `mawa/values.yaml`) |
-| 7 | k6 image build (`migrations/k6`) | `TrafficCapture/trafficLoadTest/Dockerfile` + `buildImages/build.gradle` (buildKit `serviceName: "k6"`) |
-| 8 | `workflow k6 run` / `list` / `logs` / `stop` (CLI) | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
-| 9 | TUI k6 panel (`k` → `action_k6_panel`) | `migrationConsole/lib/console_link/console_link/workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
-| 10 | `submit_workflow_from_template` (creates the `Workflow`) | `migrationConsole/lib/console_link/console_link/workflow/commands/argo_utils.py` |
-| 11 | Grafana dashboard ConfigMap | `mawa/templates/resources/k6/grafanaDashboard.yaml` |
+| 1 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
+| 2 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
+| 3 | Scenario / preset ConfigMaps | `templates/k6-scenarios-configmap.yaml`, `templates/k6-presets-configmap.yaml` (from `files/k6/`) |
+| 4 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
+| 5 | `workflow k6 run/list/logs/stop` | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
+| 6 | TUI k6 panel (`k`) | `.../workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
+| 7 | TestRun CRUD | `.../workflow/commands/testrun_utils.py` |
+| 8 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
 
-The template is **defined once** in TypeScript and installed the standard way; every **run** is a
-separate short-lived Argo `Workflow` submitted by name from the console (CLI or TUI) — decoupled
-from any migration workflow.
+A run is specified by a `scenario` (script) and a `config` (a `k6-config/*.env` preset). Every
+preset value is overridable per run; load is spread across `--parallelism` runner pods by k6
+execution segments.
 
 ---
 
-## What gets deployed
+## Install the load-test chart (opt-in)
 
-The `k6-load-test` **WorkflowTemplate** is generated from `k6LoadTest.ts` and installed with every
-deployment (baked into the migration-console image, applied by the `migrationsResources` Job) —
-it's inert until a run is submitted. Enabling `k6.enabled` in the `migration-assistant` chart adds,
-gated and namespaced:
+The chart depends on the `k6-operator` subchart, so vendor it once, then install into the migration
+namespace (`ma`). For local minikube the runner image comes from GCR's Docker Hub mirror.
 
-| Resource | Purpose |
-|---|---|
-| `ConfigMap/k6-load-test-dashboard` | Grafana dashboard (auto-imported by the kube-prometheus-stack sidecar) |
-| `Deployment/Service redis` + `webdis` | only when `k6.registry.enabled=true` — needed by the `mixed` & chaos scenarios |
-
-The `migrations/k6` image bakes the scenarios and the `k6-config/*.env` presets into `/scripts`.
-A run is specified by two names: `scenario` (script) and `configName` (preset).
-
----
-
-## One-time setup
-
-### Local minikube
 ```bash
-# Build all images (incl. migrations/k6) into the local registry:
-cd buildImages
-./scripts/fillLocalRegistry.sh
-# Deploy / upgrade the chart (k6.enabled=true is set in valuesForLocalK8sWithEnvSubst.yaml):
-./scripts/startMinikubeAndDeployCharts.sh
+CHART=deployment/k8s/charts/components/k6LoadTest
+helm repo add grafana https://grafana.github.io/helm-charts
+helm dependency build "$CHART"          # vendors grafana/k6-operator into charts/
+
+helm upgrade --install k6-load-test "$CHART" -n ma \
+  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest
 ```
 
-### EKS / cloud
-`k6.enabled=true` is set in `valuesEks.yaml`; the `migrations/k6` image ships through the normal
-ECR-mirror image path. No extra step beyond the standard deploy.
+Or let the data-plane script do it for you (it installs this chart alongside the capture proxy,
+source/target, Kafka and replayer):
 
-### Verify the template is installed
 ```bash
-kubectl get workflowtemplate -n ma k6-load-test
+./buildImages/scripts/deployWorkflowComponents.sh up      # data plane + k6 chart
 ```
+
+Verify:
+```bash
+kubectl get crd testruns.k6.io
+kubectl -n ma get pods -l app.kubernetes.io/name=k6-operator
+kubectl -n ma get cm k6-scenarios k6-presets k6-image-config
+```
+
+On EKS the operator + runner images are mirrored to ECR via
+`deployment/k8s/charts/components/k6LoadTest/infra/mirror/k6-ecr-manifest.yaml`.
 
 ---
 
-## Find the Capture Proxy endpoint (required per run)
+## Find the Capture Proxy endpoint
 
-The proxy Service name is chosen by the migration config, so look it up:
 ```bash
-kubectl get svc -n ma -l migrations/proxy
-PROXY=https://<proxy-svc>.ma.svc.cluster.local:9200
+# Data plane from deployWorkflowComponents.sh:
+PROXY=https://capture-proxy:9200
+# Capture proxy inside a running CDC migration:
+PROXY=https://capture-proxy:9201
 ```
 (k6 uses `insecureSkipTLSVerify`, matching the self-signed proxy cert.)
 
@@ -125,124 +114,162 @@ PROXY=https://<proxy-svc>.ma.svc.cluster.local:9200
 
 ## From the migration console (`workflow k6`)
 
-The console wraps submit/list/logs/stop over the same WorkflowTemplate — no `argo` CLI needed.
-Run these inside the migration-console pod (or anywhere with the cluster context).
+Run inside the migration-console pod (or anywhere with cluster context). The command group is
+**hidden/inert unless the TestRun CRD is present** — i.e. unless the chart above is installed.
 
 ```bash
 # Submit (every preset value is overridable; --override is repeatable)
 workflow k6 run --scenario ingest --config ingest-steady --target "$PROXY"
+workflow k6 run --scenario ingest --parallelism 4 --target "$PROXY"           # 4 runner pods
 workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
 workflow k6 run --scenario mixed --registry-enabled -o INGEST_RATE=80 -o SEARCH_RATE=40 --target "$PROXY"
 workflow k6 run --scenario ingest --config ingest-burst --extra-args --no-thresholds --target "$PROXY"
 workflow k6 run --scenario ingest --target "$PROXY" --wait        # block until it finishes
 
 # Observe
-workflow k6 list                       # NAME / SCENARIO / PHASE / PROGRESS / AGE
+workflow k6 list                       # NAME / SCENARIO / STAGE / PARALLEL / AGE
 workflow k6 list --scenario mixed
-workflow k6 logs <run-name> -f         # follow the k6 container
+workflow k6 logs <run-name> -f         # follow the runner pods' k6 containers
 
-# Kill
+# Stop (deletes the TestRun; the operator tears down its pods)
 workflow k6 stop <run-name>
-workflow k6 stop --scenario mixed --delete
+workflow k6 stop --scenario mixed
 workflow k6 stop --all
 ```
 
-Options mirror the WorkflowTemplate parameter contract (see **Parameters** below): `--scenario`,
-`--config`, `--target`, `--rate`, `--duration`, `--vus`, `--registry-enabled/--no-…`,
-`--control-enabled/--no-…`, `--override/-o KEY=VALUE` (repeatable), `--extra-args`. Omitted
-options keep the preset's value.
+> **`--parallelism` splits the load.** `--rate` / `--vus` are **global totals** that k6 divides
+> across the runner pods via execution segments — `--rate 100 --parallelism 4` ≈ 25 req/s per pod.
 
-**From the TUI:** in `workflow manage`, press **`k`** to open the k6 panel — it both **launches**
-a new run (scenario, config, target, rate/duration/vus, registry/control toggles, overrides box)
-and **lists the running** runs with per-run **Stop** (plus **Stop all** and a "delete after stop"
-toggle). It uses the identical submit/stop paths as `workflow k6`. k6 runs are standalone Argo
-Workflows, so launching or stopping one never affects the migration workflow you're managing.
+Options: `--scenario`, `--config`, `--parallelism`, `--target`, `--rate`, `--duration`, `--vus`,
+`--registry-enabled/--no-…`, `--control-enabled/--no-…`, `--override/-o KEY=VALUE` (repeatable),
+`--extra-args`. Omitted options keep the preset's value.
 
----
+**From the TUI:** in `workflow manage`, press **`k`** to open the k6 panel — it **launches** a new
+run (scenario, config, target, rate/duration/vus/parallelism, registry/control toggles, overrides
+box) and **lists running** runs with per-run **Stop** (plus **Stop all**). k6 runs are standalone
+TestRuns, so launching or stopping one never affects the migration workflow you're managing.
 
-## Run scenarios (raw `argo submit`)
+### Raw kubectl (no console)
 
-### Ingest (steady preset)
-```bash
-argo submit -n ma --from workflowtemplate/k6-load-test \
-  -p scenario=ingest -p configName=ingest-steady -p targetUrl="$PROXY" \
-  -l app=k6-load-test -l k6-scenario=ingest
-```
-
-### Search, concurrently, with per-run overrides
-Named params (`rate`, `duration`, `vus`) and a generic `overrides` bag both beat the preset:
-```bash
-argo submit -n ma --from workflowtemplate/k6-load-test \
-  -p scenario=search -p configName=search-steady -p targetUrl="$PROXY" \
-  -p rate=100 -p duration=10m \
-  -p overrides=$'DEEP_PAGING_ENABLED=true\nPAGING_MODE=search_after' \
-  -l app=k6-load-test -l k6-scenario=search
-```
-`overrides` is one `KEY=VALUE` per line; JSON values work too, e.g.
-`-p overrides='RAMP_STAGES=[{"duration":"2m","target":150}]'`.
-
-### Ramp / burst
-```bash
-argo submit -n ma --from workflowtemplate/k6-load-test \
-  -p scenario=ingest -p configName=ingest-burst -p targetUrl="$PROXY" \
-  -p extraArgs=--no-thresholds \
-  -l app=k6-load-test -l k6-scenario=ingest
-```
-> Burst is designed to saturate the proxy; a k6 threshold breach exits non-zero (the *finding*, not
-> a broken test). `extraArgs=--no-thresholds` keeps the workflow from being marked failed.
-
-### Mixed / chaos (need Redis+Webdis → `k6.registry.enabled=true`, then redeploy)
-```bash
-argo submit -n ma --from workflowtemplate/k6-load-test \
-  -p scenario=mixed -p configName=mixed-steady -p targetUrl="$PROXY" \
-  -p registryEnabled=true \
-  -l app=k6-load-test -l k6-scenario=mixed
-```
+`workflow k6 run` builds a TestRun; you can also hand-apply one. The scenario tree is mounted from
+the `k6-scenarios` ConfigMap via an `items` projection (keys are file paths with `/`→`__`) at
+`/scripts` on **both** the `runner` and the `initializer`, with `script.localFile:
+/scripts/scenarios/<scenario>.js`. Metrics output goes through `K6_OUT=opentelemetry` (runner env)
+— **not** `--out`, which the operator would also feed to the initializer's `k6 archive` and be
+rejected as an unknown flag.
 
 ---
 
-## Observe running runs
+## Observe & metrics
 
 ```bash
-argo list -n ma -l app=k6-load-test                         # CLI
-argo logs -n ma @latest                                     # live logs of the newest run
-kubectl -n ma port-forward service/argo-server 8001:2746    # Argo UI at https://localhost:8001
+kubectl -n ma get testrun -l app=k6-load-test
+kubectl -n ma logs -l k6_cr=<run-name>,runner=true -c k6 --prefix -f
 ```
 Metrics land in the existing Grafana (kube-prometheus-stack); open the **k6-load-test** dashboard.
 
+> On a resource-constrained cluster the default latency thresholds may breach (k6 exits non-zero)
+> even though every request succeeds. Pass `--extra-args --no-thresholds` for a clean run.
+
 ---
 
-## Kill runs
+## Tear down
 
 ```bash
-argo terminate -n ma <run-name>              # stop one
-argo delete    -n ma -l k6-scenario=mixed    # a selection (by label)
-argo delete    -n ma -l app=k6-load-test     # all k6 runs
+helm uninstall k6-load-test -n ma        # removes operator + scenarios + RBAC
+# or, if you brought it up via the data-plane script:
+./buildImages/scripts/deployWorkflowComponents.sh down
 ```
 
 ---
 
-## Parameters
+## Scenario reference
 
-| Param | Default | Meaning |
+| Input | Default | Meaning |
 |---|---|---|
-| `scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
-| `configName` | `ingest-steady` | any `k6-config/*.env` preset name (without `.env`) |
-| `targetUrl` | *(empty — required)* | Capture Proxy endpoint |
-| `rate` | *(empty)* | override request rate (sets `INGEST_RATE`+`SEARCH_RATE`); empty = keep preset |
-| `duration` | *(empty)* | override `DURATION`; empty = keep preset |
-| `vus` | *(empty)* | override pre-allocated VUs (`INGEST_VUS`+`SEARCH_VUS`) |
-| `overrides` | *(empty)* | newline-separated `KEY=VALUE`, applied last (wins over the preset) |
-| `extraArgs` | *(empty)* | extra flags for `k6 run` (e.g. `--no-thresholds`) |
-| `registryEnabled` | *(empty)* | empty = keep preset; `true` → mixed consistency ring buffer (needs `k6.registry.enabled`) |
-| `controlEnabled` | *(empty)* | empty = keep preset; `true` → chaos pause/resume/set-rate control bus |
-| `webdisUrl` | *(empty)* | empty = keep preset (mixed presets set `http://webdis:7379`) |
+| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
+| `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`) |
+| `--parallelism` | `1` | runner pods; k6 splits `--rate`/`--vus` across them |
+| `--target` | preset's `CAPTURE_PROXY_URL` | Capture Proxy endpoint |
+| `--rate` | keep preset | request rate (sets `INGEST_RATE`+`SEARCH_RATE`) |
+| `--duration` | keep preset | `DURATION` (e.g. `30s`, `10m`) |
+| `--vus` | keep preset | pre-allocated VUs (`INGEST_VUS`+`SEARCH_VUS`) |
+| `-o KEY=VALUE` | — | extra env override, applied last (wins over the preset); repeatable |
+| `--extra-args` | — | extra flags for `k6 run` (e.g. `--no-thresholds`) |
+| `--registry-enabled` | keep preset | mixed consistency ring buffer (needs `registry.enabled=true` on the chart) |
+| `--control-enabled` | keep preset | chaos pause/resume/set-rate control bus |
 
-Every non-`scenario`/`configName` param is empty-by-default, meaning **"keep the preset's value"**;
-set it to override. (`targetUrl` still wins over the preset's `CAPTURE_PROXY_URL` when provided.)
+**Document type** (`nyc_taxis` default, or `logs_data`) is a separate axis from `--scenario` (the
+script). Switch it via the overrides bag: `-o SCENARIO=logs_data`.
 
-For independent ingest/search rates in `mixed`, use the `overrides` bag (`INGEST_RATE=…`,
-`SEARCH_RATE=…`) rather than the single `rate` convenience param.
+For independent ingest/search rates in `mixed`, use `-o INGEST_RATE=…  -o SEARCH_RATE=…` rather
+than the single `--rate` convenience option.
 
-**Document type** (`nyc_taxis` default, or `logs_data`) is a separate axis from `scenario` (the
-script). Switch it via the overrides bag: `-p overrides=$'SCENARIO=logs_data'`.
+---
+
+## Integration test
+
+`Test0050CdcK6LoadTest` (`migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py`)
+layers a short k6 run on a live CDC migration and asserts the traffic is captured and replayed to
+the target **under load**. It's explicit-selection only; the test runner installs this chart when
+invoked with `--with-load-test`.
+
+---
+
+## Design decisions
+
+Why the current setup looks the way it does (decision → rationale → alternative rejected):
+
+1. **Separate, opt-in chart — not part of the migration.** The load-test chart is *not* a
+   dependency of any migration aggregate, so a normal migration deployment contains no operator,
+   no scenarios, no RBAC, and the `workflow k6` commands are hidden/inert. This is deliberate
+   safety: a user or an agent cannot accidentally fire a load test while running a migration.
+   *Defense in depth:* four independent things are missing by default (the `testruns.k6.io` CRD,
+   the console RBAC, the scenario/preset ConfigMaps, and the visible CLI) — any one blocks a run.
+   *Rejected:* bundling k6 into `migrationAssistantWithArgo`, which would make load testing always
+   present and discoverable.
+
+2. **k6-operator `TestRun` CRs — not an Argo WorkflowTemplate.** Chosen for native distributed
+   runners (one test split across `--parallelism` pods via k6 execution segments) and a
+   CRD-native lifecycle. *Cost:* a second orchestrator (the operator) alongside Argo — but it is
+   scoped entirely to this opt-in chart. The earlier Argo `k6LoadTest.ts` template was retired.
+
+3. **Scenarios as a ConfigMap tree — not a baked custom image.** k6 runs on the **stock**
+   `grafana/k6` image; the scenarios ship as the `k6-scenarios` ConfigMap. Editing a scenario is a
+   `helm upgrade`, not an image rebuild. *Mechanism:* ConfigMap keys can't contain `/`, so each
+   file's path is stored with `/`→`__` and the console rebuilds an `items[]` volume projection at
+   `/scripts` on **both** the runner and the initializer (so imports and `open()` resolve). Total
+   size (~130 KB) is well under the 1 MiB ConfigMap limit. *Rejected:* a PVC (needs ReadWriteMany
+   for multi-node parallelism, unavailable on minikube's default storage) and a `k6 archive`
+   tarball (reintroduces a build step and yields a non-editable binary blob).
+
+4. **Console-side env resolution; metrics via `K6_OUT`, not `--out`.** The operator owns the runner
+   command, so the console resolves preset (`k6-presets` ConfigMap) + overrides into `runner.env`
+   rather than an in-container shell wrapper. Metrics output is set with the `K6_OUT` env var
+   because the operator also feeds `spec.arguments` to the initializer's `k6 archive`, which
+   rejects the run-only `--out` flag as unknown.
+
+5. **The `workflow k6` CLI is the single submission path — scripts included, not raw kubectl.**
+   The CLI *is* the TestRun spec-builder (preset/override precedence, the `items` projection, the
+   runner image, the `K6_OUT` handling, and the isolation labels), and the interactive CLI, the
+   TUI panel, and the validation scripts all share it — one tested path, one place to fix bugs.
+   *Cost:* runs are submitted by `kubectl exec`-ing the console pod, so they need a console image
+   built from this branch. *Rejected:* raw `kubectl apply`, which would either duplicate the
+   spec-builder in bash or require static per-scenario manifests that lose the preset/override
+   ergonomics and drift from the scenario files. *Escape hatch:* a future `workflow k6 run
+   --dry-run` that emits the built TestRun YAML would let scripts `kubectl apply` it without the
+   console-pod coupling.
+
+6. **`--parallelism` splits global load.** `--rate` / `--vus` are totals divided across runner pods
+   by k6 execution segments — surfaced explicitly so results aren't misread as per-pod.
+
+7. **Stock images are mirrored, not pulled ad hoc.** The runner image comes from a chart value
+   (locally `mirror.gcr.io/grafana/k6`, GCR's Docker Hub mirror — same pattern as the data plane's
+   OpenSearch/Kafka images); on EKS the operator + runner images are mirrored to ECR via
+   `infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's mirror manifest so k6
+   mirroring is also opt-in.
+
+8. **Validation scripts assume a running data plane and drive through the console.**
+   `scripts/run_test_*.sh` submit k6 via `workflow k6 run` and assert against the in-cluster
+   services with `kubectl` (Kafka/OpenSearch), console-pod `curl` (proxy, Webdis), and PromQL
+   against `kube-prometheus-stack`. Setup/teardown is `deployWorkflowComponents.sh up`/`down`.

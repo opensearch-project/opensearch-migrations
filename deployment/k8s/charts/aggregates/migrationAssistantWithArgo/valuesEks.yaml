@@ -41,12 +41,6 @@ defaultBucketConfiguration:
   snapshotRoleArn: ""
   bucketOperationImagePullPolicy: "IfNotPresent"
 
-# Load-test WorkflowTemplate (k6). Metrics reach Grafana via the existing ServiceMonitor and,
-# on EKS, also CloudWatch via the metrics/app awsemf exporter. Redis/Webdis stays off unless the
-# mixed/chaos scenarios are needed.
-k6:
-  enabled: true
-
 # Useful for updating images while developing
 #images:
 #  captureProxy:

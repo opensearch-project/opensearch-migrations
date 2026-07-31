@@ -4,8 +4,11 @@ Two things in one screen: **launch** a new run, and **list/stop** the currently-
 Returns a command dict for the app to execute, or None on close/cancel:
 
     {"kind": "launch", "fields": {... build_k6_parameters kwargs ...}}
-    {"kind": "stop",   "names": [run, ...], "delete": bool}
+    {"kind": "stop",   "names": [run, ...]}
     None
+
+Stopping a run deletes its TestRun CR (the operator tears down the pods), so there is no separate
+"delete" toggle.
 """
 from typing import List, Optional
 
@@ -57,7 +60,6 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
                                          f"{r['phase']} · {r['age']}[/]")
                             yield Button("Stop", id=f"stop-{i}", name=r["name"], variant="warning")
                     with Horizontal(classes="run-row"):
-                        yield Checkbox("delete after stop", id="delete")
                         yield Button("Stop all", id="stopall", variant="error")
                 else:
                     yield Static("  [dim](none)[/]")
@@ -74,6 +76,7 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
                     yield Input(placeholder="rate", id="rate")
                     yield Input(placeholder="duration (e.g. 30s)", id="duration")
                     yield Input(placeholder="vus", id="vus")
+                    yield Input(placeholder="parallelism", id="parallelism")
                 yield Checkbox("registry enabled (mixed consistency ring)", id="registry")
                 yield Checkbox("control enabled (chaos bus)", id="control")
                 yield Static("overrides (one KEY=VALUE per line):")
@@ -98,12 +101,9 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
         elif bid == "launch":
             self.dismiss({"kind": "launch", "fields": self._fields()})
         elif bid == "stopall":
-            self.dismiss({"kind": "stop", "names": list(self._run_names), "delete": self._delete()})
+            self.dismiss({"kind": "stop", "names": list(self._run_names)})
         elif bid.startswith("stop-"):
-            self.dismiss({"kind": "stop", "names": [event.button.name], "delete": self._delete()})
-
-    def _delete(self) -> bool:
-        return bool(self._runs) and self.query_one("#delete", Checkbox).value
+            self.dismiss({"kind": "stop", "names": [event.button.name]})
 
     def _val(self, wid: str) -> Optional[str]:
         v = self.query_one(f"#{wid}", Input).value.strip()
@@ -113,6 +113,7 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
         return {
             "scenario": self.query_one("#scenario", Select).value,
             "config_name": self._val("config"),
+            "parallelism": self._val("parallelism") or 1,
             "target_url": self._val("target"),
             "rate": self._val("rate"),
             "duration": self._val("duration"),

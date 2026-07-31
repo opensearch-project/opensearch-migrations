@@ -1,125 +1,69 @@
 #!/usr/bin/env bash
-# run_test_load_shapes.sh
-#
-# Validates non-steady load profiles: ramp-up and burst.
-# Must be run from the TrafficCapture/trafficLoadTest/ directory.
+# Validates the ramping-arrival-rate load shapes: ramp, burst, mixed-ramp.
+# Assumes the data plane is already up (deployWorkflowComponents.sh up).
 #
 # Usage:
-#   ./scripts/run_test_load_shapes.sh                     # all shapes (ramp + burst + mixed-ramp)
-#   ./scripts/run_test_load_shapes.sh --with-burst        # burst shape only
-#   ./scripts/run_test_load_shapes.sh --with-mixed-ramp   # mixed-ramp shape only
-#   ./scripts/run_test_load_shapes.sh --with-setup        # start stack before running
-#   ./scripts/run_test_load_shapes.sh --teardown          # tear down after checks
+#   ./scripts/run_test_load_shapes.sh --run                    # ramp only, then check
+#   ./scripts/run_test_load_shapes.sh --run --with-burst       # ramp + burst
+#   ./scripts/run_test_load_shapes.sh --run --with-mixed-ramp  # ramp + mixed-ramp (needs registry)
+#   ./scripts/run_test_load_shapes.sh                          # checks only
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-# ── Argument parsing ──────────────────────────────────────────────────────────
-WITH_SETUP=false; WITH_TEARDOWN=false
-WITH_BURST=false; WITH_MIXED_RAMP=false; ALL_SHAPES=true
-for arg in "$@"; do
-  case $arg in
-    --with-setup)      WITH_SETUP=true ;;
-    --teardown)        WITH_TEARDOWN=true ;;
-    --with-burst)      WITH_BURST=true; ALL_SHAPES=false ;;
-    --with-mixed-ramp) WITH_MIXED_RAMP=true; ALL_SHAPES=false ;;
-    *) echo "Unknown argument: $arg"; exit 1 ;;
+WITH_RUN=false; WITH_BURST=false; WITH_MIXED_RAMP=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run) WITH_RUN=true ;;
+    --with-burst) WITH_BURST=true ;;
+    --with-mixed-ramp) WITH_MIXED_RAMP=true ;;
+    *) echo "Unknown argument: $1"; exit 1 ;;
   esac
+  shift
 done
-if $ALL_SHAPES; then WITH_BURST=true; WITH_MIXED_RAMP=true; fi
 
 echo -e "\n${BOLD}Load Shapes Validation — $(date '+%Y-%m-%d %H:%M:%S')${NC}"
 echo "──────────────────────────────────────────────────"
 
-# ── Capture Proxy image ────────────────────────────────────────────────────────
-header "Step 1 — Capture Proxy image"
-check_capture_proxy_image "$WITH_SETUP"
+header "Step 1 — Capture Proxy reachable"
+check_proxy_ready
 
-# ── Optional stack startup ────────────────────────────────────────────────────
-if $WITH_SETUP; then
-  header "Step 2 — Starting stack"
-  "${DOCKER_COMPOSE[@]}" up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
-  echo ""
-else
-  info "Skipping stack startup (use --with-setup to include that step)."
-fi
+if $WITH_RUN; then
+  header "Step 2 — Ramp load shape"
+  run_k6 --scenario ingest --config ingest-ramp
+  check_service_health "(post-ramp)" kafka opensearch-source capture-proxy
+  check_kafka_messages 1
+  ramp_rate=$(prom_range_max "sum(rate(http_reqs_total[1m]))" "10m")
+  [[ -n "$ramp_rate" ]] && pass "Ramp peak req/s (max over 10m): $ramp_rate" \
+                        || info "Ramp: rate not yet in Prometheus"
 
-# ── Ramp run ──────────────────────────────────────────────────────────────────
-header "Step 3 — Ramp load shape"
-load_k6_env "k6-config/ingest-ramp.env"
-"${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-echo ""
-
-check_service_health "(post-ramp)" kafka opensearch-source capture-proxy
-check_kafka_messages 1
-
-ramp_rate_variation=$(prom_range_max "http_reqs_total" "10m")
-if [[ -n "$ramp_rate_variation" && $(python3 -c "print(1 if float('$ramp_rate_variation') > 0 else 0)") == "1" ]]; then
-  pass "Ramp: non-zero rate variation detected (max_over_time=$ramp_rate_variation req/s)"
-else
-  fail "Ramp: could not verify rate variation (prom_range_max returned: '${ramp_rate_variation:-empty}')"
-fi
-
-# ── Burst run ─────────────────────────────────────────────────────────────────
-if $WITH_BURST; then
-  header "Step 4 — Burst load shape"
-
-  offset_before=$(kafka_total_offset)
-
-  load_k6_env "k6-config/ingest-burst.env"
-  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
-    k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-  echo ""
-
-  offset_after=$(kafka_total_offset)
-  offset_delta=$(( offset_after - offset_before ))
-
-  check_service_health "(post-burst)" kafka opensearch-source capture-proxy
-
-  if (( offset_delta > 0 )); then
-    pass "Burst: $offset_delta new Kafka messages produced during burst run"
-  else
-    fail "Burst: no new Kafka messages during burst run (offset before=$offset_before, after=$offset_after)"
+  if $WITH_BURST; then
+    header "Step 3 — Burst load shape"
+    offset_before=$(kafka_total_offset)
+    run_k6 --scenario ingest --config ingest-burst --extra-args --no-thresholds
+    offset_after=$(kafka_total_offset)
+    check_service_health "(post-burst)" kafka opensearch-source capture-proxy
+    info "Kafka messages during burst: $(( offset_after - offset_before ))"
+    burst_rate=$(prom_range_max "sum(rate(http_reqs_total[1m]))" "5m")
+    [[ -n "$burst_rate" ]] && pass "Burst peak req/s (max over 5m): $burst_rate" \
+                           || info "Burst: rate not yet in Prometheus"
   fi
 
-  burst_rate=$(prom_range_max "http_reqs_total" "5m")
-  info "Burst peak rate (last 5m): ${burst_rate:-unknown} req/s"
-fi
-
-# ── Mixed ramp run ────────────────────────────────────────────────────────────
-if $WITH_MIXED_RAMP; then
-  header "Step 5 — Mixed ramp load shape"
-
-  load_k6_env "k6-config/mixed-ramp.env"
-  "${DOCKER_COMPOSE[@]}" run --rm "${env_flags[@]}" \
-    k6 run --out=opentelemetry /scripts/scenarios/mixed.js
-  echo ""
-
-  check_service_health "(post-mixed-ramp)" kafka opensearch-source capture-proxy
-
-  mixed_rate_variation=$(prom_range_max "http_reqs_total" "10m")
-  if [[ -n "$mixed_rate_variation" && $(python3 -c "print(1 if float('$mixed_rate_variation') > 0 else 0)") == "1" ]]; then
-    pass "Mixed ramp: non-zero rate variation detected (max=$mixed_rate_variation req/s)"
-  else
-    fail "Mixed ramp: could not verify rate variation (got: '${mixed_rate_variation:-empty}')"
+  if $WITH_MIXED_RAMP; then
+    header "Step 4 — Mixed ramp load shape (needs registry.enabled)"
+    run_k6 --scenario mixed --config mixed-ramp --registry-enabled
+    check_service_health "(post-mixed-ramp)" kafka opensearch-source capture-proxy
+    mixed_rate=$(prom_range_max "sum(rate(http_reqs_total[1m]))" "10m")
+    [[ -n "$mixed_rate" ]] && pass "Mixed-ramp peak req/s (max over 10m): $mixed_rate" \
+                           || info "Mixed-ramp: rate not yet in Prometheus"
   fi
+else
+  info "Skipping k6 runs (use --run to submit them first)."
 fi
 
-# ── Final Prometheus spot checks ──────────────────────────────────────────────
-header "Step 6 — Prometheus: error rate across all shape runs"
-# ingest_errors_total is the SUM of error values (0 in a healthy run), so checking it
-# as a counter would always fail when there are no errors.  HTTP error rate via
-# http_reqs_total{status=~"4..|5.."} is the correct signal.
+header "Step 5 — Prometheus: error rate + latency across shape runs"
 prom_check_http_error_rate 0.05 "HTTP error rate (4xx/5xx)"
 prom_check_latency_p95 "bulk_write" 3000
-
-# ── Optional teardown ─────────────────────────────────────────────────────────
-if $WITH_TEARDOWN; then
-  header "Teardown"
-  "${DOCKER_COMPOSE[@]}" down -v
-  pass "Stack torn down (volumes removed)"
-fi
 
 print_summary

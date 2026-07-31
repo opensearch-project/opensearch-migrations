@@ -3,7 +3,6 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CreateSnapshot} from "./createSnapshot";
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {FullMigration} from "./fullMigration";
-import {K6LoadTest} from "./k6LoadTest";
 import {TestMigrationWithWorkflowCli} from "./testMigrationWithWorkflowCli";
 import {MetadataMigration} from "./metadataMigration";
 import {MigrationConsole} from "./migrationConsole";
@@ -20,7 +19,6 @@ export const AllWorkflowTemplates = [
     CreateSnapshot,
     DocumentBulkLoad,
     FullMigration,
-    K6LoadTest,
     MetadataMigration,
     MigrationConsole,
     Replayer,

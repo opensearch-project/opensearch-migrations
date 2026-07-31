@@ -1,665 +1,162 @@
 # Load Test Traffic Generator
 
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay
-pipeline.
+pipeline. The scenarios run on Kubernetes as **k6-operator `TestRun`** CRs, driven from the
+migration console (`workflow k6 …`).
 
-There are two ways to run it:
+- **How to run it:** [`k8s/README.md`](k8s/README.md) — install the standalone `k6LoadTest` chart,
+  then `workflow k6 run …`.
+- **This document:** the scenarios, their configuration knobs, and the key implementation
+  decisions. Configuration is transport-agnostic: each variable below is a preset value you
+  override per run with `-o KEY=VALUE` (or the named `--rate`/`--duration`/`--vus` options).
 
-- **Kubernetes / Argo** — k6 runs as a short-lived Argo Workflow inside the migration's
-  minikube (or EKS) deployment, submitted from the `k6-load-test` WorkflowTemplate via the
-  `workflow k6` console CLI / TUI. See [Running in Kubernetes](#running-in-kubernetes-minikube--argo)
-  directly below. Deeper reference (WorkflowTemplate parameters, `argo submit`, TUI `k` panel):
-  [`k8s/README.md`](k8s/README.md).
-- **Docker Compose** — standalone local stack for developing the scenarios themselves.
-  Everything from [Prerequisites](#prerequisites) onward.
-
----
-
-## Running in Kubernetes (minikube + Argo)
-
-End-to-end walkthrough: build images → start minikube + deploy the chart → bring up a data
-plane → fire a k6 run → validate → tear down. Traffic flows
-**k6 → capture-proxy → opensearch-source**, and **capture-proxy → kafka → replayer →
-opensearch-target** — the same capture-and-replay pipeline a real migration exercises.
-
-> Run the two build/deploy scripts from the **`buildImages/`** directory (they use paths
-> relative to it); run `deployWorkflowComponents.sh` and the `workflow k6` commands from
-> anywhere with cluster context.
-
-### 1. Build & push all images to the local registry
-
-Builds every image — including `migrations/k6` and the migration-console image (which bakes in
-the generated `k6-load-test` WorkflowTemplate) — and pushes them to `localhost:5001`:
-
-```bash
-cd buildImages
-./scripts/fillLocalRegistry.sh
-```
-
-### 2. Start minikube and deploy the charts
-
-```bash
-# still in buildImages/
-./scripts/startMinikubeAndDeployCharts.sh
-```
-
-This installs the migration-assistant chart. On deploy the console install Job applies
-`/root/workflows/*.yaml`, so the `k6-load-test` WorkflowTemplate is registered automatically —
-no manual `kubectl apply` needed. `k6Image` / `k6PullPolicy` come from the `migration-image-config`
-ConfigMap (rendered from chart `values.yaml`).
-
-### 3. Bring up the data plane
-
-`startMinikubeAndDeployCharts.sh` installs the control plane but does **not** run a migration.
-`deployWorkflowComponents.sh` deploys a minimal, fully-wired data plane (OpenSearch source +
-target, single-node Kafka, capture proxy, replayer) so k6 has a Capture Proxy to target — all
-labeled `part-of=k6-dataplane`, with **no** migration workflow involved.
-
-```bash
-cd ..    # back to repo root
-./buildImages/scripts/deployWorkflowComponents.sh up       # deploy + wait until ready
-./buildImages/scripts/deployWorkflowComponents.sh status   # show state + the proxy URL
-```
-
-When ready it prints the proxy URL for k6: `https://capture-proxy:9200` (namespace `ma`).
-Override the target cluster with `CONTEXT=<kube-context>` / `NAMESPACE=<ns>` env vars.
-
-### 4. Run a k6 load test
-
-Submit runs with the `workflow k6` CLI from inside the migration console pod. Each run is an
-independent Argo Workflow — start several, list them, and stop any or all without touching a
-migration:
-
-```bash
-C="kubectl -n ma exec migration-console-0 --"
-
-# Submit a run against the capture proxy
-$C workflow k6 run --scenario ingest --config ingest-steady \
-     --target https://capture-proxy:9200 --duration 30s --rate 10
-
-# List active runs
-$C workflow k6 list
-
-# Stream logs of one run (name from `list`)
-$C workflow k6 logs -f <run-name>
-
-# Stop one run, or all of them
-$C workflow k6 stop <run-name>
-$C workflow k6 stop --all
-```
-
-Any preset value is overridable per run: `--rate` / `--duration` / `--vus`, or the generic
-`-o KEY=VALUE` bag (repeatable), and `--extra-args` for raw `k6 run` flags. On a
-resource-constrained minikube the default latency thresholds may breach (k6 exits non-zero) even
-though every request succeeds — pass `--extra-args --no-thresholds` for a clean run.
-
-You can also launch/monitor runs from the TUI (`workflow manage`, then press **`k`**) or submit
-directly with `argo submit --from workflowtemplate/k6-load-test` — see
-[`k8s/README.md`](k8s/README.md).
-
-### 5. Validate the pipeline
-
-```bash
-S="kubectl -n ma exec deploy/opensearch-source --"
-T="kubectl -n ma exec deploy/opensearch-target --"
-
-# k6 wrote through the proxy to the source:
-$S curl -s localhost:9200/nyc_taxis/_count
-
-# the proxy captured the traffic to Kafka (end offset > 0):
-kubectl -n ma exec deploy/kafka -- \
-  /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic logging-traffic-topic
-
-# the replayer replayed it to the target (count converges to the source):
-$T curl -s localhost:9200/nyc_taxis/_count
-```
-
-### 6. Tear down
-
-```bash
-# remove just the data plane (leaves minikube + the chart running):
-./buildImages/scripts/deployWorkflowComponents.sh down
-
-# or stop the whole cluster:
-minikube stop      # or: minikube delete
-```
+> The load-test setup is deployed **separately** from any migration (an opt-in chart), so a normal
+> migration deployment contains no k6 and cannot trigger a load test. See
+> [`k8s/README.md`](k8s/README.md).
 
 ---
 
-## Prerequisites
+## Scenarios
 
-Build the Capture Proxy Docker image (also generates the self-signed TLS certs).
-Run from the **repo root**:
+Three scenario scripts, selected with `--scenario`:
 
-```bash
-cd /path/to/opensearch-migrations   # repo root (where settings.gradle lives)
-./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest
-```
+| `--scenario` | Script | What it does |
+|---|---|---|
+| `ingest` | `scenarios/ingest.js` | `_bulk` + single-doc writes at a constant/ramping rate; optional stateful create→update→query→delete sequences |
+| `search` | `scenarios/search.js` | flat `_search`, aggregations, partial updates, optional deep paging (scroll / search_after) |
+| `mixed` | `scenarios/mixed.js` | ingest + search streams concurrently, with a write-then-read consistency check via a Redis ring buffer (Webdis) |
 
----
+Each scenario reads its load shape from a `k6-config/*.env` **preset** (selected with `--config`,
+default `<scenario>-steady`). Presets describe load shape only — no document-schema settings — so
+any preset works with any scenario. Available presets: `ingest-steady`, `ingest-ramp`,
+`ingest-burst`, `search-steady`, `search-deep-paging`, `search-ramp`, `search-burst`,
+`mixed-steady`, `mixed-ramp`, `mixed-burst`.
 
-## Ingest Baseline
+### Load shapes (ramp / burst)
 
-### Start the stack
+| Preset | Executor | Description |
+|---|---|---|
+| `*-steady` | `constant-arrival-rate` | hold a fixed rate for `DURATION` |
+| `*-ramp` | `ramping-arrival-rate` | 0→peak over minutes, hold, ramp down |
+| `*-burst` | `ramping-arrival-rate` | warm-up → short spike (designed to saturate the proxy) → recover |
 
-```bash
-cd TrafficCapture/trafficLoadTest
-docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
-```
-
-### Run the ingest scenario
-
-The k6 service already has all defaults set in `docker-compose.yml`. Run with the
-defaults from `k6-config/ingest-steady.env` by passing each variable explicitly
-(`docker compose run` does not support `--env-file`):
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-Or override individual variables inline:
-
-```bash
-docker compose run --rm -e INGEST_RATE=100 -e DURATION=10m \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-### Validate
-
-```bash
-# checks only — stack and k6 run must already be complete
-./scripts/run_test_ingest.sh
-
-# start stack + run k6 + validate, all in one go
-./scripts/run_test_ingest.sh --with-setup
-
-# add --teardown to bring the stack down after validation
-./scripts/run_test_ingest.sh --with-setup --teardown
-```
-
-### What to check manually
-
-| What | Where |
-|---|---|
-| k6 live output | terminal (req/s, error rate, p95 latency) |
-| Grafana dashboard | http://localhost:3000 → Load Testing → Load Test — Capture Proxy Ingest (admin / admin) |
-| Kafka consumer lag | `docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --all-groups` |
-| Capture Proxy logs | `docker compose logs -f capture-proxy` |
-| Prometheus metrics | http://localhost:19090 |
-
-The Grafana datasource (Prometheus) and the dashboard are provisioned automatically on startup — no manual configuration needed.
-
-### Tear down
-
-```bash
-docker compose down -v
-```
+> **Burst saturates the proxy on purpose.** k6 exits non-zero when latency/error thresholds breach
+> during the spike — that's the *finding* (the saturation point), not a broken test. Add
+> `--extra-args --no-thresholds` to keep the run from being marked failed.
 
 ---
 
 ## Document scenarios
 
-All three scenario scripts (`ingest.js`, `search.js`, `mixed.js`) support multiple document
-schemas. Select one by passing `SCENARIO` on the command line:
+All scripts select a document schema via the `SCENARIO` env var — a **separate axis** from
+`--scenario` (which picks the script). Override it with `-o SCENARIO=<type>`:
 
-| `SCENARIO` value | Index (default) | Document type |
+| `SCENARIO` | Index (default) | Document type |
 |---|---|---|
 | `nyc_taxis` (default) | `nyc_taxis` | NYC taxi trip records — geo_point, scaled_float, date |
 | `logs_data` | `logs_data` | Structured log events — keyword, integer, text, date |
 
-```bash
-# Run log ingest with the steady profile
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  -e SCENARIO=logs_data \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-`INDEX_NAME` defaults to the `SCENARIO` value. Override explicitly if needed:
-```bash
--e SCENARIO=logs_data -e INDEX_NAME=my-logs-index
-```
-
-Any load-profile env file (`ingest-steady.env`, `ingest-burst.env`, etc.) works with any scenario —
-they describe load shape only and contain no document-schema settings.
+`INDEX_NAME` defaults to the `SCENARIO` value; override with `-o INDEX_NAME=my-index`. The
+NYC Taxis schema mirrors `DataGenerator/NycTaxis.java` exactly (same date format, constants and
+geo-point array format); the index is `dynamic: strict`, so any mismatch rejects documents.
 
 ---
 
-## Configuration
+## Configuration reference
 
-All scenario parameters are set via environment variables. Edit the relevant `k6-config/*.env`
-file or override on the command line with `-e KEY=VALUE`.
+Set via preset (default) or per-run override. `-o KEY=VALUE` is applied last and wins.
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `SCENARIO` | `nyc_taxis` | Document schema: `nyc_taxis` or `logs_data` |
-| `CAPTURE_PROXY_URL` | `https://capture-proxy:9200` | Proxy endpoint |
-| `INDEX_NAME` | value of `SCENARIO` | Target index (override to use a custom name) |
-| `INGEST_RATE` | `50` | Target requests/second |
-| `INGEST_VUS` | `20` | Pre-allocated VUs (≈ connections) |
-| `INGEST_MAX_VUS` | `100` | Max VUs k6 may spin up |
-| `DURATION` | `5m` | Scenario run time |
-| `BULK_BATCH_SIZE` | `20` | Documents per `_bulk` call |
-| `SEED_DOC_COUNT` | `100000` | Expected seed doc count (informational) |
-
----
-
-## Stateful Sequences
-
-### Run with sequences (pinned mode)
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  -e SEQUENCE_FRACTION=0.15 \
-  -e CONNECTION_MODE=pinned \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-To test spread mode (forces a new TCP connection per request — sequences may replay out of order):
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  -e SEQUENCE_FRACTION=0.15 \
-  -e CONNECTION_MODE=spread \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-### Validate
-
-```bash
-./scripts/run_test_sequences.sh
-./scripts/run_test_sequences.sh --with-setup
-./scripts/run_test_sequences.sh --with-setup --teardown
-```
-
-
-### New environment variables
+### Common
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEQUENCE_FRACTION` | `0.15` | Share of iterations run as a create→update→query→delete sequence |
-| `BULK_FRACTION` | `0.70` | Share of non-sequence iterations sent as `_bulk` (remainder → single-doc POSTs) |
-| `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive (one stream); `spread` = sends `Connection: close` header, asking the server to close the TCP connection after each response (one stream per request). See caveat below. |
-| `NO_CONNECTION_REUSE` | _(unset)_ | Set to `true` to disable keep-alive at the k6 transport level (`noConnectionReuse: true`). Guarantees a new TCP connection per request client-side, regardless of server behaviour. Use alongside `CONNECTION_MODE=spread` for the strongest isolation. |
+| `SCENARIO` | `nyc_taxis` | document schema (`nyc_taxis` or `logs_data`) |
+| `CAPTURE_PROXY_URL` | preset | proxy endpoint (also set by `--target`) |
+| `INDEX_NAME` | value of `SCENARIO` | target index |
+| `DURATION` | `5m` | scenario run time (`--duration`) |
+| `EXECUTOR` | `constant-arrival-rate` | set to `ramping-arrival-rate` for ramp/burst |
+| `RAMP_STAGES` | single hold stage | JSON array of k6 stages, e.g. `[{"duration":"2m","target":150}]` |
 
-> **`Connection: close` caveat:** k6 does not close the TCP connection itself when this header
-> is set on a request — it only sends the header to the server. The connection is closed only if
-> the server echoes `Connection: close` back in the response. The Capture Proxy and OpenSearch
-> are HTTP/1.1 compliant and will do so, but if traffic flows through an intermediary that strips
-> the header (some load balancers or TLS terminators), spread mode silently falls back to
-> keep-alive. `NO_CONNECTION_REUSE=true` avoids this dependency.
-
----
-
-## Search Profile
-
-### Run the search scenario (steady, no deep paging)
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/search-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/search.js
-```
-
-To enable deep paging (scroll or search_after sequences for 5% of iterations):
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/search-deep-paging.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/search.js
-```
-
-Switch between scroll and search_after by overriding `PAGING_MODE`:
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/search-deep-paging.env | grep -v '^$' | sed 's/^/-e /') \
-  -e PAGING_MODE=search_after \
-  k6 run --out=opentelemetry /scripts/scenarios/search.js
-```
-
-### Validate
-
-```bash
-./scripts/run_test_search.sh
-./scripts/run_test_search.sh --with-setup
-./scripts/run_test_search.sh --with-setup --teardown
-./scripts/run_test_search.sh --with-setup --deep-paging   # uses search-deep-paging.env
-```
-
-Steps 1–8 are automated. Step 10 (Replayer memory growth) requires the Traffic Replayer
-to be running separately — see the script output for guidance.
-
-### New environment variables
+### Ingest
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEARCH_RATE` | `50` | Target requests/second |
-| `SEARCH_VUS` | `30` | Pre-allocated VUs |
-| `SEARCH_MAX_VUS` | `150` | Max VUs k6 may spin up |
-| `DEEP_PAGING_ENABLED` | `false` | `true` to activate scroll / search_after steps |
+| `INGEST_RATE` | `50` | target requests/second (`--rate`) |
+| `INGEST_VUS` | `20` | pre-allocated VUs (`--vus`) |
+| `INGEST_MAX_VUS` | `100` | max VUs k6 may spin up |
+| `BULK_BATCH_SIZE` | `20` | documents per `_bulk` call |
+| `SEQUENCE_FRACTION` | `0.15` | share of iterations run as create→update→query→delete |
+| `BULK_FRACTION` | `0.70` | share of non-sequence iterations sent as `_bulk` |
+| `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive; `spread` = `Connection: close` per request |
+| `NO_CONNECTION_REUSE` | _(unset)_ | `true` forces a new TCP connection per request client-side |
+| `SEED_DOC_COUNT` | `100000` | expected seed doc count (informational; set `0` to skip the wait) |
+
+### Search
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEARCH_RATE` | `50` | target requests/second |
+| `SEARCH_VUS` | `30` | pre-allocated VUs |
+| `SEARCH_MAX_VUS` | `150` | max VUs |
+| `DEEP_PAGING_ENABLED` | `false` | `true` to activate scroll / search_after |
 | `PAGING_MODE` | `scroll` | `scroll` or `search_after` |
-| `SCROLL_PAGES` | `3` | Max pages per scroll sequence |
-| `SEARCH_AFTER_PAGES` | `3` | Max pages per search_after sequence |
-| `CONNECTION_MODE` | `pinned` | Same as Stateful Sequences (see caveat there) |
-| `NO_CONNECTION_REUSE` | _(unset)_ | Same as Stateful Sequences |
-| `SEARCH_FLAT_FRACTION` | `0.60` | Fraction of iterations for flat `_search` (term / range / bool) |
-| `SEARCH_AGG_FRACTION` | `0.20` | Fraction of iterations for aggregation queries |
-| `SEARCH_UPDATE_FRACTION` | `0.10` | Fraction of iterations for partial updates |
-| `SEARCH_WRITE_FRACTION` | `0.05` | Fraction of iterations for single-doc writes; remainder → deep paging or flat fallback |
+| `SEARCH_FLAT_FRACTION` | `0.60` | fraction for flat `_search` |
+| `SEARCH_AGG_FRACTION` | `0.20` | fraction for aggregation queries |
+| `SEARCH_UPDATE_FRACTION` | `0.10` | fraction for partial updates |
 
-The `search` scenario auto-appears in the Grafana Scenario drop-down — no dashboard changes needed.
-
----
-
-## Mixed Profile
-
-Runs the ingest and search streams concurrently. A Redis ring buffer (accessed via Webdis)
-lets ingest VUs register newly-created document IDs so that `CONSISTENCY_FRACTION` of search
-VUs can query those exact documents — exercising write-then-read ordering through the pipeline.
-
-### Start the stack
-
-```bash
-docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana redis webdis
-```
-
-### Run the mixed scenario
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/mixed-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/mixed.js
-```
-
-To dial the streams independently:
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/mixed-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  -e INGEST_RATE=50 -e SEARCH_RATE=10 \
-  k6 run --out=opentelemetry /scripts/scenarios/mixed.js
-```
-
-### Validate
-
-```bash
-./scripts/run_test_mixed.sh
-./scripts/run_test_mixed.sh --with-setup
-./scripts/run_test_mixed.sh --with-setup --teardown
-```
-
-### New environment variables
+### Mixed (needs Redis+Webdis → chart `registry.enabled=true`)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `INGEST_RATE` | `30` | Ingest stream target requests/second |
-| `SEARCH_RATE` | `20` | Search stream target requests/second |
-| `INGEST_VUS` | `15` | Pre-allocated ingest VUs |
-| `INGEST_MAX_VUS` | `75` | Max ingest VUs |
-| `SEARCH_VUS` | `15` | Pre-allocated search VUs |
-| `SEARCH_MAX_VUS` | `75` | Max search VUs |
-| `SEQUENCE_FRACTION` | `0.15` | Fraction of ingest iterations run as create→update→query→delete |
-| `BULK_FRACTION` | `0.70` | Fraction of non-sequence ingest iterations sent as `_bulk` (remainder → single-doc with registry write) |
-| `CONSISTENCY_FRACTION` | `0.10` | Fraction of search iterations that query a recently-ingested doc |
-| `SEARCH_FLAT_FRACTION` | `0.60` | Fraction of non-consistency search iterations for flat `_search` |
-| `SEARCH_AGG_FRACTION` | `0.20` | Fraction of non-consistency search iterations for aggregation queries |
-| `SEARCH_UPDATE_FRACTION` | `0.10` | Fraction of non-consistency search iterations for partial updates; remainder → single-doc write |
+| `INGEST_RATE` / `SEARCH_RATE` | `30` / `20` | per-stream target rates |
+| `CONSISTENCY_FRACTION` | `0.10` | fraction of search iterations that query a recently-ingested doc |
 | `WEBDIS_URL` | `http://webdis:7379` | Webdis HTTP-to-Redis proxy URL |
-| `REGISTRY_ENABLED` | `false` | `true` to activate the ID ring buffer; when `false` all registry calls are no-ops and the consistency fraction falls back to flat searches (safe to run without Redis/Webdis) |
+| `REGISTRY_ENABLED` | `false` | `true` activates the ID ring buffer (`--registry-enabled`); off = consistency reads fall back to flat searches |
 
-The `mixed_ingest` and `mixed_search` scenarios auto-appear in the Grafana Scenario drop-down.
+### Chaos control (opt-in via `CONTROL_ENABLED=true` / `--control-enabled`)
 
----
+Control commands are written to a Redis key (via Webdis) and polled by VUs mid-run:
 
-## Burst and Ramp Profiles
-
-Adds `ramping-arrival-rate` load shapes to find the Capture Proxy saturation point and observe
-Kafka lag accumulation under load spikes. Three profiles:
-
-| Profile | Env file | Scenario | Description |
-|---|---|---|---|
-| Ramp | `ingest-ramp.env` | `ingest.js` | 0→150 req/s over 2m, hold 3m, ramp down 1m |
-| Burst | `ingest-burst.env` | `ingest.js` | 20 req/s warm-up → 200 req/s spike (30s) → recover |
-| Mixed ramp | `mixed-ramp.env` | `mixed.js` | Ingest 0→80 req/s, search 0→50 req/s, independent ramps |
-
-### Run the ramp profile
-
-```bash
-docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana
-
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-ramp.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-### Run the burst profile
-
-```bash
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-burst.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-> **Note:** The burst profile is designed to saturate the proxy. k6 will exit non-zero when
-> error-rate and latency thresholds breach during the 200 req/s spike — this is the expected
-> finding (saturation point), not a broken test.
-
-### Run the mixed-ramp profile
-
-Redis + Webdis are required (same as Mixed Profile):
-
-```bash
-docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana redis webdis
-
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/mixed-ramp.env | grep -v '^$' | sed 's/^/-e /') \
-  k6 run --out=opentelemetry /scripts/scenarios/mixed.js
-```
-
-### Validate
-
-```bash
-# Ramp profile only
-./scripts/run_test_load_shapes.sh --with-setup
-
-# Ramp + burst
-./scripts/run_test_load_shapes.sh --with-setup --with-burst
-
-# Ramp + mixed-ramp (starts Redis+Webdis automatically)
-./scripts/run_test_load_shapes.sh --with-setup --with-mixed-ramp
-
-# All three profiles + teardown
-./scripts/run_test_load_shapes.sh --with-setup --with-burst --with-mixed-ramp --teardown
-```
-
-### New environment variables
-
-For `ingest.js` and `mixed.js`:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `EXECUTOR` | `constant-arrival-rate` | Switch to `ramping-arrival-rate` for ramp/burst shapes |
-| `RAMP_STAGES` | single hold stage | JSON array of k6 stage objects, e.g. `[{"duration":"2m","target":150},{"duration":"1m","target":0}]` |
-
-Additional variables for `mixed.js` ramping (override `RAMP_STAGES` per stream):
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `INGEST_RAMP_STAGES` | single hold stage | Stage array for the ingest stream |
-| `SEARCH_RAMP_STAGES` | single hold stage | Stage array for the search stream |
-| `MIN_RING_FILL` | `0` | Minimum IDs in the Redis ring before search VUs start; converted to a `startTime` delay using `INGEST_RATE × (1−SEQUENCE_FRACTION) × (1−BULK_FRACTION)` IDs/s |
-
-> When `DURATION` is set and `RAMP_STAGES` is not, the scenario falls back to a single
-> hold-at-`INGEST_RATE` stage — existing env files work unchanged.
-
----
-
-## Chaos Integration Hooks
-
-Exposes pause/resume/rate-throttle control points so an orchestration layer can inject faults
-at defined moments within a live test run. Uses the existing Webdis sidecar as a shared
-signalling bus — no new services required.
-
-Control is **opt-in**: pass `CONTROL_ENABLED=true` when launching k6. All existing env files
-work unchanged (default is no-op).
-
-### Run with control enabled
-
-```bash
-docker compose up -d --wait kafka opensearch-source capture-proxy otel-collector prometheus grafana redis webdis
-
-docker compose run --rm \
-  $(grep -v '^[[:space:]]*#' k6-config/ingest-steady.env | grep -v '^$' | sed 's/^/-e /') \
-  -e CONTROL_ENABLED=true \
-  k6 run --out=opentelemetry /scripts/scenarios/ingest.js
-```
-
-### Send commands while k6 is running (from host)
-
-```bash
-# Pause all VUs (traffic to Capture Proxy stops within ~50ms):
-curl -s "http://localhost:7379/SET/control_cmd/pause"
-
-# Resume:
-curl -s "http://localhost:7379/DEL/control_cmd"
-
-# Throttle to ~10 req/s (80% skip at default 50 req/s baseline):
-curl -s "http://localhost:7379/SET/control_cmd/set-rate%3A10"
-
-# Clear throttle:
-curl -s "http://localhost:7379/DEL/control_cmd"
-```
-
-### Validate
-
-```bash
-./scripts/run_test_chaos.sh --with-setup
-./scripts/run_test_chaos.sh --with-setup --teardown
-```
-
-The script runs k6 in the background and exercises pause → resume → set-rate automatically,
-using Kafka offset snapshots to confirm traffic stopped and restarted.
-
-> **Note on latency thresholds:** while VUs are paused they accumulate sleep time inside
-> `checkControl()`, which inflates `http_req_duration`. k6 will exit non-zero if p95 thresholds
-> breach during a pause. For chaos runs where latency is not the primary assertion, pass
-> `--no-thresholds` to `k6 run` to disable threshold evaluation for the run:
->
-> ```bash
-> k6 run --out=opentelemetry --no-thresholds /scripts/scenarios/ingest.js
-> ```
->
-> `run_test_chaos.sh` does this automatically — the flag is already wired in.
-
-### New environment variables
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `CONTROL_ENABLED` | `false` | `true` to enable mid-test control polling via Webdis |
-| `CONTROL_CMD_KEY` | `control_cmd` | Redis key name polled for commands |
-
-### Commands reference
-
-| Command string (written to `control_cmd`) | Effect |
+| Command (written to `control_cmd`) | Effect |
 |---|---|
-| `pause` | All VUs halt within ~50ms; sleep loop until command changes |
-| `resume` (or DEL key) | Exits pause; VUs proceed normally |
-| `set-rate:N` | Probabilistic skip: effective throughput ≈ N/baseRate × configured rate |
+| `pause` | all VUs halt within ~50 ms |
+| `resume` (or delete the key) | VUs proceed |
+| `set-rate:N` | probabilistic skip → effective throughput ≈ N |
 
+---
+
+## Thresholds vs Checks
+
+- **`check()`** (k6 built-in) — observational assertions listed in the run summary. Failed checks do
+  **not** cancel the run.
+- **thresholds** — pass/fail gates on metrics. A breach fails the run (non-zero exit) unless
+  `--extra-args --no-thresholds` is set. On a resource-constrained cluster, latency thresholds may
+  breach even when every request succeeds — use `--no-thresholds` there.
 
 ---
 
 ## Key implementation decisions
 
-- **Tool: k6.** Each Virtual User (VU) holds one persistent TCP connection — this maps directly to
-  `connectionId` in the Capture Proxy and is the foundation for connection-pinning in the Sequences scenario.
+These are scenario/tool-level decisions. For the **deployment-architecture** decisions — why k6 is
+a separate opt-in chart, why the k6-operator instead of Argo, ConfigMap-vs-image scenario storage,
+console-CLI-vs-kubectl submission, etc. — see **[k8s/README.md → Design decisions](k8s/README.md#design-decisions)**.
 
-- **Proxy TLS.** The Capture Proxy listens on HTTPS with a self-signed cert (generated by
-  `generateSelfSignedCerts` Gradle task, baked into the Docker image). k6 uses
-  `insecureSkipTLSVerify: true`. The source cluster behind the proxy runs plain HTTP with
-  security disabled — the proxy handles all TLS termination.
-
-- **Metrics.** All metrics funnel through the OTEL collector. Capture Proxy pushes OTLP gRPC to
-  the collector (`:4317`). Kafka broker/topic/consumer metrics are scraped by the collector's
-  `kafkametricsreceiver`. k6 pushes OTLP gRPC (`--out=opentelemetry`, `K6_OTEL_GRPC_EXPORTER_ENDPOINT=otel-collector:4317`)
-  to the same OTLP receiver — no custom k6 image needed. The collector exposes a single Prometheus
-  scrape endpoint at `:8889`. k6 timing histograms arrive in milliseconds and are exposed as
-  `http_req_duration_milliseconds_bucket/sum/count`; query p95 via
-  `histogram_quantile(0.95, rate(http_req_duration_milliseconds_bucket{name="..."}[5m]))`.
-
-- **Document scenarios.** All scenario scripts select a document generator via the `SCENARIO` env
-  var (`nyc_taxis` default, `logs_data` also available). Each scenario provides its own index
-  mapping (`data/<scenario>/mapping.json`), field-value samples for queries, and partial-update
-  body generator. The NYC Taxis schema mirrors `DataGenerator/NycTaxis.java` exactly (same date
-  format, same constants, same geo-point array format) — the index is `dynamic: strict`, so any
-  mismatch causes rejected documents. Adding a new document type requires only a new
-  `lib/<name>/documents.js` and `lib/<name>/queries.js` alongside the data files; the scenario
-  scripts pick it up via the `SCENARIO` dispatch.
-
-- **Operation mix.** Ingest baseline: 70% `_bulk` writes, 30% single-doc POSTs. Sequences adds
-  stateful sequences (create → update → query → delete); the budget is redistributed using
-  `SEQUENCE_FRACTION` (default 0.15). `CONNECTION_MODE=pinned` (default) keeps all VU requests
-  on one TCP connection; `CONNECTION_MODE=spread` sends `Connection: close` per request, relying
-  on the server to echo it back and close the socket. For a client-side guarantee independent of
-  server behaviour, set `NO_CONNECTION_REUSE=true` (adds `noConnectionReuse: true` to k6 options).
-  Search adds a separate search scenario: 60% flat search, 20% aggregations, 10% partial update,
-  5% single-doc write, 5% deep paging (scroll or search_after, off by default).
-
-- **Scroll safety.** Scroll contexts are closed in a `try/finally` block — leaks cannot
-  accumulate even if a page fetch fails or k6 is interrupted mid-sequence.
-
-- **ID registry (Mixed Profile).** Cross-VU shared state (ingest → search write-then-read) is
-  implemented via a Redis list accessed through a Webdis HTTP proxy (`anapsix/webdis`).
-  k6 uses its built-in `http` module to call Webdis over HTTP (`GET /LPUSH/key/val`, etc.) —
-  no custom k6 build or xk6 extension required. This avoids the native Redis client modules
-  (`k6/experimental/redis` was removed from k6; `k6/x/redis` requires a custom binary build
-  and exposes only a subset of Redis commands).
-
-- **Chaos control.** Control commands (`pause`, `resume`, `set-rate:N`) are written
-  to a Redis key by the orchestration layer and polled by VUs via the same Webdis sidecar.
-  Opt-in via `CONTROL_ENABLED=true`; fail-open (Webdis unreachable → proceed normally).
-
----
-
-## Validation scripts
-
-| Script | What it validates |
-|---|---|
-| `run_test_ingest.sh` | `_bulk` + single-doc writes at constant rate → Kafka → OpenSearch |
-| `run_test_sequences.sh` | Stateful create → update → query → delete; connection pinning; doc leak check |
-| `run_test_search.sh` | Queries, aggregations, deep paging (scroll / search_after); scroll context leak check |
-| `run_test_mixed.sh` | Concurrent ingest + search; Webdis ID registry; consistency metrics |
-| `run_test_load_shapes.sh` | `ramping-arrival-rate` profiles: ramp, burst, mixed-ramp |
-| `run_test_chaos.sh` | Pause/resume/rate-throttle via Webdis; Kafka offset delta assertions |
-
-
-## Thresholds vs Checks
-- `check()` calls (k6 built-in) are used for checks whose outcome is listed in the k6 summary after a run. Failed
-  checks do not cancel the run or similar, its solely observational.
-- thresholds on metrics configured in the run script. If those checks fail, this can abort the run if the flag to 
-  ignore thresholds is not set (`--no-thresholds`).
-
-
-## Usage Notes
-
-- **CaptureProxy flag rename**: `--otelCollectorEndpoint` was split into `--otelTraceCollectorEndpoint`
-  and `--otelMetricsCollectorEndpoint`. If you see a JCommander error about an unknown main parameter
-  on proxy startup, your local image is stale — rebuild it:
-  ```bash
-  ./gradlew :TrafficCapture:trafficCaptureProxyServer:jibDockerBuild -Djib.to.image=migrations/capture_proxy:latest
-  ```
-
-- **Jib ENTRYPOINT**: Jib bakes `java -cp @/app/jib-classpath-file CaptureProxy` as the image
-  `ENTRYPOINT`. `docker-compose.yml` therefore uses an explicit `entrypoint:` key (not just `command:`)
-  to run `/runJavaWithClasspath.sh` — without it, the script name lands as a JCommander argument and
-  the proxy exits immediately with code 2.
-
-- **Prometheus config changes**: After editing `prometheus.yaml`, restart Prometheus to pick up the change:
-  ```bash
-  docker compose restart prometheus
-  ```
+- **Tool: k6.** Each Virtual User holds one persistent TCP connection — mapping directly to
+  `connectionId` in the Capture Proxy, the foundation for connection-pinning in the sequences path.
+- **Distributed runs.** The k6-operator splits a run across `--parallelism` runner pods via k6
+  execution segments, so `--rate`/`--vus` are global totals divided among pods.
+- **Proxy TLS.** The proxy listens HTTPS with a self-signed cert; k6 uses
+  `insecureSkipTLSVerify: true`. The source cluster behind the proxy runs plain HTTP.
+- **Metrics.** k6 pushes OTLP gRPC to the otel-collector (`K6_OUT=opentelemetry`,
+  `K6_OTEL_GRPC_EXPORTER_ENDPOINT=otel-collector:4317`). Output is set via the `K6_OUT` **env var**,
+  not `--out`, because the operator also feeds run arguments to the initializer's `k6 archive`,
+  which rejects run-only flags. The collector exposes a Prometheus scrape endpoint; the
+  `k6-load-test` Grafana dashboard reads it.
+- **Document scenarios.** Scripts select a generator via `SCENARIO`; each provides its own index
+  mapping (`data/<scenario>/mapping.json`), query samples and update-body generator. Adding a type
+  needs only new `lib/data/<name>/{documents,queries}.js` + `data/<name>/mapping.json`.
+- **ID registry (mixed).** Cross-VU write-then-read state uses a Redis list via a Webdis HTTP proxy
+  — k6's built-in `http` module calls Webdis (`GET /LPUSH/key/val`), so no xk6/native Redis build.
+- **Scenario storage.** Scenarios ship as a ConfigMap (`k6-scenarios`) mounted into the runner via
+  an `items` projection, not baked into a custom image — so editing a scenario is a `helm upgrade`,
+  not an image rebuild. See [`k8s/README.md`](k8s/README.md).

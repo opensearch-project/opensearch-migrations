@@ -1,0 +1,15 @@
+# Load-profile presets (k6-config/*.env). The console reads the selected preset from here, overlays
+# per-run overrides, and emits the merged values as TestRun spec.runner.env — the operator owns the
+# runner command, so env is resolved console-side rather than by an in-container shell wrapper.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-presets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+data:
+{{- range $path, $bytes := .Files.Glob "files/k6/k6-config/*.env" }}
+  {{ base $path }}: |-
+{{ $bytes | toString | indent 4 }}
+{{- end }}
