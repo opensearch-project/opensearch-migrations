@@ -22,17 +22,23 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Container-free unit tests for {@link SolrBackupStrategy#detectTopology}, covering the mode/status/exception
+ * Container-free unit tests for {@link SolrBackupStrategy#detectTopology}, covering the body/status/exception
  * branches (auth, unreachable, malformed) that the live-container tests in TestCreateSnapshotSolr can't reproduce.
+ * The response shapes below are verbatim from Solr 6.6.0 through 9.8.1.
  */
 public class SolrTopologyDetectionTest {
 
     private static final String URL = "http://solr:8983";
 
-    private static String systemInfo(String mode) {
-        return "{\"responseHeader\":{\"status\":0,\"QTime\":2},"
-            + "\"mode\":\"" + mode + "\",\"solr_home\":\"/var/solr/data\"}";
-    }
+    /** SolrCloud's LIST reply (HTTP 200). */
+    private static final String CLOUD_BODY =
+        "{\"responseHeader\":{\"status\":0,\"QTime\":7},\"collections\":[\"movies\"]}";
+
+    /** Standalone's rejection of the Collections API (HTTP 400). */
+    private static final String STANDALONE_BODY =
+        "{\"responseHeader\":{\"status\":400,\"QTime\":1},\"error\":{"
+            + "\"metadata\":[\"error-class\",\"org.apache.solr.common.SolrException\"],"
+            + "\"msg\":\"Solr instance is not running in SolrCloud mode.\",\"code\":400}}";
 
     @SuppressWarnings("unchecked")
     private static SolrHttpClient clientReturning(int statusCode, String body) throws Exception {
@@ -55,52 +61,48 @@ public class SolrTopologyDetectionTest {
     }
 
     @Test
-    void modeSolrCloud_isSolrCloud() throws Exception {
-        assertTrue(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200, systemInfo("solrcloud"))));
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, systemInfo("solrcloud"))),
+    void collectionsArray_isSolrCloud() throws Exception {
+        assertTrue(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200, CLOUD_BODY)));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, CLOUD_BODY)),
             is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
     }
 
     @Test
-    void modeStd_isStandalone() throws Exception {
-        assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200, systemInfo("std"))));
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, systemInfo("std"))),
+    void emptyCollectionsArray_isStillSolrCloud() throws Exception {
+        // A cloud instance with no collections yet must not read as standalone.
+        var body = "{\"responseHeader\":{\"status\":0},\"collections\":[]}";
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body)),
+            is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
+    }
+
+    @Test
+    void notRunningInSolrCloudMode_isStandalone() throws Exception {
+        assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(400, STANDALONE_BODY)));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, STANDALONE_BODY)),
             is(SolrBackupStrategy.SolrTopology.STANDALONE));
     }
 
     @Test
-    void queriesTheSystemInfoEndpoint() throws Exception {
-        var httpClient = clientReturning(200, systemInfo("std"));
+    void usesTheCollectionsEndpoint() throws Exception {
+        // Detection must stay on the endpoint discovery already uses, so it needs no extra permission.
+        var httpClient = clientReturning(200, CLOUD_BODY);
         SolrBackupStrategy.detectTopology(URL, httpClient);
-        org.mockito.Mockito.verify(httpClient)
-            .getRaw(org.mockito.ArgumentMatchers.eq(URL + "/solr/admin/info/system?wt=json"), any(Duration.class));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"SolrCloud", "STD"})
-    void modeIsCaseInsensitive(String mode) throws Exception {
-        var expected = mode.equalsIgnoreCase("std")
-            ? SolrBackupStrategy.SolrTopology.STANDALONE
-            : SolrBackupStrategy.SolrTopology.SOLR_CLOUD;
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, systemInfo(mode))), is(expected));
+        org.mockito.Mockito.verify(httpClient).getRaw(
+            org.mockito.ArgumentMatchers.eq(URL + "/solr/admin/collections?action=LIST&wt=json"),
+            any(Duration.class));
     }
 
     @Test
-    void unrecognizedMode_isUnknown() throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, systemInfo("something-else"))),
-            is(SolrBackupStrategy.SolrTopology.UNKNOWN));
-    }
-
-    @Test
-    void missingModeProperty_isUnknown() throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, "{\"solr_home\":\"/var/solr\"}")),
+    void bareStatus400WithoutTheMarker_isUnknown() throws Exception {
+        // A 400 from something else (bad param, proxy) must not be read as standalone.
+        var body = "{\"responseHeader\":{\"status\":400},\"error\":{\"msg\":\"unknown parameter\",\"code\":400}}";
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, body)),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "   ", "not json at all", "{\"mode\":"})
+    @ValueSource(strings = {"", "   ", "not json at all", "{\"collections\":", "<html>proxy error</html>"})
     void unusableBody_isUnknown(String body) throws Exception {
-        // A 200 that isn't parseable JSON must not be read as either topology.
         assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body)),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
@@ -112,25 +114,18 @@ public class SolrTopologyDetectionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {301, 302, 400, 404, 500, 503})
+    @ValueSource(ints = {301, 302, 404, 500, 503})
     void reachableButUninformativeStatus_isUnknown(int status) throws Exception {
         assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status)),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {301, 302, 400, 404, 500, 503})
+    @ValueSource(ints = {301, 302, 404, 500, 503})
     void unknownTopology_throwsInsteadOfAssumingStandalone(int status) throws Exception {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
             () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(status)));
         assertThat(ex.getMessage(), containsString(URL));
-    }
-
-    @Test
-    void nonOkStatusIsNotParsedForMode() throws Exception {
-        // A body that says "solrcloud" alongside an error status must not be trusted.
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(500, systemInfo("solrcloud"))),
-            is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @Test
@@ -143,12 +138,10 @@ public class SolrTopologyDetectionTest {
 
     @Test
     void http403_namesTheRequiredPermission() throws Exception {
-        // The system info endpoint needs 'config-read', which the other Solr calls don't — say so.
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
             () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(403)));
         assertThat(ex.getMessage(), containsString("403"));
-        assertThat(ex.getMessage(), containsString("config-read"));
-        assertThat(ex.getMessage(), containsString("/solr/admin/info/system"));
+        assertThat(ex.getMessage(), containsString("collection-admin-read"));
     }
 
     @Test

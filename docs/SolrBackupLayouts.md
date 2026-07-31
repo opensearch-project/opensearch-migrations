@@ -42,21 +42,18 @@ A standalone backup does **not** record the core name, so the target index name 
 
 ## Solr permissions the migration needs
 
-When the migration connects to a live Solr (via `--source-username` / `--source-password`), it first
-asks Solr whether it is running in SolrCloud or standalone mode by reading
-`/solr/admin/info/system`. Under Solr's `RuleBasedAuthorizationPlugin` that endpoint is guarded by
-the **`config-read`** permission — which the migration's other calls (`/admin/collections`,
-`/admin/cores`, schema reads) do *not* require. A least-privilege role that covers only collection
-and core reads will authenticate successfully and still be refused here.
+When the migration connects to a live Solr (via `--source-username` / `--source-password`), it reads
+the Collections and Cores admin APIs to determine whether Solr is running in SolrCloud or standalone
+mode and to discover what to migrate. Under Solr's `RuleBasedAuthorizationPlugin` those need:
 
-Grant `config-read` to the user in `--source-username`, or give it a role with broader read access.
-Without it the migration stops before starting, reporting:
+| Permission | Used for |
+| --- | --- |
+| `collection-admin-read` | `/admin/collections?action=LIST` — topology detection and collection discovery |
+| `core-admin-read` | `/admin/cores?action=STATUS` — core discovery on standalone |
 
-```
-Solr authorization failed (HTTP 403) while detecting topology at <url>; cannot determine SolrCloud
-vs standalone. Reading /solr/admin/info/system requires the 'config-read' permission — grant it to
-the source user.
-```
+Topology detection deliberately reuses the same Collections API call as discovery, so it requires no
+permission beyond what the migration already needs. (`/admin/info/system` reports the mode more
+directly, but is guarded by `config-read`, which nothing else here requires — so it is not used.)
 
 This applies only to Solr instances with authorization rules configured; an open Solr, or a user
 with `all`, needs nothing extra.
