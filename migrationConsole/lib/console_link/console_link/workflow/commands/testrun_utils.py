@@ -19,8 +19,10 @@ K6_PLURAL = "testruns"
 
 # ConfigMaps rendered by the k6LoadTest chart.
 SCENARIOS_CONFIGMAP = "k6-scenarios"
-PRESETS_CONFIGMAP = "k6-presets"
-IMAGE_CONFIGMAP = "k6-image-config"
+# One ready-to-run TestRun (JSON) per scenario — the single source of the run spec (items mount,
+# image, K6_OUT, default envFrom preset). The console loads and patches these rather than building
+# a spec from scratch, so Helm stays the one definition.
+EXAMPLES_CONFIGMAP = "k6-testrun-examples"
 
 
 def create_testrun(namespace, body):

@@ -16,17 +16,17 @@ set -euo pipefail
 # ── Cluster targeting ──────────────────────────────────────────────────────────
 CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
 NAMESPACE="${NAMESPACE:-ma}"
-CONSOLE_POD="${CONSOLE_POD:-migration-console-0}"
 PROM_SVC="${PROM_SVC:-kube-prometheus-stack-prometheus:9090}"
 PROXY_URL="${PROXY_URL:-https://capture-proxy:9200}"
 KAFKA_TOPIC="${KAFKA_TOPIC:-logging-traffic-topic}"
+# Any in-cluster pod with curl + service DNS, used for proxy/Webdis/Prometheus probes. A data-plane
+# pod is used (not the console) so the whole validation path is console-independent.
+CURL_POD="${CURL_POD:-deploy/opensearch-source}"
+# Console-independent run submitter (reads the chart's example TestRuns, kubectl-creates one).
+K6_RUN="${K6_RUN:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/k6-run.sh}"
 
 K()  { kubectl --context "$CONTEXT" -n "$NAMESPACE" "$@"; }
-# Run the migration-console `workflow` CLI (drives k6 TestRuns). Requires a console image that
-# includes the TestRun-based `workflow k6` command (i.e. built from this branch onward).
-WF() { K exec "$CONSOLE_POD" -- workflow "$@"; }
-# curl from inside the console pod (in-cluster DNS + TLS to services).
-kcurl() { K exec "$CONSOLE_POD" -- curl "$@"; }
+kcurl() { K exec "$CURL_POD" -- curl "$@"; }
 
 # ── Colors and counters ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
@@ -36,19 +36,59 @@ fail()   { echo -e "  ${RED}✗ FAIL${NC}  $1"; (( FAIL++ )) || true; }
 info()   { echo -e "  ${YELLOW}ℹ${NC}      $1"; }
 header() { echo -e "\n${BOLD}$1${NC}"; }
 
-# ── k6 runs (via the console CLI) ──────────────────────────────────────────────
-run_k6() {
-  # Submit a k6 run and block until it finishes. Pass any `workflow k6 run` flags, e.g.
-  #   run_k6 --scenario ingest --config ingest-steady
-  #   run_k6 --scenario mixed --config mixed-steady --registry-enabled -o INGEST_RATE=80
-  WF k6 run --target "$PROXY_URL" --wait "$@"
+# ── k6 runs (console-independent, via k6-run.sh + kubectl) ─────────────────────
+# The scripts call these with console-style flags; we translate to k6-run.sh args. Supported:
+#   --scenario X  --config PRESET  --parallelism N  --registry-enabled  --extra-args STR  -o KEY=VAL
+submit_k6() {
+  # Submit a k6 run WITHOUT waiting; echo the generated run name.
+  local scenario="" preset="" parallelism="" extra=""; local -a extra_env=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scenario) scenario="$2"; shift ;;
+      --config) preset="$2"; shift ;;
+      --parallelism) parallelism="$2"; shift ;;
+      --registry-enabled) extra_env+=(-e REGISTRY_ENABLED=true) ;;
+      --extra-args) extra="$2"; shift ;;
+      -o) extra_env+=(-e "$2"); shift ;;
+      *) echo "submit_k6: unknown flag $1" >&2; return 2 ;;
+    esac
+    shift
+  done
+  local -a args=("$scenario" --target "$PROXY_URL")
+  [[ -n "$preset" ]] && args+=(--preset "$preset")
+  [[ -n "$parallelism" ]] && args+=(--parallelism "$parallelism")
+  [[ -n "$extra" ]] && args+=(--extra-args "$extra")
+  [[ ${#extra_env[@]} -gt 0 ]] && args+=("${extra_env[@]}")
+  CONTEXT="$CONTEXT" NAMESPACE="$NAMESPACE" bash "$K6_RUN" "${args[@]}"
 }
 
-submit_k6() {
-  # Submit a k6 run WITHOUT waiting; echo the generated run name (for background/chaos control).
-  local out
-  out=$(WF k6 run --target "$PROXY_URL" "$@" 2>&1) || { echo "$out" >&2; return 1; }
-  echo "$out" | sed -n 's/^Submitted k6 run: //p' | head -1
+run_k6() {
+  # Submit and block until the run finishes (fails the script if it errors/times out).
+  local name; name=$(submit_k6 "$@") || return 1
+  [[ -n "$name" ]] || { fail "k6 submit produced no run name"; return 1; }
+  wait_testrun "$name"
+}
+
+wait_testrun() {
+  local name="$1" timeout="${2:-600}" t=0 st
+  while (( t < timeout )); do
+    st=$(K get testrun "$name" -o jsonpath='{.status.stage}' 2>/dev/null || echo "")
+    case "$st" in
+      finished) return 0 ;;
+      error|stopped) fail "run $name ended in stage '$st'"; return 1 ;;
+    esac
+    sleep 6; t=$(( t + 6 ))
+  done
+  fail "run $name timed out after ${timeout}s"; return 1
+}
+
+k6_list()     { K get testrun -l app=k6-load-test 2>/dev/null; }
+k6_stop()     { K delete testrun "$1" >/dev/null 2>&1 || true; }
+k6_stop_all() { K delete testrun -l app=k6-load-test >/dev/null 2>&1 || true; }
+k6_active_count() {
+  # Count TestRuns not yet in a terminal stage (empty/created/started all count as active).
+  K get testrun -l app=k6-load-test -o jsonpath='{range .items[*]}{.status.stage}{"\n"}{end}' 2>/dev/null \
+    | grep -cvE 'finished|error|stopped' || true
 }
 
 # ── Webdis (chaos / consistency control bus) ───────────────────────────────────

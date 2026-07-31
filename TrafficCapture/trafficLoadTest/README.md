@@ -159,4 +159,7 @@ console-CLI-vs-kubectl submission, etc. — see **[k8s/README.md → Design deci
   — k6's built-in `http` module calls Webdis (`GET /LPUSH/key/val`), so no xk6/native Redis build.
 - **Scenario storage.** Scenarios ship as a ConfigMap (`k6-scenarios`) mounted into the runner via
   an `items` projection, not baked into a custom image — so editing a scenario is a `helm upgrade`,
-  not an image rebuild. See [`k8s/README.md`](k8s/README.md).
+  not an image rebuild. Each preset becomes a `k6-preset-<name>` ConfigMap consumed via `envFrom`
+  (defaults), with per-run `runner.env` overrides winning natively. Runs are `kubectl create`d from
+  chart-rendered example TestRuns (`k6-testrun-examples`); the console is optional. See
+  [`k8s/README.md`](k8s/README.md).

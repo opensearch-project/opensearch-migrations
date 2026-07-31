@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-cleanup() { [[ -n "$RUN_NAME" ]] && WF k6 stop "$RUN_NAME" >/dev/null 2>&1 || true; }
+cleanup() { [[ -n "$RUN_NAME" ]] && k6_stop "$RUN_NAME" || true; }
 trap cleanup EXIT
 
 echo -e "\n${BOLD}Chaos Control Validation — $(date '+%Y-%m-%d %H:%M:%S')${NC}"

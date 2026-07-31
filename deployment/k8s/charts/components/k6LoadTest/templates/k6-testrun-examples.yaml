@@ -1,0 +1,45 @@
+# One ready-to-run TestRun per scenario, rendered as JSON into this ConfigMap's data (NOT applied
+# by helm — these are examples, applied on demand). Each bakes in the scenario-tree `items` mount
+# (kept in sync with k6-scenarios by Helm), the runner image, K6_OUT metrics, and a default preset
+# via envFrom. To run one:
+#   kubectl get cm k6-testrun-examples -o "jsonpath={.data.ingest}" | kubectl create -f -
+# Override defaults by swapping the envFrom preset name or adding runner.env entries (env wins).
+{{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
+{{- $pull := .Values.image.pullPolicy }}
+{{- $otel := list
+      (dict "name" "K6_OUT" "value" "opentelemetry")
+      (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
+      (dict "name" "K6_OTEL_GRPC_EXPORTER_INSECURE" "value" "true") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-testrun-examples
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+data:
+{{- range $scenario := (list "ingest" "search" "mixed") }}
+  {{- $items := list }}
+  {{- range $path, $bytes := $.Files.Glob "files/k6/scenarios/**" }}
+    {{- $items = append $items (dict "key" (replace "/" "__" (trimPrefix "files/k6/" $path)) "path" (trimPrefix "files/k6/" $path)) }}
+  {{- end }}
+  {{- range $path, $bytes := $.Files.Glob "files/k6/lib/**" }}
+    {{- $items = append $items (dict "key" (replace "/" "__" (trimPrefix "files/k6/" $path)) "path" (trimPrefix "files/k6/" $path)) }}
+  {{- end }}
+  {{- range $path, $bytes := $.Files.Glob "files/k6/data/**" }}
+    {{- $items = append $items (dict "key" (replace "/" "__" (trimPrefix "files/k6/" $path)) "path" (trimPrefix "files/k6/" $path)) }}
+  {{- end }}
+  {{- $volume := dict "name" "scenarios" "configMap" (dict "name" "k6-scenarios" "items" $items) }}
+  {{- $mount := dict "name" "scenarios" "mountPath" "/scripts" }}
+  {{- $initializer := dict "image" $image "imagePullPolicy" $pull "volumeMounts" (list $mount) "volumes" (list $volume) }}
+  {{- $runner := dict "image" $image "imagePullPolicy" $pull "volumeMounts" (list $mount) "volumes" (list $volume)
+        "envFrom" (list (dict "configMapRef" (dict "name" (printf "k6-preset-%s-steady" $scenario))))
+        "env" $otel }}
+  {{- $testrun := dict
+        "apiVersion" "k6.io/v1alpha1" "kind" "TestRun"
+        "metadata" (dict "generateName" "k6-run-" "labels" (dict "app" "k6-load-test" "k6-scenario" $scenario))
+        "spec" (dict "parallelism" 1 "script" (dict "localFile" (printf "/scripts/scenarios/%s.js" $scenario))
+                     "initializer" $initializer "runner" $runner) }}
+  {{ $scenario }}: |-
+{{ $testrun | toJson | indent 4 }}
+{{- end }}

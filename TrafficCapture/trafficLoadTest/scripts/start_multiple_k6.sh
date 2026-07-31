@@ -27,7 +27,7 @@ FLEET=(
   search:search-deep-paging
 )
 
-cleanup() { trap - EXIT INT; echo "Stopping all k6 runs..."; WF k6 stop --all >/dev/null 2>&1 || true; }
+cleanup() { trap - EXIT INT; echo "Stopping all k6 runs..."; k6_stop_all; }
 
 echo "Submitting ${#FLEET[@]} concurrent k6 runs..."
 for spec in "${FLEET[@]}"; do
@@ -37,18 +37,17 @@ for spec in "${FLEET[@]}"; do
 done
 
 echo ""
-WF k6 list || true
+k6_list || true
 
 if $WAIT; then
   trap cleanup EXIT INT
   echo ""
-  echo "All runs submitted. Ctrl+C to stop all (or: workflow k6 stop --all)."
+  echo "All runs submitted. Ctrl+C to stop all (or: kubectl delete testrun -l app=k6-load-test)."
   # Wait until no active runs remain.
   while true; do
     sleep 15
-    active=$(WF k6 list 2>/dev/null | grep -cE "started|created|initiali" || true)
-    [[ "${active:-0}" -eq 0 ]] && { echo "All runs finished."; trap - EXIT INT; break; }
+    [[ "$(k6_active_count)" -eq 0 ]] && { echo "All runs finished."; trap - EXIT INT; break; }
   done
 else
-  echo "Submitted (--no-wait). Manage with: workflow k6 list · workflow k6 stop --all"
+  echo "Submitted (--no-wait). Manage with: kubectl get/delete testrun -l app=k6-load-test"
 fi

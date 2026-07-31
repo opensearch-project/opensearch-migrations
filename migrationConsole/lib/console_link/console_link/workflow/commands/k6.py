@@ -13,6 +13,7 @@ load test. See TrafficCapture/trafficLoadTest/k8s/README.md for the deployment s
 """
 
 import calendar
+import json
 import logging
 import os
 import subprocess
@@ -22,11 +23,7 @@ import click
 
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from .testrun_utils import (
-    K6_GROUP,
-    K6_VERSION,
-    SCENARIOS_CONFIGMAP,
-    PRESETS_CONFIGMAP,
-    IMAGE_CONFIGMAP,
+    EXAMPLES_CONFIGMAP,
     create_testrun,
     list_testruns,
     get_testrun,
@@ -38,10 +35,9 @@ from .testrun_utils import (
 logger = logging.getLogger(__name__)
 
 K6_APP_LABEL = "k6-load-test"
-K6_GENERATE_NAME = "k6-run-"
 
 SCENARIOS = ["ingest", "search", "mixed"]
-# Presets shipped as ConfigMap keys (k6-config/*.env). Used for completion/help; any name works.
+# Presets shipped as k6-preset-<name> ConfigMaps (from k6-config/*.env). Completion/help only.
 CONFIG_PRESETS = [
     "ingest-steady", "ingest-ramp", "ingest-burst",
     "search-steady", "search-deep-paging", "search-ramp", "search-burst",
@@ -50,9 +46,6 @@ CONFIG_PRESETS = [
 
 # Stages of a TestRun that mean it is no longer active.
 DONE_STAGES = {"finished", "error", "stopped"}
-
-# Default OTLP endpoint k6 pushes metrics to (the migration's otel-collector).
-DEFAULT_OTEL_ENDPOINT = "otel-collector:4317"
 
 
 # ---------------------------------------------------------------------------
@@ -128,56 +121,38 @@ def _k6_testruns(namespace, scenario=None):
 # ---------------------------------------------------------------------------
 # Run assembly.
 # ---------------------------------------------------------------------------
-def _parse_preset(text):
-    """Parse a sourceable k6-config/*.env preset into a {KEY: VALUE} dict."""
+def load_example(namespace, scenario):
+    """Load the chart-rendered example TestRun (JSON) for a scenario. Helm is the single source of
+    the run spec (items mount, image, K6_OUT, default preset); the console only patches it."""
+    data = read_configmap(namespace, EXAMPLES_CONFIGMAP)
+    if scenario not in data:
+        raise ValueError(f"no example for scenario '{scenario}' in ConfigMap {EXAMPLES_CONFIGMAP}; "
+                         "is the k6LoadTest chart installed?")
+    return json.loads(data[scenario])
+
+
+def _override_env(params):
+    """Per-run env overrides (these win over the preset's envFrom). Named flags fan out to the vars
+    the scenarios read; the -o bag is applied as-is."""
     env = {}
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):]
-        if "=" not in line:
-            continue
-        key, val = line.split("=", 1)
-        env[key.strip()] = val.strip().strip('"').strip("'")
-    return env
-
-
-def resolve_env(namespace, scenario, config_name, target_url=None, rate=None, duration=None,
-                vus=None, registry_enabled=None, control_enabled=None, webdis_url=None,
-                overrides_text=None):
-    """Merge the selected preset with per-run overrides into the runner env (precedence order).
-
-    preset (defaults) < named convenience (rate/duration/vus) < dedicated (target/webdis/flags) <
-    generic KEY=VALUE bag. The operator owns the runner command, so env is resolved here rather
-    than by an in-container shell wrapper.
-    """
-    preset_key = f"{config_name}.env"
-    presets = read_configmap(namespace, PRESETS_CONFIGMAP)
-    if preset_key not in presets:
-        raise ValueError(f"unknown config preset '{config_name}' "
-                         f"(no {preset_key} in ConfigMap {PRESETS_CONFIGMAP})")
-    env = _parse_preset(presets[preset_key])
-
-    if duration:
-        env["DURATION"] = duration
-    if rate:
-        env["INGEST_RATE"] = rate
-        env["SEARCH_RATE"] = rate
-    if vus:
-        env["INGEST_VUS"] = vus
-        env["SEARCH_VUS"] = vus
-    if target_url:
-        env["CAPTURE_PROXY_URL"] = target_url
-    if webdis_url:
-        env["WEBDIS_URL"] = webdis_url
-    if registry_enabled is not None:
-        env["REGISTRY_ENABLED"] = str(registry_enabled).lower()
-    if control_enabled is not None:
-        env["CONTROL_ENABLED"] = str(control_enabled).lower()
-    if overrides_text:
-        for line in overrides_text.splitlines():
+    if params.get("duration"):
+        env["DURATION"] = params["duration"]
+    if params.get("rate"):
+        env["INGEST_RATE"] = params["rate"]
+        env["SEARCH_RATE"] = params["rate"]
+    if params.get("vus"):
+        env["INGEST_VUS"] = params["vus"]
+        env["SEARCH_VUS"] = params["vus"]
+    if params.get("targetUrl"):
+        env["CAPTURE_PROXY_URL"] = params["targetUrl"]
+    if params.get("webdisUrl"):
+        env["WEBDIS_URL"] = params["webdisUrl"]
+    if params.get("registryEnabled") is not None:
+        env["REGISTRY_ENABLED"] = str(params["registryEnabled"]).lower()
+    if params.get("controlEnabled") is not None:
+        env["CONTROL_ENABLED"] = str(params["controlEnabled"]).lower()
+    if params.get("overrides"):
+        for line in params["overrides"].splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -185,29 +160,7 @@ def resolve_env(namespace, scenario, config_name, target_url=None, rate=None, du
                 raise ValueError(f"override must be KEY=VALUE, got '{line}'")
             key, val = line.split("=", 1)
             env[key.strip()] = val.strip()
-    return env
-
-
-def _scenario_volume(namespace):
-    """Return (volume, volumeMount) that reconstruct the scenario tree at /scripts.
-
-    ConfigMap keys are the file paths with "/" -> "__"; we project each back to its real path so
-    imports ("../lib/...") and open("../data/...") resolve.
-    """
-    data = read_configmap(namespace, SCENARIOS_CONFIGMAP)
-    if not data:
-        raise ValueError(f"ConfigMap {SCENARIOS_CONFIGMAP} is missing or empty; "
-                         "is the k6LoadTest chart installed?")
-    items = [{"key": key, "path": key.replace("__", "/")} for key in sorted(data)]
-    volume = {"name": "scenarios", "configMap": {"name": SCENARIOS_CONFIGMAP, "items": items}}
-    mount = {"name": "scenarios", "mountPath": "/scripts"}
-    return volume, mount
-
-
-def _runner_image(namespace):
-    data = read_configmap(namespace, IMAGE_CONFIGMAP)
-    return (data.get("k6Image", "grafana/k6:latest"),
-            data.get("k6PullPolicy", "IfNotPresent"))
+    return [{"name": k, "value": str(v)} for k, v in env.items()]
 
 
 def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=None, rate=None,
@@ -238,63 +191,29 @@ def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=No
     }
 
 
-def build_testrun_spec(namespace, params, image, pull_policy):
-    """Assemble a TestRun body from normalized params. Standalone: its own generateName + labels,
-    no ownerReferences, so a k6 run cannot affect a migration."""
-    scenario = params["scenario"]
-    env = resolve_env(
-        namespace, scenario, params["configName"],
-        target_url=params.get("targetUrl"), rate=params.get("rate"),
-        duration=params.get("duration"), vus=params.get("vus"),
-        registry_enabled=params.get("registryEnabled"),
-        control_enabled=params.get("controlEnabled"),
-        webdis_url=params.get("webdisUrl"), overrides_text=params.get("overrides"),
-    )
-    volume, mount = _scenario_volume(namespace)
+def build_testrun_spec(namespace, params):
+    """Load the scenario's example TestRun and patch it: swap the envFrom preset, append env
+    overrides (which win over envFrom), set parallelism, and pass any extra `k6 run` args. The
+    example already carries the items mount, image, K6_OUT, labels, and generateName."""
+    testrun = load_example(namespace, params["scenario"])
+    runner = testrun["spec"]["runner"]
 
-    env_list = [{"name": k, "value": str(v)} for k, v in sorted(env.items())]
-    otel_endpoint = os.environ.get("K6_OTEL_ENDPOINT", DEFAULT_OTEL_ENDPOINT)
-    # Metrics output is set via K6_OUT (runner env), NOT `--out` in spec.arguments: the operator
-    # passes spec.arguments to the initializer's `k6 archive` too, which rejects run-only flags
-    # like `--out`. Env-based output is ignored by archive and honored by `k6 run`.
-    env_list += [
-        {"name": "K6_OUT", "value": "opentelemetry"},
-        {"name": "K6_OTEL_GRPC_EXPORTER_ENDPOINT", "value": otel_endpoint},
-        {"name": "K6_OTEL_GRPC_EXPORTER_INSECURE", "value": "true"},
-    ]
+    preset_ref = {"configMapRef": {"name": f"k6-preset-{params['configName']}"}}
+    if runner.get("envFrom"):
+        runner["envFrom"][0] = preset_ref
+    else:
+        runner["envFrom"] = [preset_ref]
+    runner.setdefault("env", []).extend(_override_env(params))
 
-    pod = {"image": image, "imagePullPolicy": pull_policy,
-           "volumeMounts": [mount], "volumes": [volume]}
-    initializer = dict(pod)          # initializer must also see the script to archive/inspect it
-    runner = dict(pod, env=env_list)
-
-    spec = {
-        "parallelism": int(params.get("parallelism", 1)),
-        "script": {"localFile": f"/scripts/scenarios/{scenario}.js"},
-        "initializer": initializer,
-        "runner": runner,
-    }
-    # extra_args go to `k6 run` via spec.arguments. Note the operator also feeds these to the
-    # initializer's `k6 archive`, so only archive-compatible flags are safe here.
+    testrun["spec"]["parallelism"] = int(params.get("parallelism", 1))
     if params.get("extraArgs"):
-        spec["arguments"] = params["extraArgs"]
-
-    return {
-        "apiVersion": f"{K6_GROUP}/{K6_VERSION}",
-        "kind": "TestRun",
-        "metadata": {
-            "generateName": K6_GENERATE_NAME,
-            "labels": {"app": K6_APP_LABEL, "k6-scenario": scenario},
-        },
-        "spec": spec,
-    }
+        testrun["spec"]["arguments"] = params["extraArgs"]
+    return testrun
 
 
 def submit_k6_run(namespace, params):
     """Build + create a TestRun from normalized params. Returns the generated name."""
-    image, pull_policy = _runner_image(namespace)
-    body = build_testrun_spec(namespace, params, image, pull_policy)
-    return create_testrun(namespace, body)
+    return create_testrun(namespace, build_testrun_spec(namespace, params))
 
 
 def list_active_k6_runs(namespace):

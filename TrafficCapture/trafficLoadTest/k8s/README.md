@@ -22,48 +22,49 @@ INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
   deployment/k8s/charts/components/k6LoadTest [1]
     ├── Chart dependency: grafana/k6-operator [2]  ──►  TestRun CRD + controller
-    ├── ConfigMap/k6-scenarios [3]   (scenarios/ + lib/ + data/, "/"→"__" keys)
-    ├── ConfigMap/k6-presets   [3]   (k6-config/*.env)
-    ├── ConfigMap/k6-image-config    (runner image ref → stock grafana/k6)
-    └── Role/RoleBinding [4]         (grants the console SA rights on testruns.k6.io)
+    ├── ConfigMap/k6-scenarios [3]         (scenarios/ + lib/ + data/, "/"→"__" keys)
+    ├── ConfigMap/k6-preset-<name> [4]     (one per k6-config/*.env, one key per var → envFrom)
+    ├── ConfigMap/k6-testrun-examples [5]  (one ready-to-run TestRun JSON per scenario)
+    └── Role/RoleBinding [6]               (grants the console SA rights on testruns.k6.io)
 
-USAGE  (from the migration console)
+USAGE  (console optional — the example is the definition)
 ──────────────────────────────────────────────────────────────
-  workflow k6 run … [5]           press  k  in  workflow manage [6]
-   (CLI, --parallelism N)          (TUI panel: launch · list · stop)
-        └───────────────┬───────────────┘
-                        ▼  build_testrun_spec + create_testrun [7]
+  kubectl create (from example) │ ./k6-run.sh [7] │ workflow k6 run [8] │ TUI: k [9]
+        └──────────────────┬───────────────┴──────────────────┘
+                           ▼  load k6-testrun-examples.<scenario>, patch env/preset/parallelism
    TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
      spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
-     runner.env ◄─ preset (k6-presets) + overrides ;  runner.image ◄─ k6-image-config
+     runner.envFrom ◄─ k6-preset-<config>   ;   runner.env ◄─ overrides (win) + K6_OUT
      runner/initializer volumes ◄─ k6-scenarios (items projection → /scripts)
-                        ▼  (operator: initializer → N runner pods)
+                           ▼  (operator: initializer → N runner pods)
                k6 runner pods  (stock grafana/k6)
         ┌───────────────┴────────────────┐
    HTTPS│                                │ OTLP :4317  (K6_OUT=opentelemetry)
         ▼                                ▼
-  Capture Proxy                    otel-collector ─► Prometheus ─► Grafana [8]
+  Capture Proxy                    otel-collector ─► Prometheus ─► Grafana [10]
         │                                             (k6-load-test dashboard)
         ▼
   Kafka ─► replayer ─► target      (migration capture-and-replay pipeline)
 
-  observe / manage:   workflow k6 list · logs · stop [5]
+  observe / manage:   kubectl get/delete testrun -l app=k6-load-test   (or workflow k6 list/stop)
 ```
 
 | # | Piece | Source |
 |---|---|---|
 | 1 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
 | 2 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
-| 3 | Scenario / preset ConfigMaps | `templates/k6-scenarios-configmap.yaml`, `templates/k6-presets-configmap.yaml` (from `files/k6/`) |
-| 4 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
-| 5 | `workflow k6 run/list/logs/stop` | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
-| 6 | TUI k6 panel (`k`) | `.../workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
-| 7 | TestRun CRUD | `.../workflow/commands/testrun_utils.py` |
-| 8 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
+| 3 | Scenario code ConfigMap | `templates/k6-scenarios-configmap.yaml` (from `files/k6/`) |
+| 4 | Per-preset `envFrom` ConfigMaps | `templates/k6-presets-configmap.yaml` (parses `files/k6/k6-config/*.env`) |
+| 5 | Example TestRuns (the run definition) | `templates/k6-testrun-examples.yaml` |
+| 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
+| 7 | `k6-run.sh` (console-independent submit) | `TrafficCapture/trafficLoadTest/scripts/k6-run.sh` |
+| 8 | `workflow k6` CLI (optional) | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
+| 9 | TUI k6 panel (`k`) | `.../workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
+| 10 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
 
-A run is specified by a `scenario` (script) and a `config` (a `k6-config/*.env` preset). Every
-preset value is overridable per run; load is spread across `--parallelism` runner pods by k6
-execution segments.
+A run is specified by a `scenario` (script) and a `config` (a `k6-config/*.env` preset, applied via
+`envFrom`). Every value is overridable per run (`runner.env` wins over `envFrom`); load is spread
+across `--parallelism` runner pods by k6 execution segments.
 
 ---
 
@@ -92,7 +93,8 @@ Verify:
 ```bash
 kubectl get crd testruns.k6.io
 kubectl -n ma get pods -l app.kubernetes.io/name=k6-operator
-kubectl -n ma get cm k6-scenarios k6-presets k6-image-config
+kubectl -n ma get cm k6-scenarios k6-testrun-examples     # scenario code + ready-to-run examples
+kubectl -n ma get cm -l app=k6-load-test | grep k6-preset  # one envFrom ConfigMap per preset
 ```
 
 On EKS the operator + runner images are mirrored to ECR via
@@ -112,51 +114,69 @@ PROXY=https://capture-proxy:9201
 
 ---
 
-## From the migration console (`workflow k6`)
+## Running a load test
 
-Run inside the migration-console pod (or anywhere with cluster context). The command group is
-**hidden/inert unless the TestRun CRD is present** — i.e. unless the chart above is installed.
+Three ways, all producing the same TestRun. **None requires the migration console** — it's
+optional convenience. The chart renders a ready-to-run TestRun per scenario into the
+`k6-testrun-examples` ConfigMap, with the scenario mount, runner image, `K6_OUT` metrics, and a
+default preset (via `envFrom`) all baked in. Override defaults by swapping the `envFrom` preset or
+adding `runner.env` entries — **`env` wins over `envFrom`** natively.
+
+### 1. kubectl (no console, no extra tooling)
 
 ```bash
-# Submit (every preset value is overridable; --override is repeatable)
-workflow k6 run --scenario ingest --config ingest-steady --target "$PROXY"
-workflow k6 run --scenario ingest --parallelism 4 --target "$PROXY"           # 4 runner pods
-workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
-workflow k6 run --scenario mixed --registry-enabled -o INGEST_RATE=80 -o SEARCH_RATE=40 --target "$PROXY"
-workflow k6 run --scenario ingest --config ingest-burst --extra-args --no-thresholds --target "$PROXY"
-workflow k6 run --scenario ingest --target "$PROXY" --wait        # block until it finishes
+# Defaults straight from the example:
+kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" | kubectl create -f -
 
-# Observe
-workflow k6 list                       # NAME / SCENARIO / STAGE / PARALLEL / AGE
-workflow k6 list --scenario mixed
-workflow k6 logs <run-name> -f         # follow the runner pods' k6 containers
-
-# Stop (deletes the TestRun; the operator tears down its pods)
-workflow k6 stop <run-name>
-workflow k6 stop --scenario mixed
-workflow k6 stop --all
+# With overrides (jq): different preset, parallelism, and an env override:
+kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
+  | jq '.spec.parallelism=4
+        | .spec.runner.envFrom[0].configMapRef.name="k6-preset-ingest-burst"
+        | .spec.runner.env += [{"name":"INGEST_RATE","value":"120"}]' \
+  | kubectl -n ma create -f -
 ```
+Use `kubectl create` (not `apply` — the examples use `generateName`).
 
-> **`--parallelism` splits the load.** `--rate` / `--vus` are **global totals** that k6 divides
-> across the runner pods via execution segments — `--rate 100 --parallelism 4` ≈ 25 req/s per pod.
+### 2. `k6-run.sh` (thin helper, still no console)
 
-Options: `--scenario`, `--config`, `--parallelism`, `--target`, `--rate`, `--duration`, `--vus`,
-`--registry-enabled/--no-…`, `--control-enabled/--no-…`, `--override/-o KEY=VALUE` (repeatable),
-`--extra-args`. Omitted options keep the preset's value.
+```bash
+./scripts/k6-run.sh ingest --preset ingest-burst --parallelism 4 -e INGEST_RATE=120
+```
+Fetches the example, applies `--preset` / `--parallelism` / `--target` / `-e KEY=VAL`, creates it,
+prints the run name. `CONTEXT` / `NAMESPACE` env-overridable.
 
-**From the TUI:** in `workflow manage`, press **`k`** to open the k6 panel — it **launches** a new
-run (scenario, config, target, rate/duration/vus/parallelism, registry/control toggles, overrides
-box) and **lists running** runs with per-run **Stop** (plus **Stop all**). k6 runs are standalone
-TestRuns, so launching or stopping one never affects the migration workflow you're managing.
+### 3. `workflow k6` (console convenience, when it's up)
 
-### Raw kubectl (no console)
+Nicer flags + `list`/`stop`/`logs` + the TUI. **Hidden/inert unless the TestRun CRD is present.**
+```bash
+workflow k6 run --scenario ingest --config ingest-burst --parallelism 4 -o INGEST_RATE=120
+workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m --wait
+workflow k6 list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
+workflow k6 logs <run-name> -f
+workflow k6 stop <run-name>   |  --scenario mixed  |  --all
+```
+`--config` swaps the `envFrom` preset; `--rate`/`--vus` fan out to the ingest+search vars; `-o
+KEY=VAL` and `--target` add `runner.env` overrides. TUI: `workflow manage` → **`k`** (launch + list
++ stop). k6 runs are standalone TestRuns, so one never affects a migration workflow.
 
-`workflow k6 run` builds a TestRun; you can also hand-apply one. The scenario tree is mounted from
-the `k6-scenarios` ConfigMap via an `items` projection (keys are file paths with `/`→`__`) at
-`/scripts` on **both** the `runner` and the `initializer`, with `script.localFile:
-/scripts/scenarios/<scenario>.js`. Metrics output goes through `K6_OUT=opentelemetry` (runner env)
-— **not** `--out`, which the operator would also feed to the initializer's `k6 archive` and be
-rejected as an unknown flag.
+> **`--parallelism` splits the load.** `--rate`/`--vus` are **global totals** k6 divides across the
+> runner pods via execution segments — `--rate 100 --parallelism 4` ≈ 25 req/s per pod.
+
+### Variants (only the preset / env vars change)
+
+| Variant | How |
+|---|---|
+| steady / ramp / burst | preset `<scenario>-{steady,ramp,burst}` |
+| document type | `-e SCENARIO=logs_data` (default `nyc_taxis`) |
+| search deep paging | preset `search-deep-paging` (or `-e DEEP_PAGING_ENABLED=true -e PAGING_MODE=search_after`) |
+| stateful sequences | `-e SEQUENCE_FRACTION=0.15 -e CONNECTION_MODE=pinned` |
+| mixed consistency | `mixed` scenario + `REGISTRY_ENABLED=true` — **needs the chart installed with `registry.enabled=true`** (Redis+Webdis) |
+| chaos control | `-e CONTROL_ENABLED=true`, then drive via Webdis — also needs `registry.enabled=true` |
+| ignore thresholds | `--extra-args --no-thresholds` |
+
+The `k6-config/*.env` files are the source of truth: Helm renders each into a `k6-preset-<name>`
+ConfigMap, consumed via `envFrom`. (Metrics use `K6_OUT=opentelemetry`, not `--out` — see Design
+decisions.)
 
 ---
 
@@ -237,28 +257,30 @@ Why the current setup looks the way it does (decision → rationale → alternat
 3. **Scenarios as a ConfigMap tree — not a baked custom image.** k6 runs on the **stock**
    `grafana/k6` image; the scenarios ship as the `k6-scenarios` ConfigMap. Editing a scenario is a
    `helm upgrade`, not an image rebuild. *Mechanism:* ConfigMap keys can't contain `/`, so each
-   file's path is stored with `/`→`__` and the console rebuilds an `items[]` volume projection at
-   `/scripts` on **both** the runner and the initializer (so imports and `open()` resolve). Total
-   size (~130 KB) is well under the 1 MiB ConfigMap limit. *Rejected:* a PVC (needs ReadWriteMany
-   for multi-node parallelism, unavailable on minikube's default storage) and a `k6 archive`
-   tarball (reintroduces a build step and yields a non-editable binary blob).
+   file's path is stored with `/`→`__` and **Helm** renders the `items[]` volume projection into the
+   example TestRun (below) at `/scripts` on **both** the runner and the initializer (so imports and
+   `open()` resolve). Total size (~130 KB) is well under the 1 MiB ConfigMap limit. *Rejected:* a
+   PVC (needs ReadWriteMany for multi-node parallelism, unavailable on minikube's default storage)
+   and a `k6 archive` tarball (reintroduces a build step and yields a non-editable binary blob).
 
-4. **Console-side env resolution; metrics via `K6_OUT`, not `--out`.** The operator owns the runner
-   command, so the console resolves preset (`k6-presets` ConfigMap) + overrides into `runner.env`
-   rather than an in-container shell wrapper. Metrics output is set with the `K6_OUT` env var
-   because the operator also feeds `spec.arguments` to the initializer's `k6 archive`, which
-   rejects the run-only `--out` flag as unknown.
+4. **Presets are `envFrom` ConfigMaps; overrides are `env`; metrics via `K6_OUT`, not `--out`.**
+   Each `k6-config/*.env` is rendered into a `k6-preset-<name>` ConfigMap (one key per var) and
+   pulled in via `runner.envFrom`. Per-run overrides go in `runner.env`, and **Kubernetes makes
+   `env` win over `envFrom`** — so "defaults + overrides" is native, with no preset-parsing in any
+   tool. Metrics output is set with the `K6_OUT` env var because the operator also feeds
+   `spec.arguments` to the initializer's `k6 archive`, which rejects the run-only `--out` flag.
 
-5. **The `workflow k6` CLI is the single submission path — scripts included, not raw kubectl.**
-   The CLI *is* the TestRun spec-builder (preset/override precedence, the `items` projection, the
-   runner image, the `K6_OUT` handling, and the isolation labels), and the interactive CLI, the
-   TUI panel, and the validation scripts all share it — one tested path, one place to fix bugs.
-   *Cost:* runs are submitted by `kubectl exec`-ing the console pod, so they need a console image
-   built from this branch. *Rejected:* raw `kubectl apply`, which would either duplicate the
-   spec-builder in bash or require static per-scenario manifests that lose the preset/override
-   ergonomics and drift from the scenario files. *Escape hatch:* a future `workflow k6 run
-   --dry-run` that emits the built TestRun YAML would let scripts `kubectl apply` it without the
-   console-pod coupling.
+5. **Helm-rendered example TestRuns are the single definition; runs are kubectl-native; the console
+   is optional.** The chart renders one ready-to-run TestRun per scenario into
+   `k6-testrun-examples` (items mount, image, `K6_OUT`, default `envFrom` preset, labels,
+   `generateName`). A run is `kubectl create` from that example (optionally patched), so it works
+   with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it, and
+   `workflow k6` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`, TUI),
+   guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no spec-builder to
+   keep in sync. *Rejected:* the console CLI as the *only* submission path (couples every run to a
+   current console image) and hand-written per-scenario manifests (the `items[]` list would drift
+   from the scenario files — Helm regenerates it). *Note:* `kubectl create` (not `apply`), because
+   the examples use `generateName`.
 
 6. **`--parallelism` splits global load.** `--rate` / `--vus` are totals divided across runner pods
    by k6 execution segments — surfaced explicitly so results aren't misread as per-pod.
