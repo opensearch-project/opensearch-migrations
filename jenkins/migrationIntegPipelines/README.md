@@ -103,6 +103,8 @@ functionName(jobName: jobNameOverride ?: null)
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 
+The time-series and vector AOSS cover files are retained as manual compatibility entry points. Their periodic schedules are disabled; the search cover file runs the combined three-collection suite.
+
 ### GitHub Actions Integration
 
 The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merge triggers using a single file. It uses `github.event_name == 'push'` to select `main-*` prefixed job names for pushes to `main`, and `pr-*` prefixed job names for pull requests. Periodic cadences are separate and defined in code (see [Periodic Cron Schedules](#periodic-cron-schedules)).
@@ -116,7 +118,7 @@ Jobs triggered:
 - `k8s-local-solr-other-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main)
-- `eks-aoss-*` (PR with `run-eks-tests` label, and main)
+- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 
