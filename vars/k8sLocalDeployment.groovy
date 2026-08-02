@@ -76,18 +76,22 @@ def call(Map config = [:]) {
                     //
                     // The kind nodes run as Docker containers. The local registry is configured
                     // as an insecure HTTP registry in the kind node containerd configuration.
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 15, unit: 'MINUTES') {
                         // Tear down the registry before deleting the kind cluster.
                         // This is only necessary if the registry container is attached to
                         // the kind network and would otherwise prevent network cleanup.
                         sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
 
-                        // Always recreate the kind cluster.
-                        sh '"${WORKSPACE}/.ci-bin/kind" delete cluster --name ma || true'
+                        // Keep the single-node topology previously provided by Minikube. The
+                        // current cgroup v1 agents cannot reliably run multi-node kind clusters.
+                        // Recreate the ephemeral cluster once for transient startup failures.
+                        retry(2) {
+                            sh '"${WORKSPACE}/.ci-bin/kind" delete cluster --name ma || true'
 
-                        // Kubernetes 1.35 drops cgroup v1 support, but the Jenkins agent fleet
-                        // currently contains both cgroup v1 and v2 hosts.
-                        sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfig.yaml --image kindest/node:v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48'
+                            // Kubernetes 1.35 drops cgroup v1 support, but the Jenkins agent fleet
+                            // currently contains both cgroup v1 and v2 hosts.
+                            sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfigSingleNode.yaml --image kindest/node:v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48'
+                        }
                     }
                 }
             }
