@@ -77,6 +77,10 @@ def call(Map config = [:]) {
                     // The kind nodes run as Docker containers. The local registry is configured
                     // as an insecure HTTP registry in the kind node containerd configuration.
                     timeout(time: 15, unit: 'MINUTES') {
+                        // Pods in kind share the host's non-namespaced inotify limits. Ensure
+                        // Fluent Bit can create its tail watcher after the control plane starts.
+                        sh './jenkins/configureKindHost.sh'
+
                         // Tear down the registry before deleting the kind cluster.
                         // This is only necessary if the registry container is attached to
                         // the kind network and would otherwise prevent network cleanup.
