@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly KIND_VERSION="${KIND_VERSION:-v0.32.0}"
+readonly KIND_VERSION="${KIND_VERSION:-v0.31.0}"
 readonly KIND_INSTALL_DIR="${KIND_INSTALL_DIR:-${HOME}/.local/bin}"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -13,11 +13,11 @@ fi
 case "$(uname -m)" in
     x86_64 | amd64)
         readonly kind_arch="amd64"
-        readonly kind_sha256="50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54"
+        readonly kind_sha256="eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa"
         ;;
     aarch64 | arm64)
         readonly kind_arch="arm64"
-        readonly kind_sha256="b92cd615e97585de8ddade28ed5cd7feb4248d717c233eea5b03c37298900f5d"
+        readonly kind_sha256="8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4"
         ;;
     *)
         echo "Unsupported architecture: $(uname -m)" >&2
