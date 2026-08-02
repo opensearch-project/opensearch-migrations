@@ -107,8 +107,8 @@ def call(Map config = [:]) {
                                 docker network connect kind docker-registry 2>/dev/null || true
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
-                            // Keep builder-kind alive across runs so the buildkit cache persists.
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            // Keep builder-kind-ma alive across runs so the buildkit cache persists.
                         }
                     }
                 }
