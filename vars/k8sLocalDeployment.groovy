@@ -96,15 +96,18 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            // Bring up the docker-hosted registry/buildkit, then connect the registry
-                            // container to the kind Docker network so kind nodes can resolve
-                            // docker-registry directly and pull images from docker-registry:5001.
+                            // Bring up the docker-hosted registry/buildkit, then configure each
+                            // kind node to reach the registry through the host's published port.
                             sh '''
                                 set -eu
                                 . ./buildImages/backends/dockerHostedBuildkit.sh
-                            
+
                                 KUBE_CONTEXT=kind-ma setup_build_backend
-                                docker network connect kind docker-registry 2>/dev/null || true
+                                kind_nodes=()
+                                while IFS= read -r node; do
+                                    [ -n "$node" ] && kind_nodes+=("$node")
+                                done < <("${WORKSPACE}/.ci-bin/kind" get nodes --name ma)
+                                connect_cluster_to_registry_network kind "${kind_nodes[@]}"
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
                             sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
