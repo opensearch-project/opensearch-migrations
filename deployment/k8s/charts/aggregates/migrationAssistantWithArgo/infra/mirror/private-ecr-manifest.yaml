@@ -1,6 +1,7 @@
 # Version-locked list of container images and Helm charts required by the
 # Migration Assistant EKS deployment. This file is packaged with the Helm chart
 # and consumed by aws-bootstrap.sh when mirroring public artifacts into ECR.
+# The gradleTestImages section is CI-only and is ignored by ECR mirroring.
 
 charts:
   # Format: "name|version|repository"
@@ -108,3 +109,27 @@ images:
   - "mirror.gcr.io/library/amazoncorretto:11-al2023-headless"
   - "mirror.gcr.io/library/amazoncorretto:8-alpine"
   - "mirror.gcr.io/library/amazonlinux:2023"
+
+gradleTestImages:
+  # Format: "cache group|canonical image|optional preferred pull source"
+  - "infrastructure|localstack/localstack:4.3.0|mirror.gcr.io/localstack/localstack:4.3.0"
+  - "infrastructure|localstack/localstack:3.4|mirror.gcr.io/localstack/localstack:3.4"
+  - "infrastructure|solr:6.6.0|mirror.gcr.io/library/solr:6.6.0"
+  - "infrastructure|solr:7.7.3|mirror.gcr.io/library/solr:7.7.3"
+  - "infrastructure|solr:8.10.1|mirror.gcr.io/library/solr:8.10.1"
+  - "infrastructure|solr:8.11.4|mirror.gcr.io/library/solr:8.11.4"
+  - "infrastructure|solr:9.8.1|mirror.gcr.io/library/solr:9.8.1"
+  - "infrastructure|confluentinc/cp-kafka:7.5.0|mirror.gcr.io/confluentinc/cp-kafka:7.5.0"
+  - "infrastructure|httpd:2.4.66-alpine|mirror.gcr.io/library/httpd:2.4.66-alpine"
+  - "infrastructure|testcontainers/ryuk:0.14.0|mirror.gcr.io/testcontainers/ryuk:0.14.0"
+  - "infrastructure|testcontainers/sshd:1.3.0|mirror.gcr.io/testcontainers/sshd:1.3.0"
+  - "infrastructure|alpine:3.17|mirror.gcr.io/library/alpine:3.17"
+  - "infrastructure|ghcr.io/shopify/toxiproxy:2.9.0|"
+  - "search|opensearchproject/opensearch:1.3.20|mirror.gcr.io/opensearchproject/opensearch:1.3.20"
+  - "search|opensearchproject/opensearch:2.19.4|mirror.gcr.io/opensearchproject/opensearch:2.19.4"
+  - "search|opensearchproject/opensearch:3.5.0|mirror.gcr.io/opensearchproject/opensearch:3.5.0"
+  - "search|amazonlinux:2023|mirror.gcr.io/library/amazonlinux:2023"
+  - "search|amazoncorretto:8-alpine|mirror.gcr.io/library/amazoncorretto:8-alpine"
+  - "search|amazoncorretto:11-al2023-headless|mirror.gcr.io/library/amazoncorretto:11-al2023-headless"
+  - "search|amazoncorretto:17-al2023-headless|mirror.gcr.io/library/amazoncorretto:17-al2023-headless"
+  - "search|amazoncorretto:21-al2023-headless|mirror.gcr.io/library/amazoncorretto:21-al2023-headless"
