@@ -60,6 +60,14 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Install Kind') {
+                steps {
+                    // Keep the CI tool isolated to this workspace so concurrent jobs do not
+                    // depend on or mutate the Jenkins agent's global installation.
+                    sh 'KIND_INSTALL_DIR="${WORKSPACE}/.ci-bin" ./jenkins/installKind.sh'
+                }
+            }
+
             stage('Recreate Kind') {
                 steps {
                     // Always recreate. The shared docker-hosted registry/buildkit containers
@@ -75,10 +83,10 @@ def call(Map config = [:]) {
                         sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
 
                         // Always recreate the kind cluster.
-                        sh 'kind delete cluster --name ma || true'
+                        sh '"${WORKSPACE}/.ci-bin/kind" delete cluster --name ma || true'
 
                         // Create the kind cluster with the local registry configured.
-                        sh 'kind create cluster --name ma --config ./deployment/k8s/kindClusterConfig.yaml'
+                        sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfig.yaml'
                     }
                 }
             }
@@ -150,7 +158,13 @@ def call(Map config = [:]) {
                             sh "kubectl config unset current-context || true"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
-                            sh "pipenv run app --delete-only --kube-context=kind-ma"
+                            sh '''
+                                if kubectl config get-contexts -o name | grep -qx kind-ma; then
+                                    pipenv run app --delete-only --kube-context=kind-ma
+                                else
+                                    echo "Skipping cleanup because Kubernetes context kind-ma does not exist"
+                                fi
+                            '''
                         }
                     }
                 }
