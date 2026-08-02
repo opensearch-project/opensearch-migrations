@@ -106,17 +106,12 @@ run_named_hook() {
   fi
 }
 
-deploy_local_charts() {
-  cd "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/"
-  local image_tag="${LOCAL_IMAGE_TAG:-latest}"
-
-  print_step "Updating Helm dependencies"
-  helm dependency update charts/aggregates/testClusters
-  helm dependency update charts/aggregates/migrationAssistantWithArgo
+install_ma_chart() {
+  local image_tag="$1"
 
   if [[ "${USE_LOCAL_REGISTRY:-false}" == "true" ]]; then
-    echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-    echo "Using local image tag: ${image_tag}"
+    echo "[ma] Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
+    echo "[ma] Using local image tag: ${image_tag}"
     print_step "Installing Migration Assistant chart"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
       --wait --timeout 10m \
@@ -137,29 +132,113 @@ deploy_local_charts() {
       --set "images.reindexFromSnapshot.tag=${image_tag}" \
       --set "images.reindexFromSnapshot.pullPolicy=Always" \
       --set "charts.kyverno.values.webhooksCleanup.image.tag=${image_tag}"
-
-    run_named_hook "${POST_MA_INSTALL_HOOK:-}"
-
-    print_step "Installing local source and target test clusters"
-    helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard" \
-      --set "source.imageTag=${image_tag}"
   else
-    echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
+    echo "[ma] Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
     print_step "Installing Migration Assistant chart"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
       --wait --timeout 10m \
       -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+  fi
 
-    run_named_hook "${POST_MA_INSTALL_HOOK:-}"
+  run_named_hook "${POST_MA_INSTALL_HOOK:-}"
+}
 
-    print_step "Installing local source and target test clusters"
+install_tc_chart() {
+  local image_tag="$1"
+  local tc_values_file="$2"
+
+  print_step "Installing local source and target test clusters (${tc_values_file})"
+
+  if [[ "${USE_LOCAL_REGISTRY:-false}" == "true" ]]; then
+    echo "[tc] Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
+    echo "[tc] Using local image tag: ${image_tag}"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m
+      --wait --timeout 10m \
+      -f "charts/aggregates/testClusters/${tc_values_file}" \
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard" \
+      --set "source.imageTag=${image_tag}"
+  else
+    helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
+      -f "charts/aggregates/testClusters/${tc_values_file}"
   fi
 
   run_named_hook "${POST_TC_INSTALL_HOOK:-}"
+}
+
+deploy_local_charts() {
+  cd "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/"
+  local image_tag="${LOCAL_IMAGE_TAG:-latest}"
+
+  # INSTALL_TEST_CLUSTERS: "true" (default) or "false" - whether to install the testClusters chart at all.
+  local install_test_clusters="${INSTALL_TEST_CLUSTERS:-true}"
+  # TEST_CLUSTERS_SOURCE: "elasticsearch" (default) or "solr" - selects the source cluster values file.
+  local test_clusters_source="${TEST_CLUSTERS_SOURCE:-elasticsearch}"
+  local tc_values_file
+
+  case "${test_clusters_source}" in
+    elasticsearch)
+      tc_values_file="valuesForLocalK8s.yaml"
+      ;;
+    solr)
+      tc_values_file="valuesSolrSource.yaml"
+      ;;
+    *)
+      echo "Unsupported TEST_CLUSTERS_SOURCE: '${test_clusters_source}' (expected 'elasticsearch' or 'solr')" >&2
+      exit 1
+      ;;
+  esac
+
+  print_step "Updating Helm dependencies"
+  helm dependency update charts/aggregates/migrationAssistantWithArgo
+  if [[ "${install_test_clusters}" == "true" ]]; then
+    helm dependency update charts/aggregates/testClusters
+  fi
+
+  # Kick off the MA chart install and (optionally) the test clusters chart install in parallel.
+  # A failure in either one must not prevent the other from running or being reported.
+  local ma_status=0 tc_status=0
+  local tc_pid=""
+
+  set +e
+  install_ma_chart "${image_tag}" &
+  local ma_pid=$!
+
+  if [[ "${install_test_clusters}" == "true" ]]; then
+    install_tc_chart "${image_tag}" "${tc_values_file}" &
+    tc_pid=$!
+  fi
+
+  wait "${ma_pid}"
+  ma_status=$?
+
+  if [[ -n "${tc_pid}" ]]; then
+    wait "${tc_pid}"
+    tc_status=$?
+  fi
+  set -e
+
+  print_step "Chart installation summary"
+  if [[ "${ma_status}" -eq 0 ]]; then
+    echo "Migration Assistant chart: SUCCESS"
+  else
+    echo "Migration Assistant chart: FAILED (exit code ${ma_status})"
+  fi
+
+  if [[ "${install_test_clusters}" == "true" ]]; then
+    if [[ "${tc_status}" -eq 0 ]]; then
+      echo "Test clusters chart (${test_clusters_source}): SUCCESS"
+    else
+      echo "Test clusters chart (${test_clusters_source}): FAILED (exit code ${tc_status})"
+    fi
+  else
+    echo "Test clusters chart: SKIPPED (INSTALL_TEST_CLUSTERS=false)"
+  fi
+
+  if [[ "${ma_status}" -ne 0 || "${tc_status}" -ne 0 ]]; then
+    echo "One or more chart installations failed; see summary above." >&2
+    exit 1
+  fi
 }
 
 run_local_test_deploy() {

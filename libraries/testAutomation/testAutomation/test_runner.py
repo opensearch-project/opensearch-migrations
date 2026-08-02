@@ -317,7 +317,7 @@ class TestRunner:
         Returns False if any of those signal incomplete cleanup. The CLI
         entrypoint translates False into a non-zero exit code so the Jenkins
         post block surfaces the incomplete cleanup as UNSTABLE.
-        Outer infra teardown (EKS/minikube delete) still handles any residue.
+        Outer infra teardown (EKS/kind delete) still handles any residue.
 
         Customer-parity sequence (steps 1-3):
 
@@ -338,7 +338,7 @@ class TestRunner:
           6. delete_namespace — webhook cleanup + kubectl delete namespace.
           7. wait_for_namespace_deleted — warn-only. Raising here previously
              aborted the Jenkins post block and left CFN stacks behind; the
-             outer infra teardown (EKS/minikube delete) finishes the job.
+             outer infra teardown (EKS/kind delete) finishes the job.
 
         Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
         timeout is not treated as a hard failure.
@@ -725,7 +725,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--capture-proxy-service-type",
         choices=("LoadBalancer", "ClusterIP"),
         default="LoadBalancer",
-        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
+        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind tests."
     )
     args = parser.parse_args(argv)
     if args.trace_test_ids:

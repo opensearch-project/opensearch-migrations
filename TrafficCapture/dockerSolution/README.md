@@ -1,6 +1,9 @@
-# Docker Solution — Local CDC Dev Environment
+# Legacy Docker Solution — Local CDC Dev Environment
 
 A lightweight docker-compose stack for testing Capture-and-Replay (CDC) locally without Kubernetes.
+
+**While Docker is used for local development environments, direct Docker container deployment for the
+entire project is discouraged in favor of Kubernetes-based solutions.**
 
 ## Prerequisites
 
@@ -10,7 +13,7 @@ The `dockerHostedBuildkit.sh` script sets up a local Docker registry and BuildKi
 ```bash
 # From the repo root — set up registry + builder, build images, pull into local daemon
 export KUBE_CONTEXT="compose-local"
-export EXTERNAL_REGISTRY_PORT=5002  # avoid conflict with minikube's port 5001
+export EXTERNAL_REGISTRY_PORT=5002  # avoid conflict with kind's port 5001
 source buildImages/backends/dockerHostedBuildkit.sh
 setup_build_backend
 

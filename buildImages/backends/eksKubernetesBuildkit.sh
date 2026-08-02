@@ -2,7 +2,7 @@
 
 # Build backend for cloud Kubernetes contexts (EKS / GKE / AKS / migration-eks-).
 # Uses docker buildx with the kubernetes driver to spin up amd64 + arm64 buildkit
-# Pods directly on the cluster's build-nodepool. Local kind/minikube go through
+# Pods directly on the cluster's build-nodepool. Local kind go through
 # buildImages/backends/dockerHostedBuildkit.sh instead.
 
 set -euo pipefail
@@ -35,7 +35,7 @@ require_eks_context() {
   context="$(get_k8s_build_context)"
   if [[ ! "${context}" =~ ${EKS_CONTEXT_PATTERN} ]]; then
     echo "ERROR: eksKubernetesBuildkit.sh requires a cloud K8s context matching ${EKS_CONTEXT_PATTERN}." >&2
-    echo "Current context: '${context}'. Use buildImages/backends/dockerHostedBuildkit.sh for kind/minikube." >&2
+    echo "Current context: '${context}'. Use buildImages/backends/dockerHostedBuildkit.sh for kind." >&2
     return 1
   fi
 }

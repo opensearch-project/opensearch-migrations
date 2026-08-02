@@ -29,6 +29,8 @@ docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
 
 # Wait for buildkitd to accept connections before registering the builder or running builds.
 echo "Waiting for buildkitd to be ready..."
+# timeout doesnt exist in macos. There need to install gtimeout via `brew install coreutils` and set alias
+# in the .zshrc (alias timeout=gtimeout)
 timeout 60 sh -c 'until nc -z localhost 1234 2>/dev/null; do sleep 1; done' \
   || { echo "ERROR: buildkitd did not become ready within 60 seconds"; exit 1; }
 
