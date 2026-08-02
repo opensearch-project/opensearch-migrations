@@ -116,7 +116,7 @@ Jobs triggered:
 - `k8s-local-solr-other-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main)
-- `eks-aoss-*` (PR with `run-aoss-tests` label, and main)
+- `eks-aoss-*` (PR with `run-eks-tests` label, and main)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 
