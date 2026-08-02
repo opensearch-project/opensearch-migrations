@@ -47,4 +47,4 @@ Pytest has been configured to accepts various parameters to customize its behavi
     - Default: Attempt to execute all tests
 - `--capture_proxy_service_type`: Kubernetes Service type used by capture proxy workflow tests.
     - Default: `LoadBalancer`
-    - Use `ClusterIP` for local kind/minikube tests that do not run a load balancer controller.
+    - Use `ClusterIP` for local kind tests that do not run a load balancer controller.
