@@ -146,7 +146,7 @@ jobs:
           echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
           docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
 
-  jenkins-script-tests:
+  jenkins-kind-setup-script-tests:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -473,6 +473,7 @@ jobs:
   all-ci-checks-pass:
     needs:
       - python-tests
+      - jenkins-kind-setup-script-tests
       - gradle-tests
       - link-checker
       - node-tests
