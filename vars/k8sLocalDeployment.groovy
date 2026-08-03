@@ -14,6 +14,11 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
+        environment {
+            KIND_VERSION = 'v0.31.0'
+            KIND_NODE_IMAGE = 'kindest/node:v1.35.1@sha256:05d7bcdefbda08b4e038f644c4df690cdac3fba8b06f8289f30e10026720a1ab'
+        }
+
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
@@ -60,6 +65,14 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Configure Kind Host') {
+                steps {
+                    // Kubernetes 1.35 requires cgroup v2. Also ensure Fluent Bit can create
+                    // its tail watcher after the control plane starts.
+                    sh './jenkins/configureKindHost.sh'
+                }
+            }
+
             stage('Install Kind') {
                 steps {
                     // Install into this workspace from a versioned, checksum-verified cache
@@ -77,24 +90,29 @@ def call(Map config = [:]) {
                     // The kind nodes run as Docker containers. The local registry is configured
                     // as an insecure HTTP registry in the kind node containerd configuration.
                     timeout(time: 15, unit: 'MINUTES') {
-                        // Pods in kind share the host's non-namespaced inotify limits. Ensure
-                        // Fluent Bit can create its tail watcher after the control plane starts.
-                        sh './jenkins/configureKindHost.sh'
-
                         // Tear down the registry before deleting the kind cluster.
                         // This is only necessary if the registry container is attached to
                         // the kind network and would otherwise prevent network cleanup.
                         sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
 
-                        // Keep the single-node topology previously provided by Minikube. The
-                        // current cgroup v1 agents cannot reliably run multi-node kind clusters.
+                        // Keep the single-node topology previously provided by Minikube. These
+                        // tests do not need separate worker nodes.
                         // Recreate the ephemeral cluster once for transient startup failures.
                         retry(2) {
                             sh '"${WORKSPACE}/.ci-bin/kind" delete cluster --name ma || true'
 
-                            // Kubernetes 1.35 drops cgroup v1 support, but the Jenkins agent fleet
-                            // currently contains both cgroup v1 and v2 hosts.
-                            sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfigSingleNode.yaml --image kindest/node:v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48'
+                            // Kubernetes 1.35 enables ImageVolume by default. The pinned manifest
+                            // digest keeps the node image reproducible across architectures.
+                            sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfigSingleNode.yaml --image "${KIND_NODE_IMAGE}"'
+
+                            // kind nodes have their own containerd. Configure its registry hosts
+                            // with a token obtained from the Jenkins agent's instance role.
+                            sh '''
+                                ECR_PULL_THROUGH_ENDPOINT="$(bash -l -c 'printf %s "$ECR_PULL_THROUGH_ENDPOINT"')" \
+                                    KIND_BIN="${WORKSPACE}/.ci-bin/kind" \
+                                    KIND_CLUSTER_NAME=ma \
+                                    ./jenkins/configureKindCluster.sh
+                            '''
                         }
                     }
                 }
@@ -126,19 +144,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Prepare Kind Test Chart') {
-                steps {
-                    // The supported chart requires Kubernetes 1.35 because ImageVolume-backed
-                    // transforms depend on it being enabled by default. Jenkins agents that use
-                    // cgroup v1 can only run 1.34, and this matrix does not exercise ImageVolume.
-                    sh '''
-                        ./jenkins/prepareKindTestChart.sh \
-                            "${WORKSPACE}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo" \
-                            "${WORKSPACE}/.ci-chart/migrationAssistantWithArgo"
-                    '''
-                }
-            }
-
             stage('Perform Python E2E Tests') {
                 steps {
                     timeout(time: 5, unit: 'HOURS') {
@@ -167,7 +172,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=kind-ma --capture-proxy-service-type=ClusterIP --ma-chart-path='${WORKSPACE}/.ci-chart/migrationAssistantWithArgo'"
+                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=kind-ma --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }

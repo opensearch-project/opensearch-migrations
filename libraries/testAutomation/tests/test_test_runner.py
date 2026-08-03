@@ -254,10 +254,6 @@ class TestVersionCombinations:
 
 
 class TestSourceVersionArgParsing:
-    def test_ma_chart_path_can_be_overridden(self):
-        args = parse_args(["--ma-chart-path", "/tmp/ma-chart"])
-        assert args.ma_chart_path == "/tmp/ma-chart"
-
     def test_all_normalizes_to_lowercase(self):
         args = parse_args(["--source-version", "all", "--kube-context", "kind-ma"])
         assert args.source_version == ["all"]
