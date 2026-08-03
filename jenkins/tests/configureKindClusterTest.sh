@@ -4,6 +4,7 @@ set -euo pipefail
 
 readonly repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly script_under_test="${repo_root}/jenkins/configureKindCluster.sh"
+readonly kind_config="${repo_root}/deployment/k8s/kindClusterConfigSingleNode.yaml"
 readonly test_dir="$(mktemp -d)"
 readonly docker_log="${test_dir}/docker.log"
 readonly hosts_log="${test_dir}/hosts.toml"
@@ -37,6 +38,9 @@ docker() {
 
 export -f kind aws docker
 export docker_log hosts_log
+
+grep -Fq '[plugins."io.containerd.grpc.v1.cri".registry]' "${kind_config}"
+grep -Fq 'config_path = "/etc/containerd/certs.d"' "${kind_config}"
 
 skip_output="$(ECR_PULL_THROUGH_ENDPOINT= bash "${script_under_test}")"
 grep -Fq "skipping kind pull-through cache configuration" <<< "${skip_output}"
