@@ -9,7 +9,7 @@ Coverage targets:
   * count — line counting, malformed gzip skipping
   * has_records — short-circuiting on the first record
   * delete_session — 1000-key batching boundary
-  * safe_has_records — swallowing ClientError / BotoCoreError
+  * has_records — propagating ClientError / BotoCoreError
   * location helper
 
 Most S3 calls are mocked via pytest-mock. TestAgainstRealS3Api additionally runs the read paths
@@ -489,28 +489,22 @@ class TestDeleteSession:
         assert len(second_batch) == 500
 
 
-# ---------- safe_has_records ------------------------------------------------
+# ---------- has_records error propagation -----------------------------------
 
-class TestSafeHasRecords:
-    def test_returns_result_on_success(self, mocker):
-        mocker.patch.object(failed_document_stream, "has_records", return_value=True)
-        assert failed_document_stream.safe_has_records(_config()) is True
+class TestHasRecordsPropagatesErrors:
+    """A stream that cannot be read must never report as "no failures" (#3273)."""
 
-    def test_returns_none_on_client_error(self, mocker):
+    def test_raises_on_client_error(self, mocker):
         err = ClientError({"Error": {"Code": "NoSuchBucket", "Message": "x"}}, "ListObjects")
-        mocker.patch.object(failed_document_stream, "has_records", side_effect=err)
-        assert failed_document_stream.safe_has_records(_config()) is None
+        mocker.patch.object(failed_document_stream, "_iter_records", side_effect=err)
+        with pytest.raises(ClientError):
+            failed_document_stream.has_records(_config())
 
-    def test_returns_none_on_botocore_error(self, mocker):
+    def test_raises_on_botocore_error(self, mocker):
         # BotoCoreError requires no args.
-        mocker.patch.object(failed_document_stream, "has_records", side_effect=BotoCoreError())
-        assert failed_document_stream.safe_has_records(_config()) is None
-
-    def test_does_not_swallow_unrelated_exceptions(self, mocker):
-        # safe_has_records is narrow on purpose — programming bugs should still surface.
-        mocker.patch.object(failed_document_stream, "has_records", side_effect=ValueError("boom"))
-        with pytest.raises(ValueError):
-            failed_document_stream.safe_has_records(_config())
+        mocker.patch.object(failed_document_stream, "_iter_records", side_effect=BotoCoreError())
+        with pytest.raises(BotoCoreError):
+            failed_document_stream.has_records(_config())
 
 
 # ---------- _select_snapshot_migration --------------------------------------

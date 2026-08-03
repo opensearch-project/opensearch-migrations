@@ -66,12 +66,12 @@ Status reports only *whether* failures exist, not how many: counting reads every
 unbounded work on a backfill that failed a large number of documents. Use `console failed-document-stream
 count` when you want the number.
 
-If the stream is not configured, both failed-document lines are omitted. If the stream cannot be read (for
-example, missing S3 permissions), it renders as `Failed documents present: unavailable`.
+If the stream is not configured, both failed-document lines are omitted. If it is configured but cannot be
+read (for example, missing S3 permissions), the command fails rather than reporting a status it cannot
+verify — a stream that cannot be read must not be reported as having no failures.
 
 In JSON mode (`console --json backfill status --deep-check`) it adds `failed_document_stream_location` and
-`failed_documents_present` (the latter is `null` if currently unavailable). The command emits a single line;
-it is pretty-printed here for readability.
+`failed_documents_present`. The command emits a single line; it is pretty-printed here for readability.
 
 ```json
 {
