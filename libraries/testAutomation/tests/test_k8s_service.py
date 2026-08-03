@@ -1,6 +1,7 @@
 import sys
 import os
 import shlex
+import subprocess
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'testAutomation'))
@@ -62,3 +63,25 @@ def test_exec_background_cmd_preserves_single_quoted_arguments():
     assert "--transform_image_context=repo.example/context-image@sha256:feedface" in shlex.split(script)
     assert "> '/tmp/test log.txt' 2>&1;" in script
     assert "echo $? > '/tmp/test exit.txt'" in script
+
+
+def test_dump_helm_debug_info_selects_installer_pod_by_release_instance():
+    """The installer Job labels its pods app.kubernetes.io/instance=<release>, so the
+    pod-log query must select by that. Regression test for a selector that instead
+    looked for app.kubernetes.io/name=migrationAssistantWithArgo and never matched,
+    silently dropping the installer logs from every failed-install dump."""
+    service = _make_service()
+    kubectl_gets = []
+
+    def fake_run(cmd, *args, **kwargs):
+        if "get" in cmd and "pods" in cmd and "-l" in cmd:
+            kubectl_gets.append(cmd[cmd.index("-l") + 1])
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("k8s_service.subprocess.run", side_effect=fake_run):
+        service._dump_helm_debug_info(release_name="ma")
+
+    # The pod-log query must select by the release-instance label the installer Job stamps.
+    assert "app.kubernetes.io/instance=ma" in kubectl_gets
+    # The mangled selector from the original bug must never be emitted.
+    assert all("migrationAssistantWithArgo" not in s for s in kubectl_gets)

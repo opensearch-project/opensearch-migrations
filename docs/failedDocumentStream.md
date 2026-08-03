@@ -54,7 +54,7 @@ Completed shards: 40
 In progress shards: 0
 Waiting shards: 0
 failed document stream location: s3://my-bucket/rfs-failed-document-stream/session=abc-123/
-Failed document count: 4
+Failed documents present: yes
 ```
 
 The first line reports the worker *deployment* state, so a finished backfill shows `STOPPED` there (no
@@ -62,12 +62,16 @@ workers running) while `Backfill status:` below it reports *shard* progress as `
 is deployment-specific: the example is a Kubernetes deployment, whereas on ECS it reads
 `Running=0 Pending=0 Desired=0 Terminating=0`.
 
-If the stream is not configured, both failed-document lines are omitted. If the count cannot be read (for
-example, missing S3 permissions), it renders as `Failed document count: unavailable`.
+Status reports only *whether* failures exist, not how many: counting reads every record, which is
+unbounded work on a backfill that failed a large number of documents. Use `console failed-document-stream
+count` when you want the number.
+
+If the stream is not configured, both failed-document lines are omitted. If the stream cannot be read (for
+example, missing S3 permissions), it renders as `Failed documents present: unavailable`.
 
 In JSON mode (`console --json backfill status --deep-check`) it adds `failed_document_stream_location` and
-`failed_document_count` (the latter is `null` if currently unavailable). The command emits a single line.
-It is pretty-printed here for readability.
+`failed_documents_present` (the latter is `null` if currently unavailable). The command emits a single line;
+it is pretty-printed here for readability.
 
 ```json
 {
@@ -81,7 +85,7 @@ It is pretty-printed here for readability.
   "shard_in_progress": 0,
   "shard_waiting": 0,
   "failed_document_stream_location": "s3://my-bucket/rfs-failed-document-stream/session=abc-123/",
-  "failed_document_count": 4
+  "failed_documents_present": true
 }
 ```
 

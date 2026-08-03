@@ -22,6 +22,7 @@ customer can also inspect the failed document stream with the aws CLI if they pr
 """
 from __future__ import annotations
 
+import contextlib
 import gzip
 import io
 import json
@@ -181,30 +182,36 @@ def _iter_objects(cfg: FailedDocumentStreamConfig, client=None) -> Iterator[dict
             yield obj
 
 
-def _read_all_records(cfg: FailedDocumentStreamConfig, client=None) -> List[dict]:
-    """Read and JSON-parse every NDJSON record across all session objects (no sort/dedup/limit).
+def _iter_object_records(client, bucket: str, key: str) -> Iterator[dict]:
+    """Yield the JSON-parsed NDJSON records of one object, decompressing as we go.
 
-    Skips non-gzip objects and malformed lines with a warning so a single bad object can't
+    Unreadable objects and malformed lines are skipped with a warning so one bad object can't
     break inspection of the rest.
     """
-    client = client or _s3_client(cfg)
-    records: List[dict] = []
-    for obj in _iter_objects(cfg, client=client):
-        body = client.get_object(Bucket=cfg.bucket, Key=obj["Key"])["Body"].read()
+    with contextlib.closing(client.get_object(Bucket=bucket, Key=key)["Body"]) as body:
         try:
-            decoded = gzip.GzipFile(fileobj=io.BytesIO(body)).read().decode("utf-8")
+            with gzip.GzipFile(fileobj=body) as gz:
+                for raw_line in io.TextIOWrapper(gz, encoding="utf-8"):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError as e:
+                        logger.warning("Skipping malformed failed document stream record in %s: %s", key, e)
         except OSError as e:
-            logger.warning("Skipping non-gzip failed document stream object %s: %s", obj["Key"], e)
-            continue
-        for line in decoded.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                logger.warning("Skipping malformed failed document stream record in %s: %s", obj["Key"], e)
-    return records
+            logger.warning("Skipping unreadable failed document stream object %s: %s", key, e)
+
+
+def _iter_records(cfg: FailedDocumentStreamConfig, client=None) -> Iterator[dict]:
+    """Lazily yield every NDJSON record across all session objects (no sort/dedup/limit).
+
+    Objects are listed, fetched and decompressed one at a time, so a caller that stops early
+    (``has_records``) never pays for the rest of the stream, however large it is.
+    """
+    client = client or _s3_client(cfg)
+    for obj in _iter_objects(cfg, client=client):
+        yield from _iter_object_records(client, cfg.bucket, obj["Key"])
 
 
 def _dedup_key(record: dict):
@@ -250,7 +257,7 @@ def list_records(cfg: FailedDocumentStreamConfig, limit: Optional[int] = None) -
     failed document stream is at-least-once. Stable order = (timestamp asc, documentId asc); records without a
     timestamp sort to the end. ``limit`` caps the returned list — useful in CLI contexts.
     """
-    records = dedupe_records(_read_all_records(cfg))
+    records = dedupe_records(list(_iter_records(cfg)))
     records.sort(key=lambda r: (r.get("timestamp") or "~", r.get("documentId") or ""))
     if limit is not None:
         return records[:limit]
@@ -261,11 +268,21 @@ def count(cfg: FailedDocumentStreamConfig) -> int:
     """Count distinct failed documents in this session's failed document stream.
 
     De-duplicates by (targetIndex, documentId) so re-emitted failures (the failed document stream is at-least-once)
-    are counted once rather than inflating the total. For very large failed document streams we read object bodies —
-    workflows typically expect a small number of failures, so this favors accuracy over a cheap
-    object/line-count approximation.
+    are counted once rather than inflating the total. This reads every object body, so it is O(stream size) —
+    only ask for it when the number itself is wanted (``console failed-document-stream count``). Callers that
+    just need to know whether the backfill had failures should use ``has_records``.
     """
-    return len(dedupe_records(_read_all_records(cfg)))
+    return len(dedupe_records(list(_iter_records(cfg))))
+
+
+def has_records(cfg: FailedDocumentStreamConfig) -> bool:
+    """Whether this session's failed document stream holds at least one failure record.
+
+    Short-circuits on the first record, so it costs one list page plus (at most) the prefix of one
+    object — unlike ``count``, it stays cheap when a backfill failed millions of documents.
+    De-duplication is irrelevant here: any record means at least one distinct failed document.
+    """
+    return next(_iter_records(cfg), None) is not None
 
 
 def delete_session(cfg: FailedDocumentStreamConfig) -> int:
@@ -285,11 +302,11 @@ def delete_session(cfg: FailedDocumentStreamConfig) -> int:
     return deleted
 
 
-def safe_count(cfg: FailedDocumentStreamConfig) -> Optional[int]:
-    """Like ``count`` but swallows S3 errors so a status command never breaks
-    on a misconfigured failed document stream. Returns ``None`` if the count is unavailable."""
+def safe_has_records(cfg: FailedDocumentStreamConfig) -> Optional[bool]:
+    """Like ``has_records`` but swallows S3 errors so a status command never breaks
+    on a misconfigured failed document stream. Returns ``None`` if it can't be determined."""
     try:
-        return count(cfg)
+        return has_records(cfg)
     except (BotoCoreError, ClientError) as e:
-        logger.warning("Failed to count failed document stream records: %s", e)
+        logger.warning("Failed to read failed document stream records: %s", e)
         return None
