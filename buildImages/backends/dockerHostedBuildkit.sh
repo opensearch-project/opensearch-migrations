@@ -44,16 +44,26 @@ ptc_rewrite_image() {
 }
 
 get_docker_network_dns_servers() {
-  local resolv_conf dns_line registry_image
+  local resolv_conf dns_line registry_image servers
   registry_image="$(ptc_rewrite_image registry:2)"
   resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" "${registry_image}" cat /etc/resolv.conf 2>/dev/null || true)"
   dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
 
-  if [[ -z "${dns_line}" ]]; then
-    return 0
+  # Docker's embedded DNS reports the host's upstream resolvers here. On hosts
+  # using systemd-resolved that upstream is the 127.0.0.53 stub — a loopback that
+  # is NOT reachable from inside the buildkit builder's own network namespace, so
+  # baking it into buildkitd.toml breaks all name resolution during the build
+  # (e.g. "Could not resolve host: cdn.amazonlinux.com"). Drop loopback
+  # (127.0.0.0/8) servers; if none remain, fall back to systemd-resolved's real
+  # uplink resolvers. If that still yields nothing, emit nothing so buildkit uses
+  # Docker's embedded resolver (127.0.0.11) on the user-defined network.
+  servers="$(printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' || true)"
+
+  if [[ -z "${servers}" && -r /run/systemd/resolve/resolv.conf ]]; then
+    servers="$(grep -E '^nameserver' /run/systemd/resolve/resolv.conf | awk '{print $2}' | grep -v '^127\.' || true)"
   fi
 
-  printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+  printf '%s\n' "${servers}"
 }
 
 write_buildkit_config() {

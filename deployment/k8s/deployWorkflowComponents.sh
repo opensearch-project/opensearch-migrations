@@ -2,7 +2,7 @@
 #
 # deployWorkflowComponents.sh — bring up the capture-and-replay DATA PLANE for k6 load testing.
 #
-# Run AFTER startMinikubeAndDeployCharts.sh (which installs the control plane: Argo, migration
+# Run AFTER kindTesting.sh (which installs the control plane: Argo, migration
 # console, kube-prometheus, otel-collector, …). This deploys the traffic components DIRECTLY as
 # plain Deployments/Services (the docker-compose stack, in k8s) — NO migration workflow, no CRs,
 # no reconcilers — so everything comes up running and wired together:
@@ -12,6 +12,21 @@
 #
 # A load test is then just:
 #     workflow k6 run --scenario ingest --config ingest-steady --target https://capture-proxy:9200
+# Or the respective shell command picking the TestRun configmap matching the respective scenario and
+# overwriting env file start values and env value overrides (see TrafficCapture/trafficLoadTest/scripts)
+#
+#
+# Relationship to existing setups (keep in sync — this script intentionally duplicates
+# the topology as plain Deployments rather than reusing either path):
+#   - Topology / env / flags (Kafka KRaft listeners, CaptureProxy + TrafficReplayer args,
+#     'logging-traffic-topic' / 'logging-group-default') mirror the canonical compose stack:
+#       TrafficCapture/dockerSolution/src/main/docker/docker-compose.yml
+#   - The CRD/reconciler-driven equivalent (Argo WorkflowTemplates + Strimzi-managed Kafka,
+#     installed by the migrationAssistantWithArgo umbrella chart) lives in:
+#       orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/
+#         {captureProxy,setupCapture,replayer,setupKafka}.ts
+#     This script deliberately bypasses all of that (no CRs, no Argo, no Strimzi) so the
+#     data plane comes up as bare running Deployments for k6 load testing.
 #
 # Usage:
 #   ./deployWorkflowComponents.sh up        # deploy + wait + print the k6 command (default)
@@ -39,7 +54,7 @@ CONSOLE_POD="migration-console-0"
 
 # k6 load-test chart (operator + scenarios + RBAC). Installed here — NOT by the migration deploy.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-K6_CHART="${SCRIPT_DIR}/../../deployment/k8s/charts/components/k6LoadTest"
+K6_CHART="${SCRIPT_DIR}/charts/components/k6LoadTest"
 K6_RELEASE="k6-load-test"
 # Stock grafana/k6, pulled through GCR's Docker Hub mirror (same pattern as OS_IMAGE/KAFKA_IMAGE).
 K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6:latest}"
@@ -304,6 +319,6 @@ case "${1:-up}" in
   up)     cmd_up ;;
   status) cmd_status ;;
   down)   cmd_down ;;
-  -h|--help) sed -n '2,32p' "$0" ;;
+  -h|--help) sed -n '2,37p' "$0" ;;
   *) die "unknown command '${1}' (use up | status | down)" ;;
 esac
