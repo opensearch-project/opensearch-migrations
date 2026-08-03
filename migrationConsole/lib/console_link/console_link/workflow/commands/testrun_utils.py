@@ -23,6 +23,11 @@ SCENARIOS_CONFIGMAP = "k6-scenarios"
 # image, K6_OUT, default envFrom preset). The console loads and patches these rather than building
 # a spec from scratch, so Helm stays the one definition.
 EXAMPLES_CONFIGMAP = "k6-testrun-examples"
+# Each load-profile preset is rendered as a ConfigMap named k6-preset-<name>, labeled
+# k6-preset=<name> (see charts/components/k6LoadTest/templates/k6-presets-configmap.yaml). The
+# label is how we enumerate the presets that actually exist in the cluster instead of hardcoding
+# them. The chart's RBAC already grants list on configmaps.
+PRESET_LABEL = "k6-preset"
 
 
 def create_testrun(namespace, body):
@@ -84,6 +89,27 @@ def read_configmap(namespace, name):
         if e.status == 404:
             return {}
         raise
+
+
+def list_presets(namespace):
+    """Config preset names available in the cluster, discovered from the k6-preset-* ConfigMaps the
+    k6LoadTest chart renders (each labeled k6-preset=<name>). Returns a sorted list, or [] when none
+    are found or the API call fails — callers fall back to their own default so the UI still works."""
+    core = client.CoreV1Api()
+    try:
+        result = core.list_namespaced_config_map(namespace=namespace, label_selector=PRESET_LABEL)
+    except ApiException:
+        return []
+    names = ((cm.metadata.labels or {}).get(PRESET_LABEL) for cm in result.items)
+    return sorted(name for name in names if name)
+
+
+def list_scenarios(namespace):
+    """Launchable scenario names, discovered from the k6-testrun-examples ConfigMap — one JSON
+    example per scenario, keyed by scenario name. These are the same keys build_testrun_spec looks
+    up via load_example, so anything listed here is guaranteed launchable. Returns a sorted list, or
+    [] when the ConfigMap is absent — callers fall back to their own default so the UI still works."""
+    return sorted(read_configmap(namespace, EXAMPLES_CONFIGMAP).keys())
 
 
 def loadtest_installed(namespace):

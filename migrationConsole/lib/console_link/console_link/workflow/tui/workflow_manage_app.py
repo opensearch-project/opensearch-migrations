@@ -451,12 +451,24 @@ class WorkflowTreeApp(App):
         k6-side error only raises a notification — it can't disturb the managed workflow or the UI.
         """
         from ..commands.k6 import list_active_k6_runs
+        from ..commands.testrun_utils import list_presets, list_scenarios
         try:
             runs = list_active_k6_runs(self._namespace)
         except Exception as e:
             self.notify(f"Could not list k6 runs: {e}", severity="error")
             runs = []
-        self.push_screen(K6PanelModal(runs), self._on_k6_action)
+        try:
+            presets = list_presets(self._namespace)
+        except Exception as e:
+            self.notify(f"Could not list k6 presets: {e}", severity="error")
+            presets = []
+        try:
+            scenarios = list_scenarios(self._namespace)
+        except Exception as e:
+            self.notify(f"Could not list k6 scenarios: {e}", severity="error")
+            scenarios = []
+        self.push_screen(K6PanelModal(runs, presets=presets, scenarios=scenarios),
+                         self._on_k6_action)
 
     def _on_k6_action(self, result: Optional[Dict]) -> None:
         if not result:

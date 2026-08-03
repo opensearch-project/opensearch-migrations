@@ -29,6 +29,8 @@ from .testrun_utils import (
     get_testrun,
     delete_testrun,
     read_configmap,
+    list_presets,
+    list_scenarios,
     loadtest_installed,
 )
 
@@ -36,8 +38,11 @@ logger = logging.getLogger(__name__)
 
 K6_APP_LABEL = "k6-load-test"
 
+# --scenario / --config are NOT restricted to these — the live sets are discovered from the cluster
+# (list_scenarios / list_presets) for shell completion, and any scenario present in the cluster is
+# launchable (custom scenarios included). These literals are only the completion fallback used when
+# the cluster is unreachable (e.g. tab-completing offline).
 SCENARIOS = ["ingest", "search", "mixed"]
-# Presets shipped as k6-preset-<name> ConfigMaps (from k6-config/*.env). Completion/help only.
 CONFIG_PRESETS = [
     "ingest-steady", "ingest-ramp", "ingest-burst",
     "search-steady", "search-deep-paging", "search-ramp", "search-burst",
@@ -46,6 +51,27 @@ CONFIG_PRESETS = [
 
 # Stages of a TestRun that mean it is no longer active.
 DONE_STAGES = {"finished", "error", "stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Shell completion — dynamic values from the cluster, static fallback when offline.
+# ---------------------------------------------------------------------------
+def _cluster_values(fetch, fallback):
+    """Best-effort completion values from the cluster. Shell completion must stay fast and never
+    raise, so any failure (no kubeconfig, chart not installed) falls back to the static hint list."""
+    try:
+        load_k8s_config()
+        return fetch(get_current_namespace()) or fallback
+    except Exception:
+        return fallback
+
+
+def _complete_scenarios(ctx, param, incomplete):
+    return [v for v in _cluster_values(list_scenarios, SCENARIOS) if v.startswith(incomplete)]
+
+
+def _complete_presets(ctx, param, incomplete):
+    return [v for v in _cluster_values(list_presets, CONFIG_PRESETS) if v.startswith(incomplete)]
 
 
 # ---------------------------------------------------------------------------
@@ -126,8 +152,9 @@ def load_example(namespace, scenario):
     the run spec (items mount, image, K6_OUT, default preset); the console only patches it."""
     data = read_configmap(namespace, EXAMPLES_CONFIGMAP)
     if scenario not in data:
-        raise ValueError(f"no example for scenario '{scenario}' in ConfigMap {EXAMPLES_CONFIGMAP}; "
-                         "is the k6LoadTest chart installed?")
+        available = ", ".join(sorted(data)) or "none"
+        raise ValueError(f"no example for scenario '{scenario}' in ConfigMap {EXAMPLES_CONFIGMAP} "
+                         f"(available: {available}); is the k6LoadTest chart installed?")
     return json.loads(data[scenario])
 
 
@@ -216,6 +243,20 @@ def submit_k6_run(namespace, params):
     return create_testrun(namespace, build_testrun_spec(namespace, params))
 
 
+def _warn_if_unknown_preset(namespace, config_name):
+    """Warn (but never block) when the resolved config preset isn't among the cluster's presets. A
+    missing preset usually means the run's envFrom points at a ConfigMap that won't exist, so the
+    heads-up is useful — but custom/ad-hoc presets are allowed, so this never fails the run. Silent
+    if the preset list can't be fetched (don't cry wolf when we simply couldn't look)."""
+    try:
+        available = list_presets(namespace)
+    except Exception:
+        return
+    if available and config_name not in available:
+        click.echo(f"Note: config preset '{config_name}' not found in the cluster "
+                   f"(available: {', '.join(available)}); running anyway.", err=True)
+
+
 def list_active_k6_runs(namespace):
     """Active (non-terminal) k6 runs as UI-friendly dicts: name/scenario/phase/age."""
     out = []
@@ -255,9 +296,9 @@ def k6_group():
 
 
 @k6_group.command(name="run")
-@click.option('--scenario', type=click.Choice(SCENARIOS), default="ingest", show_default=True,
-              help="Scenario script to run.")
-@click.option('--config', 'config_name', default=None,
+@click.option('--scenario', default="ingest", show_default=True, shell_complete=_complete_scenarios,
+              help="Scenario to run — any scenario present in the cluster, including custom ones.")
+@click.option('--config', 'config_name', default=None, shell_complete=_complete_presets,
               help="k6-config preset name (default: <scenario>-steady).")
 @click.option('--parallelism', default=1, type=int, show_default=True,
               help="Number of runner pods. k6 splits the load across them via execution segments, "
@@ -307,6 +348,7 @@ def k6_run(ctx, scenario, config_name, parallelism, target_url, rate, duration, 
 
     try:
         load_k8s_config()
+        _warn_if_unknown_preset(namespace, config_name)
         name = submit_k6_run(namespace, params)
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
@@ -334,7 +376,8 @@ def k6_run(ctx, scenario, config_name, parallelism, target_url, rate, duration, 
 
 
 @k6_group.command(name="list")
-@click.option('--scenario', type=click.Choice(SCENARIOS), default=None, help="Filter by scenario.")
+@click.option('--scenario', default=None, shell_complete=_complete_scenarios,
+              help="Filter by scenario.")
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.pass_context
 def k6_list(ctx, scenario, namespace):
@@ -374,7 +417,7 @@ def k6_list(ctx, scenario, namespace):
 @k6_group.command(name="stop")
 @click.argument('name', required=False)
 @click.option('--all', 'stop_all', is_flag=True, default=False, help="Stop all k6 runs.")
-@click.option('--scenario', type=click.Choice(SCENARIOS), default=None,
+@click.option('--scenario', default=None, shell_complete=_complete_scenarios,
               help="Stop all k6 runs for one scenario.")
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.pass_context

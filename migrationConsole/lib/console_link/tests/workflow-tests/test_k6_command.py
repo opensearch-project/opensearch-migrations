@@ -152,12 +152,76 @@ class TestK6Run:
         assert result.exit_code == 1
         assert "Error submitting k6 run" in result.output
 
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_unknown_preset_warns_but_runs(self, mock_create, monkeypatch):
+        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
+        monkeypatch.setattr(k6mod, "list_presets",
+                            lambda ns: ["ingest-steady", "search-steady", "mixed-steady"])
+        result = _runner().invoke(workflow_cli, [
+            "k6", "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "not found in the cluster" in result.output  # warned
+        mock_create.assert_called_once()                    # but ran anyway
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_known_preset_no_warning(self, mock_create, monkeypatch):
+        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
+        monkeypatch.setattr(k6mod, "list_presets", lambda ns: ["ingest-steady", "ingest-burst"])
+        result = _runner().invoke(workflow_cli, [
+            "k6", "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "not found in the cluster" not in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_custom_scenario_accepted(self, mock_create, monkeypatch):
+        # --scenario is no longer a fixed Choice: any scenario present in the cluster is launchable.
+        def fake(ns, name):
+            return {"my-custom": json.dumps(_example("my-custom"))} if name == EXAMPLES_CONFIGMAP else {}
+        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(k6mod, "read_configmap", fake)
+        result = _runner().invoke(workflow_cli, ["k6", "run", "--scenario", "my-custom"], env=ENV)
+        assert result.exit_code == 0, result.output
+        body = mock_create.call_args.args[1]
+        assert body["metadata"]["labels"]["k6-scenario"] == "my-custom"
+        assert body["spec"]["script"]["localFile"] == "/scripts/SCENARIO_my-custom.js"
+
 
 class TestBuildTestrunSpec:
     def test_missing_example_raises(self, monkeypatch):
         monkeypatch.setattr(k6mod, "read_configmap", lambda ns, name: {})
         with pytest.raises(ValueError):
             load_example("ma", "ingest")
+
+    def test_missing_example_lists_available(self, monkeypatch):
+        monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
+        with pytest.raises(ValueError) as e:
+            load_example("ma", "nope")
+        msg = str(e.value)
+        assert "available:" in msg and "ingest" in msg and "mixed" in msg
+
+
+class TestCompletion:
+    def test_scenario_completion_from_cluster(self, monkeypatch):
+        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(k6mod, "get_current_namespace", lambda: "ma")
+        monkeypatch.setattr(k6mod, "list_scenarios", lambda ns: ["ingest", "mixed", "search"])
+        assert k6mod._complete_scenarios(None, None, "mi") == ["mixed"]
+
+    def test_preset_completion_from_cluster(self, monkeypatch):
+        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(k6mod, "get_current_namespace", lambda: "ma")
+        monkeypatch.setattr(k6mod, "list_presets", lambda ns: ["custom-a", "custom-b"])
+        assert k6mod._complete_presets(None, None, "custom-") == ["custom-a", "custom-b"]
+
+    def test_completion_falls_back_when_offline(self, monkeypatch):
+        def boom():
+            raise RuntimeError("no kubeconfig")
+        monkeypatch.setattr(k6mod, "load_k8s_config", boom)
+        # falls back to the static hint lists rather than raising during shell completion
+        assert "ingest-steady" in k6mod._complete_presets(None, None, "ingest-")
+        assert k6mod._complete_scenarios(None, None, "sea") == ["search"]
 
     def test_registry_and_bag_overrides(self, monkeypatch):
         monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
