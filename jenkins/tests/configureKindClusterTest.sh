@@ -56,16 +56,17 @@ ECR_PULL_THROUGH_ENDPOINT=123456789012.dkr.ecr.us-east-1.amazonaws.com \
     bash "${script_under_test}"
 
 for expected in \
-    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/docker-hub' \
-    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/quay' \
-    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/ecr-public' \
-    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/k8s' \
+    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/docker-hub' \
+    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/quay' \
+    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/ecr-public' \
+    'https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/k8s' \
     'authorization = "Basic QVdTOnRlbXBvcmFyeS1wYXNzd29yZA=="'
 do
     grep -Fq "${expected}" "${hosts_log}"
 done
 
 [[ "$(grep -Fc 'server = ' "${hosts_log}")" -eq 12 ]]
+[[ "$(grep -Fc 'override_path = true' "${hosts_log}")" -eq 12 ]]
 if grep -Fq 'temporary-password' "${hosts_log}"; then
     echo "Raw ECR password was written to containerd configuration" >&2
     exit 1

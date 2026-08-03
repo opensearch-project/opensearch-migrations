@@ -50,7 +50,8 @@ configure_registry_mirror() {
     local source_registry="$2"
     local ecr_prefix="$3"
     local registry_dir="/etc/containerd/certs.d/${source_registry}"
-    local ecr_url="https://${ECR_PULL_THROUGH_ENDPOINT}/${ecr_prefix}"
+    # ECR pull-through repositories sit below /v2/<rule-prefix>; this full API root is used with override_path.
+    local ecr_url="https://${ECR_PULL_THROUGH_ENDPOINT}/v2/${ecr_prefix}"
 
     docker exec "${node}" mkdir -p "${registry_dir}"
     cat <<EOF | docker exec -i "${node}" sh -c "umask 077 && cp /dev/stdin '${registry_dir}/hosts.toml'"
@@ -58,6 +59,7 @@ server = "https://${source_registry}"
 
 [host."${ecr_url}"]
   capabilities = ["pull", "resolve"]
+  override_path = true
   [host."${ecr_url}".header]
     authorization = "Basic ${ecr_authorization}"
 EOF
