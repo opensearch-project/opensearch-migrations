@@ -4,7 +4,7 @@ Each run is a k6-operator **TestRun** CR (k6.io/v1alpha1), NOT an Argo workflow.
 the scenario/preset ConfigMaps, and this command's RBAC all ship in the standalone k6LoadTest
 chart (deployment/k8s/charts/components/k6LoadTest), which is installed separately from any
 migration. A run is specified by a `scenario` (script) and a `config` (k6-config/*.env preset);
-every preset value is overridable per run via named options or the repeatable `-o KEY=VALUE` bag.
+every preset value is overridable per run via named options or the repeatable `-e KEY=VALUE` bag.
 Load is spread across `--parallelism` runner pods by k6 execution segments.
 
 Because the infra is a separate opt-in, these commands are inert (and hidden from `--help`) unless
@@ -272,8 +272,8 @@ def k6_group():
               help="Force the mixed/consistency ring buffer on/off (default: keep preset).")
 @click.option('--control-enabled/--no-control-enabled', 'control_enabled', default=None,
               help="Force the chaos control bus on/off (default: keep preset).")
-@click.option('--override', '-o', 'overrides', multiple=True, metavar='KEY=VALUE',
-              help="Extra env override, applied after the preset. Repeatable.")
+@click.option('--override', '-e', 'overrides', multiple=True, metavar='KEY=VALUE',
+              help="Extra env override, applied after the preset (matches k6-run.sh's -e). Repeatable.")
 @click.option('--extra-args', default=None, help="Extra flags for `k6 run` (e.g. --no-thresholds).")
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.option('--wait', is_flag=True, default=False, help="Wait for the run to complete.")
@@ -289,7 +289,7 @@ def k6_run(ctx, scenario, config_name, parallelism, target_url, rate, duration, 
     Examples:
       workflow k6 run --scenario ingest --target https://my-proxy:9200
       workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
-      workflow k6 run --scenario mixed --parallelism 4 --registry-enabled -o INGEST_RATE=80
+      workflow k6 run --scenario mixed --parallelism 4 --registry-enabled -e INGEST_RATE=80
     """
     _require_k6(ctx, namespace)
     try:

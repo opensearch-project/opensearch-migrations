@@ -8,9 +8,9 @@
  *   (EXECUTOR=ramping-arrival-rate): ramp / burst load shapes via RAMP_STAGES.
  *
  * Key environment variables (see k6-config/ingest-steady.env for load-profile defaults):
- *   SCENARIO           — document schema to use: "nyc_taxis" (default) or "logs_data"
+ *   SCHEMA           — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL  — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME         — target OpenSearch index; defaults to the value of SCENARIO
+ *   INDEX_NAME         — target OpenSearch index; defaults to the value of SCHEMA
  *   INGEST_RATE        — target requests/second for constant-arrival-rate executor;
  *                        also used as stage target when RAMP_STAGES is not set
  *   INGEST_VUS         — pre-allocated VUs (= concurrent connections in pinned mode)
@@ -54,21 +54,21 @@ const ingestErrors     = new Rate('ingest_errors');
 const sequenceErrors   = new Rate('ingest_sequence_errors');
 const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 
-// ── Scenario selection ─────────────────────────────────────────────────────
+// ── Schema selection ───────────────────────────────────────────────────────
 // All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
-const docs     = SCENARIO === 'logs_data' ? logsDocs : nycTaxisDocs;
+const SCHEMA = __ENV.SCHEMA || 'nyc_taxis';
+const docs     = SCHEMA === 'logs_data' ? logsDocs : nycTaxisDocs;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
 
 const MAPPINGS = {
   nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
   logs_data: open('./SCHEMA_logs_data.json'),
 };
-const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PROXY_URL       = __ENV.CAPTURE_PROXY_URL   || 'https://capture-proxy:9200';
-const INDEX           = __ENV.INDEX_NAME          || SCENARIO;
+const INDEX           = __ENV.INDEX_NAME          || SCHEMA;
 const RATE            = parseInt(__ENV.INGEST_RATE         || '50');
 const VUS             = parseInt(__ENV.INGEST_VUS          || '20');
 const MAX_VUS         = parseInt(__ENV.INGEST_MAX_VUS      || '100');

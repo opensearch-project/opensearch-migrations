@@ -10,9 +10,9 @@
  *        When deep paging is disabled the remainder falls back to flat search.
  *
  * Key environment variables (see k6-config/search-steady.env for load-profile defaults):
- *   SCENARIO              — document schema to use: "nyc_taxis" (default) or "logs_data"
+ *   SCHEMA              — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL     — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME            — target OpenSearch index; defaults to the value of SCENARIO
+ *   INDEX_NAME            — target OpenSearch index; defaults to the value of SCHEMA
  *   SEARCH_RATE           — target requests/second (arrival rate)
  *   SEARCH_VUS            — pre-allocated VUs
  *   SEARCH_MAX_VUS        — max VUs k6 may spin up to meet the rate
@@ -59,21 +59,21 @@ const searchAfterPages   = new Counter('search_after_pages');
 const searchErrors       = new Rate('search_errors');
 const deepPagingErrors   = new Rate('search_deep_paging_errors');
 
-// ── Scenario selection ──────────────────────────────────────────────────────
+// ── Schema selection ────────────────────────────────────────────────────────
 // All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
-const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
-const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
+const SCHEMA = __ENV.SCHEMA || 'nyc_taxis';
+const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
+const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
 
 const MAPPINGS = {
   nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
   logs_data: open('./SCHEMA_logs_data.json'),
 };
-const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const PROXY_URL          = __ENV.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
-const INDEX              = __ENV.INDEX_NAME             || SCENARIO;
+const INDEX              = __ENV.INDEX_NAME             || SCHEMA;
 const RATE               = parseInt(__ENV.SEARCH_RATE      || '50');
 const VUS                = parseInt(__ENV.SEARCH_VUS       || '30');
 const MAX_VUS            = parseInt(__ENV.SEARCH_MAX_VUS   || '150');
@@ -162,7 +162,7 @@ export function setup() {
     if (createRes.status !== 200) {
       console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
     } else {
-      console.log(`setup: created index ${INDEX} with ${SCENARIO} mapping`);
+      console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
     }
   } else {
     console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);

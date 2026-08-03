@@ -78,7 +78,7 @@ run_scenario() {
     sequences)
       header "Running k6 ingest with sequences ($CONNECTION_MODE mode, config=$preset)"
       run_k6 --scenario ingest --config "$preset" \
-        -o SEQUENCE_FRACTION=0.15 -o "CONNECTION_MODE=$CONNECTION_MODE" "${extra[@]}" ;;
+        -e SEQUENCE_FRACTION=0.15 -e "CONNECTION_MODE=$CONNECTION_MODE" "${extra[@]}" ;;
   esac
 }
 

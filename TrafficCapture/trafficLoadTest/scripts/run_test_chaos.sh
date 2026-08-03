@@ -32,7 +32,7 @@ if $WITH_RUN; then
   header "Step 2 — Submitting a controlled k6 run (CONTROL_ENABLED, 2m)"
   # --no-thresholds: paused VUs inflate p95 beyond k6's thresholds; not the assertion here.
   RUN_NAME=$(submit_k6 --scenario ingest --config ingest-steady \
-    -o CONTROL_ENABLED=true -o DURATION=2m --extra-args --no-thresholds)
+    -e CONTROL_ENABLED=true -e DURATION=2m --extra-args --no-thresholds)
   [[ -n "$RUN_NAME" ]] && info "Submitted run: $RUN_NAME" || { fail "could not submit run"; print_summary; }
   info "Waiting for the run to start producing traffic..."
   for _ in $(seq 1 20); do

@@ -23,7 +23,7 @@ scenarios (as ConfigMaps), and the console's RBAC — ships in one **standalone,
 - [Running a load test](#running-a-load-test)
 - [CLI / run-input reference](#cli--run-input-reference)
 - [Scenarios](#scenarios)
-- [Document scenarios](#document-scenarios)
+- [Document schemas](#document-schemas)
 - [Configuration reference](#configuration-reference)
 - [Thresholds vs Checks](#thresholds-vs-checks)
 - [Observe & metrics](#observe--metrics)
@@ -106,6 +106,17 @@ source/target, Kafka and replayer):
 ```bash
 ./buildImages/scripts/deployWorkflowComponents.sh up      # data plane + k6 chart
 ```
+
+Summing up, there are three ways the chart lands on a cluster - pick by context:
+
+| Route | Command | Use when |
+|---|---|---|
+| **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow k6` command. |
+| **Local data plane** | `./buildImages/scripts/deployWorkflowComponents.sh up` | Local minikube dev — installs k6 alongside the capture proxy, Kafka, replayer, etc. |
+| **Integration tests** | `pipenv run app … --with-load-test` (the test runner) | Only to run the `Test0050` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
+
+All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
+general one and the reference for the others.
 
 Verify:
 ```bash
@@ -231,7 +242,7 @@ kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
         | .spec.runner.env += [{"name":"INGEST_RATE","value":"120"}]' \
   | kubectl -n ma create -f -
 ```
-Use `kubectl create` (not `apply` — the examples use `generateName`).
+Use `kubectl create` (not `apply`).
 
 ### 2. `k6-run.sh` (thin helper, still no console)
 
@@ -245,13 +256,13 @@ prints the run name. `CONTEXT` / `NAMESPACE` env-overridable.
 
 Nicer flags + `list`/`stop`/`logs` + the TUI. **Hidden/inert unless the TestRun CRD is present.**
 ```bash
-workflow k6 run --scenario ingest --config ingest-burst --parallelism 4 -o INGEST_RATE=120
+workflow k6 run --scenario ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
 workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m --wait
 workflow k6 list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
 workflow k6 logs <run-name> -f
 workflow k6 stop <run-name>   |  --scenario mixed  |  --all
 ```
-`--config` swaps the `envFrom` preset; `--rate`/`--vus` fan out to the ingest+search vars; `-o
+`--config` swaps the `envFrom` preset; `--rate`/`--vus` fan out to the ingest+search vars; `-e
 KEY=VAL` and `--target` add `runner.env` overrides. TUI: `workflow manage` → **`k`** (launch + list
 + stop). k6 runs are standalone TestRuns, so one never affects a migration workflow.
 
@@ -263,7 +274,7 @@ KEY=VAL` and `--target` add `runner.env` overrides. TUI: `workflow manage` → *
 | Variant | How |
 |---|---|
 | steady / ramp / burst | preset `<scenario>-{steady,ramp,burst}` |
-| document type | `-e SCENARIO=logs_data` (default `nyc_taxis`) |
+| document type | `-e SCHEMA=logs_data` (default `nyc_taxis`) |
 | search deep paging | preset `search-deep-paging` (or `-e DEEP_PAGING_ENABLED=true -e PAGING_MODE=search_after`) |
 | stateful sequences | `-e SEQUENCE_FRACTION=0.15 -e CONNECTION_MODE=pinned` |
 | mixed consistency | `mixed` scenario + `REGISTRY_ENABLED=true` — **needs the chart installed with `registry.enabled=true`** (Redis+Webdis) |
@@ -278,7 +289,7 @@ ConfigMap, consumed via `envFrom`. (Metrics use `K6_OUT=opentelemetry`, not `--o
 
 ## CLI / run-input reference
 
-Flags accepted by `k6-run.sh` / `workflow k6 run` (the `-o KEY=VALUE` overrides map to the env vars
+Flags accepted by `k6-run.sh` / `workflow k6 run` (the `-e KEY=VALUE` overrides map to the env vars
 in the [Configuration reference](#configuration-reference)):
 
 | Input | Default | Meaning |
@@ -290,15 +301,15 @@ in the [Configuration reference](#configuration-reference)):
 | `--rate` | keep preset | request rate (sets `INGEST_RATE`+`SEARCH_RATE`) |
 | `--duration` | keep preset | `DURATION` (e.g. `30s`, `10m`) |
 | `--vus` | keep preset | pre-allocated VUs (`INGEST_VUS`+`SEARCH_VUS`) |
-| `-o KEY=VALUE` | — | extra env override, applied last (wins over the preset); repeatable |
+| `-e KEY=VALUE` | — | extra env override, applied last (wins over the preset); repeatable |
 | `--extra-args` | — | extra flags for `k6 run` (e.g. `--no-thresholds`) |
 | `--registry-enabled` | keep preset | mixed consistency ring buffer (needs `registry.enabled=true` on the chart) |
 | `--control-enabled` | keep preset | chaos pause/resume/set-rate control bus |
 
 **Document type** (`nyc_taxis` default, or `logs_data`) is a separate axis from `--scenario` (the
-script). Switch it via the overrides bag: `-o SCENARIO=logs_data`.
+script). Switch it via the overrides bag: `-e SCHEMA=logs_data`.
 
-For independent ingest/search rates in `mixed`, use `-o INGEST_RATE=…  -o SEARCH_RATE=…` rather
+For independent ingest/search rates in `mixed`, use `-e INGEST_RATE=…  -e SEARCH_RATE=…` rather
 than the single `--rate` convenience option.
 
 ---
@@ -333,17 +344,17 @@ any preset works with any scenario. Available presets: `ingest-steady`, `ingest-
 
 ---
 
-## Document scenarios
+## Document schemas
 
-All scripts select a document schema via the `SCENARIO` env var — a **separate axis** from
-`--scenario` (which picks the script). Override it with `-o SCENARIO=<type>`:
+All scripts select a document schema via the `SCHEMA` env var — a **separate axis** from
+`--scenario` (which picks the script). Override it with `-e SCHEMA=<type>`:
 
-| `SCENARIO` | Index (default) | Document type |
+| `SCHEMA` | Index (default) | Document type |
 |---|---|---|
 | `nyc_taxis` (default) | `nyc_taxis` | NYC taxi trip records — geo_point, scaled_float, date |
 | `logs_data` | `logs_data` | Structured log events — keyword, integer, text, date |
 
-`INDEX_NAME` defaults to the `SCENARIO` value; override with `-o INDEX_NAME=my-index`. The
+`INDEX_NAME` defaults to the `SCHEMA` value; override with `-e INDEX_NAME=my-index`. The
 NYC Taxis schema mirrors `DataGenerator/NycTaxis.java` exactly (same date format, constants and
 geo-point array format); the index is `dynamic: strict`, so any mismatch rejects documents.
 
@@ -351,15 +362,15 @@ geo-point array format); the index is `dynamic: strict`, so any mismatch rejects
 
 ## Configuration reference
 
-Set via preset (default) or per-run override. `-o KEY=VALUE` is applied last and wins.
+Set via preset (default) or per-run override. `-e KEY=VALUE` is applied last and wins.
 
 ### Common
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SCENARIO` | `nyc_taxis` | document schema (`nyc_taxis` or `logs_data`) |
+| `SCHEMA` | `nyc_taxis` | document schema (`nyc_taxis` or `logs_data`) |
 | `CAPTURE_PROXY_URL` | preset | proxy endpoint (also set by `--target`) |
-| `INDEX_NAME` | value of `SCENARIO` | target index |
+| `INDEX_NAME` | value of `SCHEMA` | target index |
 | `DURATION` | `5m` | scenario run time (`--duration`) |
 | `EXECUTOR` | `constant-arrival-rate` | set to `ramping-arrival-rate` for ramp/burst |
 | `RAMP_STAGES` | single hold stage | JSON array of k6 stages, e.g. `[{"duration":"2m","target":150}]` |
@@ -461,6 +472,21 @@ layers a short k6 run on a live CDC migration and asserts the traffic is capture
 the target **under load**. It's explicit-selection only; the test runner installs this chart when
 invoked with `--with-load-test`.
 
+The **only** command that installs the chart for you is the test-automation runner
+(`libraries/testAutomation`, `pipenv run app … --with-load-test`) — it runs `helm upgrade --install
+k6-load-test` once the migration stack is healthy, so you don't install separately for the test. On a
+cloud cluster whose migration stack is already up (e.g. from `aws-bootstrap.sh`), add `--skip-install`
+so only the k6 chart is added:
+
+```bash
+pipenv run app --skip-install --with-load-test --test-ids 0050 \
+  --source-version ES_7.10 --target-version OS_2.19 --registry-prefix <ecr-repo>/
+```
+
+For any run **outside** this test harness, install the chart yourself first (see
+[Install the load-test chart](#install-the-load-test-chart-opt-in)) — there is no `--with-load-test`
+equivalent on `aws-bootstrap.sh` or the `workflow k6` / `k6-run.sh` commands.
+
 ---
 
 ## Design decisions
@@ -471,7 +497,7 @@ invoked with `--with-load-test`.
   `connectionId` in the Capture Proxy, the foundation for connection-pinning in the sequences path.
 - **Proxy TLS.** The proxy listens HTTPS with a self-signed cert; k6 uses
   `insecureSkipTLSVerify: true`. The source cluster behind the proxy runs plain HTTP.
-- **Document scenarios.** Scripts select a generator via `SCENARIO`; each provides its own index
+- **Document schemas.** Scripts select a generator via `SCHEMA`; each provides its own index
   mapping (`data/<scenario>/mapping.json`), query samples and update-body generator. Adding a type
   needs only new `lib/data/<name>/{documents,queries}.js` + `data/<name>/mapping.json`.
 - **ID registry (mixed).** Cross-VU write-then-read state uses a Redis list via a Webdis HTTP proxy

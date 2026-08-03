@@ -38,7 +38,7 @@ header() { echo -e "\n${BOLD}$1${NC}"; }
 
 # ── k6 runs (console-independent, via k6-run.sh + kubectl) ─────────────────────
 # The scripts call these with console-style flags, passed straight through to k6-run.sh. Supported:
-#   --scenario X  --config NAME  --parallelism N  --registry-enabled  --extra-args STR  -o KEY=VAL
+#   --scenario X  --config NAME  --parallelism N  --registry-enabled  --extra-args STR  -e KEY=VAL
 submit_k6() {
   # Submit a k6 run WITHOUT waiting; echo the generated run name.
   local scenario="" config="" parallelism="" extra=""; local -a extra_env=()
@@ -49,7 +49,7 @@ submit_k6() {
       --parallelism) parallelism="$2"; shift ;;
       --registry-enabled) extra_env+=(-e REGISTRY_ENABLED=true) ;;
       --extra-args) extra="$2"; shift ;;
-      -o) extra_env+=(-e "$2"); shift ;;
+      -e) extra_env+=(-e "$2"); shift ;;
       *) echo "submit_k6: unknown flag $1" >&2; return 2 ;;
     esac
     shift

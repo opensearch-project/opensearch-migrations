@@ -142,7 +142,7 @@ class TestK6Run:
 
     @patch(f"{K6}.create_testrun")
     def test_bad_override_rejected(self, mock_create, cluster):
-        result = _runner().invoke(workflow_cli, ["k6", "run", "-o", "NOEQUALS"], env=ENV)
+        result = _runner().invoke(workflow_cli, ["k6", "run", "-e", "NOEQUALS"], env=ENV)
         assert result.exit_code == 2
         mock_create.assert_not_called()
 
