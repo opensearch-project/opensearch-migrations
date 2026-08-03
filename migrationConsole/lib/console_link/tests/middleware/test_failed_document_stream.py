@@ -492,7 +492,7 @@ class TestDeleteSession:
 # ---------- has_records error propagation -----------------------------------
 
 class TestHasRecordsPropagatesErrors:
-    """A stream that cannot be read must never report as "no failures" (#3273)."""
+    """A stream that cannot be read must never report as "no failures"."""
 
     def test_raises_on_client_error(self, mocker):
         err = ClientError({"Error": {"Code": "NoSuchBucket", "Message": "x"}}, "ListObjects")

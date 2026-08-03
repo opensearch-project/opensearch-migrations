@@ -2068,7 +2068,7 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
 
 
 def test_backfill_status_surfaces_unreadable_failed_document_stream(runner, mocker):
-    # A configured stream we cannot read must fail, not report a clean status (#3273).
+    # A configured stream we cannot read must fail, not report a clean status.
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
@@ -2153,7 +2153,7 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
 
 
 def test_backfill_status_json_deep_check_surfaces_unreadable_stream(runner, mocker):
-    # A configured stream we cannot read must fail rather than emit a clean payload (#3273).
+    # A configured stream we cannot read must fail rather than emit a clean payload.
     mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
                         return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
