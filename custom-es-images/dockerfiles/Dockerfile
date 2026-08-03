@@ -83,11 +83,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -ge 1 ] && [ "$MINOR" -le 2 ]; then \
       # Detect Alpine (apk) vs AL2023 (dnf) for compiler installation
       if command -v apk >/dev/null 2>&1; then \
-        for attempt in 1 2 3; do \
-          if apk add --no-cache gcc musl-dev; then break; fi; \
-          if [ "$attempt" -eq 3 ]; then exit 1; fi; \
-          sleep 5; \
-        done; \
+        apk add --no-cache gcc musl-dev; \
       else \
         dnf install -y gcc glibc-devel && dnf clean all; \
       fi && \
@@ -149,11 +145,7 @@ ENV ES_HOME=/usr/share/elasticsearch \
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
 # Alpine (Corretto 8): apk, AL2023 (Corretto 11+): dnf
 RUN if command -v apk >/dev/null 2>&1; then \
-      for attempt in 1 2 3; do \
-        if apk add --no-cache bash coreutils curl shadow which; then break; fi; \
-        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
-        sleep 5; \
-      done; \
+      apk add --no-cache bash coreutils curl shadow which; \
     else \
       dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which util-linux && \
       dnf clean all && rm -rf /var/cache/dnf; \
