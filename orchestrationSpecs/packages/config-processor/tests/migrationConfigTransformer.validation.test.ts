@@ -252,6 +252,18 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized keys.*solrCollections/);
     });
 
+    it('should reject solrContextPath on a user-facing ES/OS createSnapshotConfig', () => {
+        // Solr-only as well: ES/OS snapshots have no context path to configure.
+        const configWithContextPath = cloneBaseConfig();
+        configWithContextPath.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrContextPath: "/tenant-a/solr"
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithContextPath);
+        }).toThrow(/Unrecognized keys.*solrContextPath/);
+    });
+
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
         const result = await transformer.processFromObject(baseConfig);
         const m = result.snapshotMigrations[0];

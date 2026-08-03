@@ -33,6 +33,7 @@ type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
+    solrContextPath?: string;
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;

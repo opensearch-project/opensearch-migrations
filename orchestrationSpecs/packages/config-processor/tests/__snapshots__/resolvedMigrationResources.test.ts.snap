@@ -197,6 +197,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "snapshotLabel": "snap1",
       "snapshotPrefix": "snap1",
       "solrCollections": [],
+      "solrContextPath": "/solr",
       "solrExternalBackupName": "",
       "sourceAllowInsecure": true,
       "sourceAuthBasicSecretName": "",
