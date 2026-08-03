@@ -397,7 +397,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.migrationConsole.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.installer.repository"
@@ -405,7 +405,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.installer.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.reindexFromSnapshot.repository"
@@ -413,7 +413,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.reindexFromSnapshot.tag"
-      value = "latest"
+      value = var.migration_release
     },
     # Capture proxy and traffic replayer images (live capture-and-replay migrations).
     # The chart's default repositories for these are unqualified ("migrations/..."),
@@ -427,7 +427,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.captureProxy.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.trafficReplayer.repository"
@@ -435,7 +435,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.trafficReplayer.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "migrationConfig.bucket_name"

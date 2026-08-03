@@ -14,6 +14,19 @@ variable "project" {
   type        = string
 }
 
+variable "migration_release" {
+  description = <<-EOT
+    Migration Assistant release tag to deploy. Applied to every Migration
+    Assistant image (console, installer, reindex-from-snapshot, capture-proxy,
+    traffic-replayer). Defaults to a pinned release for reproducibility; bump it
+    to move to a newer release. The tag must exist for all four mirrored images
+    in the Artifact Registry repo the images.* repositories point at
+    (us-central1-docker.pkg.dev/<project>/migrations/*).
+  EOT
+  type        = string
+  default     = "3.3.4"
+}
+
 variable "region" {
   description = "GCP region"
   type        = string
