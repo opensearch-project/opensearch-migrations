@@ -7,22 +7,28 @@ Coverage targets:
   * _s3_client region/endpoint selection
   * list_records — sorting, limit, malformed gzip/JSON skipping
   * count — line counting, malformed gzip skipping
+  * has_records — short-circuiting on the first record
   * delete_session — 1000-key batching boundary
-  * safe_count — swallowing ClientError / BotoCoreError
+  * safe_has_records — swallowing ClientError / BotoCoreError
   * location helper
 
-S3 calls are mocked via pytest-mock; no moto / live S3 / kubernetes API needed.
+Most S3 calls are mocked via pytest-mock. TestAgainstRealS3Api additionally runs the read paths
+against moto, so botocore's real StreamingBody (partial reads, mid-stream close) is exercised.
+No live S3 or kubernetes API is needed.
 """
 from __future__ import annotations
 
 import gzip
 import io
 import json
+import os
 from typing import List
 from unittest.mock import MagicMock
 
+import boto3
 import pytest
 from botocore.exceptions import BotoCoreError, ClientError
+from moto import mock_aws
 
 import console_link.middleware.failed_document_stream as failed_document_stream
 
@@ -42,7 +48,7 @@ def _ndjson(records: List[dict]) -> str:
 
 def _make_s3_mock(objects_with_bodies: List[tuple]) -> MagicMock:
     """Build a MagicMock S3 client whose paginator yields the given (Key, body)
-    objects and whose get_object returns the matching body."""
+    objects and whose get_object returns the matching body as a readable stream."""
     client = MagicMock()
     paginator = MagicMock()
     pages = [{"Contents": [{"Key": key} for (key, _body) in objects_with_bodies]}]
@@ -52,12 +58,24 @@ def _make_s3_mock(objects_with_bodies: List[tuple]) -> MagicMock:
     body_by_key = {key: body for (key, body) in objects_with_bodies}
 
     def fake_get_object(Bucket, Key):
-        body = MagicMock()
-        body.read.return_value = body_by_key[Key]
-        return {"Body": body}
+        # BytesIO stands in for botocore's StreamingBody: read(n)-able and closeable.
+        return {"Body": io.BytesIO(body_by_key[Key])}
 
     client.get_object.side_effect = fake_get_object
     return client
+
+
+class _CountingStream(io.BytesIO):
+    """BytesIO that remembers how much was actually pulled off it."""
+
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
 
 
 def _config(**overrides) -> failed_document_stream.FailedDocumentStreamConfig:
@@ -267,6 +285,114 @@ class TestCount:
         assert failed_document_stream.count(_config()) == 1
 
 
+# ---------- has_records -----------------------------------------------------
+
+class TestHasRecords:
+    def test_true_when_a_record_exists(self, mocker):
+        s3 = _make_s3_mock([("a.gz", _gz(_ndjson([{"documentId": "d1"}])))])
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=s3)
+
+        assert failed_document_stream.has_records(_config()) is True
+
+    def test_false_when_no_objects(self, mocker):
+        s3 = _make_s3_mock([])
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=s3)
+
+        assert failed_document_stream.has_records(_config()) is False
+
+    def test_false_when_objects_hold_no_records(self, mocker):
+        # An object that exists but decodes to nothing usable must not read as a failure.
+        s3 = _make_s3_mock([("empty.gz", _gz("\n  \n")), ("bad.gz", b"not gzip")])
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=s3)
+
+        assert failed_document_stream.has_records(_config()) is False
+
+    def test_stops_after_the_first_object(self, mocker):
+        # The whole point: a stream with millions of failures must not be read to answer "any?".
+        bodies = [(f"k{i}.gz", _gz(_ndjson([{"documentId": f"d{i}"}]))) for i in range(50)]
+        s3 = _make_s3_mock(bodies)
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=s3)
+
+        assert failed_document_stream.has_records(_config()) is True
+        assert s3.get_object.call_count == 1
+
+    def test_does_not_read_the_whole_object(self, mocker):
+        # ...nor the rest of the first object once a record has been found.
+        big = _gz(_ndjson([{"documentId": f"d{i}"} for i in range(200_000)]))
+        stream = _CountingStream(big)
+
+        client = MagicMock()
+        paginator = MagicMock()
+        paginator.paginate.return_value = iter([{"Contents": [{"Key": "big.gz"}]}])
+        client.get_paginator.return_value = paginator
+        client.get_object.return_value = {"Body": stream}
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=client)
+
+        assert failed_document_stream.has_records(_config()) is True
+        assert stream.bytes_read < len(big)
+
+
+# ---------- against a real S3 API (moto) ------------------------------------
+
+@pytest.fixture
+def aws_credentials():
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_SECURITY_TOKEN"] = "testing"
+    os.environ["AWS_SESSION_TOKEN"] = "testing"
+    os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+
+class TestAgainstRealS3Api:
+    """The mocks above hand out BytesIO; these exercise botocore's real StreamingBody,
+    which is what ``_iter_records`` actually reads (and closes mid-stream)."""
+
+    @staticmethod
+    def _seed(objects: List[tuple]) -> failed_document_stream.FailedDocumentStreamConfig:
+        cfg = _config(bucket="fds-bucket", prefix="p/", session_id="sess-1")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket=cfg.bucket)
+        for name, body in objects:
+            s3.put_object(Bucket=cfg.bucket, Key=f"{cfg.session_prefix}{name}", Body=body)
+        return cfg
+
+    def test_has_records_true_over_streaming_body(self, aws_credentials):
+        with mock_aws():
+            cfg = self._seed([("a.ndjson.gz", _gz(_ndjson([{"targetIndex": "i", "documentId": "d1"}])))])
+            assert failed_document_stream.has_records(cfg) is True
+
+    def test_has_records_false_when_prefix_empty(self, aws_credentials):
+        with mock_aws():
+            cfg = self._seed([])
+            assert failed_document_stream.has_records(cfg) is False
+
+    def test_has_records_short_circuits_a_large_body(self, aws_credentials):
+        # Closing the StreamingBody part-way must not raise or hang.
+        with mock_aws():
+            big = _gz(_ndjson([{"targetIndex": "i", "documentId": f"d{i}"} for i in range(200_000)]))
+            cfg = self._seed([("big.ndjson.gz", big)])
+            assert failed_document_stream.has_records(cfg) is True
+
+    def test_count_and_list_agree_over_streaming_body(self, aws_credentials):
+        with mock_aws():
+            cfg = self._seed([
+                ("a.ndjson.gz", _gz(_ndjson([{"targetIndex": "i", "documentId": "d1", "timestamp": "t1"}]))),
+                # d1 re-emitted (at-least-once) plus a new document.
+                ("b.ndjson.gz", _gz(_ndjson([{"targetIndex": "i", "documentId": "d1", "timestamp": "t2"},
+                                             {"targetIndex": "i", "documentId": "d2", "timestamp": "t2"}]))),
+            ])
+            assert failed_document_stream.count(cfg) == 2
+            assert [r["documentId"] for r in failed_document_stream.list_records(cfg)] == ["d1", "d2"]
+
+    def test_other_sessions_are_not_read(self, aws_credentials):
+        with mock_aws():
+            cfg = self._seed([])
+            boto3.client("s3", region_name="us-east-1").put_object(
+                Bucket=cfg.bucket, Key="p/session=other/a.ndjson.gz",
+                Body=_gz(_ndjson([{"targetIndex": "i", "documentId": "x"}])))
+            assert failed_document_stream.has_records(cfg) is False
+
+
 # ---------- deduplication (at-least-once → duplicates collapse) --------------
 
 class TestDeduplication:
@@ -363,28 +489,28 @@ class TestDeleteSession:
         assert len(second_batch) == 500
 
 
-# ---------- safe_count ------------------------------------------------------
+# ---------- safe_has_records ------------------------------------------------
 
-class TestSafeCount:
-    def test_returns_count_on_success(self, mocker):
-        mocker.patch.object(failed_document_stream, "count", return_value=42)
-        assert failed_document_stream.safe_count(_config()) == 42
+class TestSafeHasRecords:
+    def test_returns_result_on_success(self, mocker):
+        mocker.patch.object(failed_document_stream, "has_records", return_value=True)
+        assert failed_document_stream.safe_has_records(_config()) is True
 
     def test_returns_none_on_client_error(self, mocker):
         err = ClientError({"Error": {"Code": "NoSuchBucket", "Message": "x"}}, "ListObjects")
-        mocker.patch.object(failed_document_stream, "count", side_effect=err)
-        assert failed_document_stream.safe_count(_config()) is None
+        mocker.patch.object(failed_document_stream, "has_records", side_effect=err)
+        assert failed_document_stream.safe_has_records(_config()) is None
 
     def test_returns_none_on_botocore_error(self, mocker):
         # BotoCoreError requires no args.
-        mocker.patch.object(failed_document_stream, "count", side_effect=BotoCoreError())
-        assert failed_document_stream.safe_count(_config()) is None
+        mocker.patch.object(failed_document_stream, "has_records", side_effect=BotoCoreError())
+        assert failed_document_stream.safe_has_records(_config()) is None
 
     def test_does_not_swallow_unrelated_exceptions(self, mocker):
-        # safe_count is narrow on purpose — programming bugs should still surface.
-        mocker.patch.object(failed_document_stream, "count", side_effect=ValueError("boom"))
+        # safe_has_records is narrow on purpose — programming bugs should still surface.
+        mocker.patch.object(failed_document_stream, "has_records", side_effect=ValueError("boom"))
         with pytest.raises(ValueError):
-            failed_document_stream.safe_count(_config())
+            failed_document_stream.safe_has_records(_config())
 
 
 # ---------- _select_snapshot_migration --------------------------------------

@@ -574,12 +574,12 @@ class K8sService:
             except Exception as e:
                 logger.error(f"--- {label} --- FAILED: {e}")
 
-        # Dump installer job logs if present
+        # Dump installer job logs if present. Select by the release instance label the
+        # Job stamps on its pods -- same selector the job/finalizer queries above use.
         try:
-            chart_name = release_name.replace('ma', 'migrationAssistantWithArgo')
             pod_result = subprocess.run(
                 self._kubectl_base() + ["get", "pods", "-n", self.namespace,
-                                        "-l", f"app.kubernetes.io/name={chart_name}",
+                                        "-l", f"app.kubernetes.io/instance={release_name}",
                                         "-o", "jsonpath={.items[*].metadata.name}"],
                 capture_output=True, text=True, timeout=10)
             for pod_name in pod_result.stdout.split():

@@ -192,7 +192,9 @@ variable "allowed_ingress_cidrs" {
 variable "node_iam_roles" {
   description = "GCP IAM roles granted to the GKE node service account"
   type        = list(string)
-  default     = ["roles/storage.admin", "roles/artifactregistry.reader"]
+  # logging.logWriter lets fluent-bit ship workload logs to Cloud Logging via
+  # Workload Identity (see the fluent-bit stackdriver output in valuesGke.yaml).
+  default = ["roles/storage.admin", "roles/artifactregistry.reader", "roles/logging.logWriter"]
 }
 
 variable "workload_identity_namespace" {
