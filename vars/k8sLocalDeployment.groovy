@@ -62,8 +62,8 @@ def call(Map config = [:]) {
 
             stage('Install Kind') {
                 steps {
-                    // Keep the CI tool isolated to this workspace so concurrent jobs do not
-                    // depend on or mutate the Jenkins agent's global installation.
+                    // Install into this workspace from a versioned, checksum-verified cache
+                    // under the agent's home directory.
                     sh 'KIND_INSTALL_DIR="${WORKSPACE}/.ci-bin" ./jenkins/installKind.sh'
                 }
             }
@@ -126,6 +126,19 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Prepare Kind Test Chart') {
+                steps {
+                    // The supported chart requires Kubernetes 1.35 because ImageVolume-backed
+                    // transforms depend on it being enabled by default. Jenkins agents that use
+                    // cgroup v1 can only run 1.34, and this matrix does not exercise ImageVolume.
+                    sh '''
+                        ./jenkins/prepareKindTestChart.sh \
+                            "${WORKSPACE}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo" \
+                            "${WORKSPACE}/.ci-chart/migrationAssistantWithArgo"
+                    '''
+                }
+            }
+
             stage('Perform Python E2E Tests') {
                 steps {
                     timeout(time: 5, unit: 'HOURS') {
@@ -154,7 +167,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=kind-ma --capture-proxy-service-type=ClusterIP"
+                                sh "pipenv run app --source-version $sourceVerArg --target-version=$targetVer $testIdsArg $traceArgs --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=kind-ma --capture-proxy-service-type=ClusterIP --ma-chart-path='${WORKSPACE}/.ci-chart/migrationAssistantWithArgo'"
                             }
                         }
                     }

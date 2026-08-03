@@ -686,6 +686,13 @@ def parse_args(argv=None) -> argparse.Namespace:
              "Defaults to valuesForLocalK8s.yaml if not specified."
     )
     parser.add_argument(
+        "--ma-chart-path",
+        type=str,
+        default=None,
+        help="Override the Migration Assistant Helm chart path. "
+             "Defaults to the chart in deployment/k8s."
+    )
+    parser.add_argument(
         "--skip-install",
         action="store_true",
         help="Skip helm install (use when deployment already exists, e.g., from aws-bootstrap.sh)"
@@ -762,7 +769,7 @@ def main() -> None:
     k8s_service = K8sService(kube_context=args.kube_context)
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
-    ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
+    ma_chart_path = args.ma_chart_path or f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
 
     target_type = TargetType(args.target_type)
     if "all" in args.source_version and len(args.source_version) > 1:

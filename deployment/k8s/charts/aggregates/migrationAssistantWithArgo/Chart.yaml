@@ -3,6 +3,6 @@ name: migration-assistant
 version: 0.2.0
 type: application
 appVersion: "latest"
-# podFailurePolicy on Jobs requires Kubernetes >= 1.26 (beta) / GA in 1.31.
-# Jenkins exercises the chart against Kubernetes 1.34.
-kubeVersion: ">=1.34.0-0"
+# ImageVolume is enabled by default in Kubernetes 1.35 and is used by
+# image-backed mountable transforms.
+kubeVersion: ">=1.35.0-0"
