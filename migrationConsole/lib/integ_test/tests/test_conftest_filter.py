@@ -105,7 +105,8 @@ def test_aoss_pipeline_id_set_resolves_expected_classes():
 
 def test_aoss_collection_pipeline_uses_one_combined_test():
     assert _names(_filter_test_cases(["0021"])) == ["Test0021AossCollectionMigrations"]
-    assert _filter_test_cases(["0022", "0023"]) == []
+    with pytest.raises(pytest.UsageError, match="No test classes match requested test IDs: 0022, 0023"):
+        _filter_test_cases(["0022", "0023"])
 
 
 def test_solr_pipeline_id_set_resolves_expected_classes():
