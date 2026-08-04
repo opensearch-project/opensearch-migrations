@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from integ_test.integration_test_argo_service import IntegrationTestArgoService, WorkflowEndedBeforeSuspend
+from integ_test.parked_gate_detection import INNER_WORKFLOW_NAME, ParkedApprovalGateError
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunnerError, FlagOnlyArgument
 
@@ -403,6 +404,93 @@ def test_wait_for_ending_phase_status_failure(mock_get_status, argo_service):
         argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
 
     assert "Failed to get workflow status" in str(exc_info.value)
+
+
+# Parked approval gate detection in the wait loops.
+#
+# A workflow parked on a VAP-denial approval gate stays 'Running' indefinitely by
+# design, so without this check the only outcome is the full timeout (1800s for a
+# migration) with a message that never mentions the denial.
+
+RUNNING_STATUS_VALUE = {
+    "phase": "Running",
+    "has_suspended_nodes": False,
+    "suspended_nodes": [],
+    "running_nodes": [{"displayName": "waitForFix", "type": "Pod", "phase": "Running"}],
+    "pending_nodes": [],
+    "unsuccessful_nodes": [],
+}
+PARKED_GATE = ("datasnapshot.source1-testsnapshot.vapretry", "Impossible field change", "retry")
+
+
+@pytest.fixture
+def parked_gate_stub():
+    """Report a parked gate for every workflow and skip cluster config loading.
+
+    The check interval is zeroed so the wait loop under test isn't held to the
+    30s production throttle in wall-clock time.
+    """
+    with patch("integ_test.parked_gate_detection.load_k8s_config"), \
+            patch("integ_test.parked_gate_detection.DEFAULT_CHECK_INTERVAL_SECONDS", 0), \
+            patch("integ_test.parked_gate_detection.waiting_runtime_gates", return_value=[PARKED_GATE]) as stub:
+        yield stub
+
+
+@pytest.mark.parametrize("wait_method", ["wait_for_suspend", "wait_for_ending_phase"])
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+@patch('time.sleep')
+def test_wait_fails_fast_on_parked_approval_gate(mock_sleep, mock_get_status, wait_method, argo_service,
+                                                 parked_gate_stub):
+    mock_get_status.return_value = CommandResult(success=True, value=RUNNING_STATUS_VALUE)
+
+    with pytest.raises(ParkedApprovalGateError) as exc_info:
+        getattr(argo_service, wait_method)("test-workflow", timeout_seconds=600, interval=0.1)
+
+    assert PARKED_GATE[0] in str(exc_info.value)
+    assert PARKED_GATE[1] in str(exc_info.value)
+    # Returned on the second observation rather than running out the 600s budget.
+    assert mock_sleep.call_count == 1
+
+
+@pytest.mark.parametrize("wait_method", ["wait_for_suspend", "wait_for_ending_phase"])
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+@patch('time.sleep')
+def test_wait_ignores_expected_parked_gate(mock_sleep, mock_get_status, wait_method, argo_service, parked_gate_stub):
+    """A test that deliberately exercises park-and-recover opts out."""
+    mock_get_status.return_value = CommandResult(success=True, value=RUNNING_STATUS_VALUE)
+    argo_service.expected_parked_gate_names = [PARKED_GATE[0]]
+
+    with patch.object(IntegrationTestArgoService, "collect_namespace_diagnostics", return_value=""), \
+            pytest.raises(TimeoutError):
+        getattr(argo_service, wait_method)("test-workflow", timeout_seconds=1, interval=0.1)
+
+
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+def test_wait_checks_polled_and_inner_workflow_for_parked_gates(mock_get_status, argo_service):
+    """The reconcile steps that can park live in the inner migration-workflow."""
+    mock_get_status.return_value = CommandResult(success=True, value=RUNNING_STATUS_VALUE)
+    watcher = argo_service.parked_gate_watcher_for("outer-workflow")
+
+    assert watcher.workflow_names == ["outer-workflow", INNER_WORKFLOW_NAME]
+    assert watcher.namespace == argo_service.namespace
+
+
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+@patch('time.sleep')
+@patch('time.time')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.collect_namespace_diagnostics')
+def test_timeout_message_reports_unconfirmed_parked_gate(mock_collect_diagnostics, mock_time, mock_sleep,
+                                                         mock_get_status, argo_service, parked_gate_stub):
+    """A single sighting isn't enough to fail, but it should still be reported."""
+    mock_time.side_effect = itertools.chain([0, 0, 2], itertools.repeat(2))
+    mock_get_status.return_value = CommandResult(success=True, value=RUNNING_STATUS_VALUE)
+    mock_collect_diagnostics.return_value = "namespace diagnostics"
+
+    with pytest.raises(TimeoutError) as exc_info:
+        argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
+
+    assert "unconfirmed_parked_gates" in str(exc_info.value)
+    assert PARKED_GATE[0] in str(exc_info.value)
 
 
 # Internal method tests
