@@ -1,9 +1,9 @@
-"""Tests for parked runtime approval gate detection.
+"""Tests for detection of workflows blocked on an unapproved approval gate.
 
-The signal under test is the pair `console_link`'s approve command extracts from
-the Argo node graph — a Running waitForFix plus a Failed tryApply sibling — so
-these tests stub `waiting_runtime_gates` and exercise the throttling,
-confirmation, and message-formatting logic on top of it.
+The signal under test is what `console_link`'s approve command extracts from the
+Argo node graph — a Running approval node, plus (for a runtime gate) a Failed
+tryApply sibling carrying the denial — so these tests stub `waiting_gates` and
+exercise the throttling, confirmation, and message-formatting logic on top of it.
 """
 
 import pytest
@@ -24,6 +24,7 @@ RETRY_GATE = "datasnapshot.source1-testsnapshot.vapretry"
 RETRY_REASON = "Impossible field change on datasnapshot: spec.snapshotName"
 CHANGE_GATE = "captureproxy.capture-proxy.vapretry"
 CHANGE_REASON = "Gated field change on captureproxy: spec.replicas"
+STEP_GATE = "documentbackfill.source1-target1-testsnapshot-migration-0"
 
 
 class FakeClock:
@@ -40,11 +41,11 @@ class FakeClock:
 
 
 def _patch_waiting(gates):
-    return patch("integ_test.parked_gate_detection.waiting_runtime_gates", return_value=gates)
+    return patch("integ_test.parked_gate_detection.waiting_gates", return_value=gates)
 
 
 def _patch_waiting_side_effect(side_effect):
-    return patch("integ_test.parked_gate_detection.waiting_runtime_gates", side_effect=side_effect)
+    return patch("integ_test.parked_gate_detection.waiting_gates", side_effect=side_effect)
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +67,14 @@ def test_find_parked_gates_returns_waiting_runtime_gates():
     assert parked[0].kind == "retry"
 
 
+def test_find_parked_gates_includes_step_gates():
+    """A step gate hangs the wait exactly like a runtime one, so it counts too."""
+    with _patch_waiting([(STEP_GATE, None, "step")]):
+        parked = find_parked_gates(NAMESPACE, INNER_WORKFLOW_NAME)
+
+    assert [(gate.name, gate.kind) for gate in parked] == [(STEP_GATE, "step")]
+
+
 def test_find_parked_gates_empty_when_nothing_waiting():
     with _patch_waiting([]):
         assert find_parked_gates(NAMESPACE, INNER_WORKFLOW_NAME) == []
@@ -76,6 +85,14 @@ def test_find_parked_gates_excludes_expected_gates():
         parked = find_parked_gates(NAMESPACE, INNER_WORKFLOW_NAME, expected_gate_names=[RETRY_GATE])
 
     assert [gate.name for gate in parked] == [CHANGE_GATE]
+
+
+def test_find_parked_gates_excludes_expected_step_gates():
+    """Test0003 approves its own step gates, so only unlisted ones are failures."""
+    with _patch_waiting([(STEP_GATE, None, "step"), (RETRY_GATE, RETRY_REASON, "retry")]):
+        parked = find_parked_gates(NAMESPACE, INNER_WORKFLOW_NAME, expected_gate_names=[STEP_GATE])
+
+    assert [gate.name for gate in parked] == [RETRY_GATE]
 
 
 def test_find_parked_gates_swallows_errors():
@@ -221,6 +238,16 @@ def test_failure_message_includes_approve_guidance_for_change_gate():
 
     assert "workflow approve change" in message
     assert "workflow reset" not in message
+
+
+def test_failure_message_includes_step_guidance_for_step_gate():
+    message = format_parked_gate_failure({INNER_WORKFLOW_NAME: [ParkedGate(STEP_GATE, None, "step")]})
+
+    assert STEP_GATE in message
+    assert "workflow approve step" in message
+    assert "skipApprovals=true" in message
+    # A step gate has no failed apply behind it, so don't invent a denial reason.
+    assert "no denial reason" not in message
 
 
 def test_failure_message_handles_missing_denial_reason():

@@ -406,11 +406,11 @@ def test_wait_for_ending_phase_status_failure(mock_get_status, argo_service):
     assert "Failed to get workflow status" in str(exc_info.value)
 
 
-# Parked approval gate detection in the wait loops.
+# Unapproved approval gate detection in the wait loops.
 #
-# A workflow parked on a VAP-denial approval gate stays 'Running' indefinitely by
-# design, so without this check the only outcome is the full timeout (1800s for a
-# migration) with a message that never mentions the denial.
+# A workflow blocked on an approval gate stays 'Running' indefinitely by design,
+# so without this check the only outcome is the full timeout (1800s for a
+# migration) with a message that never mentions the gate.
 
 RUNNING_STATUS_VALUE = {
     "phase": "Running",
@@ -421,19 +421,27 @@ RUNNING_STATUS_VALUE = {
     "unsuccessful_nodes": [],
 }
 PARKED_GATE = ("datasnapshot.source1-testsnapshot.vapretry", "Impossible field change", "retry")
+PARKED_STEP_GATE = ("documentbackfill.source1-target1-testsnapshot-migration-0", None, "step")
 
 
-@pytest.fixture
-def parked_gate_stub():
-    """Report a parked gate for every workflow and skip cluster config loading.
+def _parked_gate_stub_for(gates):
+    """Report `gates` for every workflow and skip cluster config loading.
 
     The check interval is zeroed so the wait loop under test isn't held to the
     30s production throttle in wall-clock time.
     """
-    with patch("integ_test.parked_gate_detection.load_k8s_config"), \
-            patch("integ_test.parked_gate_detection.DEFAULT_CHECK_INTERVAL_SECONDS", 0), \
-            patch("integ_test.parked_gate_detection.waiting_runtime_gates", return_value=[PARKED_GATE]) as stub:
-        yield stub
+    return (
+        patch("integ_test.parked_gate_detection.load_k8s_config"),
+        patch("integ_test.parked_gate_detection.DEFAULT_CHECK_INTERVAL_SECONDS", 0),
+        patch("integ_test.parked_gate_detection.waiting_gates", return_value=gates),
+    )
+
+
+@pytest.fixture
+def parked_gate_stub():
+    no_config, no_throttle, stub = _parked_gate_stub_for([PARKED_GATE])
+    with no_config, no_throttle, stub as waiting:
+        yield waiting
 
 
 @pytest.mark.parametrize("wait_method", ["wait_for_suspend", "wait_for_ending_phase"])
@@ -449,6 +457,22 @@ def test_wait_fails_fast_on_parked_approval_gate(mock_sleep, mock_get_status, wa
     assert PARKED_GATE[0] in str(exc_info.value)
     assert PARKED_GATE[1] in str(exc_info.value)
     # Returned on the second observation rather than running out the 600s budget.
+    assert mock_sleep.call_count == 1
+
+
+@pytest.mark.parametrize("wait_method", ["wait_for_suspend", "wait_for_ending_phase"])
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+@patch('time.sleep')
+def test_wait_fails_fast_on_unexpected_step_gate(mock_sleep, mock_get_status, wait_method, argo_service):
+    """Tests run with skipApprovals=true, so a waiting step gate hangs just as hard."""
+    mock_get_status.return_value = CommandResult(success=True, value=RUNNING_STATUS_VALUE)
+    no_config, no_throttle, stub = _parked_gate_stub_for([PARKED_STEP_GATE])
+
+    with no_config, no_throttle, stub, pytest.raises(ParkedApprovalGateError) as exc_info:
+        getattr(argo_service, wait_method)("test-workflow", timeout_seconds=600, interval=0.1)
+
+    assert PARKED_STEP_GATE[0] in str(exc_info.value)
+    assert "workflow approve step" in str(exc_info.value)
     assert mock_sleep.call_count == 1
 
 

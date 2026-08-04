@@ -95,21 +95,22 @@ def _classify_runtime_gate(denial_msg):
     return 'retry' if 'Impossible' in denial_msg else 'change'
 
 
-def waiting_runtime_gates(namespace, workflow_name):
-    """Public accessor for the runtime gates a workflow is actively blocked on.
+def waiting_gates(namespace, workflow_name):
+    """Public accessor for every gate a workflow is actively blocked on.
 
     Returns a list of (gate_name, denial_reason, category) where category is
-    'change' or 'retry', filtered to runtime ('.vapretry') gates only. Step
-    gates are excluded because they are a normal mid-run state.
+    'step' for a user-defined approval point, or 'change'/'retry' for a runtime
+    VAP-denial gate. Anything blocking here will block until someone approves
+    it, whatever its category.
 
     Exposed for callers outside this module (notably the integration test
-    harness, which needs to tell a parked workflow from a slow one) so they
+    harness, which needs to tell a blocked workflow from a slow one) so they
     don't have to reach for the private helpers or reimplement the node walk.
     """
     return [
-        (name, reason, _classify_runtime_gate(reason))
+        (name, reason,
+         _classify_runtime_gate(reason) if _gate_category_from_name(name) == 'runtime' else 'step')
         for name, reason in _waiting_gates_from_workflow(namespace, workflow_name)
-        if _gate_category_from_name(name) == 'runtime'
     ]
 
 

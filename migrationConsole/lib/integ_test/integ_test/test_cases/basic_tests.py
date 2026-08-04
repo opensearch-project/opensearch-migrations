@@ -102,6 +102,11 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.doc_id = "test_0003_doc"
         self.doc_type = "sample_type"
         self.snapshot_migration_name = "source1-target1-testsnapshot-migration-0"
+        # Unlike every other test, this one runs with skipApprovals=false and means
+        # to block at each of these gates until it approves them by hand, so the
+        # wait loops must not treat them as a workflow stuck on an approval nobody
+        # will give. Any gate outside this list still fails the test.
+        self.argo_service.expected_parked_gate_names = self._approval_gate_names()
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)

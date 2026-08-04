@@ -100,11 +100,12 @@ class WorkflowEndedBeforeSuspend(Exception):
 class IntegrationTestArgoService:
     def __init__(self, namespace: str = "ma"):
         self.namespace = namespace
-        # Runtime approval gates this test intends to leave parked. Empty for
-        # every test today: a parked gate means the workflow is waiting on an
-        # approval no test will ever give, so the wait loops treat it as a
-        # failure. A test that deliberately exercises park-and-recover adds its
-        # gate names here before starting the wait.
+        # Approval gates this test intends to sit on. Empty by default: a gate
+        # blocking a wait means the workflow needs an approval the test isn't
+        # going to give, so the wait loops treat it as a failure rather than
+        # burning the whole timeout. A test that approves its own step gates, or
+        # deliberately exercises park-and-recover, lists those gate names here
+        # before starting the wait.
         self.expected_parked_gate_names: List[str] = []
 
     def parked_gate_watcher_for(self, workflow_name: str) -> ParkedGateWatcher:
