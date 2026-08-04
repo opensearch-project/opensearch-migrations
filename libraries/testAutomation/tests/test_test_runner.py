@@ -117,6 +117,14 @@ class TestFailureDetection:
                 passed=0, failed=0, expected=0, source="OS_1.3", target="OS_2.19")):
             runner.run()  # Should not raise
 
+    def test_nonzero_pytest_exit_fails_even_when_zero_tests_are_expected(self):
+        runner = _make_runner(combinations=[("ES_2.4", "OS_3.1")])
+        report = _make_report(passed=0, failed=0, expected=0)
+        report.exit_code = 2
+        with patch.object(runner, "run_tests", return_value=report):
+            with pytest.raises(TestsFailed, match="test failures"):
+                runner.run()
+
     def test_skip_delete_does_not_skip_workflow_reset(self):
         runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
         with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)) as run_tests:
@@ -182,6 +190,26 @@ class TestPytestCommand:
 
         command_list = runner.k8s_service.exec_background_cmd.call_args.kwargs["command_list"]
         assert "--capture_proxy_service_type=ClusterIP" in command_list
+
+    def test_pytest_exit_code_is_preserved_in_report(self):
+        runner = _make_runner(combinations=[("ES_8.19", "OS_3.1")])
+        runner.k8s_service.exec_background_cmd.return_value = "migration-console-0"
+        runner.k8s_service.poll_cmd_completion.return_value = 2
+        runner.k8s_service.exec_migration_console_cmd.return_value = str({
+            "summary": {
+                "passed": 0,
+                "failed": 0,
+                "source_version": "ES_8.19",
+                "target_version": "OS_3.1",
+                "expected": 0,
+            },
+            "tests": [],
+        })
+
+        report = runner.run_tests(source_version="ES_8.19", target_version="OS_3.1")
+
+        assert report.exit_code == 2
+        assert runner._report_failed(report)
 
     def test_skip_delete_does_not_disable_inter_case_reset(self):
         """--skip-delete preserves the deployment but must NOT pass
