@@ -6,6 +6,8 @@ leak into the selection set. Test IDs are themselves expected to be
 unique per class — see Test0041 (CDC full E2E AOSS) vs Test0042 (CDC
 full E2E mountable transforms).
 """
+import pytest
+
 from integ_test.conftest import _filter_test_cases  # noqa: E402
 
 # Importing conftest re-runs the test_cases imports, so ALL_TEST_CASES is populated.
@@ -48,6 +50,16 @@ def test_unique_id_returns_single_class():
     # Unique ID — no other test class uses the 0042 prefix.
     for name in selected:
         assert name.startswith("Test0042"), name
+
+
+def test_unknown_explicit_id_is_rejected():
+    with pytest.raises(pytest.UsageError, match="No test classes match requested test IDs: renamed-test"):
+        _filter_test_cases(["renamed-test"])
+
+
+def test_unknown_id_is_rejected_when_other_ids_match():
+    with pytest.raises(pytest.UsageError, match="No test classes match requested test IDs: renamed-test"):
+        _filter_test_cases(["0042", "renamed-test"])
 
 
 def test_id_0041_only_returns_aoss_target_class():
