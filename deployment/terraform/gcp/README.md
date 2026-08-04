@@ -64,6 +64,7 @@ terraform destroy -var="project=my-project"
 |------|---------|-------------|
 | `project` | (required) | GCP project ID |
 | `region` | `us-central1` | GCP region |
+| `migration_release` | `3.3.4` | Migration Assistant release tag applied to all MA images (console, installer, reindex-from-snapshot, capture-proxy, traffic-replayer); must exist in the Artifact Registry mirror |
 | `node_machine_type` | `e2-standard-4` | Node machine type |
 | `node_count` | `2` | Initial nodes per zone |
 | `create_vpc` | `true` | Create new VPC, or use existing (`false`) |
