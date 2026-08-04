@@ -97,6 +97,10 @@ class Test0008OptionalSnapshotStages(MATestBase):
     the workflow uid (see fullMigrationImportedClusters.yaml), so a snapshot from one
     workflow is not readable by another and reuse is not an option.
 
+    Because the repo path differs per workflow, each run must also carry its own snapshot
+    label — the label is what names the DataSnapshot / SnapshotMigration CRs, whose repo
+    paths are immutable. See _extra_run_parameters.
+
     - metadata-only run: metadataMigrationConfig present, documentBackfillConfig absent.
       metadataMigrate Succeeds, bulkLoadDocuments is Skipped. The index mappings land on
       the target but the document does not — the functional proof that backfill was
@@ -126,6 +130,10 @@ class Test0008OptionalSnapshotStages(MATestBase):
         # and of the baseline (metadata migration fails on an already-existing index).
         self.metadata_only_index = f"test_0008_meta_{self.unique_id}-{run_suffix}"
         self.backfill_only_index = f"test_0008_backfill_{self.unique_id}-{run_suffix}"
+        # ...and its own snapshot label, which is what keeps the runs on distinct
+        # DataSnapshot/SnapshotMigration CRs. See _extra_run_parameters.
+        self.metadata_only_snapshot_label = f"meta-{run_suffix}"
+        self.backfill_only_snapshot_label = f"backfill-{run_suffix}"
         self.doc_id = "test_0008_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
@@ -161,17 +169,25 @@ class Test0008OptionalSnapshotStages(MATestBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _extra_run_parameters(self, migration_config: dict) -> dict:
+    def _extra_run_parameters(self, migration_config: dict, snapshot_label: str) -> dict:
         """Build parameters for an extra run against the already-provisioned clusters.
 
         Uses imported-clusters mode so no new clusters are stood up. The run creates its
         own snapshot (the repo path is per-workflow, so the baseline's snapshot is not
         reachable from here).
+
+        snapshot_label must be unique per workflow. It names the DataSnapshot CR
+        (source1-<label>) and the SnapshotMigration CR (source1-target1-<label>-migration-N),
+        and those CRs' repoPathUri / snapshotRepoPathUri are immutable per the
+        ValidatingAdmissionPolicies. Since the repo path carries the workflow uid, a second
+        run reusing the baseline's default "testsnapshot" label resolves to the baseline's
+        CRs and its apply is rejected outright ("cannot be changed. Delete and recreate.").
         """
         return {
             "source-configs": [{
                 "source": self.source_cluster.config,
                 "snapshot-and-migration-configs": [{
+                    "snapshotConfig": {"snapshotLabel": snapshot_label},
                     "migrations": [migration_config],
                 }],
             }],
@@ -238,7 +254,7 @@ class Test0008OptionalSnapshotStages(MATestBase):
         allowlist = [self.metadata_only_index]
         params = self._extra_run_parameters({
             "metadataMigrationConfig": {"indexAllowlist": allowlist},
-        })
+        }, snapshot_label=self.metadata_only_snapshot_label)
         wf = self._submit_and_wait(params, label)
         phases = self._node_phases_by_display_name(wf)
         self._assert_node_phase(phases, "metadataMigrate", "Succeeded", label)
@@ -269,7 +285,7 @@ class Test0008OptionalSnapshotStages(MATestBase):
                     "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"},
                 },
             }
-        })
+        }, snapshot_label=self.backfill_only_snapshot_label)
         wf = self._submit_and_wait(params, label)
         phases = self._node_phases_by_display_name(wf)
         self._assert_node_phase(phases, "metadataMigrate", "Skipped", label)
