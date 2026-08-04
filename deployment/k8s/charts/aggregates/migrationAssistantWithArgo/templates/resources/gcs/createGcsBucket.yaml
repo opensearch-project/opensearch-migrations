@@ -8,7 +8,9 @@ metadata:
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   backoffLimit: 2
   template:
     metadata:
