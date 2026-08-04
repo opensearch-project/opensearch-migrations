@@ -17,7 +17,7 @@ class Test0020GcsSnapshotMigration(MATestBase):
 
     Exercises the create-snapshot → metadata-migration → document-backfill
     code path against a real Elasticsearch source cluster. The snapshot is
-    written to a GCS bucket; for local minikube/kind testing the bucket is
+    written to a GCS bucket; for local kind testing the bucket is
     backed by fake-gcs-server (enable conditionalPackageInstalls.fake-gcs-server
     and set gcsBucketConfiguration.useLocalGcs=true in your values overlay).
 
