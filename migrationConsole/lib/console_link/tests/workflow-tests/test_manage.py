@@ -803,3 +803,85 @@ async def test_tree_renders_with_artifact_outputs():
         # node-2: no statusOutput at all
         migrate_label = next(lbl for lbl in labels if "Migrate Data" in lbl)
         assert "Running" in migrate_label, f"Expected Running phase. Got: {migrate_label}"
+
+
+def _k6_gating_app(mock_workflow_with_two_pods):
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_two_pods)
+    return WorkflowTreeApp(
+        namespace="default", name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(spec=PodScraperInterface(None, None, None)),
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_k6_option_hidden_when_loadtest_not_installed(mock_workflow_with_two_pods):
+    """The `k` option (k6 panel) must stay hidden — and inert — on a normal migration deployment
+    where the k6 load-test infra isn't installed. Regression: it used to always bind, so pressing
+    `k` fired k8s calls against an absent TestRun CRD and surfaced an access error."""
+    from console_link.workflow.tui.k6_panel_modal import K6PanelModal
+
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=False) as probe:
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+            # Probe ran (in the mount worker) and reported "not installed".
+            assert await wait_until(pilot, lambda: probe.called, timeout=5.0)
+            assert app._k6_available is False
+
+            # Pressing `k` must NOT open the panel.
+            await pilot.press("k")
+            await pilot.pause()
+            assert not isinstance(app.screen, K6PanelModal)
+
+
+@pytest.mark.asyncio
+async def test_k6_option_shown_when_loadtest_installed(mock_workflow_with_two_pods):
+    """When the probe confirms the k6 load-test infra is installed, the `k` option appears and
+    opens the panel."""
+    from console_link.workflow.tui.k6_panel_modal import K6PanelModal
+
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.list_active_k6_runs", return_value=[]), \
+            patch("console_link.workflow.commands.testrun_utils.list_presets", return_value=[]), \
+            patch("console_link.workflow.commands.testrun_utils.list_scenarios", return_value=[]):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+            assert await wait_until(pilot, lambda: app._k6_available is True, timeout=5.0)
+
+            await pilot.press("k")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, K6PanelModal), timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_k6_option_appears_after_chart_installed(mock_workflow_with_two_pods):
+    """The console re-probes on every refresh, so installing the k6LoadTest chart AFTER startup
+    makes the `k` option appear without restarting — the flag adapts from unavailable to available."""
+    from console_link.workflow.tui.k6_panel_modal import K6PanelModal
+
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=False) as probe, \
+            patch("console_link.workflow.commands.k6.list_active_k6_runs", return_value=[]), \
+            patch("console_link.workflow.commands.testrun_utils.list_presets", return_value=[]), \
+            patch("console_link.workflow.commands.testrun_utils.list_scenarios", return_value=[]):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+            assert await wait_until(pilot, lambda: probe.called, timeout=5.0)
+            assert app._k6_available is False
+
+            # Simulate installing the k6 chart: the probe now reports "installed".
+            probe.return_value = True
+
+            # A manual refresh ('r') re-probes and should flip the flag on, revealing the option.
+            await pilot.press("r")
+            assert await wait_until(pilot, lambda: app._k6_available is True, timeout=5.0)
+
+            await pilot.press("k")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, K6PanelModal), timeout=5.0)

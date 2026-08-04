@@ -86,6 +86,11 @@ class WorkflowTreeApp(App):
         # Internal Application Metadata
         self._workflow_name = name
         self._namespace = namespace
+        # Whether the k6 load-test infra (TestRun CRD + chart ConfigMaps) is installed in this
+        # namespace. Probed once in a worker at mount (see _probe_k6_availability); until then, and
+        # on a normal migration deployment, it stays False so the `k` option is neither advertised
+        # in the footer nor able to fire k8s calls against a CRD that isn't there.
+        self._k6_available = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -96,6 +101,9 @@ class WorkflowTreeApp(App):
     def on_mount(self) -> None:
         self._tree_state.set_tree_widget(self.tree_root_widget)
         self.action_refresh_workflow()
+        # Probe for the k6 load-test infra off the main thread; the footer's `k` option appears only
+        # once this confirms it's installed (avoids blocking startup on a k8s round-trip).
+        self.run_worker(self._probe_k6_availability, thread=True, name="probe_k6")
 
     @property
     def tree_root_widget(self) -> Tree:
@@ -130,6 +138,10 @@ class WorkflowTreeApp(App):
             self.call_from_thread(self._handle_resource_data, sections, workflow_data)
         else:
             self.call_from_thread(self._handle_workflow_data, workflow_data)
+
+        # Piggyback on the refresh loop to re-probe k6 availability (no-op once found), so the `k`
+        # option appears if the k6LoadTest chart is installed after the console started.
+        self._probe_k6_availability()
 
     def _build_resource_sections(self, workflow_data: Dict):
         """Build resource sections with workflow steps merged (runs in worker thread)."""
@@ -237,6 +249,10 @@ class WorkflowTreeApp(App):
             self.call_from_thread(self._handle_resource_data, sections, workflow_data, True)
         else:
             self.call_from_thread(self._handle_workflow_data, workflow_data, True)
+
+        # A manual refresh ('r') also re-probes, so the user can force the `k` option to appear
+        # immediately after installing the chart without waiting for the periodic cycle.
+        self._probe_k6_availability()
 
     # --- Event Handlers & Actions ---
 
@@ -450,6 +466,11 @@ class WorkflowTreeApp(App):
         affects the migration workflow this TUI is managing. All actions are wrapped below so a
         k6-side error only raises a notification — it can't disturb the managed workflow or the UI.
         """
+        # Defensive: the `k` binding is only advertised when k6 is available, but guard the action
+        # too so a stale keypress can't fire k8s calls against an absent TestRun CRD.
+        if not self._k6_available:
+            self.notify("k6 load testing is not installed in this namespace.", severity="warning")
+            return
         from ..commands.k6 import list_active_k6_runs
         from ..commands.testrun_utils import list_presets, list_scenarios
         try:
@@ -488,6 +509,34 @@ class WorkflowTreeApp(App):
             self.notify(f"Invalid override: {e}", severity="error")
         except Exception as e:
             self.notify(f"k6 action failed: {e}", severity="error")
+
+    def _probe_k6_availability(self) -> None:
+        """Probe (in a worker thread) whether the k6 load-test infra is installed and reflect it in
+        the UI. Runs at mount and again on every workflow refresh, so installing the k6LoadTest chart
+        after the console started makes the `k` option appear on its own within one refresh cycle.
+
+        Once found, it stops re-probing (the interesting transition is not-installed → installed; a
+        mid-session *uninstall* isn't worth an API call every cycle). Uses force=True so each probe
+        re-checks the cluster rather than the value cached at startup, and only ever flips the flag
+        on, never off. A namespaced TestRun list returns 200 only when the chart's CRD/RBAC exist, so
+        any failure means "not installed" and a normal migration deployment never shows the option.
+        """
+        if self._k6_available:
+            return
+        from ..commands.k6 import k6_available
+        try:
+            available = k6_available(self._namespace, force=True)
+        except Exception:
+            available = False
+        if available:
+            self.call_from_thread(self._set_k6_available, True)
+
+    def _set_k6_available(self, available: bool) -> None:
+        """Main thread: record k6 availability and refresh the footer so the `k` binding appears
+        (or stays hidden) accordingly."""
+        if available != self._k6_available:
+            self._k6_available = available
+            self._update_dynamic_bindings()
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
@@ -540,7 +589,10 @@ class WorkflowTreeApp(App):
 
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "manual_refresh", description="Refresh")
-        self.bind("k", "k6_panel", description="k6 load tests")
+        # Only advertise the k6 panel once the load-test infra is confirmed installed (probed at
+        # mount). On a normal migration deployment this stays hidden rather than erroring on open.
+        if self._k6_available:
+            self.bind("k", "k6_panel", description="k6 load tests")
         self.bind("q", "quit", description="Quit")
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)

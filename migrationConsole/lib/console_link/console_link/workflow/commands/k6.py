@@ -80,16 +80,21 @@ def _complete_presets(ctx, param, incomplete):
 _AVAIL_CACHE = {}
 
 
-def k6_available(namespace):
+def k6_available(namespace, force=False):
     """True if load testing is enabled here.
 
     `K6_LOADTEST_ENABLED` (true/false) is an explicit override — used by tests and as a kill
-    switch. Otherwise we probe once (cached) whether the TestRun CRD is usable in the namespace.
+    switch. Otherwise we probe (cached) whether the TestRun CRD is usable in the namespace.
+
+    `force=True` bypasses the cache and re-probes the cluster, refreshing the cached value. The
+    long-running `workflow manage` TUI uses this to notice the k6LoadTest chart being installed
+    *after* the console started — a plain cached probe would pin the startup result for the life of
+    the process. The env override still wins over any probe.
     """
     override = os.environ.get("K6_LOADTEST_ENABLED")
     if override is not None:
         return override.strip().lower() in ("1", "true", "yes", "on")
-    if namespace not in _AVAIL_CACHE:
+    if force or namespace not in _AVAIL_CACHE:
         try:
             load_k8s_config()
             _AVAIL_CACHE[namespace] = loadtest_installed(namespace)
