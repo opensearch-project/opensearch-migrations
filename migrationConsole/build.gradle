@@ -18,7 +18,10 @@ def orchestrationSpecsDirP = rootProject.layout.projectDirectory.dir("orchestrat
 def orchestrationP     = orchestrationSpecsDirP
 def configProcessorP   = orchestrationP.dir("packages/config-processor")
 def workflowTemplatesP = orchestrationP.dir("packages/migration-workflow-templates")
+def argoWorkflowBuildersP = orchestrationP.dir("packages/argo-workflow-builders")
 def schemasP           = orchestrationP.dir("packages/schemas")
+def cloudWatchDashboardsP = rootProject.layout.projectDirectory.dir(
+        "deployment/k8s/charts/aggregates/migrationAssistantWithArgo/files/cloudwatch-dashboards")
 def configProcessorStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/configProcessor")
 def workflowTemplatesStagingP =
@@ -32,53 +35,57 @@ def rootTsConfigFiles = [
         orchestrationSpecsDirP.file("tsconfig.json"),
         orchestrationSpecsDirP.file("tsconfig.workspaces.json")
 ]
+def npmDependencyFiles = [
+        orchestrationSpecsDirP.file("package.json"),
+        orchestrationSpecsDirP.file("package-lock.json")
+]
+
+def configureNpmTask = { task ->
+    task.dependsOn installDependencies
+    task.inputs.files(npmDependencyFiles)
+}
 
 def configureWorkflowTemplateTask = { task ->
-    task.dependsOn installDependencies
+    configureNpmTask(task)
 
-    // Source files
     task.inputs.dir(workflowTemplatesP.dir("src"))
-    // Resource files embedded in templates
-    task.inputs.dir(workflowTemplatesP.dir("resources"))
-    // Dependency packages whose source affects template generation
-    task.inputs.dir(orchestrationSpecsDirP.dir("packages/argo-workflow-builders/src"))
+    task.inputs.dir(argoWorkflowBuildersP.dir("src"))
     task.inputs.dir(schemasP.dir("src"))
+    task.inputs.dir(schemasP.dir("generated"))
 
-    // Package-level config files
     task.inputs.files(
         workflowTemplatesP.file("package.json"),
-        workflowTemplatesP.file("tsconfig.json"),
-        workflowTemplatesP.file("makeTemplates.cjs")
+        workflowTemplatesP.file("tsconfig.json")
     )
 
     task.inputs.files(rootTsConfigFiles)
 }
 
 def configureConfigProcessorTask = { task ->
-    task.dependsOn installDependencies
+    configureNpmTask(task)
 
-    // Source files
     task.inputs.dir(configProcessorP.dir("src"))
-    // Shell scripts copied into the config-processor bundle
-    task.inputs.dir(configProcessorP.dir("scripts"))
+    task.inputs.dir(schemasP.dir("src"))
+    task.inputs.dir(schemasP.dir("generated"))
 
     task.inputs.files(
-        // Build script
-        configProcessorP.file("makeBundle.js"),
-        // Package-level config files
-        configProcessorP.file("package.json"),
-        configProcessorP.file("tsconfig.json"),
-    )
-
-    task.inputs.files(
-        // Build script
-        configProcessorP.file("makeBundle.js"),
-        // Package-level config files
         configProcessorP.file("package.json"),
         configProcessorP.file("tsconfig.json"),
     )
 
     task.inputs.files(rootTsConfigFiles)
+}
+
+// Input-only checks need a success marker for Gradle to skip unchanged runs.
+def configureSuccessfulCheckOutput = { task ->
+    def resultP = layout.buildDirectory.file("npmChecks/${task.name}.passed")
+    task.outputs.file(resultP)
+
+    task.doLast {
+        def resultFile = resultP.get().asFile
+        resultFile.parentFile.mkdirs()
+        resultFile.text = "passed\n"
+    }
 }
 
 tasks.register('installDependencies', NpmTask) {
@@ -101,6 +108,14 @@ tasks.register('typeCheckWorkflowTemplates', NpmTask) {
     workingDir = workflowTemplatesP.asFile
     args = ['run', 'type-check-all']
     configureWorkflowTemplateTask(delegate)
+    inputs.files(
+        orchestrationSpecsDirP.file("tsconfig.typecheck.templates.json"),
+        argoWorkflowBuildersP.file("package.json"),
+        argoWorkflowBuildersP.file("tsconfig.json"),
+        schemasP.file("package.json"),
+        schemasP.file("tsconfig.json")
+    )
+    configureSuccessfulCheckOutput(delegate)
 }
 
 tasks.register('testWorkflowTemplates', NpmTask) {
@@ -109,6 +124,22 @@ tasks.register('testWorkflowTemplates', NpmTask) {
     args = ['run', 'test-all']
 
     configureWorkflowTemplateTask(delegate)
+    inputs.dir(workflowTemplatesP.dir("resources"))
+    inputs.dir(workflowTemplatesP.dir("tests"))
+    inputs.dir(argoWorkflowBuildersP.dir("tests/unit"))
+    inputs.dir(schemasP.dir("tests"))
+    inputs.files(
+        workflowTemplatesP.file("jest.config.js"),
+        argoWorkflowBuildersP.file("package.json"),
+        argoWorkflowBuildersP.file("tsconfig.json"),
+        argoWorkflowBuildersP.file("jest.config.js"),
+        schemasP.file("package.json"),
+        schemasP.file("tsconfig.json"),
+        schemasP.file("jest.config.js"),
+        cloudWatchDashboardsP.file("capture-replay-dashboard.json"),
+        cloudWatchDashboardsP.file("reindex-from-snapshot-dashboard.json")
+    )
+    configureSuccessfulCheckOutput(delegate)
 }
 
 tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
@@ -117,6 +148,8 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     args = ['run', 'make-templates', '--', '--outputDirectory', workflowTemplatesStagingP.get().asFile.absolutePath]
 
     configureWorkflowTemplateTask(delegate)
+    inputs.dir(workflowTemplatesP.dir("resources"))
+    inputs.file(workflowTemplatesP.file("makeTemplates.cjs"))
     outputs.dir(workflowTemplatesStagingP)
 
     doFirst {
@@ -130,6 +163,12 @@ tasks.register('typeCheckConfigProcessor', NpmTask) {
     args = ['run', 'type-check']
 
     configureConfigProcessorTask(delegate)
+    inputs.files(
+        orchestrationSpecsDirP.file("tsconfig.typecheck.processor.json"),
+        schemasP.file("package.json"),
+        schemasP.file("tsconfig.json")
+    )
+    configureSuccessfulCheckOutput(delegate)
 }
 
 tasks.register('testConfigProcessor', NpmTask) {
@@ -138,6 +177,15 @@ tasks.register('testConfigProcessor', NpmTask) {
     args = ['run', 'test']
 
     configureConfigProcessorTask(delegate)
+    inputs.files(fileTree(configProcessorP.dir("tests").asFile) {
+        exclude "integ/**"
+    })
+    inputs.files(
+        configProcessorP.file("jest.config.js"),
+        schemasP.file("package.json"),
+        schemasP.file("tsconfig.json")
+    )
+    configureSuccessfulCheckOutput(delegate)
 }
 
 tasks.register('buildAndStageConfigProcessor', NpmTask) {
@@ -146,6 +194,8 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     args = ['run', 'bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
 
     configureConfigProcessorTask(delegate)
+    inputs.dir(configProcessorP.dir("scripts"))
+    inputs.file(configProcessorP.file("makeBundle.js"))
     outputs.dir(configProcessorStagingP)
 
     doFirst {
@@ -167,6 +217,7 @@ tasks.register('buildAndStageMigrationResources', NpmTask) {
     dependsOn installDependencies
 
     inputs.dir(schemasP.dir("src"))
+    inputs.dir(schemasP.dir("generated"))
     inputs.files(
         schemasP.file("package.json"),
         orchestrationSpecsDirP.file("package.json"),
