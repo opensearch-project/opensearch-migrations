@@ -166,6 +166,13 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
 
     # Explicit selection: include matching tests regardless of requires_explicit_selection
     prefixes = tuple(f"Test{tid}" for tid in test_ids_list)
+    unmatched_ids = [
+        test_id
+        for test_id, prefix in zip(test_ids_list, prefixes)
+        if not any(case.__name__.startswith(prefix) for case in ALL_TEST_CASES)
+    ]
+    if unmatched_ids:
+        raise pytest.UsageError(f"No test classes match requested test IDs: {', '.join(unmatched_ids)}")
     return [case for case in ALL_TEST_CASES if case.__name__.startswith(prefixes)]
 
 

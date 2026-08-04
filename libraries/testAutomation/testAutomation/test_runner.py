@@ -51,6 +51,7 @@ class TestSummary:
 class TestReport:
     summary: TestSummary
     tests: List[TestEntry] = field(default_factory=list)
+    exit_code: int = 0
 
 
 class TestsFailed(Exception):
@@ -236,11 +237,12 @@ class TestRunner:
                                       target_version=target_version, unique_id=active_unique_id,
                                       report_suffix=report_suffix)
         test_report = self._parse_test_report(test_data)
+        test_report.exit_code = exit_code
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
         if exit_code != 0 and test_report.summary.failed == 0:
-            logger.warning(f"pytest exited with code {exit_code} but report shows no failures — "
-                           f"possible infrastructure error")
+            logger.error(f"pytest exited with code {exit_code} but report shows no failures; "
+                         f"treating the run as an infrastructure failure")
         return test_report
 
     def cleanup_clusters(self) -> None:
@@ -264,6 +266,10 @@ class TestRunner:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
     def _report_failed(self, test_report: TestReport) -> bool:
+        if test_report.exit_code != 0:
+            logger.error(f"pytest exited with code {test_report.exit_code}")
+            return True
+
         expected = test_report.summary.expected
         if expected is not None and expected == 0 and test_report.summary.failed == 0:
             logger.info(f"No compatible tests for {test_report.summary.source_version} → "
