@@ -4,7 +4,9 @@
 #   0001-0009  Basic tests (single doc backfill, coordinator cluster)
 #   0004-0005  Multi-type index tests (union, split)
 #   0006       Benchmark backfill (OpenSearch Benchmark)
-#   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots). These need a
+#              pre-existing external S3 snapshot supplied via BYOS_* environment
+#              variables, so they only run in the BYOS pipeline — not the local k8s jobs.
 #   0020       GCS snapshot migration tests
 #   0021-0029  AOSS collection tests (search, time-series, vector)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
@@ -101,7 +103,10 @@ def pytest_configure(config):
         "failed": 0,
         "expected": 0,
         "source_version": "",
-        "target_version": ""
+        "target_version": "",
+        # Names of test classes that could not even be constructed. A non-empty list
+        # means the selection was silently truncated and the run is NOT trustworthy.
+        "uncollectable": []
     }
 
 
@@ -136,8 +141,16 @@ def pytest_generate_tests(metafunc):
                                         transform_image_sequence=transform_image_sequence,
                                         transform_image_context=transform_image_context,
                                         capture_proxy_service_type=capture_proxy_service_type)
-        test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
+        broken_test_cases = []
+        test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list,
+                                                broken_test_cases=broken_test_cases)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
+        if broken_test_cases:
+            metafunc.config.test_summary["uncollectable"] = [name for name, _ in broken_test_cases]
+            details = "; ".join(f"{name}: {type(exc).__name__}: {exc}" for name, exc in broken_test_cases)
+            metafunc.config.test_summary["error"] = (
+                f"Some selected test cases could not be constructed and were skipped: {details}"
+            )
         if not test_cases_param and not test_ids_list:
             target_label = target_version if target_type != "AOSS" else "AOSS"
             metafunc.config.test_summary["error"] = (
@@ -175,9 +188,12 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     return [case for case in ALL_TEST_CASES if case.__name__.startswith(prefixes)]
 
 
-def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
+def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str],
+                         broken_test_cases: List = None):
     test_cases_to_run = []
     unsupported_test_cases = []
+    if broken_test_cases is None:
+        broken_test_cases = []
     cases = _filter_test_cases(test_ids_list)
     for test_case in cases:
         try:
@@ -185,6 +201,14 @@ def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str
             test_cases_to_run.append(valid_case)
         except ClusterVersionCombinationUnsupported:
             unsupported_test_cases.append(test_case)
+        except Exception as e:
+            # A constructor that raises anything else would otherwise propagate out of
+            # pytest_generate_tests and abort collection for the WHOLE session, silently
+            # taking every unrelated test with it. Isolate the damage to the one class
+            # and let the rest of the run proceed.
+            broken_test_cases.append((test_case.__name__, e))
+            logger.error(f"Test case {test_case.__name__} could not be constructed and will be skipped: "
+                         f"{type(e).__name__}: {e}", exc_info=True)
     logger.info(f"Test cases to run ({len(test_cases_to_run)}) - {test_cases_to_run}")
     if unsupported_test_cases:
         logger.info(f"The following tests are incompatible with the cluster version specified and will be "
