@@ -14,7 +14,7 @@ from console_link.models.cluster import Cluster, SIGV4_SIGNING_ENDPOINT_KEY
 from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS
-from ..parked_gate_detection import INNER_WORKFLOW_NAME, ParkedGateWatcher
+from ..parked_gate_detection import INNER_WORKFLOW_NAME, ParkedApprovalGateError, ParkedGateWatcher
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments  # noqa: F401 (re-exported)
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,13 @@ def _raise_if_cdc_dependency_error(namespace: str, workflow_names: Optional[Sequ
     # A CaptureProxy or Replayer whose apply was VAP-denied leaves the workflow
     # parked, not errored, so nothing above fires and the pod never appears.
     if parked_gate_watcher:
-        parked_gate_watcher.check()
+        try:
+            parked_gate_watcher.check()
+        except ParkedApprovalGateError:
+            # Every other raise above dumps first; match that, since the gate name
+            # alone doesn't show which resource's apply was denied.
+            _dump_argo_workflow_diagnostics(namespace)
+            raise
 
 
 def _raise_if_kafka_cluster_error(namespace: str) -> None:
