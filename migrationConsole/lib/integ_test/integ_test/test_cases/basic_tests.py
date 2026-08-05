@@ -97,8 +97,10 @@ class Test0008OptionalSnapshotStages(MATestBase):
 
     After the baseline run (both stages, verified end-to-end), two more workflows are
     submitted against the same provisioned clusters. Each seeds its own fresh index and
-    is scoped with indexAllowlist so the runs cannot interfere with each other or with
-    the baseline. Each extra run takes its own snapshot: the repo path is suffixed with
+    is scoped with indexAllowlist so the runs cannot interfere with each other. The
+    baseline is scoped too — see prepare_workflow_snapshot_and_migration_config, without
+    which it migrates the metadata-only run's document and invalidates that run's central
+    assertion. Each extra run takes its own snapshot: the repo path is suffixed with
     the workflow uid (see fullMigrationImportedClusters.yaml), so a snapshot from one
     workflow is not readable by another and reuse is not an option.
 
@@ -145,6 +147,21 @@ class Test0008OptionalSnapshotStages(MATestBase):
         self.target_cluster = None
         self._extra_workflow_names: list[str] = []
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        """Scope the baseline run to its own index.
+
+        The default config carries no indexAllowlist, so the baseline migrates every index
+        on the source — including the two this test seeds for the extra runs. That put the
+        document into metadata_only_index on the target before the metadata-only run ever
+        started, so its "backfill was skipped, so the document must be absent" assertion
+        saw a 200 and failed. Scoping the baseline is what makes that assertion measure the
+        metadata-only run instead of the baseline.
+        """
+        super().prepare_workflow_snapshot_and_migration_config()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration["metadataMigrationConfig"]["indexAllowlist"] = [self.index_name]
+            migration["documentBackfillConfig"]["indexAllowlist"] = [self.index_name]
+
     def prepare_clusters(self):
         for index_name in (self.index_name, self.metadata_only_index, self.backfill_only_index):
             self.source_operations.create_document(
@@ -158,6 +175,16 @@ class Test0008OptionalSnapshotStages(MATestBase):
             cluster=self.target_cluster, index_name=self.index_name,
             doc_id=self.doc_id, max_attempts=10, delay=3.0,
         )
+
+        # The baseline is allowlisted to self.index_name, so the extra runs' indices must
+        # not be on the target yet. Asserting it here localizes a regression in that
+        # scoping to the baseline, instead of surfacing it as a confusing 200-vs-404
+        # failure inside the metadata-only run below.
+        for index_name in (self.metadata_only_index, self.backfill_only_index):
+            self.target_operations.get_index(
+                cluster=self.target_cluster, index_name=index_name,
+                expected_status_code=404, max_attempts=3, delay=2.0,
+            )
 
         self._run_and_assert_metadata_only()
         self._run_and_assert_backfill_only()

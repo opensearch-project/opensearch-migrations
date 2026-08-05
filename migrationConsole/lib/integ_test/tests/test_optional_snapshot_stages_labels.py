@@ -119,6 +119,60 @@ def test_missing_creation_timestamp_is_rejected():
         Test0008OptionalSnapshotStages._assert_inner_workflow_is_not_stale(outer, {"metadata": {}}, "metadata-only")
 
 
+# --- Baseline scoping ---------------------------------------------------------------
+#
+# The default config has no indexAllowlist, so an unscoped baseline migrates all three
+# seeded indices. That lands the document in metadata_only_index on the target before
+# the metadata-only run starts, and its "document must be absent" assertion then sees
+# 200 instead of 404 — which is exactly how build 295 failed.
+
+
+def test_baseline_run_is_scoped_to_its_own_index():
+    test_case = _make_test_case()
+    test_case.prepare_workflow_snapshot_and_migration_config()
+    migrations = test_case.workflow_snapshot_and_migration_config[0]["migrations"]
+    assert migrations, "baseline must still declare its migrations"
+    for migration in migrations:
+        for config_key in ("metadataMigrationConfig", "documentBackfillConfig"):
+            assert migration[config_key]["indexAllowlist"] == [test_case.index_name], (
+                f"baseline {config_key} must be scoped to the baseline index only, else it "
+                f"migrates the extra runs' indices and invalidates their assertions"
+            )
+
+
+def test_baseline_scoping_excludes_the_extra_run_indices():
+    """The specific indices that must not be dragged along by the baseline."""
+    test_case = _make_test_case()
+    test_case.prepare_workflow_snapshot_and_migration_config()
+    migration = test_case.workflow_snapshot_and_migration_config[0]["migrations"][0]
+    for config_key in ("metadataMigrationConfig", "documentBackfillConfig"):
+        allowlist = migration[config_key]["indexAllowlist"]
+        assert test_case.metadata_only_index not in allowlist
+        assert test_case.backfill_only_index not in allowlist
+
+
+def test_baseline_still_migrates_both_stages():
+    """Scoping must not accidentally drop a stage — the baseline is the end-to-end case."""
+    test_case = _make_test_case()
+    test_case.prepare_workflow_snapshot_and_migration_config()
+    migration = test_case.workflow_snapshot_and_migration_config[0]["migrations"][0]
+    assert "metadataMigrationConfig" in migration
+    assert "documentBackfillConfig" in migration
+    # The default resource/shard settings must survive the override.
+    assert migration["documentBackfillConfig"]["maxShardSizeBytes"] == 16000000
+
+
+def test_extra_runs_are_each_scoped_to_their_own_index():
+    test_case = _make_test_case()
+    meta = test_case._extra_run_parameters(
+        {"metadataMigrationConfig": {"indexAllowlist": [test_case.metadata_only_index]}},
+        snapshot_label="meta-abcd")
+    migrations = meta["source-configs"][0]["snapshot-and-migration-configs"][0]["migrations"]
+    assert migrations[0]["metadataMigrationConfig"]["indexAllowlist"] == [test_case.metadata_only_index]
+    assert "documentBackfillConfig" not in migrations[0], \
+        "the metadata-only run must omit documentBackfillConfig entirely — that's the gate under test"
+
+
 def test_wrapper_node_names_would_not_satisfy_the_stage_assertions():
     """Pins why the wrapper is the wrong workflow to read: the stage names aren't in it.
 
