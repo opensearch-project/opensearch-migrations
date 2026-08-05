@@ -93,9 +93,9 @@ class SolrMultiCollectionSourceTest {
             for (var p : partitions) {
                 // Subscribe but don't wait — readDocuments returns a Flux. Here we just
                 // need the prepare-on-first-access path to fire.
-                source.readDocuments(p, 0L).subscribe().dispose();
+                source.readDocuments(p, null).subscribe().dispose();
                 // Calling readDocuments again on the same partition must NOT re-prepare.
-                source.readDocuments(p, 0L).subscribe().dispose();
+                source.readDocuments(p, null).subscribe().dispose();
             }
         } catch (Exception e) {
             throw new RuntimeException(e);

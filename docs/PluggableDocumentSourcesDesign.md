@@ -109,14 +109,18 @@ is dead code today, and removing the interface makes future accidental sorts a c
 ### Work-item id format
 
 ```
-base64url(collectionName) __ base64url(partitionName) __ base64url(cursor)
+base64url(collectionName) . base64url(partitionName) . base64url(cursor)
 ```
 
 All three segments are encoded, not just the first: two of them are now arbitrary strings rather than
-integers, so `parseInt`/`parseLong` go away. Encoding is safe because base64url of valid UTF-8 can
-never contain `__` — that needs twelve consecutive 1-bits on a sextet boundary, and UTF-8 tops out at
-eleven — so the `__` delimiter stays unambiguous. This makes UTF-8 a requirement on cursors: raw bytes
+integers, so `parseInt`/`parseLong` go away. This makes UTF-8 a requirement on cursors: raw bytes
 would break it.
+
+The delimiter is `.`, not `__`. The first draft argued `__` was safe because base64url of valid UTF-8
+can never *contain* `__`. True, but not sufficient: base64url output can begin or end with a single
+`_`, so `"a_" + "__" + "_b"` and `"a" + "__" + "__b"` both render as `a____b` and no parser can tell
+them apart. `.` is outside the base64url alphabet (`A-Z a-z 0-9 - _`) entirely, so no segment value
+can produce it and the split is unambiguous by construction.
 
 ## The resume contract
 
@@ -134,7 +138,9 @@ first draft conflated the two.
 The two snapshot reader modes disagree about the offset's units: delta mode skips that many *emitted*
 documents, regular mode treats it as a Lucene doc index, which also counts deleted ones. The pipeline
 sends an emitted count to both, so a resumed regular read restarts too early and re-sends the
-difference. A cursor leaves no unit to guess at. Filed separately — it affects released behavior.
+difference. A cursor leaves no unit to guess at — with the source minting its own cursor, this stops
+being possible to get wrong, and Phase 1 tags each mode's cursor (`lucene:` vs `delta:`) so a cursor
+recorded in one mode is rejected in the other rather than silently misread.
 
 **Cost.** This does not stay inside the SPI. `DocumentMigrationPipeline` currently derives the next
 position arithmetically (`cumulativeOffset += result.docsInBatch()`), which an opaque cursor makes
@@ -238,7 +244,12 @@ implementation:
 3. `findPartition` resolves every returned name and rejects any other.
 4. `listCollections` is deterministic.
 5. Resuming from the cursor emitted with `d` omits nothing after `d` and re-emits nothing at or
-   before it.
+   before it; resuming from the last cursor yields nothing; the same cursor replays identically.
+
+It earned its keep immediately: rule 5 failed on the snapshot source because `SnapshotShardUnpacker`
+threw rather than no-op'ing when the shard was already unpacked, so a second read of one partition in
+one process could not happen. Production never did that — one worker, one shard, one read — so
+nothing else would have caught it. Unpacking is now idempotent.
 
 ## First new source: failed-document-stream redrive
 

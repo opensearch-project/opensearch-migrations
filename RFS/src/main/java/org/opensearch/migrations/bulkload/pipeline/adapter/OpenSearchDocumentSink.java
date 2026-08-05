@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -89,19 +90,24 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
-        long bytesInBatch = batch.stream()
+    public Mono<BatchResult> writeBatch(String collectionName, List<PositionedDocument> batch) {
+        var documents = batch.stream()
+            .map(PositionedDocument::document)
+            .collect(Collectors.toList());
+        long bytesInBatch = documents.stream()
             .mapToLong(Document::sourceLength)
             .sum();
+        // The batch lands or fails as one bulk request, so the cursor we can report is its last.
+        var cursorAfter = batch.get(batch.size() - 1).cursorAfter();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
+            bulkMono = client.sendBulkRequestRaw(collectionName, documents,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
-            var bulkOps = batch.stream()
+            var bulkOps = documents.stream()
                 .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
@@ -109,7 +115,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
+        return bulkMono.then(Mono.just(new BatchResult(documents.size(), bytesInBatch, cursorAfter)));
     }
 
     @SuppressWarnings("unchecked")

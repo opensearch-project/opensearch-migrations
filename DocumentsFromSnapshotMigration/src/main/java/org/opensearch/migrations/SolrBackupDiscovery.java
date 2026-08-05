@@ -66,8 +66,25 @@ public class SolrBackupDiscovery {
 
     static SolrBackupLayout.BareBackupLayout detectBareLayout(S3Repo s3Repo, Path backupDir) {
         return s3Repo != null
-            ? s3Repo.detectBareSolrLayout()
+            ? detectBareS3Layout(s3Repo)
             : SolrBackupLayout.classifyBareBackup(backupDir);
+    }
+
+    /**
+     * Binds an S3Repo to {@link SolrBackupLayout#detectBareLayout}. Kept on this side of the
+     * boundary so :SnapshotReader does not have to depend on :SolrReader; ClusterReaderExtractor
+     * carries the same binding for the metadata command.
+     */
+    public static SolrBackupLayout.BareBackupLayout detectBareS3Layout(S3Repo s3Repo) {
+        return SolrBackupLayout.detectBareLayout(
+            s3Repo::listTopLevelDirectories,
+            s3Repo::listFilesInS3Root,
+            () -> {
+                s3Repo.downloadFile("backup.properties");
+                return s3Repo.getRepoRootDir();
+            },
+            () -> s3Repo.getS3RepoUri().key
+        );
     }
 
     public List<String> collections() {

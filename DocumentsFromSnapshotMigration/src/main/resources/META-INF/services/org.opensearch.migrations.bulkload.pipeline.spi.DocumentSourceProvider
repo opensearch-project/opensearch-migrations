@@ -1,0 +1,2 @@
+org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider
+org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider

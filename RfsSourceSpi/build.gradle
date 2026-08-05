@@ -1,0 +1,23 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    // The SPI sits above the core IR and below the concrete sources. It needs RfsPipeline for the
+    // DocumentSource port and RfsCommon for the handful of shared value types a spec/runtime
+    // legitimately mentions (Version, tracing contexts). It deliberately does not depend on any
+    // provider module, and providers do not depend on each other.
+    api project(':RfsPipeline')
+    api project(':RfsCommon')
+
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.hamcrest
+    testRuntimeOnly libs.junit.jupiter.engine
+    testRuntimeOnly libs.log4j.slf4j2.impl
+    testRuntimeOnly libs.log4j.core
+}

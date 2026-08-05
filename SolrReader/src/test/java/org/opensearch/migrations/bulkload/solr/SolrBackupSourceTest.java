@@ -185,7 +185,7 @@ class SolrBackupSourceTest {
         try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
             mockedFiles.when(() -> Files.list(indexDir)).thenThrow(new IOException("simulated I/O error"));
 
-            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, 0));
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, null));
             assertThat(ex, instanceOf(SnapshotReadFailure.class));
             assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
             assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
@@ -244,7 +244,7 @@ class SolrBackupSourceTest {
         var partition = source.listPartitions("test").get(0);
 
         var ex = assertThrows(IllegalArgumentException.class,
-            () -> source.readDocuments(partition, 0));
+            () -> source.readDocuments(partition, null));
         assertThat(ex.getMessage().contains("Unsupported Solr major version"), equalTo(true));
     }
 
@@ -255,7 +255,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 7);
         var mappedPartition = new SolrShardPartition("test", "shard1", tempDir, java.util.Map.of("segments_1", "uuid"));
 
-        StepVerifier.create(source.readDocuments(mappedPartition, 0))
+        StepVerifier.create(source.readDocuments(mappedPartition, null))
             .expectErrorMatches(t -> t instanceof IllegalStateException
                 && t.getMessage().contains("incremental")
                 && t.getMessage().contains("Solr 7"))

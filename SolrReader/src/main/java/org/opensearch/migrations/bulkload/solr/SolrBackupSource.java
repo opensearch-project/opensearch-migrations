@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -21,6 +22,7 @@ import org.opensearch.migrations.bulkload.lucene.version_9.MappedDirectory;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -51,6 +53,9 @@ public class SolrBackupSource implements DocumentSource {
     private static final String INDEX_DIR_NAME = "index";
     private static final String SEGMENTS_FILE_PREFIX = "segments_";
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Cursor is the Lucene doc index to resume at, tagged with the source that minted it. */
+    private static final String CURSOR_PREFIX = "solr:";
 
     private final Path backupDir;
     private final String collectionName;
@@ -113,6 +118,13 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     @Override
+    public Optional<Partition> findPartition(String collectionName, String partitionName) {
+        return listPartitions(collectionName).stream()
+            .filter(p -> p.name().equals(partitionName))
+            .findFirst();
+    }
+
+    @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         var mappings = SolrSchemaConverter.convertToOpenSearchMappings(
             solrSchema.path("fields"),
@@ -129,12 +141,28 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public Flux<PositionedDocument> readDocuments(Partition partition, String startingCursor) {
         var solrPartition = (SolrShardPartition) partition;
+        long startingDocOffset = parseCursor(startingCursor, partition);
         if (solrPartition.fileNameMapping() != null) {
             return readLuceneIndexMapped(solrPartition.indexPath(), solrPartition.fileNameMapping(), startingDocOffset);
         }
         return readLuceneIndex(solrPartition.indexPath(), startingDocOffset);
+    }
+
+    private static long parseCursor(String cursor, Partition partition) {
+        if (cursor == null || cursor.isEmpty()) {
+            return 0;
+        }
+        if (!cursor.startsWith(CURSOR_PREFIX)) {
+            throw new IllegalArgumentException(
+                "Cursor '" + cursor + "' for partition " + partition + " was not minted by a Solr backup source");
+        }
+        try {
+            return Long.parseLong(cursor.substring(CURSOR_PREFIX.length()));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Malformed cursor '" + cursor + "' for partition " + partition, e);
+        }
     }
 
     /**
@@ -241,7 +269,7 @@ public class SolrBackupSource implements DocumentSource {
      * standard reader path. Actual UUID remappings require Solr 8.9+ (SIP-12) and use
      * IndexReader9's MappedDirectory support.
      */
-    private Flux<Document> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
+    private Flux<PositionedDocument> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
         boolean hasUuidRemapping = fileNameMapping.entrySet().stream()
             .anyMatch(e -> !e.getKey().equals(e.getValue()));
         if (!hasUuidRemapping) {
@@ -276,7 +304,7 @@ public class SolrBackupSource implements DocumentSource {
     /**
      * Read a Lucene index directly from filesystem (for standalone backups).
      */
-    private Flux<Document> readLuceneIndex(Path indexDir, long startingDocOffset) {
+    private Flux<PositionedDocument> readLuceneIndex(Path indexDir, long startingDocOffset) {
         try {
             var reader = newLuceneReader(indexDir);
             var segmentsFile = findSegmentsFile(indexDir);
@@ -291,7 +319,7 @@ public class SolrBackupSource implements DocumentSource {
         }
     }
 
-    private Flux<Document> readFromDirectoryReader(
+    private Flux<PositionedDocument> readFromDirectoryReader(
         org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader directoryReader,
         long startingDocOffset
     ) {
@@ -304,7 +332,10 @@ public class SolrBackupSource implements DocumentSource {
                 (reader, docIdx, segDocBase) -> Mono.justOrEmpty(
                     SolrLuceneDocReader.getDocument(
                         reader, docIdx, true, segDocBase, DocumentChangeType.INDEX, mappingContext))))
-            .map(SolrBackupSource::toDocument)
+            // Resume at the doc after this one; the read starts *at* the Lucene index it is given.
+            .map(change -> new PositionedDocument(
+                toDocument(change),
+                CURSOR_PREFIX + (change.getLuceneDocNumber() + 1L)))
             .doFinally(s -> scheduler.dispose());
     }
 

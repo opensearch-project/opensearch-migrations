@@ -4,7 +4,7 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 
 import reactor.core.publisher.Mono;
 
@@ -26,15 +26,16 @@ public interface DocumentSink extends AutoCloseable {
     /**
      * Write a batch of documents to the target collection.
      *
-     * <p>Returns batch-local stats only. The pipeline is responsible for tracking
-     * cumulative offsets and constructing {@link org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor}
-     * for resumability.
+     * <p>Documents arrive paired with the source cursor that resumes after each of them. The sink
+     * writes the documents and reports back the cursor it wrote through, which the pipeline turns
+     * into a {@link org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor}. The sink
+     * never interprets the cursor.
      *
      * @param collectionName the target collection name
      * @param batch          the documents to write, must not be empty
-     * @return batch-local stats (docs written, bytes written)
+     * @return batch-local stats (docs written, bytes written, cursor written through)
      */
-    Mono<BatchResult> writeBatch(String collectionName, List<Document> batch);
+    Mono<BatchResult> writeBatch(String collectionName, List<PositionedDocument> batch);
 
     @Override
     default void close() throws Exception {
