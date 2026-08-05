@@ -5,6 +5,6 @@ def call(Map config = [:]) {
             // (no S3BackupRepository module). Re-enable when SolrBackupStrategy handles the <8 case.
             sourceVersion: 'SOLR_9.8',
             targetVersion: 'OS_2.19',
-            testIds: 'Solr0001'
+            testIds: '0071'
     )
 }

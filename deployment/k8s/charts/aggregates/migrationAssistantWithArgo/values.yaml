@@ -21,7 +21,7 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
-  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for minikube/kind testing
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for local testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -72,6 +72,11 @@ cloudProvider: ""
 gcp:
   project: ""
   serviceAccountEmail: ""
+  # GKE cluster name and location, used by the fluent-bit stackdriver output to
+  # tag Cloud Logging entries with the correct k8s_container resource. Populated
+  # from Terraform on GKE; empty elsewhere.
+  clusterName: ""
+  clusterLocation: ""
 
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
@@ -124,7 +129,7 @@ gcsBucketConfiguration:
   bucketOperationImage: "google/cloud-sdk:latest"
   bucketOperationImagePullPolicy: "IfNotPresent"
   serviceAccountName: "migrations-service-account"
-  useLocalGcs: false   # set true for minikube/kind; wires fake-gcs-server as the GCS endpoint
+  useLocalGcs: false   # set true for kind; wires fake-gcs-server as the GCS endpoint
   localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
 
 kafkaExternal:
@@ -200,7 +205,7 @@ metrics:
                 credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
               tls_config:
                 ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                insecure_skip_verify: true # Minikube uses self-signed certs
+                insecure_skip_verify: true # kind uses self-signed certs
               kubernetes_sd_configs:
                 - role: node
               relabel_configs:
