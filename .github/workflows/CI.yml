@@ -158,11 +158,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Each list maps to one independently invalidated Docker cache.
         include:
           - name: infrastructure
-            manifest: deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml
+            image_list: .github/gradle-test-images/infrastructure.txt
           - name: search
-            manifest: deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml
+            image_list: .github/gradle-test-images/search.txt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Free disk space
@@ -174,10 +175,10 @@ jobs:
         id: docker-cache
         uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
         with:
-          key: gradle-test-docker-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles(matrix.manifest) }}
+          key: gradle-test-docker-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles(matrix.image_list) }}
       - name: Pull images for Gradle tests
         if: steps.docker-cache.outputs.cache-hit != 'true'
-        run: .github/scripts/seed-gradle-test-docker-cache.sh "${{ matrix.manifest }}" "${{ matrix.name }}"
+        run: .github/scripts/seed-gradle-test-docker-cache.sh "${{ matrix.image_list }}"
 
   gradle-tests:
     needs: [generate-test-matrix, seed-gradle-test-docker-cache]
@@ -200,12 +201,12 @@ jobs:
       - name: Restore Gradle test infrastructure Docker cache
         uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
         with:
-          key: gradle-test-docker-${{ runner.os }}-infrastructure-${{ hashFiles('deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml') }}
+          key: gradle-test-docker-${{ runner.os }}-infrastructure-${{ hashFiles('.github/gradle-test-images/infrastructure.txt') }}
           read-only: true
       - name: Restore Gradle test search Docker cache
         uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
         with:
-          key: gradle-test-docker-${{ runner.os }}-search-${{ hashFiles('deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml') }}
+          key: gradle-test-docker-${{ runner.os }}-search-${{ hashFiles('.github/gradle-test-images/search.txt') }}
           read-only: true
 
       - name: Run Gradle tests with striping
