@@ -55,6 +55,12 @@ spec:
               configMapKeyRef:
                 name: "{{workflow.parameters.migration-image-configmap}}"
                 key: migrationConsolePullPolicy
+          # Forwarded to full-migration-with-workflow-cli, whose last step deletes the
+          # inner "migration-workflow". Set to "true" by callers that need to read the
+          # inner workflow's node phases after this wrapper finishes; they then own
+          # deleting it. Defaults to "false" so existing callers are unaffected.
+          - name: keepMigrationWorkflow
+            value: "false"
       steps:
         - - name: generate-migration-configs
             template: generate-migration-configs
@@ -81,6 +87,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: keepMigrationWorkflow
+                  value: "{{inputs.parameters.keepMigrationWorkflow}}"
 
     - name: generate-migration-configs
       inputs:

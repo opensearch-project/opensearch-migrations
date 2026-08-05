@@ -16,6 +16,8 @@ invariant at the config-construction layer instead.
 import re
 from unittest.mock import MagicMock
 
+import pytest
+
 from integ_test.test_cases.basic_tests import Test0008OptionalSnapshotStages
 from integ_test.test_cases.ma_argo_test_base import MATestUserArguments
 
@@ -75,3 +77,62 @@ def test_two_instances_do_not_reuse_labels():
     first, second = _make_test_case(), _make_test_case()
     assert first.metadata_only_snapshot_label != second.metadata_only_snapshot_label
     assert first.backfill_only_snapshot_label != second.backfill_only_snapshot_label
+
+
+# --- Reading stage phases off the inner workflow -----------------------------------
+#
+# full-migration-imported-clusters is only a wrapper: its own nodes are
+# generate-migration-configs / configureAndSubmitWorkflow / monitorWorkflow /
+# evaluateWorkflowResult / deleteMigrationWorkflow. metadataMigrate and
+# bulkLoadDocuments live in the inner workflow that configureAndSubmitWorkflow.sh
+# submits, so asserting against the wrapper could never match anything.
+
+
+def test_extra_runs_keep_the_inner_workflow_alive():
+    """The wrapper's last step deletes the inner workflow unless we ask it not to.
+
+    Without this the phases are gone before they can be read.
+    """
+    test_case = _make_test_case()
+    params = test_case._extra_run_parameters({"metadataMigrationConfig": {}}, snapshot_label="meta-abcd")
+    assert params["keepMigrationWorkflow"] == "true"
+
+
+def test_stale_inner_workflow_is_rejected():
+    """The inner name is fixed and reused, so a leftover must not be asserted against."""
+    outer = {"metadata": {"creationTimestamp": "2026-08-04T21:54:02Z"}}
+    stale_inner = {"metadata": {"creationTimestamp": "2026-08-04T21:46:16Z"}}
+    with pytest.raises(AssertionError, match="leftover from an earlier run"):
+        Test0008OptionalSnapshotStages._assert_inner_workflow_is_not_stale(outer, stale_inner, "metadata-only")
+
+
+def test_inner_workflow_created_after_the_wrapper_is_accepted():
+    outer = {"metadata": {"creationTimestamp": "2026-08-04T21:54:02Z"}}
+    inner = {"metadata": {"creationTimestamp": "2026-08-04T21:54:03Z"}}
+    Test0008OptionalSnapshotStages._assert_inner_workflow_is_not_stale(outer, inner, "metadata-only")
+
+
+def test_missing_creation_timestamp_is_rejected():
+    """Absent timestamps can't confirm ownership, so don't silently trust the workflow."""
+    outer = {"metadata": {"creationTimestamp": "2026-08-04T21:54:02Z"}}
+    with pytest.raises(AssertionError, match="cannot confirm the inner workflow belongs to this run"):
+        Test0008OptionalSnapshotStages._assert_inner_workflow_is_not_stale(outer, {"metadata": {}}, "metadata-only")
+
+
+def test_wrapper_node_names_would_not_satisfy_the_stage_assertions():
+    """Pins why the wrapper is the wrong workflow to read: the stage names aren't in it.
+
+    These are the node names the ES7x run actually reported when the assertion failed.
+    """
+    wrapper_phases = {
+        "configureAndSubmitWorkflow": "Succeeded",
+        "monitorWorkflow": "Succeeded",
+        "evaluateWorkflowResult": "Succeeded",
+        "deleteMigrationWorkflow": "Succeeded",
+        "generate-migration-configs": "Succeeded",
+        "run-full-migration-with-workflow-cli": "Succeeded",
+    }
+    for step_name in ("metadataMigrate", "bulkLoadDocuments"):
+        with pytest.raises(AssertionError, match=f"no workflow node whose displayName contains '{step_name}'"):
+            Test0008OptionalSnapshotStages._assert_node_phase(
+                wrapper_phases, step_name, "Succeeded", "metadata-only")

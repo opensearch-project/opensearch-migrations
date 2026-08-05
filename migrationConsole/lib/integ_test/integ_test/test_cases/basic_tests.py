@@ -10,6 +10,11 @@ from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, M
 
 logger = logging.getLogger(__name__)
 
+# The workflow `workflow submit` creates, from DEFAULT_WORKFLOW_NAME in
+# console_link.workflow.commands.autocomplete_workflows. Fixed, not generated, so only
+# one can exist at a time and each extra run must delete it before the next submits.
+INNER_WORKFLOW_NAME = "migration-workflow"
+
 
 # This test case is subject to removal, as its value looks limited
 class Test0001SingleDocumentBackfill(MATestBase):
@@ -158,12 +163,26 @@ class Test0008OptionalSnapshotStages(MATestBase):
         self._run_and_assert_backfill_only()
 
     def cleanup(self):
+        # keepMigrationWorkflow=true means the wrapper left the inner workflow behind for
+        # us to read, so this test owns deleting it.
+        self._delete_inner_workflow()
         for wf_name in self._extra_workflow_names:
             try:
                 self.argo_service.delete_workflow(workflow_name=wf_name)
             except Exception as e:
                 logger.warning("Failed to delete extra workflow %s: %s", wf_name, e)
         self._extra_workflow_names.clear()
+
+    def _delete_inner_workflow(self):
+        """Delete the inner workflow, which each run recreates under the same fixed name.
+
+        Best-effort: it may already be gone (an early failure, or the run that created it
+        never got that far), and a failure to clean up should not mask the real assertion.
+        """
+        try:
+            self.argo_service.delete_workflow(workflow_name=INNER_WORKFLOW_NAME)
+        except Exception as e:
+            logger.warning("Failed to delete inner workflow %s: %s", INNER_WORKFLOW_NAME, e)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -192,12 +211,22 @@ class Test0008OptionalSnapshotStages(MATestBase):
                 }],
             }],
             "target-config": self.target_cluster.config,
-            "keepMigrationWorkflow": "false",
+            # The stage phases this test asserts on live in the inner workflow, which
+            # full-migration-with-workflow-cli's last step deletes unless this is set.
+            # Keeping it means we own the deletion; cleanup() does that.
+            "keepMigrationWorkflow": "true",
         }
 
     def _submit_and_wait(self, parameters: dict, label: str) -> dict:
         """Submit a full-migration-imported-clusters workflow and wait for it to end.
-        Returns the raw workflow status JSON."""
+
+        Returns the *inner* workflow's status JSON, which is where the stage phases are.
+        The submitted workflow is only an outer wrapper: its own steps are
+        generate-migration-configs / configureAndSubmitWorkflow / monitorWorkflow /
+        evaluateWorkflowResult / deleteMigrationWorkflow (see testMigrationWithWorkflowCli.ts).
+        configureAndSubmitWorkflow.sh runs `workflow submit`, which creates a separate
+        workflow named INNER_WORKFLOW_NAME holding metadataMigrate and bulkLoadDocuments.
+        """
         start_result = self.argo_service.start_workflow(
             workflow_template_name="full-migration-imported-clusters",
             parameters=parameters,
@@ -210,19 +239,55 @@ class Test0008OptionalSnapshotStages(MATestBase):
             workflow_name=wf_name,
             timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
         )
-        workflow_json = self.argo_service._get_workflow_status_json(wf_name)
-        phase = workflow_json.get("status", {}).get("phase")
-        # Log every node phase before asserting so a failure here is diagnosable from
-        # the Jenkins console alone, without re-running against a live cluster.
-        logger.info("%s: workflow %s ended in phase=%s; node phases: %s",
-                    label, wf_name, phase,
-                    json.dumps(self._node_phases_by_display_name(workflow_json), indent=2, sort_keys=True))
-        assert phase == "Succeeded", (
-            f"{label}: workflow {wf_name} ended in phase {phase!r}, expected 'Succeeded'. "
+        outer_json = self.argo_service._get_workflow_status_json(wf_name)
+        outer_phase = outer_json.get("status", {}).get("phase")
+        # Log both workflows' node phases before asserting so a failure here is
+        # diagnosable from the Jenkins console alone, without a live cluster.
+        logger.info("%s: outer workflow %s ended in phase=%s; node phases: %s",
+                    label, wf_name, outer_phase,
+                    json.dumps(self._node_phases_by_display_name(outer_json), indent=2, sort_keys=True))
+        assert outer_phase == "Succeeded", (
+            f"{label}: workflow {wf_name} ended in phase {outer_phase!r}, expected 'Succeeded'. "
             f"A non-Succeeded run makes 'Skipped' assertions meaningless, since a step can "
             f"also be skipped as a consequence of an upstream failure."
         )
-        return workflow_json
+
+        # keepMigrationWorkflow=true keeps the inner workflow alive past the wrapper, so
+        # its phases are still readable here.
+        inner_json = self.argo_service._get_workflow_status_json(INNER_WORKFLOW_NAME)
+        inner_phase = inner_json.get("status", {}).get("phase")
+        logger.info("%s: inner workflow %s ended in phase=%s; node phases: %s",
+                    label, INNER_WORKFLOW_NAME, inner_phase,
+                    json.dumps(self._node_phases_by_display_name(inner_json), indent=2, sort_keys=True))
+        # INNER_WORKFLOW_NAME is fixed, so the baseline and both extra runs all use it in
+        # turn. Reading a leftover from an earlier run would assert against the wrong
+        # stages and could pass for the wrong reason, so pin it to this wrapper.
+        self._assert_inner_workflow_is_not_stale(outer_json, inner_json, label)
+        assert inner_phase == "Succeeded", (
+            f"{label}: inner workflow {INNER_WORKFLOW_NAME} ended in phase {inner_phase!r}, "
+            f"expected 'Succeeded'."
+        )
+        return inner_json
+
+    @staticmethod
+    def _assert_inner_workflow_is_not_stale(outer_json: dict, inner_json: dict, label: str):
+        """Assert the inner workflow was created by this wrapper, not an earlier run.
+
+        The wrapper's configureAndSubmitWorkflow step is what runs `workflow submit`, so
+        this run's inner workflow is always created after the wrapper itself.
+        """
+        outer_created = outer_json.get("metadata", {}).get("creationTimestamp")
+        inner_created = inner_json.get("metadata", {}).get("creationTimestamp")
+        assert outer_created and inner_created, (
+            f"{label}: missing creationTimestamp (outer={outer_created!r}, inner={inner_created!r}); "
+            f"cannot confirm the inner workflow belongs to this run"
+        )
+        # RFC 3339 with a fixed 'Z' offset, so lexicographic order is chronological.
+        assert inner_created >= outer_created, (
+            f"{label}: inner workflow {INNER_WORKFLOW_NAME} was created at {inner_created}, before "
+            f"this run's wrapper at {outer_created} — it is a leftover from an earlier run, so its "
+            f"stage phases say nothing about this one."
+        )
 
     @staticmethod
     def _node_phases_by_display_name(workflow_json: dict) -> dict[str, str]:
