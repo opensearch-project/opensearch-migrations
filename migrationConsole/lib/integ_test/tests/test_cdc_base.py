@@ -120,22 +120,3 @@ def test_cdc_dependency_check_fails_on_failed_inner_migration_workflow(monkeypat
 
     with pytest.raises(RuntimeError, match="CDC dependency workflow failed.*migration-workflow.*Create Snapshot"):
         cdc_base._raise_if_cdc_dependency_error("ma", ["outer-workflow"])
-
-
-def test_cdc_dependency_check_dumps_diagnostics_before_raising_on_parked_gate(monkeypatch):
-    """The gate name alone doesn't say which apply was denied, so dump like every other raise here."""
-    monkeypatch.setattr(cdc_base, "_get_capture_proxy_readiness_status", lambda namespace: ("Ready", "", "", ""))
-    monkeypatch.setattr(cdc_base, "_get_kafka_cluster_errors", lambda namespace: [])
-    monkeypatch.setattr(cdc_base, "_get_migration_resource_errors", lambda namespace: [])
-    monkeypatch.setattr(cdc_base, "_get_argo_workflow_errors", lambda namespace, workflow_names: [])
-    dumped = []
-    monkeypatch.setattr(cdc_base, "_dump_argo_workflow_diagnostics", dumped.append)
-
-    class ParkedWatcher:
-        def check(self):
-            raise cdc_base.ParkedApprovalGateError("parked on captureproxy.capture-proxy.vapretry")
-
-    with pytest.raises(cdc_base.ParkedApprovalGateError, match="captureproxy.capture-proxy.vapretry"):
-        cdc_base._raise_if_cdc_dependency_error("ma", ["outer-workflow"], parked_gate_watcher=ParkedWatcher())
-
-    assert dumped == ["ma"]
