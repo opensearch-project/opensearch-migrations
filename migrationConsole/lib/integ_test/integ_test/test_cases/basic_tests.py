@@ -405,6 +405,11 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.doc_id = "test_0003_doc"
         self.doc_type = "sample_type"
         self.snapshot_migration_name = "source1-target1-testsnapshot-migration-0"
+        # Unlike every other test, this one runs with skipApprovals=false and means
+        # to block at each of these gates until it approves them by hand, so the
+        # wait loops must not treat them as a workflow stuck on an approval nobody
+        # will give. Any gate outside this list still fails the test.
+        self.argo_service.expected_parked_gate_names = self._approval_gate_names()
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
@@ -631,6 +636,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
     def _wait_until_suspended_or_ended(self, timeout_seconds: int):
         """Wait until the workflow suspends for verification or ends."""
         deadline = time.time() + timeout_seconds
+        parked_gate_watcher = self.argo_service.parked_gate_watcher_for(self.workflow_name)
         while time.time() < deadline:
             status_result = self.argo_service.get_workflow_status(self.workflow_name)
             if status_result.success:
@@ -642,6 +648,9 @@ class Test0003ApprovalGateIntegration(MATestBase):
                 if phase in ENDING_ARGO_PHASES:
                     logger.info("Workflow reached ending phase: %s", phase)
                     return
+            # A workflow parked on a VAP-denial approval gate stays 'Running'
+            # forever; without this the only exit is the full timeout.
+            parked_gate_watcher.check()
             time.sleep(10)
         raise TimeoutError(
             f"Workflow did not reach suspend or ending phase within {timeout_seconds}s "
