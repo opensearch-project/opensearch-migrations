@@ -1,9 +1,10 @@
 # conftest.py
 #
 # Test ID naming convention:
-#   0001-0009  Basic tests (single doc backfill, coordinator cluster)
+#   0001-0003  Basic tests (single doc backfill, coordinator cluster, approval gates)
 #   0004-0005  Multi-type index tests (union, split)
 #   0006       Benchmark backfill (OpenSearch Benchmark)
+#   0008       Optional snapshot stage skipping (metadata-only / backfill-only)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots). These need a
 #              pre-existing external S3 snapshot supplied via BYOS_* environment
 #              variables, so they only run in the BYOS pipeline — not the local k8s jobs.

@@ -11,6 +11,14 @@
 #
 # For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName.
 # For Solr external backups, pass snapshotConfig.solrBackupConfig.externalBackupName.
+#
+# snapshotConfig.snapshotLabel overrides the snapshot/backup label, which defaults to
+# "testsnapshot". The label determines the DataSnapshot / SnapshotMigration CR names
+# (source1-<label>, source1-target1-<label>-migration-N), and the snapshot repo path is
+# suffixed with the workflow uid. A second workflow reusing the default label against the
+# same clusters therefore tries to mutate the first run's CRs with a new repoPathUri,
+# which the ValidatingAdmissionPolicies reject as an impossible change. Any test that
+# submits more than one workflow against the same source must give each run its own label.
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -47,6 +55,12 @@ spec:
               configMapKeyRef:
                 name: "{{workflow.parameters.migration-image-configmap}}"
                 key: migrationConsolePullPolicy
+          # Forwarded to full-migration-with-workflow-cli, whose last step deletes the
+          # inner "migration-workflow". Set to "true" by callers that need to read the
+          # inner workflow's node phases after this wrapper finishes; they then own
+          # deleting it. Defaults to "false" so existing callers are unaffected.
+          - name: keepMigrationWorkflow
+            value: "false"
       steps:
         - - name: generate-migration-configs
             template: generate-migration-configs
@@ -73,6 +87,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: keepMigrationWorkflow
+                  value: "{{inputs.parameters.keepMigrationWorkflow}}"
 
     - name: generate-migration-configs
       inputs:
@@ -159,6 +175,7 @@ spec:
                   # Build snapshotInfo based on whether snapshot/backup is externally managed or not
                   | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig // null) as $snapshotNameConfig |
                     ($entry["snapshot-and-migration-configs"][0].snapshotConfig.solrBackupConfig // null) as $solrBackupConfig |
+                    ($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotLabel // "testsnapshot") as $snapLabel |
                     ($snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
                     ($solrBackupConfig.externalBackupName // null) as $extBackup |
                     if $extBackup != null then
@@ -173,7 +190,7 @@ spec:
                       . + {"snapshotInfo": {
                         "repos": {"default": $repo},
                         "backups": {
-                          "testsnapshot": ($solrBackupConfig + {"repoName": "default"})
+                          ($snapLabel): ($solrBackupConfig + {"repoName": "default"})
                         }
                       }}
                     elif $extSnap != null then
@@ -192,7 +209,7 @@ spec:
                         . + {"snapshotInfo": {
                           "repos": {"default": $repo},
                           "backups": {
-                            "testsnapshot": {
+                            ($snapLabel): {
                               "repoName": "default",
                               "createBackupConfig": {}
                             }
@@ -202,7 +219,7 @@ spec:
                         . + {"snapshotInfo": {
                           "repos": {"default": $repo},
                           "snapshots": {
-                            "testsnapshot": {
+                            ($snapLabel): {
                               "repoName": "default",
                               "config": {"createSnapshotConfig": {}}
                             }
@@ -228,14 +245,15 @@ spec:
             # Build perSnapshotConfig: snapshot/backup label -> migrations array
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
               .[0]["snapshot-and-migration-configs"][0] as $smc |
+              ($smc.snapshotConfig.snapshotLabel // "testsnapshot") as $snapLabel |
               if ($smc.snapshotConfig.solrBackupConfig.externalBackupName // null) != null then
                 {($smc.snapshotConfig.solrBackupConfig.externalBackupName): $smc.migrations}
               elif ($smc.snapshotConfig.solrBackupConfig // null) != null then
-                {"testsnapshot": $smc.migrations}
+                {($snapLabel): $smc.migrations}
               elif ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
                 {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName): $smc.migrations}
               else
-                {"testsnapshot": $smc.migrations}
+                {($snapLabel): $smc.migrations}
               end
             ')
 
