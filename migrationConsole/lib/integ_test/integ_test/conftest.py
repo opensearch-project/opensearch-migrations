@@ -7,7 +7,7 @@
 #   0008       Optional snapshot stage skipping (metadata-only / backfill-only)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
 #   0020       GCS snapshot migration tests
-#   0021-0029  AOSS collection tests (search, time-series, vector)
+#   0021       Combined AOSS collection test (search, time-series, vector)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #   0050-0059  Observability tests (metrics/tracing backends)
