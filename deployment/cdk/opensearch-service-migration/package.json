@@ -46,7 +46,6 @@
   },
   "devDependencies": {
     "@aws-cdk/aws-msk-alpha": "2.213.0-alpha.0",
-    "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.186.0-alpha.0",
     "@eslint/js": "^9.38.0",
     "@types/jest": "^30.0.0",
     "@types/node": "26.1.1",
@@ -73,7 +72,6 @@
   },
   "peerDependencies": {
     "@aws-cdk/aws-msk-alpha": "^2.150.0-alpha.0",
-    "@aws-cdk/aws-servicecatalogappregistry-alpha": "^2.150.0-alpha.0",
     "aws-cdk-lib": "^2.150.0",
     "constructs": "^10.7.1"
   },
