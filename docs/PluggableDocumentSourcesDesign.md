@@ -342,7 +342,10 @@ Outside this design, because a source cannot see the sink's configuration:
   reviewable unit, the name change stands alone and can land first. Also break the
   `SnapshotReader → SolrReader` dependency (`S3Repo` imports `SolrBackupLayout`); provider modules
   must not depend on each other.
-- **Phase 2** — expose `--source-kind` and the `--source-*` group, inferring from today's arguments.
+- **Phase 2** — expose `--source-kind` and `--source-config`, inferring from today's arguments when
+  neither is given. `--source-config` takes the provider's JSON, inline or `@/path/to/file.json`.
+  Passing `--source-kind` alongside the arguments it replaces is rejected, naming both. The registry
+  already normalizes kinds and lists them on an unknown one.
 - **Phase 3** — the failed-document-stream source, the record-to-operation transform, the manifest
   writer and the console `seal` command.
 - **Phase 4** — wire up the console command and rewrite #3065's acceptance criteria. #3065's premise

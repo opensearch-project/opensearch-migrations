@@ -146,7 +146,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate. Required when --source-type is SNAPSHOT.")
+            description = "The name of the snapshot to migrate. Required for snapshot migrations.")
         public String snapshotName;
 
         @Parameter(required = false,
@@ -172,7 +172,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
-            description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
+            description = "The absolute path to the directory where we'll put the Lucene docs. Required for snapshot migrations.")
         public String luceneDir;
 
         @Parameter(required = false,
@@ -252,7 +252,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
+            description = ("Version of the source cluster. Required; a SOLR flavor selects the Solr backup path."))
         public Version sourceVersion;
 
         @Parameter(required = false,
@@ -483,13 +483,13 @@ public class RfsMigrateDocuments {
         }
 
         if (args.snapshotName == null) {
-            throw new ParameterException("--snapshot-name is required when --source-type is SNAPSHOT.");
+            throw new ParameterException("--snapshot-name is required for snapshot migrations.");
         }
         if (args.luceneDir == null) {
-            throw new ParameterException("--lucene-dir is required when --source-type is SNAPSHOT.");
+            throw new ParameterException("--lucene-dir is required for snapshot migrations.");
         }
         if (args.sourceVersion == null) {
-            throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
+            throw new ParameterException("--source-version is required.");
         }
 
         if (args.repoUri == null) {
