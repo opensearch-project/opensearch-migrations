@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -300,11 +299,3 @@ def delete_session(cfg: FailedDocumentStreamConfig) -> int:
     return deleted
 
 
-def safe_has_records(cfg: FailedDocumentStreamConfig) -> Optional[bool]:
-    """Like ``has_records`` but swallows S3 errors so a status command never breaks
-    on a misconfigured failed document stream. Returns ``None`` if it can't be determined."""
-    try:
-        return has_records(cfg)
-    except (BotoCoreError, ClientError) as e:
-        logger.warning("Failed to read failed document stream records: %s", e)
-        return None
