@@ -465,6 +465,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "default": [],
                                         "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                       },
+                                      "solrContextPath": {
+                                        "type": "string",
+                                        "default": "/solr",
+                                        "description": "The path Solr's APIs are served under, appended to the source endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host."
+                                      },
                                       "otelTraceCollectorEndpoint": {
                                         "anyOf": [
                                           {
@@ -533,6 +538,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             },
                                             "default": [],
                                             "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                          },
+                                          "solrContextPath": {
+                                            "type": "string",
+                                            "default": "/solr",
+                                            "description": "The path Solr's APIs are served under, appended to the source endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host."
                                           },
                                           "otelTraceCollectorEndpoint": {
                                             "anyOf": [
@@ -1674,6 +1684,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string"
                             },
                             "default": []
+                          },
+                          "solrContextPath": {
+                            "type": "string",
+                            "default": "/solr"
                           }
                         }
                       },
@@ -3988,6 +4002,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "default": [],
                               "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                             },
+                            "solrContextPath": {
+                              "type": "string",
+                              "default": "/solr",
+                              "description": "The path Solr's APIs are served under, appended to the source endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host."
+                            },
                             "otelTraceCollectorEndpoint": {
                               "anyOf": [
                                 {
@@ -4056,6 +4075,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   },
                                   "default": [],
                                   "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                },
+                                "solrContextPath": {
+                                  "type": "string",
+                                  "default": "/solr",
+                                  "description": "The path Solr's APIs are served under, appended to the source endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host."
                                 },
                                 "otelTraceCollectorEndpoint": {
                                   "anyOf": [

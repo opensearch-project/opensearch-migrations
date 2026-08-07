@@ -793,6 +793,11 @@ export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional(
         "transformer from the user-facing collectionAllowlist. When empty, CreateSnapshot auto-discovers all " +
         "live Solr collections/cores. Not user-configurable.");
 
+export const SOLR_CONTEXT_PATH_OPTION = z.string().default("/solr").optional()
+    .describe("The path Solr's APIs are served under, appended to the source endpoint when building Solr URLs. " +
+        "Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse " +
+        "proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host.");
+
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
 
@@ -1384,6 +1389,7 @@ export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
 
 const SOLR_BACKUP_PROCESS_OPTIONS = {
     collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
+    solrContextPath: SOLR_CONTEXT_PATH_OPTION,
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     jvmArgs: z.string().default("").optional()

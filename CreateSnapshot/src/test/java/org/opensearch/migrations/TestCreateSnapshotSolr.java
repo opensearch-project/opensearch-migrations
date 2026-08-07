@@ -1,12 +1,21 @@
 package org.opensearch.migrations;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
+import com.sun.net.httpserver.HttpServer;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -62,7 +71,7 @@ public class TestCreateSnapshotSolr {
     @Test
     public void testDiscoverCores_standaloneSolr() throws Exception {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        var cores = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(STANDALONE_SOLR));
+        var cores = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(STANDALONE_SOLR), SolrContextPath.DEFAULT);
 
         log.atInfo().setMessage("Discovered standalone cores: {}").addArgument(cores).log();
         Assertions.assertFalse(cores.isEmpty(), "Should discover at least the 'dummy' core");
@@ -77,7 +86,7 @@ public class TestCreateSnapshotSolr {
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=testcoll&numShards=1&replicationFactor=1&wt=json");
 
-        var collections = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(CLOUD_SOLR));
+        var collections = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(CLOUD_SOLR), SolrContextPath.DEFAULT);
 
         log.atInfo().setMessage("Discovered SolrCloud collections: {}").addArgument(collections).log();
         Assertions.assertTrue(collections.contains("testcoll"), "Should find 'testcoll' collection");
@@ -86,14 +95,14 @@ public class TestCreateSnapshotSolr {
     @Test
     public void testIsSolrCloud_standalone_returnsFalse() {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        Assertions.assertFalse(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(STANDALONE_SOLR)),
+        Assertions.assertFalse(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(STANDALONE_SOLR), SolrContextPath.DEFAULT),
             "Standalone Solr should not be detected as SolrCloud");
     }
 
     @Test
     public void testIsSolrCloud_cloud_returnsTrue() {
         var solrUrl = CLOUD_SOLR.getSolrUrl();
-        Assertions.assertTrue(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(CLOUD_SOLR)),
+        Assertions.assertTrue(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(CLOUD_SOLR), SolrContextPath.DEFAULT),
             "SolrCloud should be detected as SolrCloud");
     }
 
@@ -186,6 +195,100 @@ public class TestCreateSnapshotSolr {
                 "Backup directory " + backupRoot + "/test_cloud_backup should contain the "
                     + "'cloudcoll' collection subdir after BACKUP completes for Solr " + solrVersion
                     + "; saw: " + result.getStdout());
+        }
+    }
+
+    /**
+     * Real Solr reached through a prefix-rewriting reverse proxy. Reuses the shared standalone
+     * container and fronts it with an in-JVM proxy that only answers under /tenant-a/solr, so any
+     * URL still hardcoding /solr fails the backup outright.
+     */
+    @Test
+    public void testRunSolrBackup_standalone_behindRewritingProxy() throws Exception {
+        var contextPath = "/tenant-a/solr";
+        try (var proxy = new RewritingProxy(STANDALONE_SOLR.getSolrUrl(), contextPath)) {
+            var args = new CreateSnapshot.Args();
+            args.sourceArgs.host = proxy.getUrl();
+            args.sourceArgs.insecure = true;
+            args.sourceType = "solr";
+            args.snapshotName = "test_proxied_backup";
+            args.repoUri = solrDataDir(STANDALONE_SOLR.getSolrVersion().major());
+            args.noWait = false;
+            args.solrContextPath = contextPath;
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+            var result = STANDALONE_SOLR.execInContainer("ls",
+                solrDataDir(STANDALONE_SOLR.getSolrVersion().major()));
+            log.atInfo().setMessage("Proxied backup directory contents: {}")
+                .addArgument(result.getStdout()).log();
+            Assertions.assertTrue(result.getStdout().contains("snapshot.test_proxied_backup"),
+                "Backup taken through the rewritten context path should land in the Solr data dir; saw: "
+                    + result.getStdout());
+            Assertions.assertTrue(proxy.getForwardedCount() > 0, "proxy should have forwarded requests");
+        }
+    }
+
+    /**
+     * Serves {@code <prefix>/x} by forwarding to {@code <upstream>/solr/x}, mirroring a reverse proxy
+     * that rewrites Solr's context path. Anything outside the prefix 404s.
+     */
+    private static final class RewritingProxy implements AutoCloseable {
+        private final HttpServer server;
+        private final HttpClient client = HttpClient.newHttpClient();
+        private int forwardedCount;
+
+        RewritingProxy(String upstream, String prefix) throws IOException {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/", exchange -> {
+                try {
+                    var path = exchange.getRequestURI().getPath();
+                    if (!path.startsWith(prefix + "/")) {
+                        send(exchange, 404, "{\"error\":\"not served here: " + path + "\"}");
+                        return;
+                    }
+                    var query = exchange.getRequestURI().getRawQuery();
+                    var target = upstream + "/solr" + path.substring(prefix.length())
+                        + (query == null ? "" : "?" + query);
+                    synchronized (this) {
+                        forwardedCount++;
+                    }
+                    var response = client.send(
+                        HttpRequest.newBuilder(URI.create(target)).GET().build(),
+                        HttpResponse.BodyHandlers.ofByteArray());
+                    exchange.getResponseHeaders().add("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(response.statusCode(), response.body().length);
+                    exchange.getResponseBody().write(response.body());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    send(exchange, 500, "{\"error\":\"interrupted\"}");
+                } finally {
+                    exchange.close();
+                }
+            });
+            server.start();
+        }
+
+        private static void send(com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+                throws IOException {
+            var bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+        }
+
+        String getUrl() {
+            return "http://127.0.0.1:" + server.getAddress().getPort();
+        }
+
+        synchronized int getForwardedCount() {
+            return forwardedCount;
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
         }
     }
 }
