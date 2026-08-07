@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
@@ -148,9 +149,10 @@ public class LuceneSnapshotSourceEndToEndTest {
             source.listPartitions(INDEX_NAME); // populate cache
 
             var partition = source.listPartitions(INDEX_NAME).get(0);
-            var docs = source.readDocuments(partition, 0).collectList().block();
+            var positioned = source.readDocuments(partition, null).collectList().block();
 
-            assertThat("Should read 3 documents", docs, hasSize(3));
+            assertThat("Should read 3 documents", positioned, hasSize(3));
+            var docs = positioned.stream().map(PositionedDocument::document).toList();
             var ids = docs.stream().map(Document::id).sorted().toList();
             assertThat(ids, equalTo(List.of("doc1", "doc2", "doc3")));
 
@@ -165,25 +167,27 @@ public class LuceneSnapshotSourceEndToEndTest {
         }
     }
 
-    @ParameterizedTest(name = "resume from offset on {0}")
+    @ParameterizedTest(name = "resume from cursor on {0}")
     @MethodSource("supportedSources")
-    void resumeFromOffsetOnRealSnapshot(ContainerVersion sourceVersion) throws Exception {
+    void resumeFromCursorOnRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_source_resume");
         try {
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var partition = source.listPartitions(INDEX_NAME).get(0);
 
-            var allDocs = source.readDocuments(partition, 0).collectList().block();
+            var allDocs = source.readDocuments(partition, null).collectList().block();
             assertThat(allDocs, hasSize(3));
 
             Path workDir2 = Files.createTempDirectory("pipeline_source_resume2");
             try {
                 var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir2).build();
                 source2.listPartitions(INDEX_NAME);
-                var resumed = source2.readDocuments(partition, 2).collectList().block();
-                assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));
-                assertThat(resumed.get(0).id(), equalTo(allDocs.get(2).id()));
+                // Resume after the second doc using the cursor the source emitted with it.
+                var resumed = source2.readDocuments(partition, allDocs.get(1).cursorAfter())
+                    .collectList().block();
+                assertThat("Resuming after doc 2 should yield 1 doc", resumed, hasSize(1));
+                assertThat(resumed.get(0).document().id(), equalTo(allDocs.get(2).document().id()));
             } finally {
                 deleteDir(workDir2);
             }
@@ -261,7 +265,7 @@ public class LuceneSnapshotSourceEndToEndTest {
                 .build();
             var partition = source.listPartitions(INDEX_NAME).get(0);
 
-            var allDelta = source.readDocuments(partition, 0).collectList().block();
+            var allDelta = source.readDocuments(partition, null).collectList().block();
             // Need at least two delta docs for the resume-from-offset-1 assertion to be meaningful.
             assertThat(allDelta.size(), greaterThanOrEqualTo(2));
 
@@ -272,12 +276,14 @@ public class LuceneSnapshotSourceEndToEndTest {
                         () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
                     .build();
                 source2.listPartitions(INDEX_NAME); // populate previous-shard cache for delta mode
-                var resumed = source2.readDocuments(partition, 1).collectList().block();
+                var resumed = source2.readDocuments(partition, allDelta.get(0).cursorAfter())
+                    .collectList().block();
 
-                // Resuming from offset 1 must yield exactly the full delta stream minus its first
-                // doc, in the same order — proving the skip lands deterministically.
-                var expectedSuffixIds = allDelta.stream().skip(1).map(Document::id).toList();
-                var resumedIds = resumed.stream().map(Document::id).toList();
+                // Resuming after the first delta doc must yield exactly the rest of the stream, in
+                // the same order — proving the skip lands deterministically.
+                var expectedSuffixIds = allDelta.stream().skip(1)
+                    .map(p -> p.document().id()).toList();
+                var resumedIds = resumed.stream().map(p -> p.document().id()).toList();
                 assertThat(resumedIds, equalTo(expectedSuffixIds));
             } finally {
                 deleteDir(workDir2);

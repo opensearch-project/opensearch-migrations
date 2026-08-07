@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.worker;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
-import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -116,21 +115,22 @@ public class ShardWorkPreparer {
             })
             .forEach(indexName -> {
                 var partitions = documentSource.listPartitions(indexName);
-                var shardCount = partitions.size();
                 log.atInfo()
-                    .setMessage("Index {} has {} shards")
+                    .setMessage("Index {} has {} partitions")
                     .addArgument(indexName)
-                    .addArgument(shardCount)
+                    .addArgument(partitions.size())
                     .log();
-                IntStream.range(0, shardCount).forEach(shardId -> {
+                // Name the partition, not its position: order isn't guaranteed to repeat.
+                partitions.forEach(partition -> {
                     log.atInfo()
-                        .setMessage("Creating Documents Work Item for index: {}, shard: {}")
+                        .setMessage("Creating Documents Work Item for index: {}, partition: {}")
                         .addArgument(indexName)
-                        .addArgument(shardId)
+                        .addArgument(partition::name)
                         .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexName, shardId, 0L).toString(),
+                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(
+                                indexName, partition.name(), null).toString(),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

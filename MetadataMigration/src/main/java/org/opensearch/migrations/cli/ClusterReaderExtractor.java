@@ -109,7 +109,7 @@ public class ClusterReaderExtractor {
             case RepoUri.S3RepoUri s -> {
                 var s3Repo = createSolrS3Repo(s);
                 backupDir = s3Repo.getRepoRootDir();
-                var bare = s3Repo.detectBareSolrLayout();
+                var bare = detectBareS3Layout(s3Repo);
                 if (bare != null && bare.collectionName() != null) {
                     collectionNames = List.of(bare.collectionName());
                     dataDirByCollection.put(bare.collectionName(), bare.dataPath());
@@ -125,6 +125,23 @@ public class ClusterReaderExtractor {
         }
 
         return buildSolrSnapshotReader(backupDir, collectionNames, dataDirByCollection);
+    }
+
+    /**
+     * Binds an S3Repo to {@link SolrBackupLayout#detectBareLayout}. Kept on this side of the
+     * boundary so :SnapshotReader does not have to depend on :SolrReader; SolrBackupDiscovery
+     * carries the same binding for the document migration.
+     */
+    static SolrBackupLayout.BareBackupLayout detectBareS3Layout(S3Repo s3Repo) {
+        return SolrBackupLayout.detectBareLayout(
+            s3Repo::listTopLevelDirectories,
+            s3Repo::listFilesInS3Root,
+            () -> {
+                s3Repo.downloadFile("backup.properties");
+                return s3Repo.getRepoRootDir();
+            },
+            () -> s3Repo.getS3RepoUri().key
+        );
     }
 
     private List<String> discoverFileSystemCollections(Path backupDir) {

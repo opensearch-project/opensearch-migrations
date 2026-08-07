@@ -425,25 +425,24 @@ class RfsMigrateDocumentsHelpersTest {
     // ---- getSuccessorWorkItemIds ----------------------------------------
 
     @Test
-    void getSuccessorWorkItemIds_buildsSuccessorAtCurrentCheckpoint() {
-        // The successor work item keeps the same checkpoint number so the next
-        // worker resumes from where this one stopped — this also handles
-        // 1:many doc splits (re-processing the last cursor is intentional).
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+    void getSuccessorWorkItemIds_buildsSuccessorAtCurrentCursor() {
+        // The successor carries the last committed cursor so the next worker resumes exactly
+        // where this one stopped.
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", "snap/movies/2", null);
         var workItemAndDuration = new IWorkCoordinator.WorkItemAndDuration(
             Instant.now().plusSeconds(60), workItem);
-        var cursor = new WorkItemCursor(42L);
+        var cursor = new WorkItemCursor("lucene:42");
 
         var successors = RfsMigrateDocuments.getSuccessorWorkItemIds(workItemAndDuration, cursor);
-        // Exactly one successor: same index/shard, restart from the cursor.
+        // Exactly one successor: same index/partition, restart from the cursor.
         assertThat(successors, contains(
-            new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 42L).toString()));
+            new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", "snap/movies/2", "lucene:42").toString()));
     }
 
     @Test
     void getSuccessorWorkItemIds_throwsWhenWorkItemNull() {
         assertThrows(IllegalStateException.class,
-            () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor(0L)));
+            () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor("lucene:0")));
     }
 
     // ---- NoWorkLeftException ---------------------------------------------

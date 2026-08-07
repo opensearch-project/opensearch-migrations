@@ -72,11 +72,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
-    // Bumped to 3.0 alongside the switch to base64url-encoded indexName segments in work-item
-    // ids (opensearch-project/opensearch-migrations#2880).  Work-coordination documents written
-    // by a previous version will fail the scriptVersion check, which is intentional — the
-    // working-state index must be cleared before upgrading across this boundary.
-    public static final String SCRIPT_VERSION = "3.0";
+    // Bumped to 4.0 alongside the switch to name-addressed partitions and opaque cursors, which
+    // changed the work-item id format again.  Work-coordination documents written by a previous
+    // version will fail the scriptVersion check, which is intentional — the working-state index
+    // must be cleared before upgrading across this boundary.  Without the bump a new worker
+    // acquires an old-format id and then fails to parse it, after taking the lease.
+    public static final String SCRIPT_VERSION = "4.0";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
@@ -362,12 +363,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     ) throws IOException {
         // Store the plaintext index name alongside the lease metadata so operators can audit
         // the work-coordination index without having to reverse the id encoding.  The id itself
-        // encodes the index name as base64url so indices whose names contain the SEPARATOR
-        // ('__') serialize cleanly (see opensearch-project/opensearch-migrations#2880).
+        // encodes each segment as base64url so index and partition names containing the separator
+        // serialize cleanly.
         String indexNameField = "";
         try {
             var parsed = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
-            if (parsed.getShardNumber() != null) {
+            if (parsed.getPartitionName() != null) {
                 indexNameField = "    \"" + INDEX_NAME_FIELD_NAME + "\": "
                     + objectMapper.writeValueAsString(parsed.getIndexName()) + ",\n";
             }
