@@ -16,10 +16,10 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
