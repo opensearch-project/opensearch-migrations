@@ -4,7 +4,7 @@ This library provides integration testing for Kubernetes-based migrations betwee
 
 ## Prerequisites
 
-- Kubernetes cluster (for example: Minikube) with a local registry
+- Kubernetes cluster (for example: kind) with a local registry
 - Python 3.11+ with pipenv installed
 
 ## Setup
@@ -42,7 +42,7 @@ pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19
 pipenv run app --test-ids=0001,0004 --source-version=ES_7.10 --target-version=OS_2.19
 ```
 
-For local kind/minikube CDC tests that deploy a capture proxy, disable external load balancer provisioning:
+For local kind CDC tests that deploy a capture proxy, disable external load balancer provisioning:
 ```bash
 pipenv run app --test-ids=0031 --source-version=ES_8.19 --target-version=OS_3.1 \
   --capture-proxy-service-type=ClusterIP
@@ -108,7 +108,7 @@ pipenv run app --delete-clusters-only
 
 ## Troubleshooting
 
-1. Check cluster status: `minikube status`
+1. Check cluster status: `kubectl cluster-info` and `kubectl get nodes`
 2. Review container logs in `./logs` (requires `--copy-logs`)
 3. Inspect test reports in `./reports`
 4. Check pod status: `kubectl get pods -n ma`

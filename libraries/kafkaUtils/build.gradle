@@ -21,11 +21,11 @@ dependencies {
     testRuntimeOnly libs.junit.jupiter.engine
 }
 
-tasks.withType(Tar){
+tasks.withType(Tar).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-tasks.withType(Zip){
+tasks.withType(Zip).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

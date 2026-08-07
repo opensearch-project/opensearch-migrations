@@ -198,31 +198,52 @@ resource "google_container_cluster" "migration_standard" {
     }
   }
 
-  # Default node pool configured inline
-  node_pool {
-    name               = "default-pool"
-    initial_node_count = var.node_count
-
-    node_config {
-      machine_type    = var.node_machine_type
-      disk_size_gb    = var.node_disk_size
-      disk_type       = var.node_disk_type
-      service_account = google_service_account.migration_nodes.email
-      oauth_scopes    = var.node_oauth_scopes
-    }
-
-    management {
-      auto_repair  = true
-      auto_upgrade = true
-    }
-
-    autoscaling {
-      min_node_count = var.node_min_count
-      max_node_count = var.node_max_count
-    }
-  }
+  # Manage every node pool as a standalone google_container_node_pool resource
+  # (see the "default" and "kafka" pools below). Mixing an inline node_pool block
+  # with standalone pools makes node-pool changes force-replace the whole cluster;
+  # a half-failed apply would then recreate the cluster and take all pools with it.
+  # GKE requires a node pool at creation, so create a throwaway one and remove it.
+  remove_default_node_pool = true
+  initial_node_count       = 1
 
   depends_on = [google_compute_router_nat.migration_nat]
+}
+
+# Default node pool for Migration Assistant workloads. Defined as a standalone
+# resource (like the kafka pool) so its config can change without forcing the
+# cluster to be replaced.
+resource "google_container_node_pool" "default" {
+  name     = "default-pool"
+  cluster  = google_container_cluster.migration_standard.name
+  location = var.region
+
+  initial_node_count = var.node_count
+
+  node_locations = local.node_locations
+
+  node_config {
+    machine_type    = var.node_machine_type
+    disk_size_gb    = var.node_disk_size
+    disk_type       = var.node_disk_type
+    service_account = google_service_account.migration_nodes.email
+    oauth_scopes    = var.node_oauth_scopes
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
+  autoscaling {
+    min_node_count = var.node_min_count
+    max_node_count = var.node_max_count
+  }
+
+  # initial_node_count only seeds the pool at creation; the autoscaler owns the
+  # count thereafter. Ignore drift so applies don't fight the autoscaler.
+  lifecycle {
+    ignore_changes = [initial_node_count]
+  }
 }
 
 
@@ -377,6 +398,16 @@ resource "helm_release" "migration_assistant" {
       name  = "gcp.serviceAccountEmail"
       value = google_service_account.migration_nodes.email
     },
+    # Cluster name/location are required by the fluent-bit stackdriver output
+    # (k8s_container resource) so Cloud Logging entries carry the right resource.
+    {
+      name  = "gcp.clusterName"
+      value = local.cluster_name
+    },
+    {
+      name  = "gcp.clusterLocation"
+      value = local.cluster_location
+    },
     {
       name  = "gcsBucketConfiguration.bucketName"
       value = google_storage_bucket.migration_snapshots.name
@@ -387,7 +418,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.migrationConsole.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.installer.repository"
@@ -395,7 +426,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.installer.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.reindexFromSnapshot.repository"
@@ -403,7 +434,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.reindexFromSnapshot.tag"
-      value = "latest"
+      value = var.migration_release
     },
     # Capture proxy and traffic replayer images (live capture-and-replay migrations).
     # The chart's default repositories for these are unqualified ("migrations/..."),
@@ -417,7 +448,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.captureProxy.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "images.trafficReplayer.repository"
@@ -425,7 +456,7 @@ resource "helm_release" "migration_assistant" {
     },
     {
       name  = "images.trafficReplayer.tag"
-      value = "latest"
+      value = var.migration_release
     },
     {
       name  = "migrationConfig.bucket_name"

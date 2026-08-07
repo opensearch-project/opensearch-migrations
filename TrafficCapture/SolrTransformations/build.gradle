@@ -9,9 +9,9 @@ plugins {
 node {
     version = '22.14.0'
     download = true
-    nodeProjectDir = file("${projectDir}/transforms")
-    workDir = file("${project.buildDir}/nodejs")
-    npmWorkDir = file("${project.buildDir}/npm")
+    nodeProjectDir = layout.projectDirectory.dir("transforms")
+    workDir = project.layout.buildDirectory.dir("nodejs")
+    npmWorkDir = project.layout.buildDirectory.dir("npm")
 }
 
 tasks.register('installTransformDeps', NpmTask) {
@@ -23,7 +23,7 @@ tasks.register('installTransformDeps', NpmTask) {
 // which can hit ETXTBSY on Linux CI. Running it separately with a retry avoids the flake.
 tasks.register('runPostInstallScripts', Exec) {
     dependsOn installTransformDeps
-    workingDir "${projectDir}/transforms"
+    workingDir layout.projectDirectory.dir("transforms")
     commandLine 'bash', '-c', '''
         for i in 1 2 3; do
             npm rebuild esbuild 2>&1 && exit 0
@@ -38,22 +38,22 @@ tasks.register('buildTransforms', NpmTask) {
     description = 'Build TypeScript transforms to GraalVM-compatible JS'
     args = ['run', 'build']
     dependsOn runPostInstallScripts
-    inputs.dir("${projectDir}/transforms/src")
-    outputs.dir("${projectDir}/transforms/dist")
+    inputs.dir(layout.projectDirectory.dir("transforms/src"))
+    outputs.dir(layout.projectDirectory.dir("transforms/dist"))
 }
 
 tasks.register('testTransforms', NpmTask) {
     description = 'Run vitest tests for TypeScript transforms'
     args = ['run', 'test:nocov']
     dependsOn runPostInstallScripts
-    inputs.dir("${projectDir}/transforms/src")
-    inputs.file("${projectDir}/transforms/package.json")
+    inputs.dir(layout.projectDirectory.dir("transforms/src"))
+    inputs.file(layout.projectDirectory.dir("transforms/package.json"))
 }
 
 tasks.register('copyTransforms', Copy) {
     description = 'Copy built JS transforms to test resources'
-    from "${projectDir}/transforms/dist"
-    into "${buildDir}/resources/test/transforms"
+    from layout.projectDirectory.dir("transforms/dist")
+    into layout.buildDirectory.dir("resources/test/transforms")
     dependsOn buildTransforms
 }
 

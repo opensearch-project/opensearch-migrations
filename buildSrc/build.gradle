@@ -26,10 +26,10 @@ dependencies {
     implementation "com.google.cloud.tools:jib-core:0.28.2"
 }
 
-tasks.withType(Tar){
+tasks.withType(Tar).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-tasks.withType(Zip){
+tasks.withType(Zip).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

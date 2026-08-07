@@ -45,12 +45,17 @@ class TestSummary:
     source_version: str
     target_version: str
     expected: Optional[int] = None
+    # Test classes that failed to construct during collection. Non-empty means the
+    # selection was silently truncated, so a clean-looking report is not trustworthy.
+    uncollectable: List[str] = field(default_factory=list)
+    error: Optional[str] = None
 
 
 @dataclass
 class TestReport:
     summary: TestSummary
     tests: List[TestEntry] = field(default_factory=list)
+    exit_code: int = 0
 
 
 class TestsFailed(Exception):
@@ -231,11 +236,12 @@ class TestRunner:
                                       target_version=target_version, unique_id=active_unique_id,
                                       report_suffix=report_suffix)
         test_report = self._parse_test_report(test_data)
+        test_report.exit_code = exit_code
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
         if exit_code != 0 and test_report.summary.failed == 0:
-            logger.warning(f"pytest exited with code {exit_code} but report shows no failures — "
-                           f"possible infrastructure error")
+            logger.error(f"pytest exited with code {exit_code} but report shows no failures; "
+                         f"treating the run as an infrastructure failure")
         return test_report
 
     def cleanup_clusters(self) -> None:
@@ -259,6 +265,21 @@ class TestRunner:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
     def _report_failed(self, test_report: TestReport) -> bool:
+        if test_report.exit_code != 0:
+            logger.error(f"pytest exited with code {test_report.exit_code}")
+            return True
+
+        # Check this BEFORE the expected==0 shortcut below. A test class that fails to
+        # construct is now skipped rather than aborting collection, so pytest exits 0
+        # and the exit_code check above cannot see it. The resulting report is
+        # indistinguishable from a genuinely empty-but-healthy selection unless we look
+        # at what failed to construct.
+        if test_report.summary.uncollectable:
+            logger.error(f"Test cases failed to construct during collection and were never run: "
+                         f"{test_report.summary.uncollectable}. "
+                         f"{test_report.summary.error or ''}")
+            return True
+
         expected = test_report.summary.expected
         if expected is not None and expected == 0 and test_report.summary.failed == 0:
             logger.info(f"No compatible tests for {test_report.summary.source_version} → "
@@ -317,7 +338,7 @@ class TestRunner:
         Returns False if any of those signal incomplete cleanup. The CLI
         entrypoint translates False into a non-zero exit code so the Jenkins
         post block surfaces the incomplete cleanup as UNSTABLE.
-        Outer infra teardown (EKS/minikube delete) still handles any residue.
+        Outer infra teardown (EKS/kind delete) still handles any residue.
 
         Customer-parity sequence (steps 1-3):
 
@@ -338,7 +359,7 @@ class TestRunner:
           6. delete_namespace — webhook cleanup + kubectl delete namespace.
           7. wait_for_namespace_deleted — warn-only. Raising here previously
              aborted the Jenkins post block and left CFN stacks behind; the
-             outer infra teardown (EKS/minikube delete) finishes the job.
+             outer infra teardown (EKS/kind delete) finishes the job.
 
         Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
         timeout is not treated as a hard failure.
@@ -725,7 +746,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--capture-proxy-service-type",
         choices=("LoadBalancer", "ClusterIP"),
         default="LoadBalancer",
-        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
+        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind tests."
     )
     args = parser.parse_args(argv)
     if args.trace_test_ids:
