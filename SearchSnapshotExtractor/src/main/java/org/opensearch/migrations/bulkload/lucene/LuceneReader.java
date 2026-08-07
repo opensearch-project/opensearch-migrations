@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -49,9 +50,23 @@ public class LuceneReader {
     }
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext,
+            useRecoverySource, null);
+    }
+
+    /**
+     * @param liveDocCountSink receives the shard's live Lucene document count once the reader is
+     *                         open, before any documents are emitted. May be null.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, LongConsumer liveDocCountSink) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                if (liveDocCountSink != null) {
+                    liveDocCountSink.accept(countLiveDocs(reader));
+                }
+                return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
+            },
             reader -> {
                 try {
                     reader.close();
@@ -83,6 +98,21 @@ public class LuceneReader {
                     useRecoverySource)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
+    }
+
+    /**
+     * Live Lucene document count, matching {@code _cat/indices docs.count} — includes nested
+     * children, since each is its own Lucene document. A popcount per segment bitset, so
+     * sub-millisecond even on a 60k-document shard.
+     */
+    public static long countLiveDocs(LuceneDirectoryReader reader) {
+        long live = 0;
+        for (var leaf : reader.leaves()) {
+            var segment = leaf.reader();
+            var liveDocs = segment.getLiveDocs();
+            live += (liveDocs == null) ? segment.maxDoc() : liveDocs.cardinality();
+        }
+        return live;
     }
 
     /**

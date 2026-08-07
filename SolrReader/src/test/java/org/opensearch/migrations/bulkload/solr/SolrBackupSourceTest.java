@@ -267,4 +267,32 @@ class SolrBackupSourceTest {
         schema.set("fields", MAPPER.createArrayNode());
         return schema;
     }
+
+    @Test
+    void toDocumentCarriesTheLucenePositionForResume() {
+        // Solr resumes by Lucene doc id, so the position must survive onto the Document. Dropping it
+        // makes the pipeline fall back to counting emitted documents, and a successor then seeks to a
+        // count rather than a position -- landing in the wrong place on any segment where the two
+        // differ (e.g. deleted or nested documents).
+        var change = new org.opensearch.migrations.bulkload.common.LuceneDocumentChange(
+            42, "doc-1", null, "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null,
+            org.opensearch.migrations.bulkload.common.DocumentChangeType.INDEX);
+
+        var doc = SolrBackupSource.toDocument(change);
+
+        assertThat(doc.position().isPresent(), equalTo(true));
+        assertThat(doc.position().get(), equalTo(42L));
+    }
+
+    @Test
+    void toDocumentSynthesizesAnIdButKeepsThePosition() {
+        var change = new org.opensearch.migrations.bulkload.common.LuceneDocumentChange(
+            7, null, null, null, null,
+            org.opensearch.migrations.bulkload.common.DocumentChangeType.INDEX);
+
+        var doc = SolrBackupSource.toDocument(change);
+
+        assertThat(doc.id(), equalTo("solr_doc_7"));
+        assertThat(doc.position().get(), equalTo(7L));
+    }
 }
