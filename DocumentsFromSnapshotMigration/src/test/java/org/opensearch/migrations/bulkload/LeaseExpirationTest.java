@@ -380,6 +380,140 @@ public class LeaseExpirationTest extends SourceTestBase {
         }
     }
 
+    /**
+     * The successor checkpoint must be a Lucene position, not a count of migrated documents.
+     *
+     * <p>On a flat index the two are equal, so a substitution goes unnoticed; on a nested index the
+     * count lags, because nested children consume Lucene positions without producing a migrated
+     * document. A resumed worker would then seek backwards and re-migrate finished documents.
+     *
+     * <p>Asserts against a real nested shard whose lease expires partway through, reading the
+     * checkpoint back out of the work-coordination index: it must exceed the number of documents that
+     * reached the target, which only holds if it is a position.
+     */
+    @Test
+    @SneakyThrows
+    public void successorCheckpointIsALucenePositionNotADocumentCount() {
+        final int ROOT_DOCS = 1640;
+        final int CHILDREN_PER_ROOT = 4;
+        // SourceTestBase.setupProcess pins --index-allowlist to "geonames", so the nested index must
+        // use that name or the worker finds no work to do.
+        final String nestedIndex = "geonames";
+
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var tempDirSnapshot = Files.createTempDirectory("nestedResume_snapshot");
+        var tempDirLucene = Files.createTempDirectory("nestedResume_lucene");
+
+        try (
+            var network = Network.newNetwork();
+            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+                .withAccessToHost(true);
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+                .withAccessToHost(true).withNetwork(network).withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
+                .withAccessToHost(true).withNetwork(network).withNetworkAliases(COORDINATOR_DOCKER_HOSTNAME);
+            var targetProxy = new ToxiProxyWrapper(network);
+            var coordinatorProxy = new ToxiProxyWrapper(network)
+        ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start),
+                CompletableFuture.runAsync(osCoordinatorContainer::start)
+            ).join();
+            targetProxy.start(TARGET_DOCKER_HOSTNAME, 9200);
+            coordinatorProxy.start(COORDINATOR_DOCKER_HOSTNAME, 9200);
+
+            var sourceClusterOperations = new ClusterOperations(esSourceContainer);
+            sourceClusterOperations.createIndex(nestedIndex,
+                "{"
+                + "  \"settings\": {\"index\": {\"number_of_shards\": 1, \"number_of_replicas\": 0}},"
+                + "  \"mappings\": {\"properties\": {"
+                + "    \"name\": {\"type\": \"keyword\"},"
+                + "    \"children\": {\"type\": \"nested\", \"properties\": {"
+                + "      \"tag\": {\"type\": \"keyword\"}, \"n\": {\"type\": \"integer\"}}}"
+                + "  }}"
+                + "}");
+
+            var children = new StringBuilder("[");
+            for (int c = 0; c < CHILDREN_PER_ROOT; c++) {
+                if (c > 0) {
+                    children.append(",");
+                }
+                children.append("{\"tag\":\"t").append(c).append("\",\"n\":").append(c).append("}");
+            }
+            children.append("]");
+            for (int i = 1; i <= ROOT_DOCS; i++) {
+                sourceClusterOperations.createDocument(nestedIndex, String.valueOf(i),
+                    "{\"name\":\"doc-" + i + "\",\"children\":" + children + "}");
+            }
+            sourceClusterOperations.refresh();
+
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var countResponse = sourceClusterOperations.get("/" + nestedIndex + "/_count");
+            int sourceCount = mapper.readTree(countResponse.getValue()).get("count").asInt();
+            var statsResponse = sourceClusterOperations.get("/" + nestedIndex + "/_stats/docs");
+            int sourceDocsCount = mapper.readTree(statsResponse.getValue())
+                .path("indices").path(nestedIndex).path("primaries").path("docs").path("count").asInt();
+
+            // Guard: if these agree the shard has no nested children and the assertion below is vacuous.
+            Assertions.assertEquals(ROOT_DOCS, sourceCount, "_count must report root documents only");
+            Assertions.assertTrue(sourceDocsCount > sourceCount,
+                "fixture must produce nested children; got docs.count=" + sourceDocsCount
+                    + " _count=" + sourceCount);
+
+            createSnapshot(esSourceContainer, SNAPSHOT_NAME, testSnapshotContext);
+            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+
+            var targetOps = new ClusterOperations(osTargetContainer);
+            var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
+            var coordinatorIndexName =
+                OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
+
+            int exitCode = runSingleWorkerWithDedicatedCoordinator(
+                tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
+            targetOps.refresh();
+            long docsAtTarget = targetOps.getDocCount(nestedIndex);
+            log.atInfo().setMessage("exit={} docsAtTarget={} sourceRoots={} sourceLuceneDocs={}")
+                .addArgument(exitCode).addArgument(docsAtTarget)
+                .addArgument(sourceCount).addArgument(sourceDocsCount).log();
+
+            Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
+                "lease should expire before the nested shard completes, producing a successor");
+
+            var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
+                .WorkItem(nestedIndex, 0, 0L).toString();
+            coordinatorOps.refresh(coordinatorIndexName);
+            var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
+            var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);
+            Assertions.assertEquals(200, searchResponse.getKey(), "Failed to query coordinator index");
+            var parentHits = mapper.readTree(searchResponse.getValue()).path("hits").path("hits");
+            Assertions.assertEquals(1, parentHits.size(),
+                "Expected exactly one hit for parent work item " + parentWorkItemId);
+            var successorItems = parentHits.get(0).path("_source")
+                .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
+            Assertions.assertFalse(successorItems.isBlank(),
+                "no successor was recorded, so the resume path was not exercised");
+
+            var successor = IWorkCoordinator.WorkItemAndDuration.WorkItem
+                .valueFromWorkItemString(successorItems);
+            long checkpoint = successor.getStartingDocId();
+            log.atInfo().setMessage("successor checkpoint={}").addArgument(checkpoint).log();
+
+            // Each root is followed by CHILDREN_PER_ROOT children, so after N roots the Lucene position
+            // is ~N*(1+CHILDREN_PER_ROOT) while only N documents have been written. A count-based
+            // checkpoint would be <= docsAtTarget.
+            Assertions.assertTrue(checkpoint > docsAtTarget,
+                "successor checkpoint (" + checkpoint + ") must exceed documents written ("
+                    + docsAtTarget + ") on a nested shard; otherwise the checkpoint is a document "
+                    + "count and a successor will seek backwards and re-migrate finished documents");
+            Assertions.assertTrue(checkpoint <= sourceDocsCount,
+                "checkpoint (" + checkpoint + ") cannot exceed the shard's live Lucene doc count ("
+                    + sourceDocsCount + ")");
+        } finally {
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
+        }
+    }
+
     @SneakyThrows
     private static int runSingleWorkerWithDedicatedCoordinator(
         Path tempDirSnapshot,

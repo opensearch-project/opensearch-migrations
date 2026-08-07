@@ -1034,6 +1034,11 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
+    shardDocCountS3Prefix: z.string().default("rfs-shard-doc-counts/").optional()
+        .describe("S3 key prefix for per-shard live document count records, written under the same bucket, " +
+            "region and endpoint already resolved for the failed document stream. Each RFS run writes under " +
+            "<prefix>/session=<workflow-uid>/. One record per shard, so volume is bounded by shard count. " +
+            "Counts are always logged regardless of this setting. Defaults to 'rfs-shard-doc-counts/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
         .describe("S3 bucket for the failed document stream. When omitted, the config processor resolves the " +
             "deployment-provisioned default bucket before workflow submission so the effective bucket is explicit " +
