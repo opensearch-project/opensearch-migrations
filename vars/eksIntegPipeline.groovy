@@ -214,6 +214,24 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Validate CloudWatch Dashboards') {
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            withMigrationsTestAccount(region: params.REGION) {
+                                verifyEksDashboards(
+                                    action: 'create',
+                                    kubeContext: env.eksKubeContext,
+                                    stage: env.maStageName,
+                                    region: params.REGION,
+                                )
+                                env.eksDashboardsVerified = 'true'
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Perform Python E2E Tests') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
@@ -240,6 +258,24 @@ def call(Map config = [:]) {
         }
         post {
             always {
+                script {
+                    if (env.eksDashboardsVerified == 'true') {
+                        catchError(
+                            buildResult: 'FAILURE',
+                            stageResult: 'FAILURE',
+                            message: 'CloudWatch dashboard deletion verification failed',
+                        ) {
+                            withMigrationsTestAccount(region: params.REGION) {
+                                verifyEksDashboards(
+                                    action: 'delete',
+                                    kubeContext: env.eksKubeContext,
+                                    stage: env.maStageName,
+                                    region: params.REGION,
+                                )
+                            }
+                        }
+                    }
+                }
                 eksPostCleanup(
                     maStackName: env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}",
                     clusterStackName: "OpenSearch-${maStageName}-${params.REGION}",
