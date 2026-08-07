@@ -1,0 +1,38 @@
+# Grants the migration-console pod's ServiceAccount the ability to drive TestRun CRs and read the
+# k6 ConfigMaps. Because this lives in the separate load-test chart, the console gains the
+# capability ONLY when this chart is installed — a normal migration deployment cannot submit runs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k6-testrun-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+rules:
+  - apiGroups: ["k6.io"]
+    resources: ["testruns"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  # Read the scenario / preset / image ConfigMaps to assemble a TestRun.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  # Read runner pod status/logs for `workflow k6 list` / `logs`.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k6-testrun-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.console.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: k6-testrun-manager
+  apiGroup: rbac.authorization.k8s.io

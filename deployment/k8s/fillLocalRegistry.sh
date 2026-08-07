@@ -11,6 +11,21 @@ MIGRATIONS_REPO_ROOT_DIR="$(git rev-parse --show-toplevel)"
 
 docker network inspect local-migrations-network >/dev/null 2>&1 || docker network create local-migrations-network
 
+# A container that exists but isn't running (exited, or stuck in a restart loop) would otherwise be
+# treated as "already there" by the checks below, silently reusing a broken container forever. Drop
+# it so it gets recreated with the current arguments.
+drop_if_not_running() {
+  local name=$1
+  if docker ps -a -q -f "name=^${name}$" | grep -q . && \
+     [ "$(docker inspect -f '{{.State.Running}}{{.State.Restarting}}' "$name")" != "truefalse" ]; then
+    echo "Removing stale '${name}' container (not running)"
+    docker rm -f "$name" >/dev/null
+  fi
+}
+
+drop_if_not_running docker-registry
+drop_if_not_running buildkitd
+
 docker ps -q -f name=^docker-registry$ | grep -q . || docker run -d --restart=always \
   --name docker-registry \
   --network local-migrations-network \
@@ -23,7 +38,7 @@ docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
   --dns 8.8.8.8 \
   --network local-migrations-network \
   -p 1234:1234 \
-  -v ./buildkitd.toml:/etc/buildkit/buildkitd.toml \
+  -v "$MIGRATIONS_REPO_ROOT_DIR/buildImages/buildkitd.toml":/etc/buildkit/buildkitd.toml \
   --restart=always \
   moby/buildkit:latest \
   --addr tcp://0.0.0.0:1234 \
@@ -36,6 +51,8 @@ until nc -z localhost 1234 2>/dev/null; do
   i=$((i+1))
   if [ "$i" -ge 60 ]; then
     echo "buildkitd did not become ready within 60 seconds" >&2
+    echo "--- docker logs buildkitd (last 20 lines) ---" >&2
+    docker logs --tail 20 buildkitd >&2 2>&1 || true
     exit 1
   fi
   sleep 1

@@ -72,7 +72,9 @@ class TestRunner:
                  transform_image_context: str = "",
                  capture_proxy_service_type: str = "LoadBalancer",
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
-                 trace_backend: str = "") -> None:
+                 trace_backend: str = "",
+                 with_load_test: bool = False, k6_chart_path: str = "",
+                 load_test_image: str = "mirror.gcr.io/grafana/k6:latest") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -90,6 +92,9 @@ class TestRunner:
         self.trace_test_ids = trace_test_ids or []
         self.trace_values_file = trace_values_file
         self.trace_backend = trace_backend
+        self.with_load_test = with_load_test
+        self.k6_chart_path = k6_chart_path
+        self.load_test_image = load_test_image
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -426,6 +431,25 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
+    def _install_load_test_chart(self) -> None:
+        """Install the standalone k6LoadTest chart (operator + scenarios + RBAC) for --with-load-test.
+
+        The chart depends on the k6-operator subchart, so vendor it first (offline from Chart.lock
+        when already present, else fetch from the grafana repo).
+        """
+        import subprocess
+        logger.info("Installing k6 load-test chart from %s", self.k6_chart_path)
+        subprocess.run(["helm", "repo", "add", "grafana", "https://grafana.github.io/helm-charts"],
+                       check=False, capture_output=True)
+        if subprocess.run(["helm", "dependency", "build", self.k6_chart_path],
+                          capture_output=True, text=True).returncode != 0:
+            subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
+        repo, _, tag = self.load_test_image.rpartition(":")
+        if not self.k8s_service.helm_install(
+                chart_path=self.k6_chart_path, release_name="k6-load-test",
+                values={"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent"}):
+            raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
+
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
         if not self.skip_install:
@@ -493,6 +517,12 @@ class TestRunner:
                         raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
+
+                # Opt-in: install the standalone k6 load-test chart so load-test cases (Test0050*)
+                # can submit TestRuns. Kept separate from the migration chart, so a normal run has
+                # no operator/scenarios/RBAC and cannot trigger a load test.
+                if self.with_load_test:
+                    self._install_load_test_chart()
 
                 test_report = self.run_tests(source_version=source_version,
                                              target_version=target_version,
@@ -652,6 +682,12 @@ def parse_args(argv=None) -> argparse.Namespace:
              "testing [--skip-delete, --reuse-clusters, --keep-workflows]"
     )
     parser.add_argument(
+        "--with-load-test",
+        action="store_true",
+        help="Install the standalone k6LoadTest chart so load-test cases (e.g. Test0050*) can "
+             "submit k6-operator TestRuns. Off by default so normal runs contain no k6."
+    )
+    parser.add_argument(
         "--test-reports-dir",
         default=None,
         help="If provided, will output generated test reports to this directory path"
@@ -778,6 +814,7 @@ def main() -> None:
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
+    k6_chart_path = f"{helm_charts_base_path}/components/k6LoadTest"
 
     target_type = TargetType(args.target_type)
     if "all" in args.source_version and len(args.source_version) > 1:
@@ -807,7 +844,9 @@ def main() -> None:
                              capture_proxy_service_type=args.capture_proxy_service_type,
                              trace_test_ids=args.trace_test_ids,
                              trace_values_file=args.trace_values_file,
-                             trace_backend=args.trace_backend or "")
+                             trace_backend=args.trace_backend or "",
+                             with_load_test=args.with_load_test,
+                             k6_chart_path=k6_chart_path)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()

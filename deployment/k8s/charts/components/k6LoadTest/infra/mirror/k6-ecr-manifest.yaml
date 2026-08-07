@@ -1,0 +1,16 @@
+# Version-locked list of container images and Helm charts required by the standalone k6 load-test
+# component on EKS. Kept separate from the migration's private-ecr-manifest.yaml so mirroring k6
+# artifacts is opt-in — only needed when the k6LoadTest chart is actually deployed.
+#
+# Same format as infra/mirror/private-ecr-manifest.yaml; consumed by the same ECR-mirroring tooling.
+
+charts:
+  # Format: "name|version|repository"
+  - "k6-operator|4.5.0|https://grafana.github.io/helm-charts"
+
+images:
+  # k6 test runner (stock grafana/k6). The runner image the console sets on TestRun.spec.runner.image.
+  - "docker.io/grafana/k6:latest"
+
+  # k6-operator controller (chart 4.5.0 / appVersion 1.5.0 — single image, no kube-rbac-proxy sidecar).
+  - "ghcr.io/grafana/k6-operator:controller-v1.5.0"

@@ -1,0 +1,22 @@
+# One ConfigMap per load-profile preset (k6-config/*.env), with one key per variable so a TestRun
+# can pull it in via `runner.envFrom`. Defaults live here; a run overrides them by adding entries to
+# `runner.env` (which win over envFrom) or by pointing envFrom at a different preset.
+{{- range $path, $bytes := .Files.Glob "files/k6/k6-config/*.env" }}
+{{- $preset := base $path | trimSuffix ".env" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-preset-{{ $preset }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: k6-load-test
+    k6-preset: {{ $preset }}
+data:
+{{- range $line := splitList "\n" (toString $bytes) }}
+{{- $l := trim $line }}
+{{- if and $l (not (hasPrefix "#" $l)) (contains "=" $l) }}
+  {{ (splitn "=" 2 $l)._0 | trim }}: {{ (splitn "=" 2 $l)._1 | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

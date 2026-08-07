@@ -1,0 +1,53 @@
+# k6 load-test component. Installed separately from any migration (opt-in), so a normal
+# migrationAssistant deployment contains no operator, scenarios, RBAC, or CLI capability.
+
+# Runner image (stock grafana/k6). The console reads this via the k6-image-config ConfigMap and
+# sets it as TestRun spec.runner.image. For local minikube, override the repository with the
+# mirrored registry path, e.g. --set image.repository=<registry>/grafana/k6
+image:
+  repository: grafana/k6
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# k6-operator subchart — installs the TestRun CRD + controller. Disable to install the operator
+# out-of-band and use only this chart's ConfigMaps/RBAC.
+k6Operator:
+  enabled: true
+
+# Values passed to the k6-operator subchart (keyed by its chart name). We install into an existing
+# namespace (the migration's), so namespace creation is disabled to avoid ownership conflicts.
+k6-operator:
+  namespace:
+    create: false
+
+# TestRun distribution defaults baked into the k6-testrun-examples ConfigMap. `parallelism` splits
+# each scenario's load across that many runner pods (the operator shards the script's executors).
+# `separate: true` is the operator's shorthand for REQUIRED node anti-affinity — it forces the runner
+# pods onto distinct nodes. Only meaningful when parallelism > 1, and it needs at least `parallelism`
+# schedulable nodes or the surplus pods stay Pending forever — so keep it false on single-node
+# clusters (e.g. local minikube).
+# `cleanup: post` makes the operator tear down the WHOLE run once it finishes — the runner/
+# initializer/starter pods AND the TestRun CR itself (it logs "Cleaning up all resources" and deletes
+# the object; metrics already shipped to Grafana persist). Left EMPTY by default: the CR is deleted
+# near-instantly on completion, which races the `stage=finished` polling that `run_test.sh`,
+# `workflow k6 run --wait`, and the Test0050 integ test rely on — they'd see the CR vanish and time
+# out. Set to "post" only for fire-and-forget runs you never wait on. Only "post" is valid non-empty.
+testRun:
+  parallelism: 1
+  separate: false
+  cleanup: ""
+
+# Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
+# Off by default; those scenarios degrade gracefully to flat searches when absent.
+registry:
+  enabled: false
+
+# Grafana dashboard auto-import (via the kube-prometheus-stack Grafana sidecar). Harmless if that
+# stack is absent — the ConfigMap simply isn't picked up.
+dashboard:
+  enabled: true
+
+# ServiceAccount of the migration-console pod that submits TestRuns. This chart grants it RBAC on
+# testruns.k6.io, so the `workflow k6` CLI is only functional once this chart is installed.
+console:
+  serviceAccountName: migration-console-access-role

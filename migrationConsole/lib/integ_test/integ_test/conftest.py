@@ -42,6 +42,7 @@ from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
+from .test_cases.k6_load_test_tests import *
 
 logger = logging.getLogger(__name__)
 
