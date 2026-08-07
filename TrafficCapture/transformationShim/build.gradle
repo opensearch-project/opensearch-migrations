@@ -43,15 +43,16 @@ tasks.withType(Test).configureEach {
 // Skip with: ./gradlew :TrafficCapture:transformationShim:jibDockerBuild -PskipBundleTransforms
 if (!project.hasProperty('skipBundleTransforms')) {
     def transformStagingDir = layout.buildDirectory.dir("docker/transforms")
+    def transformationsDist = project(':TrafficCapture:SolrTransformations').layout.projectDirectory.dir("transforms/dist")
 
     tasks.register('stageTransformsForImage', Sync) {
         description = 'Sync built transforms into build/docker/transforms/ for Jib extraDirectories'
-        from "${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist"
+        from transformationsDist
         into transformStagingDir
         include '*.js'
         dependsOn ':TrafficCapture:SolrTransformations:buildTransforms'
 
-        inputs.dir("${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist")
+        inputs.dir(transformationsDist)
         outputs.dir(transformStagingDir)
 
         doLast {
@@ -59,7 +60,7 @@ if (!project.hasProperty('skipBundleTransforms')) {
             if (staged.isEmpty()) {
                 throw new GradleException(
                     "stageTransformsForImage produced no .js files. " +
-                    "Expected built transforms in ${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist/")
+                    "Expected built transforms in ${transformationsDist.asFile.toString()}")
             }
             logger.lifecycle("Staged ${staged.size()} transform(s) for Docker image: ${staged*.name}")
         }
