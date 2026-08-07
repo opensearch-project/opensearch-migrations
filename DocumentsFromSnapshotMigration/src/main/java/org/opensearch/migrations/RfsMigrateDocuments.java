@@ -12,13 +12,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -37,6 +36,7 @@ import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProv
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -202,7 +202,7 @@ public class RfsMigrateDocuments {
             description = ("Optional. The maximum shard size, in bytes, to allow when " +
                 "performing the document migration.  " +
                 "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
-        public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
+        public long maxShardSizeBytes = DEFAULT_MAX_SHARD_SIZE_BYTES;
 
         @Parameter(required = false,
             names = { "--initial-lease-duration", "--initialLeaseDuration" },
@@ -471,43 +471,81 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
+    static final long DEFAULT_MAX_SHARD_SIZE_BYTES = 80 * 1024 * 1024 * 1024L;
+
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
         }
     }
 
-    /** Per-source arguments that {@code --source-config} supersedes, by flag name. */
-    private static final Map<String, Function<Args, Object>> SUPERSEDED_BY_SOURCE_CONFIG = Map.of(
-        "--repo-uri", a -> a.repoUri,
-        "--snapshot-name", a -> a.snapshotName,
-        "--source-version", a -> a.sourceVersion,
-        "--s3-region", a -> a.s3Region,
-        "--endpoint", a -> a.endpoint);
+    private record SupersededArg(String flag, Predicate<Args> wasGiven) {}
 
-    static void validateSourceSelection(Args args) {
+    /**
+     * Arguments whose values now live in {@code --source-config}. Working directories are absent on
+     * purpose: they configure {@link SourceRuntime}, not the spec, and are still required.
+     */
+    private static final List<SupersededArg> SUPERSEDED_BY_SOURCE_CONFIG = List.of(
+        new SupersededArg("--repo-uri", a -> a.repoUri != null),
+        new SupersededArg("--snapshot-name", a -> a.snapshotName != null),
+        new SupersededArg("--source-version", a -> a.sourceVersion != null),
+        new SupersededArg("--s3-region", a -> a.s3Region != null),
+        new SupersededArg("--endpoint", a -> a.endpoint != null),
+        new SupersededArg("--max-shard-size-bytes", a -> a.maxShardSizeBytes != DEFAULT_MAX_SHARD_SIZE_BYTES),
+        new SupersededArg("--use-recovery-source", a -> a.experimental.useRecoverySource),
+        new SupersededArg("--enable-sourceless-migrations", a -> a.experimental.enableSourcelessMigrations),
+        new SupersededArg("--experimental-delta-mode", a -> a.experimental.experimentalDeltaMode != null),
+        new SupersededArg("--experimental-previous-snapshot-name",
+            a -> a.experimental.previousSnapshotName != null));
+
+    /** Validates the pair and returns the chosen provider, or null when neither argument was given. */
+    static DocumentSourceProvider<?> validateSourceSelection(Args args) {
         if (args.sourceKind == null && args.sourceConfig == null) {
-            return;
+            return null;
         }
         if (args.sourceKind == null || args.sourceConfig == null) {
             throw new ParameterException("--source-kind and --source-config must be given together.");
         }
-        var conflicting = SUPERSEDED_BY_SOURCE_CONFIG.entrySet().stream()
-            .filter(e -> e.getValue().apply(args) != null)
-            .map(Map.Entry::getKey)
-            .sorted()
+        var conflicting = SUPERSEDED_BY_SOURCE_CONFIG.stream()
+            .filter(s -> s.wasGiven().test(args))
+            .map(SupersededArg::flag)
             .collect(Collectors.toList());
         if (!conflicting.isEmpty()) {
             throw new ParameterException("--source-kind supersedes " + String.join(", ", conflicting)
                 + "; put those settings in --source-config instead of passing both.");
         }
-        DocumentSourceRegistry.getDefault().resolve(args.sourceKind);
+        try {
+            return DocumentSourceRegistry.getDefault().resolve(args.sourceKind);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Requirements that outlive the source spec. Mirrors the inferred paths: a snapshot unpacks
+     * segments and so needs a working directory, a Solr backup reads in place and does not, and a
+     * Solr backup cannot coordinate work on the target.
+     */
+    private static void validateRuntimeArgs(Args args, DocumentSourceProvider<?> provider) {
+        if (provider instanceof SolrBackupSourceProvider) {
+            if (args.coordinatorArgs.host == null) {
+                throw new ParameterException(
+                    "--coordinator-host is required for a Solr backup, which cannot coordinate work on the target."
+                );
+            }
+            return;
+        }
+        if (args.luceneDir == null && args.localDir == null) {
+            throw new ParameterException(
+                "--lucene-dir or --local-dir is required so unpacked documents have somewhere to go.");
+        }
     }
 
     public static void validateArgs(Args args) {
-        validateSourceSelection(args);
-        if (args.sourceKind != null) {
-            // The chosen provider validates its own config; the per-source checks below do not apply.
+        var provider = validateSourceSelection(args);
+        if (provider != null) {
+            // The provider validates its own config; only the runtime requirements are ours to check.
+            validateRuntimeArgs(args, provider);
             return;
         }
         // Solr backup path
@@ -856,6 +894,9 @@ public class RfsMigrateDocuments {
 
     /** Reads {@code --source-config}, either inline JSON or {@code @path} naming a JSON file. */
     static JsonNode readSourceConfig(String sourceConfig) {
+        if (sourceConfig == null) {
+            throw new ParameterException("--source-config is required when --source-kind is given.");
+        }
         var mapper = ObjectMapperFactory.createDefaultMapper();
         try {
             if (sourceConfig.startsWith("@")) {

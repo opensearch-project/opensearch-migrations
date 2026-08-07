@@ -3,6 +3,7 @@ package org.opensearch.migrations;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 
@@ -24,6 +25,9 @@ class ExplicitSourceSelectionTest {
 
     private static final String SOLR_CONFIG =
         "{\"repoUri\":\"file:///backups\",\"backupName\":\"nightly\",\"solrMajorVersion\":8}";
+
+    private static final String ES_CONFIG =
+        "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\",\"version\":\"ES 7.10.2\"}";
 
     private static RfsMigrateDocuments.Args argsWithExplicitSource(String kind, String config) {
         var args = new RfsMigrateDocuments.Args();
@@ -114,7 +118,7 @@ class ExplicitSourceSelectionTest {
 
     @Test
     void anUnknownKindIsRejectedAndListsTheAvailableOnes() {
-        var message = assertThrows(IllegalArgumentException.class,
+        var message = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateSourceSelection(
                 argsWithExplicitSource("not-a-kind", SOLR_CONFIG))).getMessage();
 
@@ -136,5 +140,63 @@ class ExplicitSourceSelectionTest {
         assertThat(assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
             containsString("--snapshot-name"));
+    }
+
+    @Test
+    void supersededSpecOnlyArgumentsAreRejected() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+        args.experimental.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
+        args.experimental.useRecoverySource = true;
+        args.maxShardSizeBytes = 1024L;
+
+        var message = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage();
+
+        assertThat(message, containsString("--experimental-delta-mode"));
+        assertThat(message, containsString("--use-recovery-source"));
+        assertThat(message, containsString("--max-shard-size-bytes"));
+    }
+
+    @Test
+    void workingDirectoriesAreStillRequiredUnderExplicitSelection() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
+            containsString("--lucene-dir"));
+    }
+
+    @Test
+    void aSolrBackupStillNeedsACoordinatorHost() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
+        args.luceneDir = "/tmp/lucene";
+
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
+            containsString("--coordinator-host"));
+    }
+
+    @Test
+    void aSolrBackupDoesNotNeedAWorkingDirectory() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
+        args.coordinatorArgs.host = "http://coordinator:9200";
+
+        // Reads the backup in place, matching the inferred Solr path.
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void eitherWorkingDirectorySatisfiesASnapshot() {
+        var withLocalDir = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+        withLocalDir.localDir = "/tmp/local";
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(withLocalDir));
+    }
+
+    @Test
+    void sourceConfigIsReportedRatherThanNullPointing() {
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.readSourceConfig(null)).getMessage(),
+            containsString("--source-config"));
     }
 }
