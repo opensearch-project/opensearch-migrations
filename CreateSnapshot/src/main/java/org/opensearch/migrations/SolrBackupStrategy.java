@@ -2,12 +2,14 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.bulkload.common.RepoUri;
@@ -18,6 +20,7 @@ import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -74,6 +77,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         "managed-schema.xml"
     );
 
+    /** Timeout for the SolrCloud-vs-standalone probe. */
+    private static final Duration DETECTION_TIMEOUT = Duration.ofSeconds(10);
+
     private String topologyLabel() {
         return isCloud ? COLLECTION_LABEL : CORE_LABEL;
     }
@@ -95,6 +101,17 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         public SolrImportSchemaUnavailable(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Thrown when the Solr topology can't be determined (unreachable, timeout, or auth-blocked). */
+    public static class SolrTopologyDetectionException extends RuntimeException {
+        public SolrTopologyDetectionException(String message) {
+            super(message);
+        }
+
+        public SolrTopologyDetectionException(String message, Throwable cause) {
             super(message, cause);
         }
     }
@@ -534,19 +551,91 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+    public enum SolrTopology {
+        SOLR_CLOUD,
+        STANDALONE,
+        /** Reachable, but the response does not identify either topology. */
+        UNKNOWN
+    }
+
+    private static final String COLLECTIONS_PATH = "/solr/admin/collections";
+    /** Solr's predefined permission guarding {@link #COLLECTIONS_PATH}; collection discovery needs it too. */
+    private static final String COLLECTIONS_PERMISSION = "collection-admin-read";
+    /** Standalone rejects the Collections API with this reason; matched loosely to survive rewording. */
+    private static final String NOT_CLOUD_MARKER = "solrcloud";
+
+    /**
+     * Detect topology from the Collections API's response body. Deliberately uses the same endpoint as
+     * collection discovery so detection needs no permission the migration doesn't already require —
+     * notably {@code /admin/info/system} would demand {@code config-read}, which nothing else here does.
+     */
+    static SolrTopology detectTopology(String solrUrl, SolrHttpClient httpClient) {
+        var listUrl = solrUrl + COLLECTIONS_PATH + "?action=LIST&wt=json";
+        HttpResponse<String> response;
         try {
-            var response = httpClient.getRaw(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
-            return response.statusCode() == 200;
+            response = httpClient.getRaw(listUrl, DETECTION_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.info("SolrCloud detection interrupted, assuming standalone");
-            return false;
-        } catch (Exception e) {
-            log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
-            return false;
+            throw new SolrTopologyDetectionException(
+                "Interrupted while detecting Solr topology at " + solrUrl, e);
+        } catch (IOException e) {
+            // No HTTP response (unreachable, refused, TLS, timeout): fail loudly rather than guess.
+            throw new SolrTopologyDetectionException(
+                "Could not reach Solr at " + solrUrl + " to detect SolrCloud vs standalone topology: "
+                    + e.getMessage(), e);
         }
+
+        int status = response.statusCode();
+        if (status == 401) {
+            throw new SolrTopologyDetectionException(
+                "Solr authentication failed (HTTP 401) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Check the source credentials.");
+        }
+        if (status == 403) {
+            // Authenticated but not permitted: name the permission so the failure is self-diagnosing.
+            throw new SolrTopologyDetectionException(
+                "Solr authorization failed (HTTP 403) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Reading " + COLLECTIONS_PATH
+                    + " requires the '" + COLLECTIONS_PERMISSION + "' permission — grant it to the source user.");
+        }
+
+        var body = parseOrNull(response.body());
+        if (body != null) {
+            // SolrCloud answers LIST with a collections array; standalone rejects the request and says why.
+            if (body.has("collections")) {
+                return SolrTopology.SOLR_CLOUD;
+            }
+            if (body.path("error").path("msg").asText("").toLowerCase(Locale.ROOT).contains(NOT_CLOUD_MARKER)) {
+                return SolrTopology.STANDALONE;
+            }
+        }
+        // Reachable but uninformative (proxy error page, 5xx, unrecognized body): do not assume standalone.
+        log.atInfo().setMessage("Solr topology detection: HTTP {} from {} did not identify a topology")
+            .addArgument(status).addArgument(listUrl).log();
+        return SolrTopology.UNKNOWN;
+    }
+
+    private static JsonNode parseOrNull(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            return MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            log.atInfo().setMessage("Could not parse Solr Collections API response: {}")
+                .addArgument(e.getMessage()).log();
+            return null;
+        }
+    }
+
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+        var topology = detectTopology(solrUrl, httpClient);
+        if (topology == SolrTopology.UNKNOWN) {
+            throw new SolrTopologyDetectionException(
+                "Could not determine SolrCloud vs standalone topology at " + solrUrl
+                    + "; the Collections API response identified neither SolrCloud nor standalone");
+        }
+        return topology == SolrTopology.SOLR_CLOUD;
     }
 
     // ---- Collection / core discovery ----

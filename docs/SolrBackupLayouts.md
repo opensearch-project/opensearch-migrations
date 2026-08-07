@@ -40,6 +40,24 @@ A standalone backup does **not** record the core name, so the target index name 
 `snapshot.<name>` directory (see
 [How the target index name is determined](#how-the-target-index-name-is-determined)).
 
+## Solr permissions the migration needs
+
+When the migration connects to a live Solr (via `--source-username` / `--source-password`), it reads
+the Collections and Cores admin APIs to determine whether Solr is running in SolrCloud or standalone
+mode and to discover what to migrate. Under Solr's `RuleBasedAuthorizationPlugin` those need:
+
+| Permission | Used for |
+| --- | --- |
+| `collection-admin-read` | `/admin/collections?action=LIST` — topology detection and collection discovery |
+| `core-admin-read` | `/admin/cores?action=STATUS` — core discovery on standalone |
+
+Topology detection deliberately reuses the same Collections API call as discovery, so it requires no
+permission beyond what the migration already needs. (`/admin/info/system` reports the mode more
+directly, but is guarded by `config-read`, which nothing else here requires — so it is not used.)
+
+This applies only to Solr instances with authorization rules configured; an open Solr, or a user
+with `all`, needs nothing extra.
+
 ## Pointing the migration at a backup
 
 Set the source version to your Solr version (e.g. `--source-version SOLR_7.7.3`) and provide the
