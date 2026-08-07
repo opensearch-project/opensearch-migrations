@@ -622,7 +622,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
     # The stack name is controlled by --stack-name, not by CDK stack IDs.
     # Other CDK env vars (CODE_BUCKET, SOLUTION_NAME, CODE_VERSION) are left
-    # intact — they affect template content (AppRegistry names, S3 paths) and
+    # intact — they affect template content (such as S3 paths) and
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified -x test
