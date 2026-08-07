@@ -8,14 +8,17 @@
   }
 
   check_s3_available() {
+    local bucket="$1"
     echo "Checking if S3 is available..."
     ENDPOINT_FLAG=$(get_s3_endpoint_flag)
-    if ! output=$(aws $ENDPOINT_FLAG s3 ls 2>&1 >/dev/null); then
-      echo "S3 check failed with error:"
-      echo "$output"
-      return 1
+    output=$(aws $ENDPOINT_FLAG s3api head-bucket --bucket "$bucket" 2>&1 >/dev/null)
+    exit_code=$?
+    if [ "$exit_code" -eq 0 ] || echo "$output" | grep -q 'Not Found\|NoSuchBucket'; then
+      return 0
     fi
-    return 0
+    echo "S3 check failed with error:"
+    echo "$output"
+    return 1
   }
 
   bucket_exists() {

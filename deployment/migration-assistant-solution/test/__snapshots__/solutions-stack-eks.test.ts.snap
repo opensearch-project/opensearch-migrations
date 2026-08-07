@@ -1050,11 +1050,19 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         "PolicyDocument": {
           "Statement": [
             {
+              "Action": "ecr:GetAuthorizationToken",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
               "Action": [
-                "ecr:GetAuthorizationToken",
                 "ecr:BatchGetImage",
                 "ecr:GetDownloadUrlForLayer",
-                "ecr:DescribeRepositories",
                 "ecr:BatchCheckLayerAvailability",
                 "ecr:CompleteLayerUpload",
                 "ecr:InitiateLayerUpload",
@@ -1062,66 +1070,197 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                 "ecr:UploadLayerPart",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EKSInfraMigrationsECRRepositoryEAD8241B",
+                  "Arn",
+                ],
+              },
             },
             {
-              "Action": [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite",
-              ],
+              "Action": "es:ESHttp*",
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":es:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":domain/*/*",
+                  ],
+                ],
+              },
             },
             {
-              "Action": [
-                "es:ESHttp*",
-                "aoss:APIAccessAll",
-              ],
+              "Action": "aoss:APIAccessAll",
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":aoss:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":collection/*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
                 "secretsmanager:DescribeSecret",
-                "secretsmanager:ListSecrets",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":secret:*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ListBucket",
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "s3:GetObject",
                 "s3:PutObject",
-                "s3:ListBucket",
-                "s3:ListAllMyBuckets",
                 "s3:DeleteObject",
-                "s3:DeleteObjectVersion",
-                "s3:ListBucketVersions",
-                "s3:ListBucketMultipartUploads",
                 "s3:AbortMultipartUpload",
-                "s3:CreateBucket",
-                "s3:DeleteBucket",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:CreateLogGroup",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:/migration-assistant-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/logs",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "logs:PutLogEvents",
-                "logs:DescribeLogStreams",
-                "logs:DescribeLogGroups",
-                "logs:CreateLogGroup",
                 "logs:CreateLogStream",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:/migration-assistant-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/logs:log-stream:*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "cloudwatch:ListMetrics",
                 "cloudwatch:GetMetricData",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
             },
@@ -1130,28 +1269,13 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                 "xray:PutTraceSegments",
                 "xray:PutTelemetryRecords",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":iam::",
-                    {
-                      "Ref": "AWS::AccountId",
-                    },
-                    ":role/*",
-                  ],
-                ],
-              },
             },
             {
               "Action": [
@@ -1160,6 +1284,59 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                 "cloudwatch:DeleteDashboards",
               ],
               "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":cloudwatch::",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":dashboard/MA-",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "-us-west-1-CaptureReplay",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":cloudwatch::",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":dashboard/MA-",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "-us-west-1-ReindexFromSnapshot",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "acm-pca:IssueCertificate",
+                "acm-pca:GetCertificate",
+                "acm-pca:DescribeCertificateAuthority",
+                "acm-pca:DeleteCertificateAuthority",
+                "acm-pca:UpdateCertificateAuthority",
+                "acm-pca:TagCertificateAuthority",
+              ],
+              "Effect": "Allow",
               "Resource": {
                 "Fn::Join": [
                   "",
@@ -1168,26 +1345,25 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":cloudwatch::",
+                    ":acm-pca:us-west-1:",
                     {
                       "Ref": "AWS::AccountId",
                     },
-                    ":dashboard/MA-*",
+                    ":certificate-authority/*",
                   ],
                 ],
               },
             },
             {
               "Action": [
-                "acm-pca:IssueCertificate",
-                "acm-pca:GetCertificate",
-                "acm-pca:DescribeCertificateAuthority",
                 "acm-pca:ListCertificateAuthorities",
                 "acm-pca:CreateCertificateAuthority",
-                "acm-pca:DeleteCertificateAuthority",
-                "acm-pca:UpdateCertificateAuthority",
-                "acm-pca:TagCertificateAuthority",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
             },
@@ -1228,20 +1404,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
           "Version": "2012-10-17",
         },
         "Description": "Migrations IAM role assumed by pods via EKS Pod Identity",
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/AmazonEC2ContainerRegistryFullAccess",
-              ],
-            ],
-          },
-        ],
         "RoleName": {
           "Fn::Join": [
             "",
@@ -1406,7 +1568,15 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":s3:::migrations-*",
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1",
                   ],
                 ],
               },
@@ -1426,7 +1596,15 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":s3:::migrations-*/*",
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/*",
                   ],
                 ],
               },
@@ -2188,11 +2366,19 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         "PolicyDocument": {
           "Statement": [
             {
+              "Action": "ecr:GetAuthorizationToken",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
               "Action": [
-                "ecr:GetAuthorizationToken",
                 "ecr:BatchGetImage",
                 "ecr:GetDownloadUrlForLayer",
-                "ecr:DescribeRepositories",
                 "ecr:BatchCheckLayerAvailability",
                 "ecr:CompleteLayerUpload",
                 "ecr:InitiateLayerUpload",
@@ -2200,66 +2386,197 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "ecr:UploadLayerPart",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EKSInfraMigrationsECRRepositoryEAD8241B",
+                  "Arn",
+                ],
+              },
             },
             {
-              "Action": [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite",
-              ],
+              "Action": "es:ESHttp*",
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":es:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":domain/*/*",
+                  ],
+                ],
+              },
             },
             {
-              "Action": [
-                "es:ESHttp*",
-                "aoss:APIAccessAll",
-              ],
+              "Action": "aoss:APIAccessAll",
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":aoss:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":collection/*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
                 "secretsmanager:DescribeSecret",
-                "secretsmanager:ListSecrets",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":secret:*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ListBucket",
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "s3:GetObject",
                 "s3:PutObject",
-                "s3:ListBucket",
-                "s3:ListAllMyBuckets",
                 "s3:DeleteObject",
-                "s3:DeleteObjectVersion",
-                "s3:ListBucketVersions",
-                "s3:ListBucketMultipartUploads",
                 "s3:AbortMultipartUpload",
-                "s3:CreateBucket",
-                "s3:DeleteBucket",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:CreateLogGroup",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:/migration-assistant-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/logs",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "logs:PutLogEvents",
-                "logs:DescribeLogStreams",
-                "logs:DescribeLogGroups",
-                "logs:CreateLogGroup",
                 "logs:CreateLogStream",
               ],
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:/migration-assistant-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/logs:log-stream:*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
                 "cloudwatch:ListMetrics",
                 "cloudwatch:GetMetricData",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
             },
@@ -2268,28 +2585,13 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "xray:PutTraceSegments",
                 "xray:PutTelemetryRecords",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":iam::",
-                    {
-                      "Ref": "AWS::AccountId",
-                    },
-                    ":role/*",
-                  ],
-                ],
-              },
             },
             {
               "Action": [
@@ -2298,6 +2600,59 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "cloudwatch:DeleteDashboards",
               ],
               "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":cloudwatch::",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":dashboard/MA-",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "-us-west-1-CaptureReplay",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":cloudwatch::",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":dashboard/MA-",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "-us-west-1-ReindexFromSnapshot",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "acm-pca:IssueCertificate",
+                "acm-pca:GetCertificate",
+                "acm-pca:DescribeCertificateAuthority",
+                "acm-pca:DeleteCertificateAuthority",
+                "acm-pca:UpdateCertificateAuthority",
+                "acm-pca:TagCertificateAuthority",
+              ],
+              "Effect": "Allow",
               "Resource": {
                 "Fn::Join": [
                   "",
@@ -2306,26 +2661,25 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":cloudwatch::",
+                    ":acm-pca:us-west-1:",
                     {
                       "Ref": "AWS::AccountId",
                     },
-                    ":dashboard/MA-*",
+                    ":certificate-authority/*",
                   ],
                 ],
               },
             },
             {
               "Action": [
-                "acm-pca:IssueCertificate",
-                "acm-pca:GetCertificate",
-                "acm-pca:DescribeCertificateAuthority",
                 "acm-pca:ListCertificateAuthorities",
                 "acm-pca:CreateCertificateAuthority",
-                "acm-pca:DeleteCertificateAuthority",
-                "acm-pca:UpdateCertificateAuthority",
-                "acm-pca:TagCertificateAuthority",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-west-1",
+                },
+              },
               "Effect": "Allow",
               "Resource": "*",
             },
@@ -2366,20 +2720,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           "Version": "2012-10-17",
         },
         "Description": "Migrations IAM role assumed by pods via EKS Pod Identity",
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/AmazonEC2ContainerRegistryFullAccess",
-              ],
-            ],
-          },
-        ],
         "RoleName": {
           "Fn::Join": [
             "",
@@ -2539,7 +2879,15 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":s3:::migrations-*",
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1",
                   ],
                 ],
               },
@@ -2559,7 +2907,15 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":s3:::migrations-*/*",
+                    ":s3:::migrations-default-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "-",
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-us-west-1/*",
                   ],
                 ],
               },
