@@ -23,7 +23,6 @@ import {
 import {EKSInfra} from "./eks-infra";
 import {
     addParameterLabel,
-    applyAppRegistry,
     generateExportString,
     getVpcEndpointForEFS,
     ParameterLabel,
@@ -82,7 +81,6 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         additionalParameters.push(stageParameter.logicalId)
 
         const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
-        const appRegistryAppARN = applyAppRegistry(this, stackMarker, props)
 
         const solutionsUserAgent = `AwsSolution/${props.solutionId}/${props.solutionVersion}`
 
@@ -319,7 +317,6 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         });
 
         const exportString = generateExportString({
-            "MIGRATIONS_APP_REGISTRY_ARN": appRegistryAppARN,
             "MIGRATIONS_USER_AGENT": solutionsUserAgent,
             "MIGRATIONS_EKS_CLUSTER_NAME": eksClusterName,
             "MIGRATIONS_ECR_REGISTRY": `${eksInfra.ecrRepo.registryUri}/${eksInfra.ecrRepo.repositoryName}`,
