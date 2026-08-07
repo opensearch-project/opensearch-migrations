@@ -60,30 +60,140 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
+    """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document."""
+
+    # Mapped `long` on the target so a non-numeric value fails to parse.
+    FAILING_FIELD = "quantity"
+
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
-        description = "Performs backfill migration for a single document (default coordinator)."
+        description = ("Performs backfill migration for one valid and one terminally failing document "
+                       "(default coordinator).")
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
                          allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0002_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0002_doc"
+        self.failing_doc_id = "test_0002_failing_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
         self.target_cluster = None
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        # Base default minus metadataMigrationConfig, which would replace the incompatible target
+        # mapping. Backfill sizing and resources are kept as-is so EKS scheduling is unchanged.
+        super().prepare_workflow_snapshot_and_migration_config()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration.pop("metadataMigrationConfig", None)
+
     def prepare_clusters(self):
-        # Create single document
+        # Failing document first: dynamic mapping pins the field to the version's string type from
+        # the first doc. Numeric-looking first would pin it to `long` and the source would reject this.
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
-                                               doc_id=self.doc_id, doc_type=self.doc_type)
+                                               doc_id=self.failing_doc_id, doc_type=self.doc_type,
+                                               data={"title": "Fails to parse on the target",
+                                                     self.FAILING_FIELD: "not-a-number"})
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id, doc_type=self.doc_type,
+                                               data={"title": "Migrates cleanly",
+                                                     self.FAILING_FIELD: "123"})
         self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id,
                                             doc_type=self.doc_type)
+        self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, doc_type=self.doc_type)
+
+        # Seed only this index; auto-creation stays enabled globally.
+        properties = {self.FAILING_FIELD: {"type": "long"}}
+        doc_type = self.target_operations.resolve_doc_type(self.doc_type)
+        mappings = {doc_type: {"properties": properties}} if self.target_operations.uses_typed_mappings() \
+            else {"properties": properties}
+        self.target_operations.create_index(index_name=self.index_name, cluster=self.target_cluster,
+                                            data=json.dumps({"mappings": mappings}))
 
     def verify_clusters(self):
-        # Validate single document exists on target
+        # The valid document migrates; the failing one must never land on the target.
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, expected_status_code=404,
+                                            max_attempts=3, delay=2.0)
+
+        workflow_uid = self.argo_service.get_workflow_uid(workflow_name=self.workflow_name)
+
+        record = self._await_failed_document_record()
+        self._assert_field(record, "documentId", self.failing_doc_id)
+        self._assert_field(record, "failureType", "mapper_parsing_exception")
+        self._assert_field(record, "failureClass", "NON_RETRYABLE")
+        self._assert_field(record, "targetIndex", self.index_name)
+        self._assert_field(record, "sessionId", workflow_uid)
+
+        status = self._await_completed_with_errors()
+        self._assert_field(status, "status", "CompletedWithErrors")
+        self._assert_field(status, "failed_documents_present", True)
+        self._assert_field(status, "percentage_completed", 100.0)
+        shard_total = status.get("shard_total")
+        shard_complete = status.get("shard_complete")
+        if shard_total != shard_complete:
+            raise AssertionError(
+                f"Backfill reported CompletedWithErrors with shard_complete={shard_complete} != "
+                f"shard_total={shard_total}: {status}"
+            )
+        self._assert_session_location(status, workflow_uid)
+        logger.info("Failed document observed through the console: %s", record)
+
+    @staticmethod
+    def _assert_field(payload: dict, field: str, expected):
+        actual = payload.get(field)
+        if actual != expected:
+            raise AssertionError(f"Expected {field}={expected!r}, got {actual!r}: {payload}")
+
+    @staticmethod
+    def _assert_session_location(status: dict, workflow_uid: str):
+        """The reported stream location must belong to this run's session."""
+        location = status.get("failed_document_stream_location")
+        if not location:
+            raise AssertionError(f"Deep status did not report a failed document stream location: {status}")
+        if f"session={workflow_uid}" not in location:
+            raise AssertionError(
+                f"Failed document stream location {location!r} does not belong to session {workflow_uid!r}"
+            )
+
+    def _run_console_json(self, args: list, timeout: int = 180) -> dict | list:
+        cmd = ["console", "--json"] + args
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode != 0:
+            raise AssertionError(
+                f"`{' '.join(cmd)}` failed (rc={result.returncode}). "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise AssertionError(f"`{' '.join(cmd)}` emitted non-JSON: {e}. stdout={result.stdout!r}") from e
+
+    def _await_failed_document_record(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
+        """Poll: the workflow can report finished before the S3 object is listable."""
+        records = []
+        for _ in range(max_attempts):
+            records = self._run_console_json(["failed-document-stream", "list", "--limit", "100"])
+            for record in records:
+                if record.get("documentId") == self.failing_doc_id:
+                    return record
+            time.sleep(delay)
+        raise AssertionError(
+            f"Document {self.failing_doc_id!r} never appeared in the failed document stream. "
+            f"Last read {len(records)} record(s): {records}"
+        )
+
+    def _await_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
+        status = {}
+        for _ in range(max_attempts):
+            status = self._run_console_json(["backfill", "status", "--deep-check"])
+            if status.get("status") == "CompletedWithErrors":
+                return status
+            time.sleep(delay)
+        raise AssertionError(f"Backfill never reported CompletedWithErrors. Last status: {status}")
 
 
 class Test0008OptionalSnapshotStages(MATestBase):
