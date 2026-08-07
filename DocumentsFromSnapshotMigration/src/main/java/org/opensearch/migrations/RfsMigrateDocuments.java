@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -11,10 +12,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -22,6 +26,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
@@ -304,6 +309,18 @@ public class RfsMigrateDocuments {
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
 
+        @Parameter(required = false,
+            names = { "--source-kind", "--sourceKind" },
+            description = "Which document source to open, e.g. es-snapshot or solr-backup. When unset, the "
+                + "kind is inferred from --source-version. Requires --source-config.")
+        public String sourceKind = null;
+
+        @Parameter(required = false,
+            names = { "--source-config", "--sourceConfig" },
+            description = "The source's own configuration as JSON, either inline or @/path/to/file.json. "
+                + "Requires --source-kind.")
+        public String sourceConfig = null;
+
         @ParametersDelegate
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
 
@@ -460,7 +477,39 @@ public class RfsMigrateDocuments {
         }
     }
 
+    /** Per-source arguments that {@code --source-config} supersedes, by flag name. */
+    private static final Map<String, Function<Args, Object>> SUPERSEDED_BY_SOURCE_CONFIG = Map.of(
+        "--repo-uri", a -> a.repoUri,
+        "--snapshot-name", a -> a.snapshotName,
+        "--source-version", a -> a.sourceVersion,
+        "--s3-region", a -> a.s3Region,
+        "--endpoint", a -> a.endpoint);
+
+    static void validateSourceSelection(Args args) {
+        if (args.sourceKind == null && args.sourceConfig == null) {
+            return;
+        }
+        if (args.sourceKind == null || args.sourceConfig == null) {
+            throw new ParameterException("--source-kind and --source-config must be given together.");
+        }
+        var conflicting = SUPERSEDED_BY_SOURCE_CONFIG.entrySet().stream()
+            .filter(e -> e.getValue().apply(args) != null)
+            .map(Map.Entry::getKey)
+            .sorted()
+            .collect(Collectors.toList());
+        if (!conflicting.isEmpty()) {
+            throw new ParameterException("--source-kind supersedes " + String.join(", ", conflicting)
+                + "; put those settings in --source-config instead of passing both.");
+        }
+        DocumentSourceRegistry.getDefault().resolve(args.sourceKind);
+    }
+
     public static void validateArgs(Args args) {
+        validateSourceSelection(args);
+        if (args.sourceKind != null) {
+            // The chosen provider validates its own config; the per-source checks below do not apply.
+            return;
+        }
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -771,10 +820,13 @@ public class RfsMigrateDocuments {
     record SourceSelection(String kind, JsonNode config) {}
 
     /**
-     * Infers the source selection from today's arguments. Phase 2 replaces this with an explicit
-     * {@code --source-kind} and {@code --source-*} group.
+     * Takes {@code --source-kind} and {@code --source-config} when given, else infers the selection
+     * from the per-source arguments so existing invocations keep working.
      */
     static SourceSelection selectSource(Args arguments, boolean emitDocType) {
+        if (arguments.sourceKind != null) {
+            return new SourceSelection(arguments.sourceKind, readSourceConfig(arguments.sourceConfig));
+        }
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
             return new SourceSelection(SolrBackupSourceProvider.KIND, new SolrBackupSpec(
                 arguments.repoUri,
@@ -800,6 +852,20 @@ public class RfsMigrateDocuments {
             arguments.experimental.experimentalDeltaMode,
             arguments.experimental.enableSourcelessMigrations
         ).toJson());
+    }
+
+    /** Reads {@code --source-config}, either inline JSON or {@code @path} naming a JSON file. */
+    static JsonNode readSourceConfig(String sourceConfig) {
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        try {
+            if (sourceConfig.startsWith("@")) {
+                var path = Paths.get(sourceConfig.substring(1));
+                return mapper.readTree(Files.readString(path));
+            }
+            return mapper.readTree(sourceConfig);
+        } catch (IOException e) {
+            throw new ParameterException("--source-config could not be read as JSON: " + e.getMessage(), e);
+        }
     }
 
     static SourceRuntime buildSourceRuntime(Args arguments, RootDocumentMigrationContext context) {
