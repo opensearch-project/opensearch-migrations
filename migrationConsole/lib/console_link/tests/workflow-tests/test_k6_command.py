@@ -188,6 +188,75 @@ class TestK6Run:
         assert body["spec"]["script"]["localFile"] == "/scripts/SCENARIO_my-custom.js"
 
 
+class TestK6RunWait:
+    """`--wait` polls the TestRun to a terminal stage and maps it onto the exit code, so a load
+    test wired into a script fails the script when the run itself failed."""
+
+    @staticmethod
+    def _stages(monkeypatch, *stages):
+        """Feed get_testrun a canned sequence of stages, one per poll."""
+        it = iter(stages)
+        monkeypatch.setattr(k6mod, "get_testrun", lambda ns, name: {"status": {"stage": next(it)}})
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_wait_succeeds_when_run_finishes(self, _create, cluster, monkeypatch):
+        self._stages(monkeypatch, "finished")
+        result = _runner().invoke(workflow_cli, ["k6", "run", "--wait"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "finished" in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_wait_polls_until_terminal(self, _create, cluster, monkeypatch):
+        # A run that is still going keeps the poll loop alive; --wait-interval 0 keeps it instant.
+        self._stages(monkeypatch, "started", "started", "finished")
+        result = _runner().invoke(
+            workflow_cli, ["k6", "run", "--wait", "--wait-interval", "0"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "Run k6-run-xy finished: finished" in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_wait_exits_nonzero_when_run_errors(self, _create, cluster, monkeypatch):
+        # "error" is terminal, so waiting ends promptly — but it is not success.
+        self._stages(monkeypatch, "error")
+        result = _runner().invoke(workflow_cli, ["k6", "run", "--wait"], env=ENV)
+        assert result.exit_code == 1
+        assert "finished: error" in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_wait_exits_nonzero_when_stopped(self, _create, cluster, monkeypatch):
+        self._stages(monkeypatch, "stopped")
+        result = _runner().invoke(workflow_cli, ["k6", "run", "--wait"], env=ENV)
+        assert result.exit_code == 1
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_wait_times_out(self, _create, cluster, monkeypatch):
+        # --timeout 0 puts the deadline in the past, so the loop gives up without polling.
+        monkeypatch.setattr(k6mod, "get_testrun", lambda ns, name: {"status": {"stage": "started"}})
+        result = _runner().invoke(
+            workflow_cli, ["k6", "run", "--wait", "--timeout", "0"], env=ENV)
+        assert result.exit_code == 1
+        assert "Timed out after 0s waiting for k6-run-xy" in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_missing_testrun_keeps_waiting_until_timeout(self, _create, cluster, monkeypatch):
+        # get_testrun returns None for a run the API doesn't know about yet; that must not be
+        # mistaken for a terminal stage.
+        monkeypatch.setattr(k6mod, "get_testrun", lambda ns, name: None)
+        result = _runner().invoke(
+            workflow_cli, ["k6", "run", "--wait", "--timeout", "0"], env=ENV)
+        assert result.exit_code == 1
+        assert "Timed out" in result.output
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_no_wait_returns_immediately(self, _create, cluster, monkeypatch):
+        # Without --wait the command must not poll at all.
+        polled = []
+        monkeypatch.setattr(k6mod, "get_testrun", lambda ns, name: polled.append(name))
+        result = _runner().invoke(workflow_cli, ["k6", "run"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert polled == []
+
+
 class TestBuildTestrunSpec:
     def test_missing_example_raises(self, monkeypatch):
         monkeypatch.setattr(k6mod, "read_configmap", lambda ns, name: {})

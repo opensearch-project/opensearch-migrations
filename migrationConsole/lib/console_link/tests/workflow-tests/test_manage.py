@@ -859,6 +859,170 @@ async def test_k6_option_shown_when_loadtest_installed(mock_workflow_with_two_po
             assert await wait_until(pilot, lambda: isinstance(app.screen, K6PanelModal), timeout=5.0)
 
 
+# The k6 panel returns a command dict for the app to execute; these drive _on_k6_action directly
+# rather than through the modal, so the launch/stop dispatch is covered without re-testing the
+# modal's own widget wiring (that lives in test_k6_panel_modal.py).
+K6_LAUNCH_FIELDS = {
+    "scenario": "ingest", "config_name": None, "parallelism": 1, "target_url": None,
+    "rate": None, "duration": None, "vus": None, "registry_enabled": False,
+    "control_enabled": False, "overrides_text": None,
+}
+
+
+def _notifications(notify_mock):
+    return [call.args[0] for call in notify_mock.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_k6_launch_submits_run(mock_workflow_with_two_pods):
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.submit_k6_run",
+                  return_value="k6-run-z") as submit:
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                app._on_k6_action({"kind": "launch", "fields": dict(K6_LAUNCH_FIELDS)})
+                await pilot.pause()
+
+    submit.assert_called_once()
+    namespace, params = submit.call_args.args
+    assert namespace == "default"
+    # The modal's fields go through build_k6_parameters, so the preset default is applied here.
+    assert params["scenario"] == "ingest"
+    assert params["configName"] == "ingest-steady"
+    assert "k6-run-z" in _notifications(notify)[0]
+
+
+@pytest.mark.asyncio
+async def test_k6_launch_reports_invalid_override(mock_workflow_with_two_pods):
+    """A malformed -e bag is rejected by build_k6_parameters before any k8s call — the TUI has to
+    surface that as a notification rather than letting it escape and kill the app."""
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    fields = dict(K6_LAUNCH_FIELDS, overrides_text="NOEQUALS")
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.submit_k6_run") as submit:
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                app._on_k6_action({"kind": "launch", "fields": fields})
+                await pilot.pause()
+
+    submit.assert_not_called()
+    assert "Invalid override" in _notifications(notify)[0]
+
+
+@pytest.mark.asyncio
+async def test_k6_launch_failure_notifies_without_crashing(mock_workflow_with_two_pods):
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.submit_k6_run",
+                  side_effect=RuntimeError("boom")):
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                app._on_k6_action({"kind": "launch", "fields": dict(K6_LAUNCH_FIELDS)})
+                await pilot.pause()
+            # The managed workflow is unaffected by a k6-side failure.
+            assert app.is_running
+
+    assert "k6 action failed" in _notifications(notify)[0]
+
+
+@pytest.mark.asyncio
+async def test_k6_stop_counts_only_runs_actually_stopped(mock_workflow_with_two_pods):
+    """delete_testrun reports False when the CR could not be removed; the tally must reflect that
+    rather than claiming every requested run was stopped."""
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.testrun_utils.delete_testrun",
+                  side_effect=[True, False]) as delete:
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                # The empty name is dropped before any API call is attempted.
+                app._on_k6_action({"kind": "stop", "names": ["k6-run-a", "k6-run-b", ""]})
+                await pilot.pause()
+
+    assert [c.args[1] for c in delete.call_args_list] == ["k6-run-a", "k6-run-b"]
+    assert "Stopped 1/2" in _notifications(notify)[0]
+
+
+@pytest.mark.asyncio
+async def test_k6_action_ignores_dismissal(mock_workflow_with_two_pods):
+    """Closing the panel dismisses with None; that must not be mistaken for a command."""
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.submit_k6_run") as submit, \
+            patch("console_link.workflow.commands.testrun_utils.delete_testrun") as delete:
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                app._on_k6_action(None)
+                await pilot.pause()
+
+    submit.assert_not_called()
+    delete.assert_not_called()
+    assert _notifications(notify) == []
+
+
+@pytest.mark.asyncio
+async def test_k6_panel_opens_even_when_cluster_lookups_fail(mock_workflow_with_two_pods):
+    """Runs/presets/scenarios are all best-effort: a failing lookup degrades to an empty list and a
+    notification, so the panel still opens and a run can be launched from the fallback values."""
+    from console_link.workflow.tui.k6_panel_modal import K6PanelModal
+
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    boom = RuntimeError("api down")
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
+            patch("console_link.workflow.commands.k6.list_active_k6_runs", side_effect=boom), \
+            patch("console_link.workflow.commands.testrun_utils.list_presets", side_effect=boom), \
+            patch("console_link.workflow.commands.testrun_utils.list_scenarios", side_effect=boom):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+            assert await wait_until(pilot, lambda: app._k6_available is True, timeout=5.0)
+
+            with patch.object(app, "notify") as notify:
+                await pilot.press("k")
+                assert await wait_until(
+                    pilot, lambda: isinstance(app.screen, K6PanelModal), timeout=5.0)
+
+            messages = " ".join(_notifications(notify))
+            assert "Could not list k6 runs" in messages
+            assert "Could not list k6 presets" in messages
+            assert "Could not list k6 scenarios" in messages
+
+
+@pytest.mark.asyncio
+async def test_k6_panel_action_is_inert_when_unavailable(mock_workflow_with_two_pods):
+    """The `k` binding is only advertised when k6 is installed, but the action guards itself too so
+    a stale keypress can't fire k8s calls against an absent TestRun CRD."""
+    from console_link.workflow.tui.k6_panel_modal import K6PanelModal
+
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available", return_value=False), \
+            patch("console_link.workflow.commands.k6.list_active_k6_runs") as list_runs:
+        async with app.run_test() as pilot:
+            with patch.object(app, "notify") as notify:
+                app.action_k6_panel()
+                await pilot.pause()
+                assert not isinstance(app.screen, K6PanelModal)
+
+    list_runs.assert_not_called()
+    assert "not installed" in _notifications(notify)[0]
+
+
+@pytest.mark.asyncio
+async def test_k6_probe_failure_leaves_option_hidden(mock_workflow_with_two_pods):
+    """A probe that raises (no kubeconfig, RBAC denial) means "not installed", not a crash in the
+    refresh worker."""
+    app = _k6_gating_app(mock_workflow_with_two_pods)
+    with patch("console_link.workflow.commands.k6.k6_available",
+               side_effect=RuntimeError("no kubeconfig")):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+            app._probe_k6_availability()
+            await pilot.pause()
+            assert app._k6_available is False
+
+
 @pytest.mark.asyncio
 async def test_k6_option_appears_after_chart_installed(mock_workflow_with_two_pods):
     """The console re-probes on every refresh, so installing the k6LoadTest chart AFTER startup
