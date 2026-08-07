@@ -163,35 +163,49 @@ def load_example(namespace, scenario):
     return json.loads(data[scenario])
 
 
+# Named run options → the scenario env vars each one sets. A value-carrying option is applied only
+# when it's non-empty, so leaving it off keeps whatever the preset's envFrom supplies. --rate and
+# --vus fan out to both the ingest and search vars because a scenario reads only its own pair.
+_VALUE_ENV_VARS = (
+    ("duration", ("DURATION",)),
+    ("rate", ("INGEST_RATE", "SEARCH_RATE")),
+    ("vus", ("INGEST_VUS", "SEARCH_VUS")),
+    ("targetUrl", ("CAPTURE_PROXY_URL",)),
+    ("webdisUrl", ("WEBDIS_URL",)),
+)
+# The toggles are three-state: None means "keep the preset's value", so they can't use the
+# truthiness test above — an explicit False still has to emit an override to turn the preset off.
+_TOGGLE_ENV_VARS = (
+    ("registryEnabled", "REGISTRY_ENABLED"),
+    ("controlEnabled", "CONTROL_ENABLED"),
+)
+
+
+def _parse_overrides(text):
+    """The -e KEY=VALUE bag as a dict. Blank lines are skipped; anything else must carry an '='."""
+    env = {}
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(f"override must be KEY=VALUE, got '{line}'")
+        key, val = line.split("=", 1)
+        env[key.strip()] = val.strip()
+    return env
+
+
 def _override_env(params):
     """Per-run env overrides (these win over the preset's envFrom). Named flags fan out to the vars
-    the scenarios read; the -o bag is applied as-is."""
+    the scenarios read; the -e bag is applied last, so it wins over the named flags."""
     env = {}
-    if params.get("duration"):
-        env["DURATION"] = params["duration"]
-    if params.get("rate"):
-        env["INGEST_RATE"] = params["rate"]
-        env["SEARCH_RATE"] = params["rate"]
-    if params.get("vus"):
-        env["INGEST_VUS"] = params["vus"]
-        env["SEARCH_VUS"] = params["vus"]
-    if params.get("targetUrl"):
-        env["CAPTURE_PROXY_URL"] = params["targetUrl"]
-    if params.get("webdisUrl"):
-        env["WEBDIS_URL"] = params["webdisUrl"]
-    if params.get("registryEnabled") is not None:
-        env["REGISTRY_ENABLED"] = str(params["registryEnabled"]).lower()
-    if params.get("controlEnabled") is not None:
-        env["CONTROL_ENABLED"] = str(params["controlEnabled"]).lower()
-    if params.get("overrides"):
-        for line in params["overrides"].splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if "=" not in line:
-                raise ValueError(f"override must be KEY=VALUE, got '{line}'")
-            key, val = line.split("=", 1)
-            env[key.strip()] = val.strip()
+    for key, names in _VALUE_ENV_VARS:
+        if params.get(key):
+            env.update(dict.fromkeys(names, params[key]))
+    for key, name in _TOGGLE_ENV_VARS:
+        if params.get(key) is not None:
+            env[name] = str(params[key]).lower()
+    env.update(_parse_overrides(params.get("overrides")))
     return [{"name": k, "value": str(v)} for k, v in env.items()]
 
 
@@ -326,9 +340,7 @@ def k6_group():
 @click.option('--timeout', default=600, type=int, help="Seconds to wait with --wait (default 600).")
 @click.option('--wait-interval', default=5, type=int, help="Seconds between status checks with --wait.")
 @click.pass_context
-def k6_run(ctx, scenario, config_name, parallelism, target_url, rate, duration, vus,
-           registry_enabled, control_enabled, overrides, extra_args,
-           namespace, wait, timeout, wait_interval):
+def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
     """Submit a k6 run.
 
     \b
@@ -338,17 +350,20 @@ def k6_run(ctx, scenario, config_name, parallelism, target_url, rate, duration, 
       workflow k6 run --scenario mixed --parallelism 4 --registry-enabled -e INGEST_RATE=80
     """
     _require_k6(ctx, namespace)
+    # Every remaining option names a build_k6_parameters keyword (that's why the click options
+    # above spell out `config_name`/`target_url`), so the run spec is assembled by forwarding the
+    # bag wholesale. `overrides` is the one exception: it arrives as a repeated-flag tuple and has
+    # to be flattened into the newline-delimited text that build_k6_parameters expects.
+    overrides = run_opts.pop("overrides", ())
     try:
         params = build_k6_parameters(
-            scenario=scenario, config_name=config_name, parallelism=parallelism,
-            target_url=target_url, rate=rate, duration=duration, vus=vus,
-            registry_enabled=registry_enabled, control_enabled=control_enabled,
-            overrides_text=("\n".join(overrides) if overrides else None), extra_args=extra_args,
-        )
+            overrides_text=("\n".join(overrides) if overrides else None), **run_opts)
     except ValueError as e:
         click.echo(f"Error: --override {e}", err=True)
         ctx.exit(ExitCode.INVALID_INPUT.value)
         return
+    scenario = params["scenario"]
+    target_url = params["targetUrl"]
     config_name = params["configName"]
 
     try:

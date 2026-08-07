@@ -30,6 +30,13 @@ _FALLBACK_PRESETS = [
     "mixed-steady", "mixed-ramp", "mixed-burst",
 ]
 
+# Widget ids for the two Selects we query back out repeatedly, with their "#id" selectors derived
+# from them so the pair can't drift.
+_SCENARIO_ID = "scenario"
+_CONFIG_ID = "config"
+_SCENARIO_SEL = f"#{_SCENARIO_ID}"
+_CONFIG_SEL = f"#{_CONFIG_ID}"
+
 
 class K6PanelModal(ModalScreen[Optional[dict]]):
     CSS = """
@@ -93,9 +100,9 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
                 yield Static("New run", classes="section")
                 default_scenario = "ingest" if "ingest" in self._scenarios else self._scenarios[0]
                 yield Select([(s, s) for s in self._scenarios], value=default_scenario,
-                             allow_blank=False, id="scenario")
+                             allow_blank=False, id=_SCENARIO_ID)
                 yield Select([(p, p) for p in self._presets], allow_blank=True,
-                             prompt="config preset — blank = <scenario>-steady", id="config")
+                             prompt="config preset — blank = <scenario>-steady", id=_CONFIG_ID)
                 yield Input(value=self._default_target,
                             placeholder="target URL (optional) — default https://capture-proxy:9200",
                             id="target")
@@ -116,13 +123,13 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
         # The config Select is blank on mount (allow_blank, no value), so its value here IS this
         # Textual's blank sentinel — capture it to reset to later. Guard against a str in case a
         # future Textual auto-selects the first option.
-        cfg_value = self.query_one("#config", Select).value
+        cfg_value = self.query_one(_CONFIG_SEL, Select).value
         self._config_blank = None if isinstance(cfg_value, str) else cfg_value
         # Seed the toggle checkboxes from the default scenario's preset before enabling the
         # change handler, then focus the scenario select.
         self._sync_toggle_defaults()
         self._ready = True
-        self.query_one("#scenario", Select).focus()
+        self.query_one(_SCENARIO_SEL, Select).focus()
 
     @staticmethod
     def _default_toggles(scenario: str, config_name: Optional[str]) -> tuple:
@@ -139,14 +146,14 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
         A blank Select yields a sentinel (NoSelection), not a str — and its identity/name varies
         across Textual versions (Select.BLANK vs Select.NULL) — so treat anything non-str as blank
         rather than comparing against a specific sentinel object."""
-        value = self.query_one("#config", Select).value
+        value = self.query_one(_CONFIG_SEL, Select).value
         return value if isinstance(value, str) else None
 
     def _sync_toggle_defaults(self) -> None:
         """Point the toggle checkboxes at the current scenario/config's preset defaults. Called
         on mount and whenever the scenario changes; a manual toggle after that is preserved until
         the scenario is changed again."""
-        scenario = self.query_one("#scenario", Select).value
+        scenario = self.query_one(_SCENARIO_SEL, Select).value
         registry_default, control_default = self._default_toggles(scenario, self._config_value())
         self.query_one("#registry", Checkbox).value = registry_default
         self.query_one("#control", Checkbox).value = control_default
@@ -154,8 +161,8 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
     def on_select_changed(self, event: Select.Changed) -> None:
         # Re-seed toggles when the scenario changes (e.g. picking "mixed" pre-checks registry).
         # Also clear any stale config preset so a blank tracks the new scenario's <scenario>-steady.
-        if self._ready and event.select.id == "scenario":
-            self.query_one("#config", Select).value = self._config_blank
+        if self._ready and event.select.id == _SCENARIO_ID:
+            self.query_one(_CONFIG_SEL, Select).value = self._config_blank
             self._sync_toggle_defaults()
 
     def action_cancel(self) -> None:
@@ -181,7 +188,7 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
 
     def _fields(self) -> dict:
         return {
-            "scenario": self.query_one("#scenario", Select).value,
+            "scenario": self.query_one(_SCENARIO_SEL, Select).value,
             "config_name": self._config_value(),
             "parallelism": self._val("parallelism") or 1,
             "target_url": self._val("target"),
