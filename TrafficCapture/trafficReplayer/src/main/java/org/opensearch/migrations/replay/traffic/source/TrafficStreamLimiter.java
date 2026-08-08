@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TrafficStreamLimiter implements AutoCloseable {
 
+    private static final org.slf4j.Logger heartbeatLogger =
+        org.slf4j.LoggerFactory.getLogger("LimiterHeartbeat");
+
     @AllArgsConstructor
     public static class WorkItem {
         private final @NonNull Consumer<WorkItem> task;
@@ -26,8 +29,10 @@ public class TrafficStreamLimiter implements AutoCloseable {
     private final LinkedTransferQueue<WorkItem> workQueue;
     private final Thread consumerThread;
     private final AtomicBoolean stopped;
+    private final int maxConcurrentCost;
 
     public TrafficStreamLimiter(int maxConcurrentCost) {
+        this.maxConcurrentCost = maxConcurrentCost;
         this.liveTrafficStreamCostGate = new Semaphore(maxConcurrentCost);
         this.workQueue = new LinkedTransferQueue<>();
         this.stopped = new AtomicBoolean();
@@ -86,6 +91,27 @@ public class TrafficStreamLimiter implements AutoCloseable {
             .addArgument(liveTrafficStreamCostGate::availablePermits)
             .addArgument(workItem.context)
             .log();
+    }
+
+    public void logHeartbeat() {
+        var available = liveTrafficStreamCostGate.availablePermits();
+        var inUse = maxConcurrentCost - available;
+        var queueDepth = workQueue.size();
+        heartbeatLogger.atInfo()
+            .setMessage("permits={}/{} inUse={} queueDepth={} utilization={}%")
+            .addArgument(available)
+            .addArgument(maxConcurrentCost)
+            .addArgument(inUse)
+            .addArgument(queueDepth)
+            .addArgument(() -> maxConcurrentCost > 0 ? (inUse * 100 / maxConcurrentCost) : 0)
+            .log();
+        if (available == 0) {
+            heartbeatLogger.atWarn()
+                .setMessage("SEMAPHORE EXHAUSTED — all {} permits consumed, {} items queued waiting")
+                .addArgument(maxConcurrentCost)
+                .addArgument(queueDepth)
+                .log();
+        }
     }
 
     @Override
