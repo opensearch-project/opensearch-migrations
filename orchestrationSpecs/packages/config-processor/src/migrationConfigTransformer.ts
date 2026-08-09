@@ -1002,8 +1002,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
                     sourceConnectionIdentity,
-                    m.metadataMigrationConfig ?? {},
-                    m.documentBackfillConfig ?? {},
+                    m.metadataMigrationConfig,
+                    m.documentBackfillConfig,
                     targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
