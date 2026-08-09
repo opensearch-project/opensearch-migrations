@@ -937,7 +937,7 @@ public class RfsMigrateDocuments {
 
     static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, String sessionId) {
         if (sink == null) {
-            log.atInfo().setMessage(FAILED_DOCUMENT_STREAM_DISABLED_REASON).log();
+            log.atWarn().setMessage(FAILED_DOCUMENT_STREAM_DISABLED_REASON).log();
             return;
         }
         log.atInfo().setMessage("failed document stream enabled: sessionId={} location={}")
