@@ -54,10 +54,23 @@ class Test0010ExternalSnapshotMigration(MATestBase):
                          description=description,
                          migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                          allow_source_target_combinations=allow_combinations)
-        self._load_snapshot_config()
 
     def _load_snapshot_config(self):
-        """Load snapshot configuration from environment variables."""
+        """Load snapshot configuration from environment variables.
+
+        Deliberately NOT called from __init__. conftest.py instantiates every
+        selected test class during pytest collection, so a missing environment
+        variable raised here at construction time would abort collection for the
+        entire session and take every unrelated test down with it.
+        """
+        missing = [name for name in ('BYOS_SNAPSHOT_NAME', 'BYOS_S3_REPO_URI') if not os.environ.get(name)]
+        if missing:
+            raise ValueError(
+                f"{type(self).__name__} requires the environment variable(s) {', '.join(missing)}. "
+                f"This test migrates from a pre-existing external S3 snapshot and can only run in a "
+                f"pipeline that supplies one (see vars/eksBYOSIntegPipeline.groovy). It is not runnable "
+                f"in the local k8s jobs, which deploy their own source cluster."
+            )
         self.snapshot_name = os.environ['BYOS_SNAPSHOT_NAME']
         self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
@@ -68,6 +81,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def import_existing_clusters(self):
         """Import target cluster from configmap."""
+        self._load_snapshot_config()
         if self.reuse_clusters:
             configmap_prefix = (f"target-{self.target_version.full_cluster_type}-"
                                 f"{self.target_version.major_version}-{self.target_version.minor_version}")

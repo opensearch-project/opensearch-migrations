@@ -14,6 +14,11 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
+        environment {
+            KIND_VERSION = 'v0.31.0'
+            KIND_NODE_IMAGE = 'kindest/node:v1.35.1@sha256:05d7bcdefbda08b4e038f644c4df690cdac3fba8b06f8289f30e10026720a1ab'
+        }
+
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
@@ -60,6 +65,22 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Configure Kind Host') {
+                steps {
+                    // Kubernetes 1.35 requires cgroup v2. Also ensure Fluent Bit can create
+                    // its tail watcher after the control plane starts.
+                    sh './jenkins/configureKindHost.sh'
+                }
+            }
+
+            stage('Install Kind') {
+                steps {
+                    // Install into this workspace from a versioned, checksum-verified cache
+                    // under the agent's home directory.
+                    sh 'KIND_INSTALL_DIR="${WORKSPACE}/.ci-bin" ./jenkins/installKind.sh'
+                }
+            }
+
             stage('Recreate Kind') {
                 steps {
                     // Always recreate. The shared docker-hosted registry/buildkit containers
@@ -68,17 +89,31 @@ def call(Map config = [:]) {
                     //
                     // The kind nodes run as Docker containers. The local registry is configured
                     // as an insecure HTTP registry in the kind node containerd configuration.
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 15, unit: 'MINUTES') {
                         // Tear down the registry before deleting the kind cluster.
                         // This is only necessary if the registry container is attached to
                         // the kind network and would otherwise prevent network cleanup.
                         sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
 
-                        // Always recreate the kind cluster.
-                        sh 'kind delete cluster --name ma || true'
+                        // Keep the single-node topology previously provided by Minikube. These
+                        // tests do not need separate worker nodes.
+                        // Recreate the ephemeral cluster once for transient startup failures.
+                        retry(2) {
+                            sh '"${WORKSPACE}/.ci-bin/kind" delete cluster --name ma || true'
 
-                        // Create the kind cluster with the local registry configured.
-                        sh 'kind create cluster --name ma --config ./deployment/k8s/kindClusterConfig.yaml'
+                            // Kubernetes 1.35 enables ImageVolume by default. The pinned manifest
+                            // digest keeps the node image reproducible across architectures.
+                            sh '"${WORKSPACE}/.ci-bin/kind" create cluster --name ma --config ./deployment/k8s/kindClusterConfigSingleNode.yaml --image "${KIND_NODE_IMAGE}"'
+
+                            // kind nodes have their own containerd. Configure its registry hosts
+                            // with a token obtained from the Jenkins agent's instance role.
+                            sh '''
+                                ECR_PULL_THROUGH_ENDPOINT="$(bash -l -c 'printf %s "$ECR_PULL_THROUGH_ENDPOINT"')" \
+                                    KIND_BIN="${WORKSPACE}/.ci-bin/kind" \
+                                    KIND_CLUSTER_NAME=ma \
+                                    ./jenkins/configureKindCluster.sh
+                            '''
+                        }
                     }
                 }
             }
@@ -88,19 +123,22 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            // Bring up the docker-hosted registry/buildkit, then connect the registry
-                            // container to the kind Docker network so kind nodes can resolve
-                            // docker-registry directly and pull images from docker-registry:5001.
+                            // Bring up the docker-hosted registry/buildkit, then configure each
+                            // kind node to reach the registry through the host's published port.
                             sh '''
                                 set -eu
                                 . ./buildImages/backends/dockerHostedBuildkit.sh
-                            
+
                                 KUBE_CONTEXT=kind-ma setup_build_backend
-                                docker network connect kind docker-registry 2>/dev/null || true
+                                kind_nodes=()
+                                while IFS= read -r node; do
+                                    [ -n "$node" ] && kind_nodes+=("$node")
+                                done < <("${WORKSPACE}/.ci-bin/kind" get nodes --name ma)
+                                connect_cluster_to_registry_network kind "${kind_nodes[@]}"
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
-                            // Keep builder-kind alive across runs so the buildkit cache persists.
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            // Keep builder-kind-ma alive across runs so the buildkit cache persists.
                         }
                     }
                 }
@@ -150,7 +188,13 @@ def call(Map config = [:]) {
                             sh "kubectl config unset current-context || true"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
-                            sh "pipenv run app --delete-only --kube-context=kind-ma"
+                            sh '''
+                                if kubectl config get-contexts -o name | grep -qx kind-ma; then
+                                    pipenv run app --delete-only --kube-context=kind-ma
+                                else
+                                    echo "Skipping cleanup because Kubernetes context kind-ma does not exist"
+                                fi
+                            '''
                         }
                     }
                 }
