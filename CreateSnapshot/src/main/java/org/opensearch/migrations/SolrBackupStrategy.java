@@ -178,13 +178,13 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
         cloudTopology = parseTopologyOption(args.solrTopology);
 
-        if (cloudTopology == null && mode == SnapshotMode.IMPORT) {
-            // Verify the backup before reading topology out of it, so a missing snapshot reports
-            // itself instead of surfacing as a detection failure.
+        if (mode == SnapshotMode.IMPORT) {
+            // Before anything writes: schema staging puts files under the snapshot location, so a
+            // later check could not tell a real backup from one this run had just created.
             validateSnapshotAccessible(parsedUri);
-            cloudTopology = inferTopologyFromArtifact(parsedUri);
-        } else if (mode == SnapshotMode.IMPORT) {
-            validateSnapshotAccessible(parsedUri);
+            if (cloudTopology == null) {
+                cloudTopology = inferTopologyFromArtifact(parsedUri);
+            }
         }
         resolveCollections(solrUrl);
 
@@ -202,7 +202,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                     + " came from SolrCloud or standalone Solr: it contains none of the layout markers"
                     + " that identify either. Specify --solr-topology cloud|standalone.");
         }
-        log.info("Running SolrBackupStrategy: mode={}, topology={}", mode, isCloud() ? "SolrCloud" : "standalone");
+        logResolvedTopology();
         if (!isCloud()) {
             ensureStandaloneConfigFiles(solrUrl, parsedUri);
         }
@@ -457,14 +457,16 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         // standalone Solr rejects it with "not running in SolrCloud mode", and that rejection is
         // the signal to switch. Nothing is written before the rejection, so the fallback is clean.
         if (cloudTopology == null || isCloud()) {
+            var explicitlyCloud = cloudTopology != null;
             try {
                 runCloudBackup(solrUrl, backupLocation, parsedUri);
                 cloudTopology = Boolean.TRUE;
+                logResolvedTopology();
                 return;
             } catch (SolrSnapshotCreator.SolrBackupFailed | SolrHttpClient.SolrRequestException e) {
                 // Standalone's rejection arrives as HTTP 400, so it lands on either type.
                 // Only a positive match redirects; auth and repo errors surface as-is.
-                if (cloudTopology != null || !isNotSolrCloudRejection(e.getMessage())) {
+                if (explicitlyCloud || !isNotSolrCloudRejection(e.getMessage())) {
                     throw e;
                 }
                 log.info("Source is not running in SolrCloud mode — using the standalone replication handler");
@@ -472,8 +474,14 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         cloudTopology = Boolean.FALSE;
+        logResolvedTopology();
         ensureStandaloneConfigFiles(solrUrl, parsedUri);
         runStandaloneBackup(solrUrl, backupLocation, parsedUri);
+    }
+
+    private void logResolvedTopology() {
+        log.info("Running SolrBackupStrategy: mode={}, topology={}",
+            mode, isCloud() ? "SolrCloud" : "standalone");
     }
 
     /** Solr's standalone rejection of the Collections API — the signal to use the replication handler. */
@@ -498,7 +506,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      */
     @SuppressWarnings("java:S1172") // solrUrl reserved for future import validation against live cluster
     private void runImportMode(String solrUrl, RepoUri parsedUri) {
-        // The location was already verified up front, before topology was read from it.
+        log.info("IMPORT mode: verifying snapshot location accessibility for {} collection(s) at {}",
+            args.solrCollections.size(), parsedUri.rawUri());
         log.info("IMPORT mode complete: config files ensured, snapshot location verified at {}",
             parsedUri.rawUri());
     }

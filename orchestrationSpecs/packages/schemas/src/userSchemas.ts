@@ -796,6 +796,11 @@ export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional(
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
 
+export const SOLR_TOPOLOGY_OPTION = z.enum(["cloud", "standalone"]).optional()
+    .describe("Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an " +
+        "externally-managed backup whose layout identifies neither, which is the common case since the schema is " +
+        "staged into the backup while preparing it. Supplying it also skips inference on a restricted source.");
+
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
@@ -1384,6 +1389,7 @@ export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
 
 const SOLR_BACKUP_PROCESS_OPTIONS = {
     collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
+    topology: SOLR_TOPOLOGY_OPTION,
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     jvmArgs: z.string().default("").optional()

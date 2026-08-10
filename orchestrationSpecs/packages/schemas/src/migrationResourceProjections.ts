@@ -169,6 +169,7 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     // so it is projected here as an internal field rather than via the USER_CREATE_SNAPSHOT_OPTIONS
     // schema projection. Kept impossible to match its prior restriction and the other artifact-scope fields.
     {resourceKind: "DataSnapshot", specPath: ["solrCollections"], schema: z.array(z.string()), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["solrTopology"], schema: z.string(), changeRestriction: "impossible"},
 
     {resourceKind: "SnapshotMigration", specPath: ["migrationLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},

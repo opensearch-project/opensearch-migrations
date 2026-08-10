@@ -493,6 +493,58 @@ def test_solr_s3_snapshot_uses_configured_collections_and_mode(monkeypatch):
                                       ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
+def test_solr_s3_snapshot_passes_configured_topology(monkeypatch):
+    # An import over a backup whose layout identifies neither topology needs this stated.
+    config = {
+        "snapshot": {
+            "snapshot_name": "external_solr_snapshot",
+            "mode": "import",
+            "solr_collections": ["products"],
+            "solr_topology": "standalone",
+            "s3": {
+                "repo_uri": "s3://my-bucket/solr",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 8.11")
+    snapshot = S3Snapshot(config["snapshot"], source)
+
+    monkeypatch.setattr("sys.stdout.write", mock.Mock())
+    monkeypatch.setattr("sys.stderr.write", mock.Mock())
+    run_mock = mock.Mock()
+    monkeypatch.setattr(subprocess, "run", run_mock)
+    snapshot.create()
+
+    called_args = run_mock.call_args[0][0]
+    assert "--solr-topology" in called_args
+    assert called_args[called_args.index("--solr-topology") + 1] == "standalone"
+
+
+def test_solr_s3_snapshot_omits_topology_when_unset(monkeypatch):
+    config = {
+        "snapshot": {
+            "snapshot_name": "external_solr_snapshot",
+            "mode": "import",
+            "solr_collections": ["products"],
+            "s3": {
+                "repo_uri": "s3://my-bucket/solr",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 8.11")
+    snapshot = S3Snapshot(config["snapshot"], source)
+
+    monkeypatch.setattr("sys.stdout.write", mock.Mock())
+    monkeypatch.setattr("sys.stderr.write", mock.Mock())
+    run_mock = mock.Mock()
+    monkeypatch.setattr(subprocess, "run", run_mock)
+    snapshot.create()
+
+    assert "--solr-topology" not in run_mock.call_args[0][0]
+
+
 def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_with_correct_args(mocker):
     custom_repo_name = "my-repo"
     config = {

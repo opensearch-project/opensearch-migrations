@@ -59,6 +59,28 @@ or from an operation which has to run anyway, the migration asks you instead:
 --solr-topology cloud|standalone
 ```
 
+**`--mode import` normally needs this flag.** Import stages the schema *into* the snapshot, so at
+the point topology is decided the snapshot usually holds nothing that identifies either kind. Only
+an import over a backup that already carries SolrCloud or standalone markers can skip it.
+
+In a migration workflow the same setting is `topology`, on the backup entry under the source
+cluster's `snapshotInfo.backups`:
+
+```yaml
+sourceClusters:
+  solrSource:
+    snapshotInfo:
+      backups:
+        solrBackup:
+          repoName: default
+          externalBackupName: preexisting-solr-backup
+          topology: standalone          # normally needed; see the marker table below
+```
+
+It is accepted on a `createBackupConfig` entry too, where it is optional — creating a backup infers
+the topology, so set it there only to skip that inference (see the note under **Creating a backup**
+below). The migration console reads it from `snapshot.solr_topology` in `services.yaml`.
+
 ### What each step needs
 
 Under Solr's `RuleBasedAuthorizationPlugin`:
@@ -87,8 +109,8 @@ handler. Any other failure is reported as-is.
 > as HTTP 403 rather than the rejection, so the switch never happens. Pass
 > `--solr-topology standalone` to skip the attempt.
 
-**Importing an existing backup** — read from the backup's own layout, which describes the
-snapshot rather than whatever cluster the source URL points at:
+**Importing an existing backup** — `--solr-topology` is used when given. Otherwise the backup's own
+layout is read, which describes the snapshot rather than whatever cluster the source URL points at:
 
 | Found in the backup | Read as |
 | --- | --- |
@@ -96,12 +118,12 @@ snapshot rather than whatever cluster the source URL points at:
 | a `snapshot.<backupName>/` index (anything but `snapshot.shard<N>`) | standalone |
 | neither | fails, asking for `--solr-topology` |
 
-The last row is reachable: a flat-root standalone backup (`segments_N` at the root, no
-`snapshot.<name>/` wrapper) carries no marker at all, and neither does a backup named `shard<N>`,
-which is excluded from the standalone test so SolrCloud's own shard directories can't match it.
-
-`zk_backup*` is deliberately not a signal either way: SolrCloud writes it, and so does this tool
-when it stages a schema for a standalone backup, so its presence proves nothing.
+The last row is the usual one, which is why the flag is normally required for import. `zk_backup*`
+is deliberately not a signal either way — SolrCloud writes it, and so does this tool when it stages
+a schema for a standalone backup — so a snapshot being prepared often carries no evidence at all.
+Two real layouts land there too: a flat-root standalone backup (`segments_N` at the root, no
+`snapshot.<name>/` wrapper), and a backup named `shard<N>`, which is excluded from the standalone
+test so SolrCloud's shard directories can't match it.
 
 ## Pointing the migration at a backup
 

@@ -465,6 +465,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "default": [],
                                         "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                       },
+                                      "topology": {
+                                        "type": "string",
+                                        "enum": [
+                                          "cloud",
+                                          "standalone"
+                                        ],
+                                        "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                                      },
                                       "otelTraceCollectorEndpoint": {
                                         "anyOf": [
                                           {
@@ -533,6 +541,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             },
                                             "default": [],
                                             "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                          },
+                                          "topology": {
+                                            "type": "string",
+                                            "enum": [
+                                              "cloud",
+                                              "standalone"
+                                            ],
+                                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                           },
                                           "otelTraceCollectorEndpoint": {
                                             "anyOf": [
@@ -1674,6 +1690,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string"
                             },
                             "default": []
+                          },
+                          "solrTopology": {
+                            "type": "string",
+                            "enum": [
+                              "cloud",
+                              "standalone"
+                            ],
+                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source.",
+                            "changeRestriction": "impossible"
                           }
                         }
                       },
@@ -3988,6 +4013,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "default": [],
                               "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                             },
+                            "topology": {
+                              "type": "string",
+                              "enum": [
+                                "cloud",
+                                "standalone"
+                              ],
+                              "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                            },
                             "otelTraceCollectorEndpoint": {
                               "anyOf": [
                                 {
@@ -4056,6 +4089,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   },
                                   "default": [],
                                   "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                },
+                                "topology": {
+                                  "type": "string",
+                                  "enum": [
+                                    "cloud",
+                                    "standalone"
+                                  ],
+                                  "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                 },
                                 "otelTraceCollectorEndpoint": {
                                   "anyOf": [

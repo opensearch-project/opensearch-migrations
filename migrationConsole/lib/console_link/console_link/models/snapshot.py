@@ -53,6 +53,7 @@ SNAPSHOT_SCHEMA = {
             'snapshot_repo_name': {'type': 'string', 'required': False},
             'mode': {'type': 'string', 'required': False, 'allowed': ['create', 'import']},
             'solr_collections': {'type': 'list', 'schema': {'type': 'string'}, 'required': False},
+            'solr_topology': {'type': 'string', 'required': False, 'allowed': ['cloud', 'standalone']},
             'otel_trace_endpoint': {'type': 'string', 'required': False},
             'otel_metrics_endpoint': {'type': 'string', 'required': False},
             's3': {
@@ -98,6 +99,7 @@ class Snapshot(ABC):
         self.snapshot_name = config['snapshot_name']
         self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
         self.solr_collections = config.get("solr_collections") or None
+        self.solr_topology = config.get("solr_topology") or None
         self.otel_trace_endpoint = config.get("otel_trace_endpoint", None)
         self.otel_metrics_endpoint = config.get("otel_metrics_endpoint", None)
 
@@ -234,6 +236,8 @@ class S3Snapshot(Snapshot):
         if self._is_solr_source():
             collections = self.solr_collections or self._get_solr_collections()
             command_args["--solr-collections"] = ",".join(collections)
+            if self.solr_topology:
+                command_args["--solr-topology"] = self.solr_topology
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
@@ -305,6 +309,8 @@ class FileSystemSnapshot(Snapshot):
         if self._is_solr_source():
             collections = self.solr_collections or self._get_solr_collections()
             command_args["--solr-collections"] = ",".join(collections)
+            if self.solr_topology:
+                command_args["--solr-topology"] = self.solr_topology
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
