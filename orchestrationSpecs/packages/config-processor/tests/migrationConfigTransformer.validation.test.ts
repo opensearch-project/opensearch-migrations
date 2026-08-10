@@ -857,6 +857,25 @@ describe('MigrationConfigTransformer validation', () => {
         expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
     });
 
+    it('should produce distinct checksums when a migration stage config is added or removed', async () => {
+        const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
+
+        const withBoth = cloneBaseConfig();
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const withBackfillOnly = cloneBaseConfig();
+        delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
+        const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
+        const backfillOnly = (await transformer.processFromObject(withBackfillOnly)).snapshotMigrations[0];
+
+        expect(metadataOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(backfillOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(metadataOnly.configChecksum).not.toEqual(backfillOnly.configChecksum);
+    });
+
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
