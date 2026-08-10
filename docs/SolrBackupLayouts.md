@@ -59,9 +59,11 @@ or from an operation which has to run anyway, the migration asks you instead:
 --solr-topology cloud|standalone
 ```
 
-**`--mode import` normally needs this flag.** Import stages the schema *into* the snapshot, so at
-the point topology is decided the snapshot usually holds nothing that identifies either kind. Only
-an import over a backup that already carries SolrCloud or standalone markers can skip it.
+**`--mode import` usually infers topology from the existing backup**, which it validates before
+anything else runs, so a backup Solr itself produced normally carries a marker. Supply
+`--solr-topology` when the layout has no definitive one — see the marker table below. For standalone
+imports the migration then stages the live source schema into the validated backup; SolrCloud
+imports skip that, since their backup already carries its own configs.
 
 In a migration workflow the same setting is `topology`, on the backup entry under the source
 cluster's `snapshotInfo.backups`:
@@ -74,7 +76,7 @@ sourceClusters:
         solrBackup:
           repoName: default
           externalBackupName: preexisting-solr-backup
-          topology: standalone          # normally needed; see the marker table below
+          topology: standalone          # needed when the existing layout is ambiguous
 ```
 
 It is accepted on a `createBackupConfig` entry too, where it is optional — creating a backup infers
@@ -118,12 +120,13 @@ layout is read, which describes the snapshot rather than whatever cluster the so
 | a `snapshot.<backupName>/` index (anything but `snapshot.shard<N>`) | standalone |
 | neither | fails, asking for `--solr-topology` |
 
-The last row is the usual one, which is why the flag is normally required for import. `zk_backup*`
-is deliberately not a signal either way — SolrCloud writes it, and so does this tool when it stages
-a schema for a standalone backup — so a snapshot being prepared often carries no evidence at all.
-Two real layouts land there too: a flat-root standalone backup (`segments_N` at the root, no
-`snapshot.<name>/` wrapper), and a backup named `shard<N>`, which is excluded from the standalone
-test so SolrCloud's shard directories can't match it.
+A backup Solr produced normally matches one of the first two rows. The last is reached by layouts
+that carry no definitive marker: a flat-root standalone backup (`segments_N` at the root, no
+`snapshot.<name>/` wrapper); a backup named `shard<N>`, which is excluded from the standalone test
+so SolrCloud's shard directories can't match it; an unusual externally-produced layout; or a very
+large backup whose inspection is capped before a marker is reached. Note that `zk_backup*` is not a
+signal either way — SolrCloud writes it, and so does this tool when staging a schema for a
+standalone backup.
 
 ## Pointing the migration at a backup
 
