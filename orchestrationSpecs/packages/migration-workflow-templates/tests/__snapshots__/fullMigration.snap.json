@@ -1690,11 +1690,11 @@
                   },
                   {
                     "name": "metadataMigrationConfig",
-                    "value": "{{=toJSON(sprig.dig('metadataMigrationConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                    "value": "{{=(('metadataMigrationConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['metadataMigrationConfig'])) : (''))}}"
                   },
                   {
                     "name": "documentBackfillConfig",
-                    "value": "{{=toJSON(sprig.dig('documentBackfillConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                    "value": "{{=(('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['documentBackfillConfig'])) : (''))}}"
                   },
                   {
                     "name": "crdName",

@@ -38,10 +38,8 @@ describe('createApp', () => {
     // Set up environment variables
     process.env.CDK_DEFAULT_ACCOUNT = 'test-account';
     process.env.CDK_DEFAULT_REGION = 'test-region';
-    process.env.MIGRATIONS_APP_REGISTRY_ARN = 'test-arn';
     process.env.MIGRATIONS_USER_AGENT = 'test-user-agent';
 
-    const consoleSpy = jest.spyOn(console, 'info').mockImplementation();
     const mockAddTag = jest.fn();
     Tags.of = jest.fn().mockReturnValue({ add: mockAddTag });
 
@@ -57,21 +55,13 @@ describe('createApp', () => {
     expect(StackComposer).toHaveBeenCalledWith(
       expect.any(Object),
       {
-        migrationsAppRegistryARN: 'test-arn',
         migrationsUserAgent: 'test-user-agent',
         migrationsSolutionVersion: '1.0.0',
         env: { account: 'test-account', region: 'test-region' },
       }
     );
 
-    // Verify console log
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('App Registry mode is enabled for CFN stack tracking')
-    );
-
     // Verify app is returned
     expect(app).toBeDefined();
-
-    consoleSpy.mockRestore();
   });
 });

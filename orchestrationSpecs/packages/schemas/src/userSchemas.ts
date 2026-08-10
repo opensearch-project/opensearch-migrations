@@ -1048,17 +1048,16 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream. When omitted, the config processor resolves the " +
-            "deployment-provisioned default bucket before workflow submission so the effective bucket is explicit " +
-            "in run history. Set this to use a separate bucket for failed document stream records."),
+        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
+            "document failures are not recorded; there is no separate enable flag and no default bucket."),
     failedDocumentStreamS3Region: z.string().optional()
         .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
-            "submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the " +
-            "deployment default) so it is explicit in run history rather than discovered at runtime."),
+            "submission (user value, else the snapshot repo's region, else the deployment default). " +
+            "Ignored without a bucket."),
     failedDocumentStreamS3Endpoint: z.string().optional()
         .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
-            "the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, " +
-            "else the deployment default)."),
+            "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
+            "Ignored without a bucket."),
     failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
         .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
             "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
@@ -1081,12 +1080,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
 /**
  * Deployment-level S3 defaults read from the cluster (the migrations-default-s3-config ConfigMap) by the
  * submitter/initializer and passed to the config processor as an explicit input. This lets the processor
- * resolve the effective failed-document-stream bucket/region/endpoint before MigrationRun.spec is created,
+ * resolve the effective failed-document-stream region/endpoint before MigrationRun.spec is created,
  * instead of RFS discovering them from pod env at runtime.
  */
 export const DEPLOYMENT_DEFAULTS_CONFIG = z.object({
     defaultS3Bucket: z.string().optional()
-        .describe("Deployment-provisioned default S3 bucket (migrations-default-s3-config BUCKET_NAME)."),
+        .describe("Deployment-provisioned default S3 bucket (migrations-default-s3-config BUCKET_NAME). " +
+            "Not a fallback for the failed document stream — that bucket must be named explicitly."),
     defaultS3Region: z.string().optional()
         .describe("Deployment-provisioned default AWS region (migrations-default-s3-config AWS_REGION)."),
     defaultS3Endpoint: z.string().optional()

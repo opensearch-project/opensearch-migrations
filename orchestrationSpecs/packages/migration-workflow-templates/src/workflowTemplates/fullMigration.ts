@@ -602,16 +602,20 @@ export const FullMigration = WorkflowBuilder.create({
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        metadataMigrationConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["metadataMigrationConfig"],
-                            expr.makeDict({}) as any
-                        )),
-                        documentBackfillConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["documentBackfillConfig"],
-                            expr.makeDict({}) as any
-                        )),
+                        metadataMigrationConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "metadataMigrationConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "metadataMigrationConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>()
+                        ),
+                        documentBackfillConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "documentBackfillConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>()
+                        ),
                         crdName: b.inputs.resourceName,
                         // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
                         // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
