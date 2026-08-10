@@ -1,0 +1,10 @@
+# Search engine and base images used by Gradle integration tests.
+# Format: canonical image|optional preferred pull source
+opensearchproject/opensearch:1.3.20|mirror.gcr.io/opensearchproject/opensearch:1.3.20
+opensearchproject/opensearch:2.19.4|mirror.gcr.io/opensearchproject/opensearch:2.19.4
+opensearchproject/opensearch:3.5.0|mirror.gcr.io/opensearchproject/opensearch:3.5.0
+amazonlinux:2023|mirror.gcr.io/library/amazonlinux:2023
+amazoncorretto:8-alpine|mirror.gcr.io/library/amazoncorretto:8-alpine
+amazoncorretto:11-al2023-headless|mirror.gcr.io/library/amazoncorretto:11-al2023-headless
+amazoncorretto:17-al2023-headless|mirror.gcr.io/library/amazoncorretto:17-al2023-headless
+amazoncorretto:21-al2023-headless|mirror.gcr.io/library/amazoncorretto:21-al2023-headless

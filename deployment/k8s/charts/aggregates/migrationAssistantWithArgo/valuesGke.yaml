@@ -6,6 +6,10 @@ cloudProvider: gcp
 gcp:
   project: ""
   serviceAccountEmail: ""
+  # Populated by Terraform (helm_release set block); required by the fluent-bit
+  # stackdriver output below.
+  clusterName: ""
+  clusterLocation: ""
 
 logs:
   sharedLogsVolume:
@@ -27,15 +31,46 @@ charts:
           keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
   fluent-bit:
     values:
+      env:
+        - name: GKE_CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: gcp-metadata
+              key: CLUSTER_NAME
+        - name: GKE_CLUSTER_LOCATION
+          valueFrom:
+            configMapKeyRef:
+              name: gcp-metadata
+              key: CLUSTER_LOCATION
       extraVolumes:
-        - name: logs-pv
-          emptyDir: {}
         - name: lua-scripts
           configMap:
             name: fluentbit-lua-scripts
       extraVolumeMounts:
-        - name: logs-pv
-          mountPath: /shared_logs
         - name: lua-scripts
           mountPath: /fluentbit/scripts
           readOnly: true
+      config:
+        # Ship workload logs to Google Cloud Logging. Auth is via Workload
+        # Identity / ADC (the metadata server) — no credential files; project_id
+        # auto-detects from the metadata server.
+        #
+        # Resource_Labels must carry ALL k8s_container labels (except project_id):
+        # once set, it becomes the plugin's exclusive label source, so cluster
+        # name/location must be supplied here too — not via K8s_Cluster_Name/
+        # _Location, which the plugin ignores when Resource_Labels is present.
+        # An incomplete Resource_Labels set makes the plugin fall back to
+        # tag-based extraction, which fails because the base pipeline rewrites
+        # tags to `fluentbit-<pod>` (not the `k8s_container.` prefix the plugin
+        # expects) and drops the record. namespace/pod/container come from the
+        # flattened fields the shared base `modify` filter produces (it renames
+        # namespace_name->namespace, pod_name->pod, container_name->container).
+        # severity_key maps the `level` field emitted by the parsers
+        # (java_log_parser / logfmt) to Cloud Logging severity.
+        outputs: |
+          [OUTPUT]
+              Name                  stackdriver
+              Match                 fluentbit-*
+              Resource              k8s_container
+              Resource_Labels       location=${GKE_CLUSTER_LOCATION},cluster_name=${GKE_CLUSTER_NAME},namespace_name=$namespace,pod_name=$pod,container_name=$container
+              severity_key          level

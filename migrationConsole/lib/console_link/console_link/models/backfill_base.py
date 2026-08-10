@@ -74,7 +74,7 @@ class Backfill(ABC):
         pass
 
     @abstractmethod
-    def build_backfill_status(self) -> BackfillStatus:
+    def build_backfill_status(self, has_failed_documents: Optional[bool] = None) -> BackfillStatus:
         pass
 
     def describe(self) -> Dict:

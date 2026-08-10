@@ -56,17 +56,10 @@ info "helm $(helm version --short)"
 
 # --- 2. Install kiro-cli (if missing) ---
 if ! command -v kiro-cli &>/dev/null; then
-  ARCH=$(uname -m)
-  OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-  case "$ARCH" in
-    x86_64|amd64) ARCH="x64" ;;
-    aarch64|arm64) ARCH="arm64" ;;
-    *) error "Unsupported architecture: $ARCH"; exit 1 ;;
-  esac
-  KIRO_URL="https://kiro.dev/downloads/latest/${OS}/${ARCH}/kiro-cli"
-  info "Installing kiro-cli from ${KIRO_URL}..."
-  sudo curl -fsSL "$KIRO_URL" -o /usr/local/bin/kiro-cli
-  sudo chmod +x /usr/local/bin/kiro-cli
+  info "Installing kiro-cli from https://cli.kiro.dev/install..."
+  curl -fsSL https://cli.kiro.dev/install | bash
+  # The installer places kiro-cli in ~/.local/bin, which may not yet be on PATH.
+  export PATH="$HOME/.local/bin:$PATH"
 fi
 info "kiro-cli $(kiro-cli --version 2>&1 || echo 'installed')"
 

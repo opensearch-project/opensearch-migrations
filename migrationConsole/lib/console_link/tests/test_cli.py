@@ -2056,29 +2056,29 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=4)
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
     assert "failed document stream location: s3://b/rfs-failed-document-stream/session=sess-A/" in result.output
-    assert "Failed document count: 4" in result.output
+    assert "Failed documents present: yes" in result.output
 
 
-def test_backfill_status_failed_document_stream_count_unavailable_renders_placeholder(runner, mocker):
+def test_backfill_status_failed_document_stream_presence_unavailable_renders_placeholder(runner, mocker):
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    # safe_count returning None means S3 was unreachable — we mustn't crash.
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=None)
+    # None means S3 was unreachable — we mustn't crash.
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
-    assert "Failed document count: unavailable" in result.output
+    assert "Failed documents present: unavailable" in result.output
 
 
 def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
@@ -2094,28 +2094,30 @@ def test_backfill_status_no_failed_document_stream_section_when_not_configured(r
     assert result.exit_code == 0
     # failed document stream block is intentionally absent when failed document stream isn't configured.
     assert "failed document stream location:" not in result.output
-    assert "Failed document count:" not in result.output
+    assert "Failed documents present:" not in result.output
 
 
-def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(runner, mocker):
-    """The --json --deep-check path goes through _augment_status_with_failed_document_stream
-    rather than the trailing click.echo block."""
-    mocked_status = {
+def _completed_status_payload():
+    return {
         "status": "Completed",
         "percentage_completed": 100.0,
         "eta_ms": None,
         "started": "2026-04-19T21:40:01+00:00",
         "finished": "2026-04-19T21:40:01+00:00",
-        "shard_total": 0,
-        "shard_complete": 0,
+        "shard_total": 5,
+        "shard_complete": 5,
         "shard_in_progress": 0,
         "shard_waiting": 0,
     }
-    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
-                        return_value=cli_module.BackfillOverallStatus(**mocked_status))
+
+
+def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runner, mocker):
+    # Presence threaded into build_backfill_status and surfaced as keys.
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=2)
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
 
     result = runner.invoke(
         cli,
@@ -2124,9 +2126,49 @@ def test_backfill_status_json_deep_check_includes_failed_document_stream_keys(ru
         catch_exceptions=False,
     )
     assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["has_failed_documents"] is True
     payload = json.loads(result.output)
     assert payload["failed_document_stream_location"] == "s3://b/rfs-failed-document-stream/session=sess-A/"
-    assert payload["failed_document_count"] == 2
+    assert payload["failed_documents_present"] is True
+
+
+def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["has_failed_documents"] is False
+    payload = json.loads(result.output)
+    assert payload["failed_documents_present"] is False
+
+
+def test_backfill_status_json_deep_check_threads_unavailable_presence(runner, mocker):
+    # None => S3 unreachable; passed through as-is.
+    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["has_failed_documents"] is None
+    payload = json.loads(result.output)
+    assert payload["failed_documents_present"] is None
 
 
 def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):
@@ -2148,7 +2190,7 @@ def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert "failed_document_stream_location" not in payload
-    assert "failed_document_count" not in payload
+    assert "failed_documents_present" not in payload
 
 
 def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
@@ -2160,7 +2202,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
                         side_effect=DeepStatusNotYetAvailable("not yet"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_count", return_value=0)
+    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
 
     result = runner.invoke(
         cli,
@@ -2172,7 +2214,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
     payload = json.loads(result.output)
     assert payload["status"] == "Pending"
     assert payload["percentage_completed"] == 0.0
-    assert payload["failed_document_count"] == 0
+    assert payload["failed_documents_present"] is False
 
 
 # ----- backfill reset ------------------------------------------------------

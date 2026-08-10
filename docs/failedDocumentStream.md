@@ -35,7 +35,7 @@ console --json failed-document-stream list --limit 100
 ```
 
 A deep status check also appends a failed-document summary. The last two lines are the failed document
-stream; everything above them is the usual backfill status.
+stream. Everything above them is the usual backfill status.
 
 ```
 console backfill status --deep-check
@@ -54,7 +54,7 @@ Completed shards: 40
 In progress shards: 0
 Waiting shards: 0
 failed document stream location: s3://my-bucket/rfs-failed-document-stream/session=abc-123/
-Failed document count: 4
+Failed documents present: yes
 ```
 
 The first line reports the worker *deployment* state, so a finished backfill shows `STOPPED` there (no
@@ -62,11 +62,15 @@ workers running) while `Backfill status:` below it reports *shard* progress as `
 is deployment-specific: the example is a Kubernetes deployment, whereas on ECS it reads
 `Running=0 Pending=0 Desired=0 Terminating=0`.
 
-If the stream is not configured, both failed-document lines are omitted. If the count cannot be read (for
-example, missing S3 permissions), it renders as `Failed document count: unavailable`.
+Status reports only *whether* failures exist, not how many: counting reads every record, which is
+unbounded work on a backfill that failed a large number of documents. Use `console failed-document-stream
+count` when you want the number.
+
+If the stream is not configured, both failed-document lines are omitted. If the stream cannot be read (for
+example, missing S3 permissions), it renders as `Failed documents present: unavailable`.
 
 In JSON mode (`console --json backfill status --deep-check`) it adds `failed_document_stream_location` and
-`failed_document_count` (the latter is `null` if currently unavailable). The command emits a single line;
+`failed_documents_present` (the latter is `null` if currently unavailable). The command emits a single line;
 it is pretty-printed here for readability.
 
 ```json
@@ -81,7 +85,7 @@ it is pretty-printed here for readability.
   "shard_in_progress": 0,
   "shard_waiting": 0,
   "failed_document_stream_location": "s3://my-bucket/rfs-failed-document-stream/session=abc-123/",
-  "failed_document_count": 4
+  "failed_documents_present": true
 }
 ```
 
@@ -101,18 +105,26 @@ console backfill reset --include-failed-document-stream
 
 ## Configuration
 
-The failed document stream is enabled by default. When you omit `failedDocumentStreamS3Bucket`, it falls
-back to the deployment's default S3 bucket (from `migrations-default-s3-config`). AWS deployments always
-provision that default bucket, so the stream is effectively always on there. It is disabled only when no
-bucket resolves at all, which happens on a non-AWS deployment that provisions no default bucket and where
-no `failedDocumentStreamS3Bucket` was set. In that case the console commands report that it is not
-configured. The destination is set under a migration's `documentBackfillConfig`, where all fields are
-optional.
+`failedDocumentStreamS3Bucket` is the stream's on/off switch. Set it and terminal document failures are
+recorded to that bucket; leave it out and nothing is recorded, so a failed migration leaves no inventory
+of which documents did not land. There is no separate enable flag and no default bucket — a migration
+only writes failures to a bucket its own config names.
+
+The destination is set under a migration's `documentBackfillConfig`, where all fields are optional:
+
+```yaml
+documentBackfillConfig:
+  failedDocumentStreamS3Bucket: my-failed-documents-bucket
+```
 
 | Option                              | Default                        | Description                                                    |
 |-------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `failedDocumentStreamS3Bucket`      | deployment default bucket      | Bucket for records; set to use a separate one.                 |
-| `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix; each run writes under `<prefix>/session=<uid>/`.   |
-| `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket.                                         |
-| `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack).                           |
+| `failedDocumentStreamS3Bucket`      | none — stream off              | Bucket for records. Setting it enables the stream.             |
+| `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
+| `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket. Ignored without a bucket.               |
+| `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack). Ignored without a bucket. |
 | `failedDocumentStreamMaxBufferBytes`| `67108864` (64 MiB)            | Max in-memory bytes per index before rotating to a new object. |
+
+The region and endpoint are still resolved for you when the bucket is set: the config processor takes your
+value if given, else the snapshot repo's, else the deployment default, and records the result in run
+history rather than leaving RFS to discover it at runtime.

@@ -666,6 +666,23 @@ class TestWorkflowCLICommands:
         ]
         assert completion_gates == []
 
+    @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
+    def test_waiting_gates_categorizes_step_and_runtime(self, mock_waiting_gates):
+        """Both kinds block until approved, so both are reported, tagged by kind."""
+        from console_link.workflow.commands.approve import waiting_gates
+
+        mock_waiting_gates.return_value = [
+            ('migratemetadata.snapshot-migration-0', None),
+            ('captureproxy.capture-proxy.vapretry', 'Gated field change on captureproxy: spec.replicas'),
+            ('datasnapshot.source1-snapshot.vapretry', 'Impossible field change on datasnapshot: spec.snapshotName'),
+        ]
+
+        assert [(name, category) for name, _, category in waiting_gates('ma', 'migration-workflow')] == [
+            ('migratemetadata.snapshot-migration-0', 'step'),
+            ('captureproxy.capture-proxy.vapretry', 'change'),
+            ('datasnapshot.source1-snapshot.vapretry', 'retry'),
+        ]
+
     @patch('console_link.workflow.commands.approve._list_all_gates')
     def test_find_already_approved_is_workflow_scoped(self, mock_list_gates):
         from console_link.workflow.commands.approve import _find_already_approved
