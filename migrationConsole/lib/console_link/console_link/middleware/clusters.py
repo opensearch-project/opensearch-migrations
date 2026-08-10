@@ -96,8 +96,9 @@ def _solr_cat_indices(cluster: Cluster, as_json=False):
 
 def _solr_list_collections_or_cores(cluster: Cluster) -> list:
     """List collections (SolrCloud) or cores (standalone). Tries both APIs."""
+    context_path = cluster.solr_context_path
     try:
-        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        r = cluster.call_api(f"{context_path}/admin/collections?action=LIST&wt=json")
         if r.status_code == 200:
             collections = r.json().get("collections", [])
             if collections:
@@ -105,7 +106,7 @@ def _solr_list_collections_or_cores(cluster: Cluster) -> list:
     except Exception:
         pass
     try:
-        r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        r = cluster.call_api(f"{context_path}/admin/cores?action=STATUS&wt=json")
         return list(r.json().get("status", {}).keys())
     except Exception:
         return []
@@ -114,7 +115,7 @@ def _solr_list_collections_or_cores(cluster: Cluster) -> list:
 def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
     """Get doc count for a Solr collection via select query."""
     try:
-        r = cluster.call_api(f"/solr/{collection}/select?q=*:*&rows=0&wt=json")
+        r = cluster.call_api(f"{cluster.solr_context_path}/{collection}/select?q=*:*&rows=0&wt=json")
         return r.json().get("response", {}).get("numFound", 0)
     except Exception:
         return 0
@@ -157,7 +158,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     r = None
     try:
         if _is_solr(cluster):
-            r = cluster.call_api("/solr/admin/info/system", timeout=3)
+            r = cluster.call_api(f"{cluster.solr_context_path}/admin/info/system", timeout=3)
         else:
             r = cluster.call_api("/", raise_error=False, timeout=5)
     except Exception as e:

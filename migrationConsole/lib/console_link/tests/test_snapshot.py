@@ -887,7 +887,7 @@ def test_solr_snapshot_status_returns_success_when_all_shards_completed_with_lag
 
 
 def test_normalize_solr_context_path():
-    from console_link.models.snapshot import normalize_solr_context_path
+    from console_link.models.cluster import normalize_solr_context_path
 
     assert normalize_solr_context_path(None) == "/solr"
     assert normalize_solr_context_path("/solr") == "/solr"
@@ -902,14 +902,14 @@ def test_solr_snapshot_create_passes_custom_context_path(monkeypatch):
     config = {
         "snapshot": {
             "snapshot_name": "solr_snapshot",
-            "solr_context_path": "/tenant-a/solr/",
             "s3": {
                 "repo_uri": "s3://my-bucket/solr",
                 "aws_region": "us-east-1"
             },
         }
     }
-    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4")
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4",
+                                  solr_context_path="/tenant-a/solr/")
     snapshot = S3Snapshot(config["snapshot"], source)
     monkeypatch.setattr(snapshot, "_get_solr_collections", lambda: ["products"])
 
@@ -993,11 +993,11 @@ def test_solr_collections_discovery_uses_configured_context_path():
     config = {
         "snapshot": {
             "snapshot_name": "solr_snapshot",
-            "solr_context_path": "/tenant-a/solr",
             "s3": {"repo_uri": "s3://my-bucket/solr", "aws_region": "us-east-1"},
         }
     }
-    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4")
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4",
+                                  solr_context_path="/tenant-a/solr")
     snapshot = S3Snapshot(config["snapshot"], source)
 
     requested_paths = []

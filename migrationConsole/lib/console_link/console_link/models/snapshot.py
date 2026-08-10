@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
 from typing import Any, Dict, List, Optional, TypeAlias
 
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
+from console_link.models.cluster import (AuthMethod, Cluster, DEFAULT_SOLR_CONTEXT_PATH, HttpMethod,
+                                         NoSourceClusterDefinedError)
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
@@ -21,21 +22,6 @@ SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available
 SOLR_LIST_COLLECTIONS_PATH = "/admin/collections?action=LIST&wt=json"
 SOLR_NO_SNAPSHOT_REPO_MSG = "Solr does not use snapshot repositories."
 CREATE_SNAPSHOT_COMMAND = "/root/createSnapshot/bin/CreateSnapshot"
-DEFAULT_SOLR_CONTEXT_PATH = "/solr"
-
-
-def normalize_solr_context_path(context_path: Optional[str]) -> str:
-    """Normalize the path Solr is served under to "" or a "/"-prefixed path with no trailing slash.
-
-    None means unset and yields the stock "/solr"; an explicit empty value means Solr is served
-    at the root of the host.
-    """
-    if context_path is None:
-        return DEFAULT_SOLR_CONTEXT_PATH
-    path = context_path.strip().rstrip("/")
-    if not path:
-        return ""
-    return path if path.startswith("/") else "/" + path
 
 
 def solr_list_collections_api(context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> str:
@@ -72,7 +58,6 @@ SNAPSHOT_SCHEMA = {
             'snapshot_repo_name': {'type': 'string', 'required': False},
             'mode': {'type': 'string', 'required': False, 'allowed': ['create', 'import']},
             'solr_collections': {'type': 'list', 'schema': {'type': 'string'}, 'required': False},
-            'solr_context_path': {'type': 'string', 'required': False},
             'otel_trace_endpoint': {'type': 'string', 'required': False},
             'otel_metrics_endpoint': {'type': 'string', 'required': False},
             's3': {
@@ -118,7 +103,6 @@ class Snapshot(ABC):
         self.snapshot_name = config['snapshot_name']
         self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
         self.solr_collections = config.get("solr_collections") or None
-        self.solr_context_path = normalize_solr_context_path(config.get("solr_context_path"))
         self.otel_trace_endpoint = config.get("otel_trace_endpoint", None)
         self.otel_metrics_endpoint = config.get("otel_metrics_endpoint", None)
 
@@ -150,14 +134,14 @@ class Snapshot(ABC):
     def _get_solr_collections(self) -> list:
         """Fetch collection/core names. Tries SolrCloud first, falls back to standalone."""
         try:
-            r = self.source_cluster.call_api(solr_list_collections_api(self.solr_context_path))
+            r = self.source_cluster.call_api(solr_list_collections_api(self.source_cluster.solr_context_path))
             if r.status_code == 200:
                 collections = r.json().get("collections", [])
                 if collections:
                     return collections
         except Exception:
             pass
-        r = self.source_cluster.call_api(f"{self.solr_context_path}/admin/cores?action=STATUS&wt=json")
+        r = self.source_cluster.call_api(f"{self.source_cluster.solr_context_path}/admin/cores?action=STATUS&wt=json")
         return list(r.json().get("status", {}).keys())
 
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
@@ -203,7 +187,7 @@ class Snapshot(ABC):
             # Always pass --mode for Solr sources; both standalone and SolrCloud
             # go through CreateSnapshot with the mode flag controlling behavior.
             command_args["--mode"] = self.config.get("mode", "create")
-            command_args["--solr-context-path"] = self.solr_context_path
+            command_args["--solr-context-path"] = self.source_cluster.solr_context_path
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -287,7 +271,7 @@ class S3Snapshot(Snapshot):
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
             return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
-                                       context_path=self.solr_context_path)
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -354,7 +338,7 @@ class FileSystemSnapshot(Snapshot):
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
             return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
-                                       context_path=self.solr_context_path)
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -427,7 +411,7 @@ class GcsSnapshot(Snapshot):
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
             return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
-                                       context_path=self.solr_context_path)
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:

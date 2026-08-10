@@ -642,6 +642,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                         sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
                         sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),
                         sourceAllowInsecure: makeDirectTypeProxy(expr.dig(sourceIdentity, ["allowInsecure"], false)),
+                        sourceSolrContextPath: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["solrContextPath"], expr.literal(""))
+                        ),
                         sourceAuthType: makeStringTypeProxy(expr.dig(sourceIdentity, ["authType"], expr.literal("none"))),
                         sourceAuthBasicSecretName: makeStringTypeProxy(
                             expr.dig(sourceIdentity, ["authBasicSecretName"], expr.literal(""))
@@ -678,9 +681,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                         ),
                         solrCollections: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["solrCollections"], expr.literal([]))
-                        ),
-                        solrContextPath: makeStringTypeProxy(
-                            expr.dig(snapshotOptions, ["solrContextPath"], expr.literal("/solr"))
                         ),
                         indexAllowlist: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([]))

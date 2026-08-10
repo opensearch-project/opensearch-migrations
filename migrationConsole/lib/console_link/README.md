@@ -93,6 +93,7 @@ Source and target clusters have the following options:
 - `endpoint`: required, the endpoint to reach the cluster.
 - `allow_insecure`: optional, default is false, equivalent to the curl `--insecure` flag, will not verify unsigned or invalid certificates
 - `version`: optional, default is to assume a version compatible with ES 7 or OS 1. Format should be `ES_7.10.2` or `OS_2.15`, for instance.
+- `solr_context_path`: optional, Solr sources only, default `/solr`. The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr URLs. Set this when Solr runs with a custom `solr.contextPath` or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host.
 
 Exactly one of the following blocks must be present:
 
@@ -186,7 +187,6 @@ The snapshot configuration specifies a local filesystem or an s3 snapshot that w
 
 - `snapshot_name`: required, name of the snapshot
 - `snapshot_repo_name`: optional, name of the snapshot repository
-- `solr_context_path`: optional, Solr sources only, default `/solr`. The path Solr's APIs are served under, appended to the source cluster endpoint when building Solr URLs. Set this when Solr runs with a custom `solr.contextPath` or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host.
 
 Exactly one of the following blocks must be present:
 

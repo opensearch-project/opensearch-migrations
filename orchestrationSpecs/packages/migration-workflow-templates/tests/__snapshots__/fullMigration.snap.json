@@ -1678,7 +1678,7 @@
                   },
                   {
                     "name": "sourceConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"solrContextPath\", sprig.dig('sourceConnectionIdentity', 'solrContextPath', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
                   },
                   {
                     "name": "snapshotConfig",
