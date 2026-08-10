@@ -237,6 +237,31 @@ public class SolrTopologyDetectionTest {
             "Backup initiation failed for collection 'dummy': Solr instance is not running in SolrCloud mode."));
     }
 
+    /** The shape that actually reaches us: HTTP 400 via SolrRequestException. Verbatim from Solr 8. */
+    @Test
+    void standaloneRejectionArrivingAsAnHttpError_isRecognized() {
+        assertTrue(SolrBackupStrategy.isNotSolrCloudRejection(
+            "Solr returned HTTP 400 for http://localhost:32852/solr/admin/collections?action=BACKUP"
+                + "&name=s3_meta_coll&collection=s3_meta_coll&async=x&wt=json — body: {\n"
+                + "  \"responseHeader\":{\n    \"status\":400,\n    \"QTime\":0},\n"
+                + "  \"error\":{\n    \"metadata\":[\n"
+                + "      \"error-class\",\"org.apache.solr.common.SolrException\",\n"
+                + "      \"root-error-class\",\"org.apache.solr.common.SolrException\"],\n"
+                + "    \"msg\":\"Solr instance is not running in SolrCloud mode.\",\n"
+                + "    \"code\":400}}"));
+    }
+
+    /** Auth failures reach us through the same exception type and must not redirect. */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "Solr authentication failed (HTTP 401) for http://solr:8983/solr/admin/collections?action=BACKUP",
+        "Solr authentication failed (HTTP 403) for http://solr:8983/solr/admin/collections?action=BACKUP",
+        "Failed to communicate with Solr: Connection refused"
+    })
+    void transportAndAuthFailures_doNotLookLikeStandalone(String message) {
+        assertFalse(SolrBackupStrategy.isNotSolrCloudRejection(message));
+    }
+
     /** Anything other than a positive "not SolrCloud" rejection must surface, not silently redirect. */
     @ParameterizedTest
     @ValueSource(strings = {

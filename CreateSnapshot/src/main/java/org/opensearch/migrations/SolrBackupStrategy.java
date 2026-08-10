@@ -210,13 +210,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     /**
-     * Standalone replication backups write only Lucene index data, so the schema is fetched from the
-     * live source into the synthetic {@code zk_backup_0/configs/} structure the RFS reader expects.
-     *
-     * <p>Never run for SolrCloud: its BACKUP writes {@code zk_backup_0/configs/} from ZooKeeper two
-     * levels deep, and a synthetic schema at the shallow path shadows it —
-     * {@code SolrBackupLayout.resolveCollectionDataPrefix} then matches the shallow zk_backup, never
-     * descends to the real data, and the worker fails with "No Lucene segments found".
+     * Stages the schema into the synthetic {@code zk_backup_0/configs/} the RFS reader expects,
+     * since standalone backups carry only index data. Never run for SolrCloud: its BACKUP writes
+     * the real zk_backup two levels down, which a shallow synthetic one would shadow.
      */
     private void ensureStandaloneConfigFiles(String solrUrl, RepoUri parsedUri) {
         ensureConfigFilesInS3(solrUrl, parsedUri);
@@ -465,9 +461,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 runCloudBackup(solrUrl, backupLocation, parsedUri);
                 cloudTopology = Boolean.TRUE;
                 return;
-            } catch (SolrSnapshotCreator.SolrBackupFailed e) {
-                // Only a positive "not SolrCloud" rejection may redirect; anything else (auth,
-                // repo misconfiguration, a genuinely failed cloud backup) must surface as-is.
+            } catch (SolrSnapshotCreator.SolrBackupFailed | SolrHttpClient.SolrRequestException e) {
+                // Standalone's rejection arrives as HTTP 400, so it lands on either type.
+                // Only a positive match redirects; auth and repo errors surface as-is.
                 if (cloudTopology != null || !isNotSolrCloudRejection(e.getMessage())) {
                     throw e;
                 }
@@ -573,10 +569,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     // ---- Collection resolution (shared across modes) ----
 
     /**
-     * Resolves the collection/core list. Passing {@code --solr-collections} skips this entirely;
-     * auto-discovery is the only thing here that needs an admin-read permission, since Solr offers
-     * no way to enumerate collections or cores below {@code collection-admin-read} /
-     * {@code core-admin-read}.
+     * Resolves the collection/core list. {@code --solr-collections} skips this entirely; discovery
+     * is the only step needing an admin-read permission, as Solr offers no lighter way to enumerate.
      */
     private void resolveCollections(String solrUrl) {
         if (!args.solrCollections.isEmpty()) {
@@ -655,11 +649,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     /**
      * Markers sit one or two levels below the snapshot root, so every segment is checked.
-     *
-     * <p>Deliberately excludes {@code zk_backup*}: {@link #uploadConfigFileToS3IfMissing} and
-     * {@link #ensureConfigFilesOnFilesystem} synthesize {@code zk_backup_0/configs/} for
-     * <em>standalone</em> backups, so re-importing one this tool prepared would otherwise read as
-     * SolrCloud. Only markers no code path here can produce count.
+     * Excludes {@code zk_backup*}, which {@link #ensureStandaloneConfigFiles} also synthesizes.
      */
     static boolean hasCloudBackupMarker(String relativePath) {
         for (var segment : relativePath.split("/")) {
@@ -827,9 +817,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     /**
      * Discovers collections/cores and classifies the topology from the same request.
      *
-     * @param knownTopology already-established topology, or null. When standalone is already known,
-     *                      the Collections API is skipped entirely so no {@code collection-admin-read}
-     *                      grant is needed.
+     * @param knownTopology established topology, or null. Standalone skips the Collections API.
      */
     static Discovery discoverCollections(String solrUrl, SolrHttpClient httpClient, Boolean knownTopology)
             throws IOException {
