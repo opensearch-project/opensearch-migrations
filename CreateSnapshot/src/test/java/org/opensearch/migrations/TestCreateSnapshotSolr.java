@@ -62,11 +62,14 @@ public class TestCreateSnapshotSolr {
     @Test
     public void testDiscoverCores_standaloneSolr() throws Exception {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        var cores = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(STANDALONE_SOLR));
+        var discovered = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(STANDALONE_SOLR), null);
+        var cores = discovered.names();
 
         log.atInfo().setMessage("Discovered standalone cores: {}").addArgument(cores).log();
         Assertions.assertFalse(cores.isEmpty(), "Should discover at least the 'dummy' core");
         Assertions.assertTrue(cores.contains("dummy"), "Should find the 'dummy' core");
+        Assertions.assertEquals(SolrBackupStrategy.SolrTopology.STANDALONE, discovered.topology(),
+            "Discovery should classify the topology from the same request");
     }
 
     @Test
@@ -77,10 +80,13 @@ public class TestCreateSnapshotSolr {
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=testcoll&numShards=1&replicationFactor=1&wt=json");
 
-        var collections = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(CLOUD_SOLR));
+        var discovered = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(CLOUD_SOLR), null);
+        var collections = discovered.names();
 
         log.atInfo().setMessage("Discovered SolrCloud collections: {}").addArgument(collections).log();
         Assertions.assertTrue(collections.contains("testcoll"), "Should find 'testcoll' collection");
+        Assertions.assertEquals(SolrBackupStrategy.SolrTopology.SOLR_CLOUD, discovered.topology(),
+            "Discovery should classify the topology from the same request");
     }
 
     @Test
