@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
