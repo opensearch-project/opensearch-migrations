@@ -641,7 +641,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 log.info("Inferred SolrCloud topology from the backup layout — no Solr request needed");
                 return Boolean.TRUE;
             }
-            if (names.stream().anyMatch(SolrBackupStrategy::hasStandaloneBackupMarker)) {
+            if (names.stream().anyMatch(SolrBackupStrategy::hasStandaloneBackupMarker)
+                || hasSiblingStandaloneIndex(parsedUri)) {
                 log.info("Inferred standalone topology from the backup layout — no Solr request needed");
                 return Boolean.FALSE;
             }
@@ -683,6 +684,28 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             if (segment.startsWith("snapshot.") && !CLOUD_SHARD_SNAPSHOT.matcher(segment).matches()) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * The replication handler writes {@code snapshot.<name>/} beside the snapshot dir, not inside
+     * it. Probed by exact name so a sibling backup can't decide this snapshot's topology.
+     */
+    private boolean hasSiblingStandaloneIndex(RepoUri parsedUri) {
+        var sibling = "snapshot." + args.snapshotName;
+        if (parsedUri instanceof RepoUri.S3RepoUri s3RepoUri) {
+            var repoUri = s3RepoUri.s3Uri();
+            var prefix = computeParentPrefix(repoUri.key) + sibling + "/";
+            try (var s3Client = buildS3Client(args.s3Region, args.endpoint)) {
+                return !s3Client.listObjectsV2(
+                    software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+                        .bucket(repoUri.bucketName).prefix(prefix).maxKeys(1).build())
+                    .contents().isEmpty();
+            }
+        }
+        if (parsedUri instanceof RepoUri.FileRepoUri fileRepoUri) {
+            return Files.isDirectory(Paths.get(fileRepoUri.path(), sibling));
         }
         return false;
     }

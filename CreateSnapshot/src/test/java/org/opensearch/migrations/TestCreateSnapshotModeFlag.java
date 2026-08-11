@@ -659,6 +659,44 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=DELETE&name=emptycoll&wt=json");
     }
 
+    // ── Standalone data sits beside the snapshot dir, not inside it ───────────
+    // Solr's replication handler writes snapshot.<name>/ at the repo root, so a backup this tool
+    // created leaves no marker under <repo>/<snapshotName>/ for inference to find.
+
+    @Test
+    void importMode_infersStandaloneFromSiblingSnapshotDir(@TempDir Path tempRepo) throws Exception {
+        var snapshotName = "sibling_layout_test";
+        // What `--mode create` against a standalone source actually produces.
+        var index = tempRepo.resolve("snapshot." + snapshotName);
+        Files.createDirectories(index);
+        Files.writeString(index.resolve("segments_1"), "seeded index data");
+        // The snapshot dir itself holds only the staged config from that create run.
+        var staged = tempRepo.resolve(Path.of(snapshotName, "dummy", "zk_backup_0", "configs", "dummy"));
+        Files.createDirectories(staged);
+        Files.writeString(staged.resolve("managed-schema.xml"), "<schema/>");
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.repoUri = tempRepo.toString();
+        args.mode = "import";
+        args.solrCollections = List.of("dummy");
+        args.noWait = false;
+
+        try (var logCapture = new CloseableLogSetup(SolrBackupStrategy.class.getName())) {
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            // No --solr-topology: the sibling index is what must resolve it.
+            new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+            Assertions.assertTrue(logCapture.getLogEvents().stream()
+                    .anyMatch(m -> m.contains("topology=standalone")),
+                "The sibling snapshot.<name>/ index should identify a standalone backup");
+        }
+    }
+
     // ── Standalone staging must not be able to manufacture a "valid" snapshot ──
     // Staging writes zk_backup_0/configs/... under the snapshot location, so validating after it
     // would let an absent backup pass on the strength of files this run just created.
