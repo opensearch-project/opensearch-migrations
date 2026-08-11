@@ -16,6 +16,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.solr.framework.SolrCloudCluster;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,18 +37,14 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Proves a SolrCloud backup holding more than one Lucene segment migrates completely.
+ * SolrCloud backups whose shape the rest of the suite never produces: more than one Lucene segment,
+ * and more than one replica per shard.
  *
- * <p>Standalone already has this coverage
- * ({@code SolrBareS3StandaloneFlatRootDerivedNameDocumentMigrationTest}), but no SolrCloud test
- * asserted its backup's segment count, so the multi-segment Cloud path was unverified — the shape
- * <a href="https://github.com/opensearch-project/opensearch-migrations/issues/3116">#3116</a> was
- * reported against. Segment count is controlled by committing per batch; a force merge only bounds
- * it from above.
- *
- * <p>Scoped to Solr 6/7, whose Cloud BACKUP writes plain Lucene names under {@code snapshot.shardN/}
- * so segments can be counted directly. Solr 8/9 incremental backups store UUID filenames and would
- * need the shard metadata parsed to count segments.
+ * <p>Segment count is controlled by committing per batch — a force merge only bounds it from above.
+ * The multi-segment cases run on Solr 6/7, whose Cloud BACKUP writes plain Lucene names under
+ * {@code snapshot.shardN/} so segments can be counted directly; Solr 8/9 store UUID filenames and
+ * would need the shard metadata parsed. The replica case runs on Solr 8 over a multi-node cluster,
+ * since {@link SolrClusterContainer#cloud} is single-node.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -282,5 +280,82 @@ public class SolrCloudSegmentAndReplicaBackupTest {
                 .getOrDefault(indexName, 0),
             "all documents should reach the target index"
         );
+    }
+
+    /** Replication factor 2 across nodes: BACKUP takes one replica per shard, so no doubled docs. */
+    @Test
+    void replicatedCloudBackupMigratesEachShardOnce() throws Exception {
+        var hostBackupDir = tempDir.toPath().resolve("shared_backups");
+        try (
+            var cluster = new SolrCloudCluster(SolrClusterContainer.SOLR_8, 2, hostBackupDir);
+            var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            cluster.start();
+            target.start();
+            var solr = cluster.node(0);
+
+            var create = solr.execInContainer("curl", "-sf",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + COLLECTION
+                    + "&numShards=" + NUM_SHARDS
+                    + "&replicationFactor=2&maxShardsPerNode=" + NUM_SHARDS
+                    + "&wt=json");
+            log.atInfo().setMessage("CREATE response: {}").addArgument(create.getStdout()).log();
+            waitForCollectionActive(solr, NUM_SHARDS * 2, 120);
+
+            indexInBatches(solr, DOC_COUNT, 1);
+
+            // Without two replicas per shard this is just the single-replica case again.
+            var status = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&collection="
+                    + COLLECTION + "&wt=json");
+            var replicaCount = countOccurrences(status.getStdout(), "\"core_node");
+            assertThat("collection should hold " + (NUM_SHARDS * 2) + " replicas",
+                replicaCount, equalTo(NUM_SHARDS * 2));
+
+            var backup = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                    + "&name=replicated_backup&collection=" + COLLECTION
+                    + "&location=" + SolrCloudCluster.BACKUP_DIR + "&wt=json");
+            log.atInfo().setMessage("BACKUP response: {}").addArgument(backup.getStdout()).log();
+            if (backup.getStdout().contains("\"status\":500") || backup.getStdout().contains("\"status\":400")) {
+                throw new IllegalStateException("BACKUP failed: " + backup.getStdout());
+            }
+
+            var schema = fetchSchema(solr, COLLECTION);
+            // Solr 8 writes the incremental layout: <name>/<collection>/{index,shard_backup_metadata}.
+            var collectionBackup = hostBackupDir.resolve("replicated_backup").resolve(COLLECTION);
+            assertThat("backup should hold one metadata entry per shard, not per replica",
+                countBackedUpShards(collectionBackup), equalTo(NUM_SHARDS));
+
+            migrate(collectionBackup, schema, SolrClusterContainer.SOLR_8, target);
+            verifyDocCount(target, COLLECTION, DOC_COUNT);
+        }
+    }
+
+    /** One md_shard<N>_*.json per shard in the incremental layout, regardless of replica count. */
+    private static int countBackedUpShards(Path collectionBackup) throws IOException {
+        var metadataDir = collectionBackup.resolve("shard_backup_metadata");
+        if (!Files.isDirectory(metadataDir)) {
+            throw new IllegalStateException("No shard_backup_metadata under " + collectionBackup);
+        }
+        try (var files = Files.list(metadataDir)) {
+            return (int) files
+                .map(p -> p.getFileName().toString())
+                .filter(n -> n.startsWith("md_shard"))
+                .map(n -> n.substring(0, n.indexOf('_', "md_shard".length())))
+                .distinct()
+                .count();
+        }
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) != -1) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
     }
 }

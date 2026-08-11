@@ -68,6 +68,14 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
         return new SolrClusterContainer(version, true);
     }
 
+    /** A node joining an external ZooKeeper rather than an embedded one; see {@link SolrCloudCluster}. */
+    @SuppressWarnings("resource")
+    public static SolrClusterContainer cloudNode(SolrVersion version, String zkHost) {
+        var container = new SolrClusterContainer(version, true);
+        container.withEnv("ZK_HOST", zkHost);
+        return container;
+    }
+
     /** Classpath resource (shipped in this module's test fixtures) wiring Solr's S3 backup repository. */
     private static final String S3_BACKUP_SOLR_XML = "solr-s3-backup.xml";
 
@@ -130,20 +138,14 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
     private static final String DEFAULT_TEST_ROLE = "solr_test_role";
 
     /**
-     * SolrCloud with BasicAuthPlugin + RuleBasedAuthorizationPlugin, expressed the way security.json
-     * is: who can log in, which roles each user holds, and which Solr predefined permissions each
-     * role grants. Supports multiple users and roles, and a permission held by several roles.
-     *
-     * <p>Solr's permissions are not hierarchical — {@code collection-admin-edit} does not imply
-     * {@code collection-admin-read} — so every endpoint a test needs must be granted explicitly.
-     *
-     * <p>security.json is uploaded to ZooKeeper after the container is up rather than mounted at
-     * build time: the readiness probe is unauthenticated and would never pass against a Solr that
-     * is already secured. Solr watches the ZK node, so the change applies without a restart.
+     * SolrCloud with BasicAuth + RuleBasedAuthorization, mirroring security.json. Solr permissions
+     * are not hierarchical, so every endpoint needed must be granted explicitly. security.json is
+     * uploaded to ZooKeeper after startup — the readiness probe is unauthenticated and would never
+     * pass against an already-secured Solr.
      *
      * @param credentials     username → password
-     * @param userRoles       username → roles that user holds
-     * @param rolePermissions role → Solr predefined permission names granted to it
+     * @param userRoles       username → roles
+     * @param rolePermissions role → Solr predefined permission names
      */
     public static SolrClusterContainer securedCloud(
         SolrVersion version,
@@ -180,8 +182,7 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
         credentials.forEach((user, password) ->
             credentialEntries.add(jsonString(user) + ":" + jsonString(sha256Credential(password))));
 
-        // Solr's permission list is ordered and first-match-wins, so a permission granted to several
-        // roles must be one entry naming all of them rather than repeated entries.
+        // Permission list is ordered, first match wins, so one entry must name all its roles.
         var permissionToRoles = new java.util.LinkedHashMap<String, java.util.List<String>>();
         rolePermissions.forEach((role, permissions) -> permissions.forEach(permission ->
             permissionToRoles.computeIfAbsent(permission, p -> new java.util.ArrayList<>()).add(role)));
@@ -244,7 +245,7 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
                 throw new IllegalStateException(
                     "Failed to upload security.json: " + upload.getStderr() + upload.getStdout());
             }
-            // Solr applies the ZK watch asynchronously; wait until an anonymous request is rejected.
+            // The ZK watch applies asynchronously; wait until anonymous requests are rejected.
             for (int i = 0; i < 60; i++) {
                 var probe = execInContainer("sh", "-c",
                     "curl -s -o /dev/null -w '%{http_code}' "
