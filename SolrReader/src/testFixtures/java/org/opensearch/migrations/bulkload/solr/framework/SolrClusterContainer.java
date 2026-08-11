@@ -116,6 +116,154 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
     public void start() {
         log.atInfo().setMessage("Starting Solr container: {} (cloud={})").addArgument(solrVersion).addArgument(cloudMode).log();
         super.start();
+        if (securityJson != null) {
+            applySecurityJson();
+        }
+    }
+
+    // --- Secured fixture ---
+
+    /** Applied after startup, not baked in — see {@link #securedCloud}. */
+    private String securityJson;
+
+    /** Role used by the single-user convenience overload. */
+    private static final String DEFAULT_TEST_ROLE = "solr_test_role";
+
+    /**
+     * SolrCloud with BasicAuthPlugin + RuleBasedAuthorizationPlugin, expressed the way security.json
+     * is: who can log in, which roles each user holds, and which Solr predefined permissions each
+     * role grants. Supports multiple users and roles, and a permission held by several roles.
+     *
+     * <p>Solr's permissions are not hierarchical — {@code collection-admin-edit} does not imply
+     * {@code collection-admin-read} — so every endpoint a test needs must be granted explicitly.
+     *
+     * <p>security.json is uploaded to ZooKeeper after the container is up rather than mounted at
+     * build time: the readiness probe is unauthenticated and would never pass against a Solr that
+     * is already secured. Solr watches the ZK node, so the change applies without a restart.
+     *
+     * @param credentials     username → password
+     * @param userRoles       username → roles that user holds
+     * @param rolePermissions role → Solr predefined permission names granted to it
+     */
+    public static SolrClusterContainer securedCloud(
+        SolrVersion version,
+        java.util.Map<String, String> credentials,
+        java.util.Map<String, java.util.List<String>> userRoles,
+        java.util.Map<String, java.util.List<String>> rolePermissions
+    ) {
+        for (var user : userRoles.keySet()) {
+            if (!credentials.containsKey(user)) {
+                throw new IllegalArgumentException("No password supplied for user with roles: " + user);
+            }
+        }
+        var container = new SolrClusterContainer(version, true);
+        container.securityJson = buildSecurityJson(credentials, userRoles, rolePermissions);
+        return container;
+    }
+
+    /** Convenience for one user holding one role that grants {@code permissions}. */
+    public static SolrClusterContainer securedCloud(
+        SolrVersion version, String username, String password, java.util.List<String> permissions
+    ) {
+        return securedCloud(version,
+            java.util.Map.of(username, password),
+            java.util.Map.of(username, java.util.List.of(DEFAULT_TEST_ROLE)),
+            java.util.Map.of(DEFAULT_TEST_ROLE, permissions));
+    }
+
+    private static String buildSecurityJson(
+        java.util.Map<String, String> credentials,
+        java.util.Map<String, java.util.List<String>> userRoles,
+        java.util.Map<String, java.util.List<String>> rolePermissions
+    ) {
+        var credentialEntries = new java.util.ArrayList<String>();
+        credentials.forEach((user, password) ->
+            credentialEntries.add(jsonString(user) + ":" + jsonString(sha256Credential(password))));
+
+        // Solr's permission list is ordered and first-match-wins, so a permission granted to several
+        // roles must be one entry naming all of them rather than repeated entries.
+        var permissionToRoles = new java.util.LinkedHashMap<String, java.util.List<String>>();
+        rolePermissions.forEach((role, permissions) -> permissions.forEach(permission ->
+            permissionToRoles.computeIfAbsent(permission, p -> new java.util.ArrayList<>()).add(role)));
+
+        var permissionEntries = new java.util.ArrayList<String>();
+        permissionToRoles.forEach((permission, roles) -> permissionEntries.add(
+            "{\"name\":" + jsonString(permission) + ",\"role\":" + jsonArray(roles) + "}"));
+
+        var userRoleEntries = new java.util.ArrayList<String>();
+        userRoles.forEach((user, roles) -> userRoleEntries.add(jsonString(user) + ":" + jsonArray(roles)));
+
+        return "{\n"
+            + "  \"authentication\": {\n"
+            + "    \"blockUnknown\": true,\n"
+            + "    \"class\": \"solr.BasicAuthPlugin\",\n"
+            + "    \"credentials\": {" + String.join(",", credentialEntries) + "}\n"
+            + "  },\n"
+            + "  \"authorization\": {\n"
+            + "    \"class\": \"solr.RuleBasedAuthorizationPlugin\",\n"
+            + "    \"permissions\": [" + String.join(",", permissionEntries) + "],\n"
+            + "    \"user-role\": {" + String.join(",", userRoleEntries) + "}\n"
+            + "  }\n"
+            + "}";
+    }
+
+    private static String jsonString(String raw) {
+        return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static String jsonArray(java.util.List<String> values) {
+        var quoted = values.stream().map(SolrClusterContainer::jsonString).toList();
+        return "[" + String.join(",", quoted) + "]";
+    }
+
+    /** Solr's Sha256AuthenticationProvider format: base64(sha256(sha256(salt + password))) + " " + base64(salt). */
+    private static String sha256Credential(String password) {
+        try {
+            var salt = new byte[32];
+            new java.security.SecureRandom().nextBytes(salt);
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            digest.reset();
+            digest.update(salt);
+            var hashed = digest.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            digest.reset();
+            hashed = digest.digest(hashed);
+            var encoder = java.util.Base64.getEncoder();
+            return encoder.encodeToString(hashed) + " " + encoder.encodeToString(salt);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private void applySecurityJson() {
+        try {
+            copyFileToContainer(
+                org.testcontainers.images.builder.Transferable.of(securityJson), "/tmp/security.json");
+            var upload = execInContainer("/opt/solr/bin/solr", "zk", "cp",
+                "file:/tmp/security.json", "zk:/security.json", "-z", "localhost:9983");
+            if (upload.getExitCode() != 0) {
+                throw new IllegalStateException(
+                    "Failed to upload security.json: " + upload.getStderr() + upload.getStdout());
+            }
+            // Solr applies the ZK watch asynchronously; wait until an anonymous request is rejected.
+            for (int i = 0; i < 60; i++) {
+                var probe = execInContainer("sh", "-c",
+                    "curl -s -o /dev/null -w '%{http_code}' "
+                        + "'http://localhost:8983/solr/admin/collections?action=LIST&wt=json'");
+                var code = probe.getStdout().trim();
+                if ("401".equals(code) || "403".equals(code)) {
+                    log.atInfo().setMessage("security.json active (anonymous request got {})")
+                        .addArgument(code).log();
+                    return;
+                }
+                Thread.sleep(1000);
+            }
+            throw new IllegalStateException("security.json did not take effect within 60s");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted applying security.json", e);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed applying security.json", e);
+        }
     }
 
     @Override
