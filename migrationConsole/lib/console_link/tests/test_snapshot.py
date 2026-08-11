@@ -521,6 +521,30 @@ def test_solr_s3_snapshot_passes_configured_topology(monkeypatch):
     assert called_args[called_args.index("--solr-topology") + 1] == "standalone"
 
 
+def test_solr_fs_snapshot_passes_configured_topology(mocker):
+    config = {
+        "snapshot": {
+            "snapshot_name": "solr_fs_snapshot",
+            "solr_collections": ["products"],
+            "solr_topology": "standalone",
+            "fs": {
+                "repo_path": "/path/for/snapshot/repo"
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 8.11")
+    snapshot = FileSystemSnapshot(config["snapshot"], source)
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    run_mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    called_args = run_mock.call_args[0][0]
+    assert "--solr-topology" in called_args
+    assert called_args[called_args.index("--solr-topology") + 1] == "standalone"
+
+
 def test_solr_s3_snapshot_omits_topology_when_unset(monkeypatch):
     config = {
         "snapshot": {

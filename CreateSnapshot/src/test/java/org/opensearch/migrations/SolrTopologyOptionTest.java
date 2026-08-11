@@ -99,6 +99,38 @@ public class SolrTopologyOptionTest {
         }
     }
 
+    /** A cloud backup classifies from its own markers and then makes no request at all. */
+    @Test
+    void cloudMarkersInBackup_inferCloudWithoutQueryingSolr(@TempDir Path repoRoot) throws Exception {
+        var snapshot = repoRoot.resolve(SNAPSHOT_NAME).resolve("movies");
+        Files.createDirectories(snapshot);
+        Files.writeString(snapshot.resolve("backup.properties"), "collection=movies");
+
+        var args = argsFor(repoRoot, "import", null);
+
+        assertDoesNotThrow(() -> new SolrBackupStrategy(args).run());
+    }
+
+    /** Discovery failures against an unreachable source must surface, not be swallowed. */
+    @Test
+    void unreachableSourceDuringDiscovery_reportsTheTopologyFailure(@TempDir Path repoRoot) throws Exception {
+        var args = argsFor(ambiguousBackup(repoRoot), "import", "cloud");
+        args.solrCollections = List.of();
+
+        assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
+            () -> new SolrBackupStrategy(args).run());
+    }
+
+    /** The standalone ladder reaches Core Admin, whose transport failure is wrapped for the user. */
+    @Test
+    void unreachableSourceDuringCoreDiscovery_isWrappedAsParameterError(@TempDir Path repoRoot) throws Exception {
+        var args = argsFor(ambiguousBackup(repoRoot), "import", "standalone");
+        args.solrCollections = List.of();
+
+        var ex = assertThrows(ParameterException.class, () -> new SolrBackupStrategy(args).run());
+        assertThat(ex.getMessage(), containsString("discover Solr collections/cores"));
+    }
+
     @Test
     void invalidTopologyValue_isRejectedBeforeAnythingRuns(@TempDir Path repoRoot) throws Exception {
         var args = argsFor(ambiguousBackup(repoRoot), "import", "zookeeper");

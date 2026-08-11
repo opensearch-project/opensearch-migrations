@@ -629,14 +629,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      */
     private Boolean inferTopologyFromArtifact(RepoUri parsedUri) {
         try {
-            List<String> names;
-            if (parsedUri instanceof RepoUri.S3RepoUri s3RepoUri) {
-                names = listS3SnapshotEntryNames(s3RepoUri.s3Uri());
-            } else if (parsedUri instanceof RepoUri.FileRepoUri fileRepoUri) {
-                names = listFilesystemSnapshotEntryNames(Paths.get(fileRepoUri.path(), args.snapshotName));
-            } else {
-                return null;
-            }
+            var names = parsedUri instanceof RepoUri.S3RepoUri s3RepoUri
+                ? listS3SnapshotEntryNames(s3RepoUri.s3Uri())
+                : listFilesystemSnapshotEntryNames(
+                    Paths.get(((RepoUri.FileRepoUri) parsedUri).path(), args.snapshotName));
             if (names.stream().anyMatch(SolrBackupStrategy::hasCloudBackupMarker)) {
                 log.info("Inferred SolrCloud topology from the backup layout — no Solr request needed");
                 return Boolean.TRUE;
@@ -704,10 +700,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                     .contents().isEmpty();
             }
         }
-        if (parsedUri instanceof RepoUri.FileRepoUri fileRepoUri) {
-            return Files.isDirectory(Paths.get(fileRepoUri.path(), sibling));
-        }
-        return false;
+        return Files.isDirectory(Paths.get(((RepoUri.FileRepoUri) parsedUri).path(), sibling));
     }
 
     /** Caps how much of the snapshot is listed when classifying it; markers appear near the top. */
@@ -731,9 +724,6 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     /** Snapshot-relative paths under a filesystem snapshot dir, bounded by {@link #TOPOLOGY_SCAN_LIMIT}. */
     private static List<String> listFilesystemSnapshotEntryNames(Path snapshotDir) throws IOException {
-        if (!Files.isDirectory(snapshotDir)) {
-            return List.of();
-        }
         try (var paths = Files.walk(snapshotDir, 4)) {
             return paths.filter(p -> !p.equals(snapshotDir))
                 .limit(TOPOLOGY_SCAN_LIMIT)

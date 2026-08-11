@@ -194,6 +194,19 @@ public class SolrTopologyDetectionTest {
         verify(client).getString(contains("/admin/cores"), any(Duration.class));
     }
 
+    /** Topology already known to be cloud, but LIST won't enumerate: say so rather than mine cores. */
+    @Test
+    void knownCloudButUnlistableCollections_asksForAnExplicitList() throws Exception {
+        var client = clientReturning(400, STANDALONE_BODY);
+        when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
+
+        var ex = assertThrows(ParameterException.class,
+            () -> SolrBackupStrategy.discoverCollections(URL, client, Boolean.TRUE));
+
+        assertThat(ex.getMessage(), containsString("--solr-collections"));
+        verify(client, never()).getString(anyString(), any(Duration.class));
+    }
+
     @Test
     void discoveryClassifiesTopologyFromTheSameRequest() throws Exception {
         var client = clientReturning(200, CLOUD_BODY);
