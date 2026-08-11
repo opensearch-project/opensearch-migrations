@@ -637,6 +637,386 @@ public class SolrSnapshotToOpenSearchTest {
         }
     }
 
+    // --- Multi-tenant (issue #3150) ---
+
+    private static final int TENANT_COUNT = 10;
+
+    /** Tenant {@code i} holds {@code i + 1} documents, so a mixed-up collection shows as a wrong count. */
+    private static String tenantName(int i) {
+        return "tenant_" + i;
+    }
+
+    private static List<String> tenantNames() {
+        return java.util.stream.IntStream.range(0, TENANT_COUNT)
+            .mapToObj(SolrSnapshotToOpenSearchTest::tenantName).toList();
+    }
+
+    /**
+     * Ten collections sharing one ConfigSet — the arrangement #3150 asks about first. Verifies the
+     * migration keeps them separate despite a single shared config in ZooKeeper.
+     */
+    @ParameterizedTest(name = "multi-tenant shared ConfigSet: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void manyCollectionsSharedConfigSetMigrate(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            uploadConfigSet(solr, "tenants_shared");
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                createCollectionWithConfig(solr, tenantName(i), "tenants_shared");
+                indexTenantDocs(solr, i);
+            }
+
+            var backupRoot = backupAllTenants(solr, tenantNames());
+            var outcome = migrateCollections(
+                backupRoot, tenantSchemas(solr, tenantNames()), tenantNames(), target, solrVersion);
+
+            assertThat("every tenant shard should migrate", outcome.succeeded, equalTo(TENANT_COUNT));
+            assertThat("no shard should fail", outcome.failed, equalTo(0));
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                verifyDocCount(target, tenantName(i), i + 1);
+            }
+        }
+    }
+
+    /**
+     * Ten collections with ten distinct ConfigSets, each carrying a field only it defines. Asserts
+     * the per-tenant field lands on its own index and nowhere else — schemas must not cross-talk.
+     */
+    @ParameterizedTest(name = "multi-tenant distinct ConfigSets: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void manyCollectionsDistinctConfigSetsMigrate(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                var configName = "tenant_config_" + i;
+                uploadConfigSet(solr, configName);
+                createCollectionWithConfig(solr, tenantName(i), configName);
+                indexTenantDocs(solr, i);
+            }
+
+            var backupRoot = backupAllTenants(solr, tenantNames());
+            var outcome = migrateCollections(
+                backupRoot, tenantSchemas(solr, tenantNames()), tenantNames(), target, solrVersion);
+
+            assertThat("every tenant shard should migrate", outcome.succeeded, equalTo(TENANT_COUNT));
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                verifyDocCount(target, tenantName(i), i + 1);
+                assertTenantFieldIsolated(target, i);
+            }
+        }
+    }
+
+    /** Migrating three of ten collections must leave the other seven absent from the target. */
+    @ParameterizedTest(name = "multi-tenant allowlist: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void collectionAllowlistMigratesOnlySelected(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            uploadConfigSet(solr, "tenants_shared");
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                createCollectionWithConfig(solr, tenantName(i), "tenants_shared");
+                indexTenantDocs(solr, i);
+            }
+
+            var backupRoot = backupAllTenants(solr, tenantNames());
+            var selected = List.of(tenantName(1), tenantName(4), tenantName(7));
+            var outcome = migrateCollections(
+                backupRoot, tenantSchemas(solr, tenantNames()), selected, target, solrVersion);
+
+            assertThat("only the selected collections should be migrated",
+                outcome.succeeded, equalTo(selected.size()));
+            for (var name : selected) {
+                verifyDocCount(target, name, Integer.parseInt(name.substring("tenant_".length())) + 1);
+            }
+            for (var name : tenantNames()) {
+                if (!selected.contains(name)) {
+                    assertIndexAbsent(target, name);
+                }
+            }
+        }
+    }
+
+    /**
+     * One tenant's backup is corrupted after the fact. The other nine must still migrate, and the
+     * failure must name the collection that actually broke.
+     */
+    @ParameterizedTest(name = "multi-tenant partial failure: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void corruptCollectionDoesNotBlockOthers(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            uploadConfigSet(solr, "tenants_shared");
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                createCollectionWithConfig(solr, tenantName(i), "tenants_shared");
+                indexTenantDocs(solr, i);
+            }
+
+            var backupRoot = backupAllTenants(solr, tenantNames());
+            var corrupted = tenantName(3);
+            corruptCollectionBackup(backupRoot, corrupted);
+
+            var outcome = migrateCollections(
+                backupRoot, tenantSchemas(solr, tenantNames()), tenantNames(), target, solrVersion);
+
+            log.atInfo().setMessage("partial-failure outcome: {} succeeded, {} failed, errors={}")
+                .addArgument(outcome.succeeded).addArgument(outcome.failed)
+                .addArgument(outcome.errors).log();
+
+            assertThat("the nine intact tenants should still migrate",
+                outcome.succeeded, equalTo(TENANT_COUNT - 1));
+            assertThat("the corrupt tenant should be attributed by name",
+                outcome.errors.stream().anyMatch(e -> e.contains(corrupted)), equalTo(true));
+            for (int i = 0; i < TENANT_COUNT; i++) {
+                if (!tenantName(i).equals(corrupted)) {
+                    verifyDocCount(target, tenantName(i), i + 1);
+                }
+            }
+        }
+    }
+
+    // --- Multi-tenant helpers ---
+
+    /** Copies Solr's bundled _default configset into ZooKeeper under {@code configName}. */
+    private static void uploadConfigSet(SolrClusterContainer solr, String configName) throws Exception {
+        var result = solr.execInContainer("/opt/solr/bin/solr", "zk", "upconfig",
+            "-n", configName, "-d", "_default", "-z", "localhost:9983");
+        if (result.getExitCode() != 0) {
+            throw new IllegalStateException(
+                "upconfig " + configName + " failed: " + result.getStderr() + result.getStdout());
+        }
+    }
+
+    private static void createCollectionWithConfig(
+        SolrClusterContainer solr, String name, String configName
+    ) throws Exception {
+        var result = solr.execInContainer("curl", "-sf",
+            "http://localhost:8983/solr/admin/collections?action=CREATE"
+                + "&name=" + name + "&numShards=1&replicationFactor=1"
+                + "&collection.configName=" + configName + "&wt=json");
+        if (result.getExitCode() != 0) {
+            throw new IllegalStateException("CREATE " + name + " failed: " + result.getStderr());
+        }
+    }
+
+    private static void indexTenantDocs(SolrClusterContainer solr, int tenant) throws Exception {
+        var name = tenantName(tenant);
+        var sb = new StringBuilder("[");
+        for (int d = 0; d <= tenant; d++) {
+            if (d > 0) {
+                sb.append(",");
+            }
+            sb.append("{\"id\":\"").append(name).append("_doc").append(d)
+                .append("\",\"title\":\"Doc ").append(d).append("\",\"")
+                .append(name).append("_note_s\":\"only in ").append(name).append("\"}");
+        }
+        sb.append("]");
+        solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + name + "/update?commit=true", "-d", sb.toString());
+    }
+
+    private Path backupAllTenants(SolrClusterContainer solr, List<String> collections) throws Exception {
+        Path backupRoot = null;
+        for (var name : collections) {
+            backupRoot = createBackup(solr, name, "backup_" + name);
+        }
+        return backupRoot;
+    }
+
+    private static Map<String, JsonNode> tenantSchemas(SolrClusterContainer solr, List<String> collections)
+        throws Exception {
+        var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+        for (var name : collections) {
+            schemas.put(name, MAPPER.createObjectNode().set("schema", fetchSchema(solr, name)));
+        }
+        return schemas;
+    }
+
+    /**
+     * Overwrites one collection's commit point with garbage so only that collection fails to read.
+     * Incremental backups (Solr 8.9+, the default) store files under UUID names, so the commit
+     * point has to be resolved through shard_backup_metadata the same way the reader does.
+     */
+    private static void corruptCollectionBackup(Path backupRoot, String collection) throws Exception {
+        var garbage = "not a lucene commit".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var collectionDir = backupRoot.resolve(collection);
+        var metadataDir = collectionDir.resolve("shard_backup_metadata");
+
+        if (Files.isDirectory(metadataDir)) {
+            int corrupted = 0;
+            try (var metadataFiles = Files.list(metadataDir)) {
+                for (var mdFile : metadataFiles.toList()) {
+                    var tree = MAPPER.readTree(mdFile.toFile());
+                    var fields = tree.fields();
+                    while (fields.hasNext()) {
+                        var entry = fields.next();
+                        var luceneName = entry.getValue().path("fileName").asText("");
+                        if (luceneName.startsWith("segments_")) {
+                            var physical = collectionDir.resolve("index").resolve(entry.getKey());
+                            Files.write(physical, garbage);
+                            corrupted++;
+                        }
+                    }
+                }
+            }
+            if (corrupted == 0) {
+                throw new IllegalStateException("No mapped segments_N for " + collection + " in " + metadataDir);
+            }
+            return;
+        }
+
+        try (var walk = Files.walk(collectionDir)) {
+            var segments = walk
+                .filter(p -> p.getFileName().toString().startsWith("segments_"))
+                .toList();
+            if (segments.isEmpty()) {
+                throw new IllegalStateException("No segments_N found for " + collection + " under " + backupRoot);
+            }
+            for (var file : segments) {
+                Files.write(file, garbage);
+            }
+        }
+    }
+
+    private record MigrationOutcome(int succeeded, int failed, List<String> errors) {
+    }
+
+    /**
+     * Registers work for {@code collections} and drains it one shard per call, recording per-shard
+     * failures rather than aborting, so partial-failure behaviour is observable.
+     */
+    private MigrationOutcome migrateCollections(
+        Path backupRoot, Map<String, JsonNode> schemas, List<String> collections,
+        SearchClusterContainer target, SolrClusterContainer.SolrVersion solrVersion
+    ) throws Exception {
+        var documentSource = new SolrMultiCollectionSource(backupRoot, schemas, null, null, solrVersion.major());
+        var connectionContext = ConnectionContextTestParams.builder()
+            .host(target.getUrl()).build().toConnectionContext();
+        var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        var coordinatorFactory = new WorkCoordinatorFactory(targetClient.getClusterVersion());
+        var progressCursor = new AtomicReference<WorkItemCursor>();
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+        int succeeded = 0;
+        int failed = 0;
+        var errors = new java.util.ArrayList<String>();
+
+        try (var setupCoordinator = coordinatorFactory.get(
+                 new CoordinateWorkHttpClient(connectionContext),
+                 SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                 UUID.randomUUID().toString(), Clock.systemUTC(), workItemRef::set);
+             var setupProcessManager = new LeaseExpireTrigger(w -> { })) {
+            new ShardWorkPreparer().run(
+                new ScopedWorkCoordinator(setupCoordinator, setupProcessManager),
+                documentSource, collections, testContext);
+        }
+
+        for (int attempt = 0; attempt < collections.size() * 3 + 5; attempt++) {
+            // A fresh worker per shard, mirroring one RfsMigrateDocuments process per shard. Reusing
+            // one worker wedges the run after a failure: the dead lease stays assigned to it and every
+            // later acquire fails with MalformedAssignedWorkDocumentException.
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     UUID.randomUUID().toString(), Clock.systemUTC(), workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(w -> { })) {
+
+                var runner = DocumentMigrationBootstrap.builder()
+                    .targetClient(targetClient)
+                    .maxDocsPerBatch(1000)
+                    .maxBytesPerBatch(Long.MAX_VALUE)
+                    .batchConcurrency(10)
+                    .allowlist(DocumentExceptionAllowlist.empty())
+                    .documentSource(documentSource)
+                    .workCoordinator(new ScopedWorkCoordinator(workCoordinator, processManager))
+                    .maxInitialLeaseDuration(Duration.ofMinutes(5))
+                    .cursorConsumer(progressCursor::set)
+                    .cancellationTriggerConsumer(r -> { })
+                    .build();
+
+                var status = runner.migrateOneShard(testContext::createReindexContext);
+                if (status == CompletionStatus.NOTHING_DONE) {
+                    break;
+                }
+                succeeded++;
+            } catch (Exception e) {
+                failed++;
+                var described = describeWithCauses(e);
+                errors.add(described);
+                log.atInfo().setMessage("shard migration failed: {}").addArgument(described).log();
+            }
+        }
+        return new MigrationOutcome(succeeded, failed, errors);
+    }
+
+    /** The top-level message carries only a base64 work-item id, so causes are needed to attribute it. */
+    private static String describeWithCauses(Throwable t) {
+        var sb = new StringBuilder();
+        var seen = new java.util.HashSet<Throwable>();
+        for (var c = t; c != null && seen.add(c); c = c.getCause()) {
+            sb.append(c.getClass().getSimpleName()).append(": ").append(c.getMessage()).append(" | ");
+        }
+        return sb.toString();
+    }
+
+    private static void assertTenantFieldIsolated(SearchClusterContainer target, int tenant) throws Exception {
+        var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+        var restClient = new RestClient(
+            ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext());
+        restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+        var ownField = tenantName(tenant) + "_note_s";
+        var resp = restClient.get(tenantName(tenant) + "/_mapping", ctx.createUnboundRequestContext());
+        assertThat(ownField + " should exist on its own index",
+            resp.body.contains(ownField), equalTo(true));
+
+        var otherTenant = (tenant + 1) % TENANT_COUNT;
+        assertThat(tenantName(otherTenant) + "_note_s should not leak into " + tenantName(tenant),
+            resp.body.contains(tenantName(otherTenant) + "_note_s"), equalTo(false));
+    }
+
+    private static void assertIndexAbsent(SearchClusterContainer target, String indexName) {
+        var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+        var restClient = new RestClient(
+            ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext());
+        restClient.get("_refresh", ctx.createUnboundRequestContext());
+        var counts = new SearchClusterRequests(ctx).getMapOfIndexAndDocCount(restClient);
+        assertThat(indexName + " was not selected and must not exist on the target",
+            counts.containsKey(indexName), equalTo(false));
+    }
+
     // --- Helpers ---
 
     /** POST {@code {"add-field":[...]}} to a Solr collection's Schema API. */
