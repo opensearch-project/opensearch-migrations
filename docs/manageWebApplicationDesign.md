@@ -6,6 +6,9 @@ This document describes the broad direction for replacing the Textual presentati
 `workflow manage` with a native web application. It is intentionally not a detailed API
 specification or a complete UX design.
 
+The detailed, phase-gated implementation runbook is
+[Workflow Manage Native Web Conversion Plan](manageWebConversionPlan.md).
+
 The existing TUI, its code, and `manageConfig.cast` are references for understanding the
 workflow and the functionality users need. They are not a behavioral specification for the
 new application. Surprising interactions in the recording should not be preserved merely
@@ -208,24 +211,34 @@ built. New browser-specific behavior should target the native application.
 
 ### 1. Read-Only Vertical Slice
 
-Build the server process, static application packaging, resource tree, detail pane, status
-refresh, and one log stream. This validates the architecture and port-forward lifecycle
-without moving destructive actions.
+Build the presentation-neutral state layer, server process, static application packaging,
+resource tree, detail pane, and status refresh. This validates the architecture and
+port-forward lifecycle without moving destructive actions or taking on log transport.
 
 ### 2. Configuration
 
 Expose the existing schema-guided edit model through the server. Add natural form controls,
 external-reference selection, pending changes, save behavior, and submit review.
 
-The save and concurrency model should be decided here. Reasonable options include explicit
-save with revision checks or carefully signaled autosave to the pending config.
+Use explicit save with revision checks. Keep raw YAML and config-processor interaction in
+the backend rather than making React parse workflow configuration.
 
-### 3. Workflow Actions
+### 3. Managed Output
+
+Move `workflow show` behavior into a presentation-neutral output service and dedicated
+selected-resource view.
+
+### 4. Workflow Actions
 
 Add tracked submit, approval, and reset operations. Reuse the current command and service
 logic, extracting it from TUI callbacks where necessary.
 
-### 4. Refinement
+### 5. Logs
+
+After state, editing, output, and action contracts are stable, implement bounded log
+history, honest pagination, cancellable follow, reconnect, and explicit Stop behavior.
+
+### 6. Refinement And Cutover
 
 Use real workflows and additional recordings to refine hierarchy, status language,
 validation placement, operation progress, responsive behavior, and dependency
@@ -248,13 +261,12 @@ replayed as a golden test or treated as the source of truth for every observed b
 
 ## Questions for Detailed Design
 
-The next design pass should settle:
+Implementation should settle the remaining details within the constraints in the conversion
+plan:
 
 - the precise state and edit DTOs;
-- explicit save versus autosave;
-- the first component library and tree implementation;
-- how status refresh and operation events share one stream;
-- operation cancellation and history limits;
+- operation cancellation behavior and history limits for each action;
 - the CLI flag and transition from `textual-serve`;
 - the minimum useful Review/Submit diff;
-- which dependency relationships are reliable enough to expose initially.
+- which dependency relationships are reliable enough to expose initially;
+- the honest pagination and reconnect guarantees supported by Kubernetes logs.

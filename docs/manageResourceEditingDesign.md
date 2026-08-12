@@ -65,7 +65,8 @@ described in this document; it does not run Textual through a browser driver.
 
 The architecture direction, ownership boundaries, main UX surfaces, port-forward
 lifecycle, and incremental implementation sequence are defined in [Workflow Manage Native
-Web Application](manageWebApplicationDesign.md).
+Web Application](manageWebApplicationDesign.md). The agent-executable phase plan is
+[Workflow Manage Native Web Conversion Plan](manageWebConversionPlan.md).
 
 The current `workflow manage --serve` implementation based on `textual-serve` is a
 compatibility path while the native application is built. Do not add new browser behavior

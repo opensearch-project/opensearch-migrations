@@ -3,6 +3,10 @@
 These spikes compare Angular, React, and Vue for the native `workflow manage` frontend.
 They are prototypes, not production application scaffolds.
 
+After React was selected, `react-ui-systems` added a second comparison between Cloudscape
+and React Aria Components with owned application styling. See
+[UI System Comparison](UI_SYSTEM_COMPARISON.md).
+
 Both applications consume `@manage-spike/shared` and must demonstrate the same behavior:
 
 - a filterable, keyboard-accessible resource tree;
@@ -17,6 +21,10 @@ Both applications consume `@manage-spike/shared` and must demonstrate the same b
 
 The component libraries are deliberately headless or lightly styled. OUI and Angular
 Material are not part of this comparison.
+
+The later UI-system comparison deliberately changes that constraint. It tests one complete
+design system against one behavior-focused component library while keeping React, the
+fixture model, and the specialized resource tree constant.
 
 ## Partial Update Requirement
 
