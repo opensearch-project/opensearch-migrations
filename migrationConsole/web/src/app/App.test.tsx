@@ -244,18 +244,18 @@ test("opens a generic configuration editor and explains generated values", async
   expect(
     await screen.findByRole("heading", { name: "Edit capture" }),
   ).toBeInTheDocument();
-  const configTree = screen.getByRole("tree", {
+  const configTree = screen.getByRole("table", {
     name: "Configuration fields",
   });
   expect(
-    within(configTree).queryByRole("treeitem", { name: /Timeout: 30/ }),
+    within(configTree).queryByRole("row", { name: /Timeout/ }),
   ).toBeNull();
 
   await userEvent.click(
     screen.getByRole("checkbox", { name: "Show optional fields" }),
   );
   await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /Timeout: 30/ }),
+    within(configTree).getByRole("row", { name: /Timeout/ }),
   );
 
   expect(screen.getByText("Generated value")).toBeInTheDocument();
@@ -265,16 +265,16 @@ test("opens a generic configuration editor and explains generated values", async
   ).toBeInTheDocument();
 
   expect(
-    within(configTree).queryByRole("treeitem", {
-      name: /Advanced setting: quiet/,
+    within(configTree).queryByRole("row", {
+      name: /Advanced setting/,
     }),
   ).toBeNull();
   await userEvent.click(
     screen.getByRole("checkbox", { name: "Show expert fields" }),
   );
   expect(
-    within(configTree).getByRole("treeitem", {
-      name: /Advanced setting: quiet/,
+    within(configTree).getByRole("row", {
+      name: /Advanced setting/,
     }),
   ).toBeInTheDocument();
 });
@@ -320,14 +320,14 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   expect(screen.getByRole("heading", { name: "Edit capture" }))
     .toBeInTheDocument();
 
-  const config = screen.getByRole("tree", {
+  const config = screen.getByRole("table", {
     name: "Configuration fields",
   });
-  expect(await within(config).findByRole("treeitem", {
-    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  expect(await within(config).findByRole("row", {
+    name: /Endpoint/,
   })).toBeInTheDocument();
-  expect(within(config).queryByRole("treeitem", {
-    name: /ConfigMap: transform-code/,
+  expect(within(config).queryByRole("row", {
+    name: /ConfigMap/,
   })).toBeNull();
 
   await userEvent.click(within(resources).getByRole("treeitem", {
@@ -336,11 +336,11 @@ test("keeps resource context while scoping edit mode to the selected resource", 
 
   expect(await screen.findByRole("heading", { name: "Edit replay" }))
     .toBeInTheDocument();
-  expect(await within(config).findByRole("treeitem", {
-    name: /ConfigMap: transform-code/,
+  expect(await within(config).findByRole("row", {
+    name: /ConfigMap/,
   })).toBeInTheDocument();
-  expect(within(config).queryByRole("treeitem", {
-    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  expect(within(config).queryByRole("row", {
+    name: /Endpoint/,
   })).toBeNull();
 });
 
@@ -395,32 +395,84 @@ test("guards browser back navigation before leaving workflow manage", async () =
 });
 
 
-test("navigates configuration rows without changing selection until activation", async () => {
+test("changes a union inline and inserts its variant fields directly below", async () => {
+  const operations: unknown[] = [];
+  server.use(
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      const updated = structuredClone(configDraft);
+      const sourceClusters = updated.editState.nodes.find(
+        (node) => node.id === "edit:sourceClusters",
+      );
+      const legacy = sourceClusters?.children.find(
+        (node) => node.id === "edit:sourceClusters.legacy",
+      );
+      const auth = legacy?.children.find(
+        (node) => node.id === "edit:sourceClusters.legacy.authConfig",
+      );
+      if (!auth) throw new Error("Missing authentication fixture");
+      auth.value = "sigv4";
+      auth.label = "Authentication: < sigv4 >";
+      auth.children = [{
+        id: "edit:sourceClusters.legacy.authConfig.sigv4.region",
+        path: [
+          "sourceClusters",
+          "legacy",
+          "authConfig",
+          "sigv4",
+          "region",
+        ],
+        label: "Signing region: us-east-1",
+        value: "us-east-1",
+        valueAuthored: true,
+        valueKind: "scalar",
+        valueType: "string",
+        presence: "required",
+        required: true,
+        status: "ok",
+        statusCounts: {
+          errors: 0,
+          warnings: 0,
+          required: 0,
+          gated: 0,
+          blocked: 0,
+        },
+        diagnostics: [],
+        children: [],
+      }];
+      return HttpResponse.json({
+        ...updated,
+        dirty: true,
+        draftRevision: "config-draft-sigv4",
+      });
+    }),
+  );
   renderApp();
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTable = await screen.findByRole("table", {
     name: "Configuration fields",
   });
-  const endpoint = within(configTree).getByRole("treeitem", {
-    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  const authRow = within(configTable).getByRole("row", {
+    name: /Authentication/,
   });
-  await userEvent.click(endpoint);
-  endpoint.focus();
-
-  await userEvent.keyboard("{ArrowDown}");
-  const allowInsecure = within(configTree).getByRole("treeitem", {
-    name: /Allow insecure: false/,
+  const authType = within(authRow).getByRole("combobox", {
+    name: "Authentication",
   });
-  expect(allowInsecure).toHaveFocus();
-  expect(endpoint).toHaveAttribute("aria-selected", "true");
-  expect(allowInsecure).toHaveAttribute("aria-selected", "false");
 
-  await userEvent.keyboard("{Enter}");
-  expect(allowInsecure).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByRole("checkbox", { name: "Allow insecure" }))
-    .toBeInTheDocument();
+  await userEvent.selectOptions(authType, "sigv4");
+
+  const regionRow = await within(configTable).findByRole("row", {
+    name: /Signing region/,
+  });
+  expect(authRow.nextElementSibling).toBe(regionRow);
+  expect(operations).toEqual([{
+    op: "set",
+    path: ["sourceClusters", "legacy", "authConfig"],
+    value: "sigv4",
+  }]);
 });
 
 
@@ -441,22 +493,22 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
 
-  await userEvent.click(
-    within(configTree).getByRole("treeitem", {
-      name: /Endpoint: https:\/\/legacy.example.com:9200/,
-    }),
-  );
+  const endpointRow = within(configTree).getByRole("row", {
+    name: /Endpoint/,
+  });
   const valueInput = screen.getByRole("textbox", { name: "Endpoint" });
   await userEvent.clear(valueInput);
   await userEvent.type(valueInput, "https://next.example.com:9200");
-  await userEvent.click(screen.getByRole("button", { name: "Apply value" }));
+  await userEvent.click(
+    within(endpointRow).getByRole("button", { name: "Apply" }),
+  );
 
   await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /^legacy/ }),
+    within(configTree).getByRole("row", { name: /^legacy/ }),
   );
   await userEvent.click(screen.getByRole("button", { name: "Rename legacy" }));
   const nameInput = screen.getByRole("textbox", { name: "Configuration name" });
@@ -465,18 +517,11 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
   await userEvent.type(nameInput, "modern");
   await userEvent.click(screen.getByRole("button", { name: "Apply rename" }));
 
-  await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /Authentication/ }),
-  );
   await userEvent.selectOptions(
     screen.getByRole("combobox", { name: "Authentication" }),
     "sigv4",
   );
-  await userEvent.click(screen.getByRole("button", { name: "Apply option" }));
 
-  await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /Snapshot: nightly/ }),
-  );
   const snapshotChoice = screen.getByRole("combobox", { name: "Snapshot" });
   expect(
     within(snapshotChoice).getByRole("option", { name: "weekly" }),
@@ -485,11 +530,7 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
   expect(
     screen.getByText("Generated from the source snapshot definitions."),
   ).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Apply value" }));
 
-  await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /\+ Add transform/ }),
-  );
   await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
 
   expect(operations).toEqual([
@@ -538,12 +579,12 @@ test("shows ConfigMap keys and selects the map plus key together", async () => {
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
   await userEvent.click(
-    within(configTree).getByRole("treeitem", {
-      name: /ConfigMap: transform-code/,
+    within(configTree).getByRole("row", {
+      name: /ConfigMap/,
     }),
   );
   await userEvent.click(
@@ -587,12 +628,12 @@ test("allows an explicit ConfigMap and key when inventory is unavailable", async
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
   await userEvent.click(
-    within(configTree).getByRole("treeitem", {
-      name: /ConfigMap: transform-code/,
+    within(configTree).getByRole("row", {
+      name: /ConfigMap/,
     }),
   );
   await userEvent.click(
@@ -662,17 +703,14 @@ test("focuses a newly added array item when command metadata requests it", async
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
-  await userEvent.click(
-    within(configTree).getByRole("treeitem", { name: /\+ Add transform/ }),
-  );
   await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
 
   expect(
-    await within(configTree).findByRole("treeitem", {
-      name: "transform 1: configured",
+    await within(configTree).findByRole("row", {
+      name: /^transform 1 Authored value/,
     }),
   ).toHaveAttribute("aria-selected", "true");
 });
@@ -699,12 +737,12 @@ test("views and creates descriptor-driven ConfigMaps without raw YAML", async ()
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
-  const configTree = await screen.findByRole("tree", {
+  const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
   await userEvent.click(
-    within(configTree).getByRole("treeitem", {
-      name: /ConfigMap: transform-code/,
+    within(configTree).getByRole("row", {
+      name: /ConfigMap/,
     }),
   );
   await userEvent.click(

@@ -32,11 +32,61 @@ async function mockManageApi(page: Page) {
     });
   });
   await page.route("**/api/v1/config/operations", async (route) => {
+    const request = route.request().postDataJSON() as {
+      operation?: { op?: string; path?: string[]; value?: unknown };
+    };
     draft = {
       ...draft,
       dirty: true,
       draftRevision: `${draft.draftRevision}-next`,
     };
+    if (
+      request.operation?.op === "set"
+      && request.operation.path?.join(".")
+        === "sourceClusters.legacy.authConfig"
+      && request.operation.value === "sigv4"
+    ) {
+      const sourceClusters = draft.editState.nodes.find(
+        (node) => node.id === "edit:sourceClusters",
+      );
+      const legacy = sourceClusters?.children.find(
+        (node) => node.id === "edit:sourceClusters.legacy",
+      );
+      const auth = legacy?.children.find(
+        (node) => node.id === "edit:sourceClusters.legacy.authConfig",
+      );
+      if (auth) {
+        auth.value = "sigv4";
+        auth.label = "Authentication: < sigv4 >";
+        auth.children = [{
+          id: "edit:sourceClusters.legacy.authConfig.sigv4.region",
+          path: [
+            "sourceClusters",
+            "legacy",
+            "authConfig",
+            "sigv4",
+            "region",
+          ],
+          label: "Signing region: us-east-1",
+          value: "us-east-1",
+          valueAuthored: true,
+          valueKind: "scalar",
+          valueType: "string",
+          presence: "required",
+          required: true,
+          status: "ok",
+          statusCounts: {
+            errors: 0,
+            warnings: 0,
+            required: 0,
+            gated: 0,
+            blocked: 0,
+          },
+          diagnostics: [],
+          children: [],
+        }];
+      }
+    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -165,15 +215,15 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
 
   await page.getByRole("button", { name: "Edit capture" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
-  const configTree = page.getByRole("tree", { name: "Configuration fields" });
+  const configTree = page.getByRole("table", { name: "Configuration fields" });
 
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
-  await configTree.getByRole("treeitem", { name: /Timeout: 30/ }).click();
+  await configTree.getByRole("row", { name: /Timeout/ }).click();
   await expect(page.getByText("Generated value")).toBeVisible();
   await expect(page.getByText("runtime timeout")).toBeVisible();
 
-  await configTree.getByRole("treeitem", {
-    name: /ConfigMap: transform-code/,
+  await configTree.getByRole("row", {
+    name: /ConfigMap/,
   }).click();
   await page.getByRole("button", {
     name: "Browse Kubernetes resources",
@@ -193,6 +243,26 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
 });
 
 
+test("updates variant fields in place beneath their selector", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit capture" }).click();
+  const config = page.getByRole("table", { name: "Configuration fields" });
+  const auth = config.getByRole("row", { name: /Authentication/ });
+  await auth.getByRole("combobox", { name: "Authentication" })
+    .selectOption("sigv4");
+
+  const region = config.getByRole("row", { name: /Signing region/ });
+  await expect(region).toBeVisible();
+  await expect(
+    auth.locator("xpath=following-sibling::tr[1]"),
+  ).toContainText("Signing region");
+  await expect(region).toBeInViewport();
+});
+
+
 test("keeps the resource overview visible during scoped editing", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
   await mockManageApi(page);
@@ -204,7 +274,7 @@ test("keeps the resource overview visible during scoped editing", async ({ page 
   await expect(resources).toBeVisible();
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(
-    page.getByRole("tree", { name: "Configuration fields" }),
+    page.getByRole("table", { name: "Configuration fields" }),
   ).toBeVisible();
 });
 
@@ -298,8 +368,8 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
   await page.getByRole("button", { name: "Edit capture" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
-  const configTree = page.getByRole("tree", { name: "Configuration fields" });
-  await configTree.getByRole("treeitem", { name: /Timeout: 30/ }).click();
+  const configTree = page.getByRole("table", { name: "Configuration fields" });
+  await configTree.getByRole("row", { name: /Timeout/ }).click();
   await expect(page.getByText("runtime timeout")).toBeVisible();
 
   const scrollWidth = await page.evaluate<number>(

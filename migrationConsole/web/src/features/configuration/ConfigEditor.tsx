@@ -51,6 +51,17 @@ function nodeChildren(node: EditNode): EditNode[] {
 }
 
 
+function allNodeIds(nodes: EditNode[]): Set<string> {
+  const result = new Set<string>();
+  const visit = (node: EditNode) => {
+    result.add(node.id);
+    nodeChildren(node).forEach(visit);
+  };
+  nodes.forEach(visit);
+  return result;
+}
+
+
 function fieldName(node: EditNode): string {
   const prefix = node.label.split(":", 1)[0].replace(/^\+ Add /, "");
   return prefix || node.path.at(-1) || "Configuration";
@@ -247,6 +258,7 @@ function ScalarEditor({
   const [value, setValue] = useState(
     scalarString(node.value),
   );
+  const [applying, setApplying] = useState(false);
   const pattern = hintRecord(node.validation).pattern;
   const selectedOption = options.find(
     (option) => String(option.value) === value,
@@ -254,23 +266,26 @@ function ScalarEditor({
 
   if (options.length > 0 && !allowCustom) {
     return (
-      <form
-        className="field-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const selected = options.find(
-            (option) => String(option.value) === value,
-          );
-          if (selected) {
-            void commit({ op: "set", path: node.path, value: selected.value });
-          }
-        }}
-      >
+      <div className="inline-choice-editor">
         <label>
-          <span>{name}</span>
+          <span className="sr-only">{name}</span>
           <select
             aria-label={name}
-            onChange={(event) => setValue(event.target.value)}
+            disabled={busy || applying}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              const selected = options.find(
+                (option) => String(option.value) === nextValue,
+              );
+              setValue(nextValue);
+              if (!selected) return;
+              setApplying(true);
+              void commit({
+                op: "set",
+                path: node.path,
+                value: selected.value,
+              }).finally(() => setApplying(false));
+            }}
             value={value}
           >
             {selectedOption ? null : (
@@ -283,29 +298,32 @@ function ScalarEditor({
             ))}
           </select>
         </label>
+        {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
         {selectedOption?.description
-          ? <p className="field-help">{selectedOption.description}</p>
+          ? <span className="inline-field-help">{selectedOption.description}</span>
           : null}
-        <button disabled={busy || !selectedOption} type="submit">
-          Apply value
-        </button>
-      </form>
+      </div>
     );
   }
 
   return (
     <form
-      className="field-form"
+      className="field-form inline-field-form"
       onSubmit={(event) => {
         event.preventDefault();
         const operationValue = node.valueType === "number"
           ? Number(value)
           : value;
-        void commit({ op: "set", path: node.path, value: operationValue });
+        setApplying(true);
+        void commit({
+          op: "set",
+          path: node.path,
+          value: operationValue,
+        }).finally(() => setApplying(false));
       }}
     >
       <label>
-        <span>{name}</span>
+        <span className="sr-only">{name}</span>
         <input
           aria-label={name}
           disabled={noReferenceChoices}
@@ -362,12 +380,14 @@ function ScalarEditor({
       <button
         disabled={
           busy
+          || applying
           || noReferenceChoices
           || (node.valueType === "number" && value === "")
         }
         type="submit"
       >
-        Apply value
+        {applying ? <LoaderCircle className="spin" /> : null}
+        Apply
       </button>
     </form>
   );
@@ -378,32 +398,42 @@ function UnionEditor({
   node,
   commit,
   busy,
+  onRevealChildren,
 }: {
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
+  onRevealChildren: () => void;
 }) {
   const name = fieldName(node);
   const variants = node.variants ?? [];
   const [value, setValue] = useState(scalarString(node.value));
+  const [applying, setApplying] = useState(false);
+  const selected = variants.find(
+    (variant) => String(variant.value) === value,
+  );
   return (
-    <form
-      className="field-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const selected = variants.find(
-          (variant) => String(variant.value) === value,
-        );
-        if (selected) {
-          void commit({ op: "set", path: node.path, value: selected.value });
-        }
-      }}
-    >
+    <div className="inline-choice-editor">
       <label>
-        <span>{name}</span>
+        <span className="sr-only">{name}</span>
         <select
           aria-label={name}
-          onChange={(event) => setValue(event.target.value)}
+          disabled={busy || applying}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            const next = variants.find(
+              (variant) => String(variant.value) === nextValue,
+            );
+            setValue(nextValue);
+            if (!next) return;
+            onRevealChildren();
+            setApplying(true);
+            void commit({
+              op: "set",
+              path: node.path,
+              value: next.value,
+            }).finally(() => setApplying(false));
+          }}
           value={value}
         >
           {variants.map((variant) => (
@@ -413,13 +443,11 @@ function UnionEditor({
           ))}
         </select>
       </label>
-      {variants.find((variant) => String(variant.value) === value)?.description
-        ? <p className="field-help">
-          {variants.find((variant) => String(variant.value) === value)?.description}
-        </p>
+      {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
+      {selected?.description
+        ? <span className="inline-field-help">{selected.description}</span>
         : null}
-      <button disabled={busy} type="submit">Apply option</button>
-    </form>
+    </div>
   );
 }
 
@@ -434,25 +462,30 @@ function BooleanEditor({
   busy: boolean;
 }) {
   const [checked, setChecked] = useState(node.value === true);
+  const [applying, setApplying] = useState(false);
   return (
-    <form
-      className="field-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void commit({ op: "set", path: node.path, value: checked });
-      }}
-    >
-      <label className="boolean-field">
+    <div className="inline-boolean-editor">
+      <label>
         <input
+          aria-label={fieldName(node)}
           checked={checked}
-          disabled={busy}
-          onChange={(event) => setChecked(event.target.checked)}
+          disabled={busy || applying}
+          onChange={(event) => {
+            const next = event.target.checked;
+            setChecked(next);
+            setApplying(true);
+            void commit({
+              op: "set",
+              path: node.path,
+              value: next,
+            }).finally(() => setApplying(false));
+          }}
           type="checkbox"
         />
-        <span>{fieldName(node)}</span>
+        <span>{checked ? "Enabled" : "Disabled"}</span>
       </label>
-      <button disabled={busy} type="submit">Apply value</button>
-    </form>
+      {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
+    </div>
   );
 }
 
@@ -476,7 +509,7 @@ function CommandEditor({
   const pattern = hintRecord(node.validation).pattern;
   return (
     <form
-      className="field-form"
+      className="field-form inline-command-form"
       onSubmit={(event) => {
         event.preventDefault();
         const trimmedName = name.trim();
@@ -502,7 +535,7 @@ function CommandEditor({
     >
       {requiresName ? (
         <label>
-          <span>{label} name</span>
+          <span className="sr-only">{label} name</span>
           <input
             aria-label={`${label} name`}
             onChange={(event) => setName(event.target.value)}
@@ -570,181 +603,291 @@ function StructuredEditor({
 }
 
 
-function FieldPanel({
+function ConfigPropertyRow({
   draft,
   node,
   parent,
+  depth,
+  expanded,
+  selected,
+  inserted,
   busy,
   commit,
   replaceDraft,
   reportError,
   onSelectAdded,
+  onSelect,
+  onRevealChildren,
+  onToggle,
+  rowRef,
 }: {
   draft: ConfigDraft;
   node: EditNode;
   parent: EditNode | null;
+  depth: number;
+  expanded: boolean;
+  selected: boolean;
+  inserted: boolean;
   busy: boolean;
   commit: (operation: EditOperation) => Promise<boolean>;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
   onSelectAdded: (nodeId: string, parentId: string | null) => void;
+  onSelect: () => void;
+  onRevealChildren: () => void;
+  onToggle: () => void;
+  rowRef: (element: HTMLTableRowElement | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
+  const children = nodeChildren(node);
   const canRename = node.removable === true && parent?.valueKind === "record";
   const canUnset = (
     node.presence === "optional"
     && node.required !== true
     && node.valueKind !== "command"
   );
+  const structured = (
+    !node.externalRef
+    && children.length === 0
+    && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
+  );
+  const showDetails = selected && (Boolean(node.externalRef) || structured);
+  const name = fieldName(node);
+
+  const valueEditor = node.externalRef ? (
+    <button
+      className="inline-resource-button"
+      onClick={onSelect}
+      type="button"
+    >
+      <span>{scalarString(node.value) || "Not selected"}</span>
+      <Pencil aria-hidden="true" />
+      Configure
+    </button>
+  ) : node.valueKind === "scalar" ? (
+    <ScalarEditor busy={busy} commit={commit} node={node} />
+  ) : node.valueKind === "boolean" ? (
+    <BooleanEditor busy={busy} commit={commit} node={node} />
+  ) : node.valueKind === "union" ? (
+    <UnionEditor
+      busy={busy}
+      commit={commit}
+      node={node}
+      onRevealChildren={onRevealChildren}
+    />
+  ) : node.valueKind === "command" ? (
+    <CommandEditor
+      busy={busy}
+      commit={commit}
+      node={node}
+      onAdded={onSelectAdded}
+      parent={parent}
+    />
+  ) : structured ? (
+    <button
+      className="secondary-button"
+      onClick={onSelect}
+      type="button"
+    >
+      <Pencil aria-hidden="true" />
+      Edit structure
+    </button>
+  ) : (
+    <span className="property-summary">
+      {children.length} {children.length === 1 ? "setting" : "settings"}
+    </span>
+  );
 
   return (
-    <article className="config-field-panel">
-      <header>
-        <div>
-          <span>{node.path.join(".") || "configuration"}</span>
-          <h3>{fieldName(node)}</h3>
-        </div>
-        <span className={`field-status status-${node.status ?? "ok"}`}>
-          {node.status ?? "ok"}
-        </span>
-      </header>
-      {node.description ? <p className="field-description">{node.description}</p> : null}
-      <div className="value-provenance">
-        {node.valueAuthored ? <span>Authored value</span> : null}
-        {node.valueDefaulted ? <span>Generated value</span> : null}
-        {node.presence ? <span>{node.presence}</span> : null}
-        {node.expert ? <span>expert</span> : null}
-      </div>
-      {node.effectiveDefault ? (
-        <div className="effective-default">
-          <strong>
-            {typeof node.effectiveDefault.label === "string"
-              ? node.effectiveDefault.label
-              : "Effective default"}
-          </strong>
-          {typeof node.effectiveDefault.description === "string"
-            ? <p>{node.effectiveDefault.description}</p>
-            : null}
-        </div>
-      ) : null}
-      {(node.diagnostics ?? []).length > 0 ? (
-        <div className="field-diagnostics">
+    <>
+      <tr
+        aria-selected={selected}
+        className={[
+          "config-property-row",
+          `status-${node.status ?? "ok"}`,
+          selected ? "selected" : "",
+          inserted ? "inserted" : "",
+        ].join(" ")}
+        onClick={(event) => {
+          const targetElement = event.target as HTMLElement;
+          if (!targetElement.closest("button, input, select, textarea, a")) {
+            onSelect();
+          }
+        }}
+        ref={rowRef}
+        tabIndex={selected ? 0 : -1}
+      >
+        <th scope="row">
+          <div
+            className="property-heading"
+            style={{ "--config-depth": depth } as React.CSSProperties}
+          >
+            {children.length > 0 ? (
+              <button
+                aria-expanded={expanded}
+                aria-label={`${expanded ? "Collapse" : "Expand"} ${name}`}
+                onClick={onToggle}
+                type="button"
+              >
+                {expanded ? <ChevronDown /> : <ChevronRight />}
+              </button>
+            ) : <span className="config-tree-spacer" />}
+            <span className="status-dot" aria-hidden="true" />
+            <span>
+              <strong>{name}</strong>
+              {node.description ? <small>{node.description}</small> : null}
+            </span>
+          </div>
+          <div
+            className="property-flags"
+            style={{ "--config-depth": depth } as React.CSSProperties}
+          >
+            {node.valueAuthored ? <span>Authored value</span> : null}
+            {node.valueDefaulted ? <span>Generated value</span> : null}
+            {node.presence ? <span>{node.presence}</span> : null}
+            {node.expert ? <span>Expert</span> : null}
+          </div>
           {(node.diagnostics ?? []).map((diagnostic, index) => (
-            <div className={`diagnostic-${diagnostic.severity}`} key={`${diagnostic.message}-${index}`}>
+            <div
+              className={`property-diagnostic diagnostic-${diagnostic.severity}`}
+              key={`${diagnostic.message}-${index}`}
+              style={{ "--config-depth": depth } as React.CSSProperties}
+            >
               <AlertTriangle aria-hidden="true" />
               <span>{diagnostic.message}</span>
             </div>
           ))}
-        </div>
+        </th>
+        <td>
+          <div
+            className="property-value"
+            key={`${node.id}-${draft.draftRevision}`}
+          >
+            {valueEditor}
+            {node.effectiveDefault ? (
+              <div className="inline-effective-default">
+                <strong>
+                  {typeof node.effectiveDefault.label === "string"
+                    ? node.effectiveDefault.label
+                    : "Effective default"}
+                </strong>
+                {typeof node.effectiveDefault.description === "string"
+                  ? <span>{node.effectiveDefault.description}</span>
+                  : null}
+              </div>
+            ) : null}
+          </div>
+        </td>
+        <td className="property-state-cell">
+          <span className={`field-status status-${node.status ?? "ok"}`}>
+            {node.status ?? "ok"}
+          </span>
+          <div className="property-actions">
+            {canRename ? (
+              <button
+                aria-label={`Rename ${node.path.at(-1)}`}
+                disabled={busy}
+                onClick={() => {
+                  onSelect();
+                  setRenaming(true);
+                }}
+                title={`Rename ${node.path.at(-1)}`}
+                type="button"
+              >
+                <Pencil aria-hidden="true" />
+              </button>
+            ) : null}
+            {canUnset ? (
+              <button
+                aria-label={`Use default for ${name}`}
+                disabled={busy}
+                onClick={() => void commit({ op: "unset", path: node.path })}
+                title="Use default"
+                type="button"
+              >
+                <Undo2 aria-hidden="true" />
+              </button>
+            ) : null}
+            {node.removable ? (
+              <button
+                aria-label={`Remove ${node.path.at(-1)}`}
+                className="danger-button"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm(`Remove ${name}?`)) {
+                    void commit({ op: "removeConfig", path: node.path });
+                  }
+                }}
+                title={`Remove ${node.path.at(-1)}`}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </td>
+      </tr>
+      {renaming || showDetails ? (
+        <tr className="config-property-detail">
+          <td colSpan={3}>
+            <div
+              className="property-detail-content"
+              style={{ "--config-depth": depth } as React.CSSProperties}
+            >
+              <span className="property-path">
+                {node.path.join(".") || "configuration"}
+              </span>
+              {renaming ? (
+                <form
+                  className="rename-form"
+                  onSubmit={(event: FormEvent) => {
+                    event.preventDefault();
+                    void commit({
+                      op: "renameConfig",
+                      path: node.path,
+                      newName: newName.trim(),
+                    }).then((applied) => {
+                      if (applied) setRenaming(false);
+                    });
+                  }}
+                >
+                  <label>
+                    <span>Configuration name</span>
+                    <input
+                      aria-label="Configuration name"
+                      autoFocus
+                      onChange={(event) => setNewName(event.target.value)}
+                      pattern={typeof hintRecord(parent?.inputHint).keyPattern === "string"
+                        ? String(hintRecord(parent?.inputHint).keyPattern)
+                        : undefined}
+                      required
+                      value={newName}
+                    />
+                  </label>
+                  <button disabled={busy || !newName.trim()} type="submit">
+                    Apply rename
+                  </button>
+                  <button onClick={() => setRenaming(false)} type="button">
+                    Cancel
+                  </button>
+                </form>
+              ) : node.externalRef ? (
+                <ExternalResourceEditor
+                  busy={busy}
+                  draft={draft}
+                  node={node}
+                  replaceDraft={replaceDraft}
+                  reportError={reportError}
+                />
+              ) : structured ? (
+                <StructuredEditor busy={busy} commit={commit} node={node} />
+              ) : null}
+            </div>
+          </td>
+        </tr>
       ) : null}
-
-      <div className="field-editor" key={`${node.id}-${draft.draftRevision}`}>
-        {node.externalRef ? (
-          <ExternalResourceEditor
-            busy={busy}
-            draft={draft}
-            node={node}
-            replaceDraft={replaceDraft}
-            reportError={reportError}
-          />
-        ) : node.valueKind === "scalar" ? (
-          <ScalarEditor busy={busy} commit={commit} node={node} />
-        ) : node.valueKind === "boolean" ? (
-          <BooleanEditor busy={busy} commit={commit} node={node} />
-        ) : node.valueKind === "union" ? (
-          <UnionEditor busy={busy} commit={commit} node={node} />
-        ) : node.valueKind === "command" ? (
-          <CommandEditor
-            busy={busy}
-            commit={commit}
-            node={node}
-            onAdded={onSelectAdded}
-            parent={parent}
-          />
-        ) : nodeChildren(node).length === 0 ? (
-          <StructuredEditor busy={busy} commit={commit} node={node} />
-        ) : (
-          <p className="field-help">
-            Select a child field to change this {node.valueKind}.
-          </p>
-        )}
-      </div>
-
-      {renaming ? (
-        <form
-          className="rename-form"
-          onSubmit={(event: FormEvent) => {
-            event.preventDefault();
-            void commit({
-              op: "renameConfig",
-              path: node.path,
-              newName: newName.trim(),
-            }).then((applied) => {
-              if (applied) setRenaming(false);
-            });
-          }}
-        >
-          <label>
-            <span>Configuration name</span>
-            <input
-              aria-label="Configuration name"
-              autoFocus
-              onChange={(event) => setNewName(event.target.value)}
-              pattern={typeof hintRecord(parent?.inputHint).keyPattern === "string"
-                ? String(hintRecord(parent?.inputHint).keyPattern)
-                : undefined}
-              required
-              value={newName}
-            />
-          </label>
-          <button disabled={busy || !newName.trim()} type="submit">
-            Apply rename
-          </button>
-          <button onClick={() => setRenaming(false)} type="button">
-            Cancel
-          </button>
-        </form>
-      ) : null}
-
-      <div className="field-actions">
-        {canRename ? (
-          <button
-            disabled={busy}
-            onClick={() => setRenaming(true)}
-            type="button"
-          >
-            <Pencil aria-hidden="true" />
-            Rename {node.path.at(-1)}
-          </button>
-        ) : null}
-        {canUnset ? (
-          <button
-            disabled={busy}
-            onClick={() => void commit({ op: "unset", path: node.path })}
-            type="button"
-          >
-            <Undo2 aria-hidden="true" />
-            Use default
-          </button>
-        ) : null}
-        {node.removable ? (
-          <button
-            className="danger-button"
-            disabled={busy}
-            onClick={() => {
-              if (window.confirm(`Remove ${fieldName(node)}?`)) {
-                void commit({ op: "removeConfig", path: node.path });
-              }
-            }}
-            type="button"
-          >
-            <Trash2 aria-hidden="true" />
-            Remove {node.path.at(-1)}
-          </button>
-        ) : null}
-      </div>
-    </article>
+    </>
   );
 }
 
@@ -766,9 +909,16 @@ export function ConfigEditor({
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
-  const rowElements = useRef(new Map<string, HTMLDivElement>());
+  const rowElements = useRef(new Map<string, HTMLTableRowElement>());
+  const knownRowIds = useRef<Set<string> | null>(null);
+  const skipNextRowTracking = useRef(false);
+  const revealChildrenFor = useRef<{
+    parentId: string;
+    previousChildIds: Set<string>;
+  } | null>(null);
 
   const draft = draftQuery.data;
   const nodes = useMemo(
@@ -794,7 +944,10 @@ export function ConfigEditor({
       const retained = new Set(
         [...current].filter((id) => findNode(scopedNodes, id)),
       );
-      return retained.size > 0 ? retained : initialExpanded(scopedNodes);
+      if (retained.size > 0) return retained;
+      knownRowIds.current = allNodeIds(scopedNodes);
+      skipNextRowTracking.current = true;
+      return initialExpanded(scopedNodes);
     });
     setSelectedId((current) => (
       findNode(scopedNodes, current)
@@ -817,8 +970,50 @@ export function ConfigEditor({
     () => treeRows(scopedNodes, expanded, showOptional, showExpert),
     [expanded, scopedNodes, showExpert, showOptional],
   );
-  const selected = findNode(nodes, selectedId);
-  const parent = selected ? findParent(nodes, selected.id) : null;
+  useEffect(() => {
+    const currentIds = new Set(rows.map(({ node }) => node.id));
+    if (skipNextRowTracking.current) {
+      skipNextRowTracking.current = false;
+      return;
+    }
+    if (knownRowIds.current === null) {
+      knownRowIds.current = currentIds;
+      return;
+    }
+    const inserted = new Set(
+      [...currentIds].filter((id) => !knownRowIds.current?.has(id)),
+    );
+    knownRowIds.current = currentIds;
+    if (inserted.size === 0) return;
+    setInsertedIds(inserted);
+    const timer = window.setTimeout(() => setInsertedIds(new Set()), 420);
+    return () => window.clearTimeout(timer);
+  }, [rows]);
+  useEffect(() => {
+    const pendingReveal = revealChildrenFor.current;
+    if (!pendingReveal) return;
+    const parentIndex = rows.findIndex(
+      ({ node }) => node.id === pendingReveal.parentId,
+    );
+    const parentRow = rows[parentIndex];
+    const childRow = rows[parentIndex + 1];
+    if (!parentRow || childRow?.depth !== parentRow.depth + 1) return;
+    if (pendingReveal.previousChildIds.has(childRow.node.id)) return;
+    revealChildrenFor.current = null;
+    const parentElement = rowElements.current.get(parentRow.node.id);
+    const childElement = rowElements.current.get(childRow.node.id);
+    const scroller = childElement?.closest<HTMLElement>(".config-table-panel");
+    if (scroller?.scrollTo && parentElement) {
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      const parentTop = parentElement.getBoundingClientRect().top;
+      scroller.scrollTo({
+        behavior: "smooth",
+        top: Math.max(0, scroller.scrollTop + parentTop - scrollerTop - 84),
+      });
+    } else {
+      childElement?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [rows]);
   const scopedDiagnostics = useMemo(
     () => (draft?.editState.validation.diagnostics ?? []).filter(
       (diagnostic) => (
@@ -986,119 +1181,70 @@ export function ConfigEditor({
         </div>
       ) : null}
       <div className="config-layout">
-        <section className="config-tree-panel">
+        <section className="config-table-panel">
           <header className="config-outline-header">
             <strong>{scope?.label ?? "Workflow configuration"}</strong>
-            <span>{rows.length} visible fields</span>
+            <span>{rows.length} visible settings</span>
           </header>
-          <div aria-label="Configuration fields" className="config-tree" role="tree">
-            {rows.map(({ node, depth }, rowIndex) => {
-              const children = nodeChildren(node);
-              const isExpanded = expanded.has(node.id);
-              return (
-                <div
-                  aria-expanded={children.length ? isExpanded : undefined}
-                  aria-label={node.label}
-                  aria-level={depth}
-                  aria-selected={selectedId === node.id}
-                  className={[
-                    "config-tree-row",
-                    `status-${node.status ?? "ok"}`,
-                    selectedId === node.id ? "selected" : "",
-                  ].join(" ")}
-                  key={node.id}
-                  onClick={() => setSelectedId(node.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                      event.preventDefault();
-                      const offset = event.key === "ArrowDown" ? 1 : -1;
-                      const next = rows[rowIndex + offset];
-                      if (next) rowElements.current.get(next.node.id)?.focus();
-                      return;
-                    }
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedId(node.id);
-                      return;
-                    }
-                    if (event.key === "ArrowRight") {
-                      event.preventDefault();
-                      if (children.length > 0 && !isExpanded) {
-                        setExpanded((current) => new Set(current).add(node.id));
-                      } else {
-                        const child = rows[rowIndex + 1];
-                        if (child?.depth === depth + 1) {
-                          rowElements.current.get(child.node.id)?.focus();
-                        }
-                      }
-                      return;
-                    }
-                    if (event.key === "ArrowLeft") {
-                      event.preventDefault();
-                      if (children.length > 0 && isExpanded) {
-                        setExpanded((current) => {
-                          const next = new Set(current);
-                          next.delete(node.id);
-                          return next;
-                        });
-                      } else {
-                        const parentNode = findParent(scopedNodes, node.id);
-                        if (parentNode) {
-                          rowElements.current.get(parentNode.id)?.focus();
-                        }
-                      }
-                    }
-                  }}
-                  ref={(element) => {
-                    if (element) rowElements.current.set(node.id, element);
-                    else rowElements.current.delete(node.id);
-                  }}
-                  role="treeitem"
-                  style={{ "--config-depth": depth } as React.CSSProperties}
-                  tabIndex={selectedId === node.id ? 0 : -1}
-                >
-                  {children.length > 0 ? (
-                    <button
-                      aria-label={`${isExpanded ? "Collapse" : "Expand"} ${fieldName(node)}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setExpanded((current) => {
-                          const next = new Set(current);
-                          if (next.has(node.id)) next.delete(node.id);
-                          else next.add(node.id);
-                          return next;
-                        });
-                      }}
-                      tabIndex={-1}
-                      type="button"
-                    >
-                      {isExpanded ? <ChevronDown /> : <ChevronRight />}
-                    </button>
-                  ) : <span className="config-tree-spacer" />}
-                  <span className="status-dot" aria-hidden="true" />
-                  <span>{node.label}</span>
-                  {node.valueDefaulted ? <em>generated</em> : null}
-                </div>
-              );
-            })}
-          </div>
+          <table aria-label="Configuration fields" className="config-table">
+            <colgroup>
+              <col className="config-setting-column" />
+              <col className="config-value-column" />
+              <col className="config-state-column" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">Setting</th>
+                <th scope="col">Value</th>
+                <th scope="col">State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ node, depth }) => {
+                const isExpanded = expanded.has(node.id);
+                return (
+                  <ConfigPropertyRow
+                    busy={busy}
+                    commit={commit}
+                    depth={depth}
+                    draft={draft}
+                    expanded={isExpanded}
+                    inserted={insertedIds.has(node.id)}
+                    key={node.id}
+                    node={node}
+                    onRevealChildren={() => {
+                      revealChildrenFor.current = {
+                        parentId: node.id,
+                        previousChildIds: new Set(
+                          nodeChildren(node).map((child) => child.id),
+                        ),
+                      };
+                      setExpanded((current) => new Set(current).add(node.id));
+                    }}
+                    onSelect={() => setSelectedId(node.id)}
+                    onSelectAdded={selectAdded}
+                    onToggle={() => {
+                      setExpanded((current) => {
+                        const next = new Set(current);
+                        if (next.has(node.id)) next.delete(node.id);
+                        else next.add(node.id);
+                        return next;
+                      });
+                    }}
+                    parent={findParent(nodes, node.id)}
+                    replaceDraft={replaceDraft}
+                    reportError={setProblem}
+                    rowRef={(element) => {
+                      if (element) rowElements.current.set(node.id, element);
+                      else rowElements.current.delete(node.id);
+                    }}
+                    selected={selectedId === node.id}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
         </section>
-        {selected ? (
-          <FieldPanel
-            busy={busy}
-            commit={commit}
-            draft={draft}
-            node={selected}
-            parent={parent}
-            replaceDraft={replaceDraft}
-            reportError={setProblem}
-            onSelectAdded={selectAdded}
-          />
-        ) : (
-          <section className="config-field-panel">
-            <p>Select a configuration field.</p>
-          </section>
-        )}
         <aside className="config-diagnostics">
           <header>
             <AlertTriangle aria-hidden="true" />
