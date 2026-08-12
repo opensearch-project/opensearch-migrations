@@ -1182,7 +1182,6 @@ button {
   font-size: 11px;
 }
 
-.inline-field-form,
 .inline-command-form {
   width: 100%;
   max-width: none;
@@ -1195,13 +1194,37 @@ button {
   align-items: center;
 }
 
-.inline-field-form input,
+.inline-text-editor input,
 .inline-choice-editor select {
   min-width: 0;
 }
 
-.inline-field-form > button {
-  min-width: 54px;
+.inline-text-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17px;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.inline-text-editor label {
+  min-width: 0;
+}
+
+.inline-text-editor input {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.inline-text-editor .field-help,
+.inline-text-editor .field-error,
+.inline-text-editor .regex-help {
+  grid-column: 1 / -1;
 }
 
 .inline-choice-editor {
@@ -2069,7 +2092,7 @@ button {
     border-left: 0;
   }
 
-  .field-form:not(.inline-field-form):not(.inline-command-form),
+  .field-form:not(.inline-command-form),
   .rename-form {
     grid-template-columns: 1fr;
   }

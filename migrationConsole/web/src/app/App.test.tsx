@@ -503,8 +503,16 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
   const valueInput = screen.getByRole("textbox", { name: "Endpoint" });
   await userEvent.clear(valueInput);
   await userEvent.type(valueInput, "https://next.example.com:9200");
-  await userEvent.click(
-    within(endpointRow).getByRole("button", { name: "Apply" }),
+  expect(
+    within(endpointRow).queryByRole("button", { name: "Apply" }),
+  ).toBeNull();
+  await userEvent.keyboard("{Enter}");
+  await waitFor(() =>
+    expect(operations).toContainEqual({
+      op: "set",
+      path: ["sourceClusters", "legacy", "endpoint"],
+      value: "https://next.example.com:9200",
+    }),
   );
 
   await userEvent.click(
@@ -560,6 +568,45 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
       value: {},
     },
   ]);
+});
+
+
+test("saves a focused text edit as one resource-level action", async () => {
+  const calls: string[] = [];
+  let saveRequest: unknown;
+  server.use(
+    http.post("*/api/v1/config/operations", async () => {
+      calls.push("update-draft");
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "config-draft-after-blur",
+      });
+    }),
+    http.post("*/api/v1/config/save", async ({ request }) => {
+      calls.push("save-resource");
+      saveRequest = await request.json();
+      return HttpResponse.json(configDraft);
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  const endpoint = await screen.findByRole("textbox", { name: "Endpoint" });
+  await userEvent.clear(endpoint);
+  await userEvent.type(endpoint, "https://saved.example.com:9200");
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  await waitFor(() => expect(saveRequest).toEqual({
+    expectedDraftRevision: "config-draft-after-blur",
+  }));
+  expect(calls).toEqual(["update-draft", "save-resource"]);
+  expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
 });
 
 

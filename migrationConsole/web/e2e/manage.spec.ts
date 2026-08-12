@@ -216,6 +216,13 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
   await page.getByRole("button", { name: "Edit capture" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   const configTree = page.getByRole("table", { name: "Configuration fields" });
+  const endpoint = configTree.getByRole("textbox", { name: "Endpoint" });
+  await endpoint.fill("https://saved.example.com:9200");
+  await expect(
+    configTree.getByRole("button", { name: "Apply" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Saved configuration")).toBeVisible();
 
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   await configTree.getByRole("row", { name: /Timeout/ }).click();

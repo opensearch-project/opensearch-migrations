@@ -243,22 +243,24 @@ function ScalarEditor({
   node,
   commit,
   busy,
+  onLocalDirtyChange,
 }: {
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
+  onLocalDirtyChange: (dirty: boolean) => void;
 }) {
   const name = fieldName(node);
+  const authoredValue = scalarString(node.value);
   const options = hintOptions(node);
   const examples = hintExamples(node);
   const hint = hintRecord(node.inputHint);
   const isReference = hint.kind === "reference";
   const allowCustom = hint.allowCustom === true;
   const noReferenceChoices = isReference && !allowCustom && options.length === 0;
-  const [value, setValue] = useState(
-    scalarString(node.value),
-  );
+  const [value, setValue] = useState(authoredValue);
   const [applying, setApplying] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const pattern = hintRecord(node.validation).pattern;
   const selectedOption = options.find(
     (option) => String(option.value) === value,
@@ -306,32 +308,55 @@ function ScalarEditor({
     );
   }
 
+  const syncValue = async () => {
+    if (applying || noReferenceChoices) return false;
+    if (value === authoredValue) {
+      onLocalDirtyChange(false);
+      return true;
+    }
+    if (inputRef.current && !inputRef.current.checkValidity()) {
+      inputRef.current.reportValidity();
+      return false;
+    }
+    if (node.valueType === "number" && value === "") return false;
+    const operationValue = node.valueType === "number"
+      ? Number(value)
+      : value;
+    setApplying(true);
+    const applied = await commit({
+      op: "set",
+      path: node.path,
+      value: operationValue,
+    });
+    setApplying(false);
+    if (applied) onLocalDirtyChange(false);
+    return applied;
+  };
+
   return (
-    <form
-      className="field-form inline-field-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const operationValue = node.valueType === "number"
-          ? Number(value)
-          : value;
-        setApplying(true);
-        void commit({
-          op: "set",
-          path: node.path,
-          value: operationValue,
-        }).finally(() => setApplying(false));
-      }}
-    >
+    <div className="inline-text-editor">
       <label>
         <span className="sr-only">{name}</span>
         <input
           aria-label={name}
-          disabled={noReferenceChoices}
+          aria-busy={applying}
+          disabled={noReferenceChoices || applying}
           list={options.length > 0 || examples.length > 0
             ? `${node.id}-choices`
             : undefined}
-          onChange={(event) => setValue(event.target.value)}
+          onBlur={() => void syncValue()}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setValue(nextValue);
+            onLocalDirtyChange(nextValue !== authoredValue);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            void syncValue();
+          }}
           pattern={typeof pattern === "string" ? pattern : undefined}
+          ref={inputRef}
           required={node.required === true}
           type={node.valueType === "number" ? "number" : "text"}
           value={value}
@@ -349,6 +374,7 @@ function ScalarEditor({
           </datalist>
         ) : null}
       </label>
+      {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
       {selectedOption?.description
         ? <p className="field-help">{selectedOption.description}</p>
         : null}
@@ -377,19 +403,10 @@ function ScalarEditor({
           </a>
         </div>
       ) : null}
-      <button
-        disabled={
-          busy
-          || applying
-          || noReferenceChoices
-          || (node.valueType === "number" && value === "")
-        }
-        type="submit"
-      >
-        {applying ? <LoaderCircle className="spin" /> : null}
-        Apply
-      </button>
-    </form>
+      {busy && !applying
+        ? <span className="sr-only">Another draft update is processing</span>
+        : null}
+    </div>
   );
 }
 
@@ -615,6 +632,7 @@ function ConfigPropertyRow({
   commit,
   replaceDraft,
   reportError,
+  onLocalDirtyChange,
   onSelectAdded,
   onSelect,
   onRevealChildren,
@@ -632,6 +650,7 @@ function ConfigPropertyRow({
   commit: (operation: EditOperation) => Promise<boolean>;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
+  onLocalDirtyChange: (nodeId: string, dirty: boolean) => void;
   onSelectAdded: (nodeId: string, parentId: string | null) => void;
   onSelect: () => void;
   onRevealChildren: () => void;
@@ -666,7 +685,12 @@ function ConfigPropertyRow({
       Configure
     </button>
   ) : node.valueKind === "scalar" ? (
-    <ScalarEditor busy={busy} commit={commit} node={node} />
+    <ScalarEditor
+      busy={busy}
+      commit={commit}
+      node={node}
+      onLocalDirtyChange={(dirty) => onLocalDirtyChange(node.id, dirty)}
+    />
   ) : node.valueKind === "boolean" ? (
     <BooleanEditor busy={busy} commit={commit} node={node} />
   ) : node.valueKind === "union" ? (
@@ -910,11 +934,15 @@ export function ConfigEditor({
   const [showExpert, setShowExpert] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
+  const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const rowElements = useRef(new Map<string, HTMLTableRowElement>());
   const knownRowIds = useRef<Set<string> | null>(null);
   const skipNextRowTracking = useRef(false);
+  const pendingCommit = useRef<Promise<boolean> | null>(null);
   const revealChildrenFor = useRef<{
     parentId: string;
     previousChildIds: Set<string>;
@@ -956,15 +984,17 @@ export function ConfigEditor({
     ));
   }, [draft, scopedNodes, target]);
 
+  const hasLocalEdits = locallyEditedIds.size > 0;
+
   useEffect(() => {
-    if (!draft?.dirty) return;
+    if (!draft?.dirty && !hasLocalEdits) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [draft?.dirty]);
+  }, [draft?.dirty, hasLocalEdits]);
 
   const rows = useMemo(
     () => treeRows(scopedNodes, expanded, showOptional, showExpert),
@@ -1045,9 +1075,60 @@ export function ConfigEditor({
     }
   };
 
-  const commit = async (operation: EditOperation) => {
-    if (!draft) return false;
-    return replaceDraft(applyEditOperation(draft.draftRevision, operation));
+  const markLocalEdit = (nodeId: string, dirty: boolean) => {
+    setLocallyEditedIds((current) => {
+      const next = new Set(current);
+      if (dirty) next.add(nodeId);
+      else next.delete(nodeId);
+      return next;
+    });
+  };
+
+  const commit = (operation: EditOperation) => {
+    const previous = pendingCommit.current;
+    const operationPromise = (async () => {
+      if (previous && !await previous) return false;
+      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      if (!current) return false;
+      return replaceDraft(applyEditOperation(
+        current.draftRevision,
+        operation,
+      ));
+    })();
+    pendingCommit.current = operationPromise;
+    void operationPromise.finally(() => {
+      if (pendingCommit.current === operationPromise) {
+        pendingCommit.current = null;
+      }
+    });
+    return operationPromise;
+  };
+
+  const waitForPendingCommit = async () => {
+    const pending = pendingCommit.current;
+    return pending ? pending : true;
+  };
+
+  const save = async () => {
+    if (!await waitForPendingCommit()) return;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current?.dirty) return;
+    await replaceDraft(saveConfigDraft(current.draftRevision));
+    setLocallyEditedIds(new Set());
+  };
+
+  const discard = async () => {
+    if (!await waitForPendingCommit()) return false;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current?.dirty) {
+      setLocallyEditedIds(new Set());
+      return true;
+    }
+    const discarded = await replaceDraft(discardConfigDraft(
+      current.draftRevision,
+    ));
+    if (discarded) setLocallyEditedIds(new Set());
+    return discarded;
   };
 
   const selectAdded = (nodeId: string, parentId: string | null) => {
@@ -1059,18 +1140,15 @@ export function ConfigEditor({
   };
 
   const close = async () => {
+    if (!await waitForPendingCommit()) return;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
     if (
-      draft?.dirty
+      (current?.dirty || hasLocalEdits)
       && !window.confirm("Discard this unsaved browser draft and close configuration?")
     ) {
       return;
     }
-    if (
-      draft?.dirty
-      && !await replaceDraft(discardConfigDraft(draft.draftRevision))
-    ) {
-      return;
-    }
+    if (current?.dirty && !await discard()) return;
     onClose();
   };
 
@@ -1107,7 +1185,11 @@ export function ConfigEditor({
         <div className="config-toolbar-title">
           <span>Configuration</span>
           <h2>Edit {resourceLabel}</h2>
-          <span>{draft.dirty ? "Unsaved changes" : "Saved configuration"}</span>
+          <span>
+            {draft.dirty || hasLocalEdits
+              ? "Unsaved changes"
+              : "Saved configuration"}
+          </span>
         </div>
         <div className="config-toolbar-filters">
           <label>
@@ -1140,10 +1222,8 @@ export function ConfigEditor({
           </button>
           <button
             aria-label="Discard changes"
-            disabled={busy || !draft.dirty}
-            onClick={() => void replaceDraft(discardConfigDraft(
-              draft.draftRevision,
-            ))}
+            disabled={!hasLocalEdits && (busy || !draft.dirty)}
+            onClick={() => void discard()}
             title="Discard changes"
             type="button"
           >
@@ -1153,10 +1233,8 @@ export function ConfigEditor({
           <button
             aria-label="Save changes"
             className="primary-button"
-            disabled={busy || !draft.dirty}
-            onClick={() => void replaceDraft(saveConfigDraft(
-              draft.draftRevision,
-            ))}
+            disabled={!hasLocalEdits && (busy || !draft.dirty)}
+            onClick={() => void save()}
             title="Save changes"
             type="button"
           >
@@ -1212,6 +1290,7 @@ export function ConfigEditor({
                     inserted={insertedIds.has(node.id)}
                     key={node.id}
                     node={node}
+                    onLocalDirtyChange={markLocalEdit}
                     onRevealChildren={() => {
                       revealChildrenFor.current = {
                         parentId: node.id,
