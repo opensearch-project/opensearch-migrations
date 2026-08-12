@@ -1,12 +1,41 @@
 # k6 load-test component. Installed separately from any migration (opt-in), so a normal
 # migrationAssistant deployment contains no operator, scenarios, RBAC, or CLI capability.
 
-# Runner image (stock grafana/k6). The console reads this via the k6-image-config ConfigMap and
-# sets it as TestRun spec.runner.image. For local minikube, override the repository with the
-# mirrored registry path, e.g. --set image.repository=<registry>/grafana/k6
+# A run pulls TWO images: the stock k6 runtime, and a data-only image carrying the load test.
+# Neither the operator nor this chart holds any scenario content.
+
+# Runner image — grafana/k6, unmodified, used as both spec.initializer.image and
+# spec.runner.image. Being an upstream artifact it goes through the normal mirroring path
+# (infra/mirror/k6-ecr-manifest.yaml on EKS). For local setup, point it at a mirror, e.g.
+# --set image.repository=mirror.gcr.io/grafana/k6
 image:
   repository: grafana/k6
   tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Scripts image — migrations/k6_scripts, a `FROM scratch` data image built from
+# TrafficCapture/trafficLoadTest, mounted read-only at /scripts on the initializer and every runner
+# via a Kubernetes `image:` volume (the same mechanism as the migration's mountable transforms; it
+# is why this chart requires k8s >= 1.35). It holds the scenarios, libs, document schemas and the
+# k6-config presets — the ONLY place that content lives, so editing a scenario or preset means
+# rebuilding and pushing this image, not a helm upgrade.
+#
+# It is NOT a released artifact (load testing is a dev/test capability, so it is not published
+# publicly and not mirrored by aws-bootstrap.sh) — build and push it yourself (~25 KB), then point
+# this at wherever it landed:
+#   local minikube:  --set scriptsImage.repository=localhost:5001/migrations/k6_scripts
+#   ECR (one repo, per-image tags):
+#                    --set scriptsImage.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
+#                    --set scriptsImage.tag=migrations_k6_scripts_latest
+#
+# `digest` pins the exact content and WINS over `tag` when set (repository@sha256:...), which is the
+# reproducible way to reference it — a moving tag otherwise leaves the content up to each node's
+# pull policy:
+#   --set scriptsImage.digest=sha256:<hex>
+scriptsImage:
+  repository: migrations/k6_scripts
+  tag: "latest"
+  digest: ""
   pullPolicy: IfNotPresent
 
 # k6-operator subchart — installs the TestRun CRD + controller. Disable to install the operator

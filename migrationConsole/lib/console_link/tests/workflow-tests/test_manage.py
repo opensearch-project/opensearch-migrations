@@ -848,7 +848,6 @@ async def test_k6_option_shown_when_loadtest_installed(mock_workflow_with_two_po
     app = _k6_gating_app(mock_workflow_with_two_pods)
     with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
             patch("console_link.workflow.commands.k6.list_active_k6_runs", return_value=[]), \
-            patch("console_link.workflow.commands.testrun_utils.list_presets", return_value=[]), \
             patch("console_link.workflow.commands.testrun_utils.list_scenarios", return_value=[]):
         async with app.run_test() as pilot:
             tree = app.query_one("#workflow-tree")
@@ -963,15 +962,15 @@ async def test_k6_action_ignores_dismissal(mock_workflow_with_two_pods):
 
 @pytest.mark.asyncio
 async def test_k6_panel_opens_even_when_cluster_lookups_fail(mock_workflow_with_two_pods):
-    """Runs/presets/scenarios are all best-effort: a failing lookup degrades to an empty list and a
-    notification, so the panel still opens and a run can be launched from the fallback values."""
+    """The cluster lookups (runs, scenarios) are best-effort: a failing one degrades to an empty
+    list and a notification, so the panel still opens and a run can be launched from the fallback
+    values. Presets need no lookup at all — they ship inside the runner image."""
     from console_link.workflow.tui.k6_panel_modal import K6PanelModal
 
     app = _k6_gating_app(mock_workflow_with_two_pods)
     boom = RuntimeError("api down")
     with patch("console_link.workflow.commands.k6.k6_available", return_value=True), \
             patch("console_link.workflow.commands.k6.list_active_k6_runs", side_effect=boom), \
-            patch("console_link.workflow.commands.testrun_utils.list_presets", side_effect=boom), \
             patch("console_link.workflow.commands.testrun_utils.list_scenarios", side_effect=boom):
         async with app.run_test() as pilot:
             tree = app.query_one("#workflow-tree")
@@ -985,7 +984,6 @@ async def test_k6_panel_opens_even_when_cluster_lookups_fail(mock_workflow_with_
 
             messages = " ".join(_notifications(notify))
             assert "Could not list k6 runs" in messages
-            assert "Could not list k6 presets" in messages
             assert "Could not list k6 scenarios" in messages
 
 
@@ -1032,7 +1030,6 @@ async def test_k6_option_appears_after_chart_installed(mock_workflow_with_two_po
     app = _k6_gating_app(mock_workflow_with_two_pods)
     with patch("console_link.workflow.commands.k6.k6_available", return_value=False) as probe, \
             patch("console_link.workflow.commands.k6.list_active_k6_runs", return_value=[]), \
-            patch("console_link.workflow.commands.testrun_utils.list_presets", return_value=[]), \
             patch("console_link.workflow.commands.testrun_utils.list_scenarios", return_value=[]):
         async with app.run_test() as pilot:
             tree = app.query_one("#workflow-tree")

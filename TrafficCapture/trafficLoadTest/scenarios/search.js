@@ -39,11 +39,12 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
-import * as nycTaxisDocs    from './GENERATOR_nyc_taxis_documents.js';
-import * as logsDocs         from './GENERATOR_logs_data_documents.js';
-import * as nycTaxisQueries  from './GENERATOR_nyc_taxis_queries.js';
-import * as logsQueries      from './GENERATOR_logs_data_queries.js';
-import { pinned, spread } from './LIB_connection-control.js';
+import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
+import * as logsDocs         from '../lib/data/logs_data/documents.js';
+import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
+import * as logsQueries      from '../lib/data/logs_data/queries.js';
+import { pinned, spread } from '../lib/connection-control.js';
+import { CFG } from '../lib/config.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends the type suffix; names here must NOT include suffixes.
@@ -61,37 +62,37 @@ const deepPagingErrors   = new Rate('search_deep_paging_errors');
 
 // ── Schema selection ────────────────────────────────────────────────────────
 // All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCHEMA = __ENV.SCHEMA || 'nyc_taxis';
+const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
 const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
 
 const MAPPINGS = {
-  nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
-  logs_data: open('./SCHEMA_logs_data.json'),
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
 };
 const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL          = __ENV.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
-const INDEX              = __ENV.INDEX_NAME             || SCHEMA;
-const RATE               = parseInt(__ENV.SEARCH_RATE      || '50');
-const VUS                = parseInt(__ENV.SEARCH_VUS       || '30');
-const MAX_VUS            = parseInt(__ENV.SEARCH_MAX_VUS   || '150');
-const DURATION           = __ENV.DURATION               || '5m';
-const DEEP_PAGING        = (__ENV.DEEP_PAGING_ENABLED    || 'false') === 'true';
-const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
-const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES          || '3');
-const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES    || '3');
-const CONNECTION_MODE    = __ENV.CONNECTION_MODE               || 'pinned';
-const NO_CONNECTION_REUSE = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
-const EXECUTOR           = __ENV.EXECUTOR                      || 'constant-arrival-rate';
-const RAMP_STAGES        = __ENV.RAMP_STAGES
-  ? JSON.parse(__ENV.RAMP_STAGES)
+const PROXY_URL          = CFG.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
+const INDEX              = CFG.INDEX_NAME             || SCHEMA;
+const RATE               = parseInt(CFG.SEARCH_RATE      || '50');
+const VUS                = parseInt(CFG.SEARCH_VUS       || '30');
+const MAX_VUS            = parseInt(CFG.SEARCH_MAX_VUS   || '150');
+const DURATION           = CFG.DURATION               || '5m';
+const DEEP_PAGING        = (CFG.DEEP_PAGING_ENABLED    || 'false') === 'true';
+const PAGING_MODE        = CFG.PAGING_MODE            || 'scroll';
+const SCROLL_PAGES       = parseInt(CFG.SCROLL_PAGES          || '3');
+const SEARCH_AFTER_PAGES = parseInt(CFG.SEARCH_AFTER_PAGES    || '3');
+const CONNECTION_MODE    = CFG.CONNECTION_MODE               || 'pinned';
+const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR           = CFG.EXECUTOR                      || 'constant-arrival-rate';
+const RAMP_STAGES        = CFG.RAMP_STAGES
+  ? JSON.parse(CFG.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
-const FLAT_FRACTION      = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
-const AGG_FRACTION       = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
-const UPDATE_FRACTION    = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
-const WRITE_FRACTION     = parseFloat(__ENV.SEARCH_WRITE_FRACTION  || '0.05');
+const FLAT_FRACTION      = parseFloat(CFG.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION       = parseFloat(CFG.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION    = parseFloat(CFG.SEARCH_UPDATE_FRACTION || '0.10');
+const WRITE_FRACTION     = parseFloat(CFG.SEARCH_WRITE_FRACTION  || '0.05');
 
 // Precomputed cumulative dispatch thresholds
 const T_AGG    = FLAT_FRACTION;

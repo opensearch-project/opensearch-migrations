@@ -14,22 +14,14 @@ from console_link.workflow.commands.testrun_utils import (
     K6_GROUP,
     K6_PLURAL,
     K6_VERSION,
-    PRESET_LABEL,
     create_testrun,
     delete_testrun,
     get_testrun,
-    list_presets,
     list_scenarios,
     list_testruns,
     loadtest_installed,
     read_configmap,
 )
-
-
-def _cm(preset_name):
-    cm = MagicMock()
-    cm.metadata.labels = {"app": "k6-load-test", PRESET_LABEL: preset_name}
-    return cm
 
 
 def _custom_api(**behavior):
@@ -54,34 +46,6 @@ def _core_api(**behavior):
         else:
             target.return_value = value
     return patch.object(testrun_utils.client, "CoreV1Api", return_value=fake), fake
-
-
-def test_list_presets_returns_sorted_names():
-    fake = MagicMock()
-    fake.list_namespaced_config_map.return_value.items = [
-        _cm("mixed-steady"), _cm("ingest-steady"), _cm("ingest-burst"),
-    ]
-    with patch.object(testrun_utils.client, "CoreV1Api", return_value=fake):
-        assert list_presets("ma") == ["ingest-burst", "ingest-steady", "mixed-steady"]
-    # discovered via the preset label, not a hardcoded list
-    fake.list_namespaced_config_map.assert_called_once_with(
-        namespace="ma", label_selector=PRESET_LABEL)
-
-
-def test_list_presets_skips_unlabeled():
-    unlabeled = MagicMock()
-    unlabeled.metadata.labels = None
-    fake = MagicMock()
-    fake.list_namespaced_config_map.return_value.items = [_cm("ingest-steady"), unlabeled]
-    with patch.object(testrun_utils.client, "CoreV1Api", return_value=fake):
-        assert list_presets("ma") == ["ingest-steady"]
-
-
-def test_list_presets_empty_on_api_error():
-    fake = MagicMock()
-    fake.list_namespaced_config_map.side_effect = ApiException(status=403)
-    with patch.object(testrun_utils.client, "CoreV1Api", return_value=fake):
-        assert list_presets("ma") == []
 
 
 def test_list_scenarios_from_examples_configmap():
@@ -195,7 +159,7 @@ class TestReadConfigmap:
         cm.data = None
         patcher, _ = _core_api(read_namespaced_config_map=cm)
         with patcher:
-            assert read_configmap("ma", "k6-scenarios") == {}
+            assert read_configmap("ma", "k6-testrun-examples") == {}
 
     def test_empty_when_absent(self):
         patcher, _ = _core_api(read_namespaced_config_map=ApiException(status=404))
@@ -205,7 +169,7 @@ class TestReadConfigmap:
     def test_reraises_non_404(self):
         patcher, _ = _core_api(read_namespaced_config_map=ApiException(status=403))
         with patcher, pytest.raises(ApiException):
-            read_configmap("ma", "k6-scenarios")
+            read_configmap("ma", "k6-testrun-examples")
 
 
 class TestLoadtestInstalled:

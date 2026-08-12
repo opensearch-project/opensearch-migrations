@@ -471,18 +471,15 @@ class WorkflowTreeApp(App):
         if not self._k6_available:
             self.notify("k6 load testing is not installed in this namespace.", severity="warning")
             return
-        from ..commands.k6 import list_active_k6_runs
-        from ..commands.testrun_utils import list_presets, list_scenarios
+        from ..commands.k6 import list_active_k6_runs, CONFIG_PRESETS
+        from ..commands.testrun_utils import list_scenarios
         try:
             runs = list_active_k6_runs(self._namespace)
         except Exception as e:
             self.notify(f"Could not list k6 runs: {e}", severity="error")
             runs = []
-        try:
-            presets = list_presets(self._namespace)
-        except Exception as e:
-            self.notify(f"Could not list k6 presets: {e}", severity="error")
-            presets = []
+        # Presets ship inside the scripts image, so there is nothing to look up in the cluster.
+        presets = CONFIG_PRESETS
         try:
             scenarios = list_scenarios(self._namespace)
         except Exception as e:

@@ -124,6 +124,17 @@ def buildKitProjects = [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
+        ],
+        [
+                // Load-test scenarios (k6) for the Kubernetes integration. A `FROM scratch` data
+                // image — same idea as the mountable transforms image — holding the
+                // TrafficCapture/trafficLoadTest scenarios, libs, schemas and presets. The
+                // k6LoadTest chart mounts it at /scripts on grafana/k6 runner pods, so it
+                // needs no base image and runs nothing itself.
+                serviceName: "k6Scripts",
+                contextDir: "TrafficCapture/trafficLoadTest",
+                imageName:  "k6_scripts",
+                imageTag:   "latest"
         ]
 ]
 

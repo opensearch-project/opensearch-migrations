@@ -1,11 +1,21 @@
 # One ready-to-run TestRun per scenario, rendered as JSON into this ConfigMap's data (NOT applied
-# by helm — these are examples, applied on demand). Since the scenario tree is flat, the whole
-# k6-scenarios ConfigMap mounts directly at /scripts (no `items` projection). Each example also
-# bakes in the runner image, K6_OUT metrics, and a default preset via envFrom. To run one:
+# by helm — these are examples, applied on demand). The load test itself is not in this chart: the
+# scenarios, libs, schemas and load-profile presets ride in the migrations/k6_scripts data image,
+# mounted read-only at /scripts by a Kubernetes `image:` volume on BOTH the initializer (which runs
+# `k6 archive`) and the runner pods. The pods themselves run stock grafana/k6. A run therefore
+# names two things: the script's path under /scripts, and the preset, via K6_PRESET. To run one:
 #   kubectl get cm k6-testrun-examples -o "jsonpath={.data.ingest}" | kubectl create -f -
-# Override defaults by swapping the envFrom preset name or adding runner.env entries (env wins).
+# Override defaults by changing K6_PRESET or adding further runner.env entries (later wins).
 {{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
 {{- $pull := .Values.image.pullPolicy }}
+{{- $scripts := .Values.scriptsImage }}
+{{- /* A digest pins exact content and wins over the tag — see the values.yaml comment. */ -}}
+{{- $scriptsRef := ternary
+      (printf "%s@%s" $scripts.repository $scripts.digest)
+      (printf "%s:%s" $scripts.repository ($scripts.tag | default .Chart.AppVersion))
+      (ne (toString $scripts.digest) "") }}
+{{- $volume := dict "name" "scripts" "image" (dict "reference" $scriptsRef "pullPolicy" $scripts.pullPolicy) }}
+{{- $mount := dict "name" "scripts" "mountPath" "/scripts" }}
 {{- $parallelism := .Values.testRun.parallelism | int }}
 {{- $separate := .Values.testRun.separate }}
 {{- $cleanup := .Values.testRun.cleanup }}
@@ -13,8 +23,6 @@
       (dict "name" "K6_OUT" "value" "opentelemetry")
       (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
       (dict "name" "K6_OTEL_GRPC_EXPORTER_INSECURE" "value" "true") }}
-{{- $volume := dict "name" "scenarios" "configMap" (dict "name" "k6-scenarios") }}
-{{- $mount := dict "name" "scenarios" "mountPath" "/scripts" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,12 +32,13 @@ metadata:
     app: k6-load-test
 data:
 {{- range $scenario := (list "ingest" "search" "mixed") }}
-  {{- $initializer := dict "image" $image "imagePullPolicy" $pull "volumeMounts" (list $mount) "volumes" (list $volume) }}
-  {{- $runner := dict "image" $image "imagePullPolicy" $pull "volumeMounts" (list $mount) "volumes" (list $volume)
-        "envFrom" (list (dict "configMapRef" (dict "name" (printf "k6-preset-%s-steady" $scenario))))
-        "env" $otel }}
+  {{- $initializer := dict "image" $image "imagePullPolicy" $pull
+        "volumes" (list $volume) "volumeMounts" (list $mount) }}
+  {{- $runner := dict "image" $image "imagePullPolicy" $pull
+        "volumes" (list $volume) "volumeMounts" (list $mount)
+        "env" (concat (list (dict "name" "K6_PRESET" "value" (printf "%s-steady" $scenario))) $otel) }}
   {{- $spec := dict "parallelism" $parallelism "separate" $separate
-        "script" (dict "localFile" (printf "/scripts/SCENARIO_%s.js" $scenario))
+        "script" (dict "localFile" (printf "/scripts/scenarios/%s.js" $scenario))
         "initializer" $initializer "runner" $runner }}
   {{- if $cleanup }}{{- $_ := set $spec "cleanup" $cleanup }}{{- end }}
   {{- $testrun := dict

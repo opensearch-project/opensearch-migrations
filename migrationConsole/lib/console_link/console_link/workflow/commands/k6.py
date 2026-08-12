@@ -1,11 +1,15 @@
 """`workflow k6` — submit and manage k6 load-test runs.
 
-Each run is a k6-operator **TestRun** CR (k6.io/v1alpha1), NOT an Argo workflow. The operator,
-the scenario/preset ConfigMaps, and this command's RBAC all ship in the standalone k6LoadTest
-chart (deployment/k8s/charts/components/k6LoadTest), which is installed separately from any
-migration. A run is specified by a `scenario` (script) and a `config` (k6-config/*.env preset);
-every preset value is overridable per run via named options or the repeatable `-e KEY=VALUE` bag.
-Load is spread across `--parallelism` runner pods by k6 execution segments.
+Each run is a k6-operator **TestRun** CR (k6.io/v1alpha1), NOT an Argo workflow. The operator, the
+example TestRuns, and this command's RBAC ship in the standalone k6LoadTest chart
+(deployment/k8s/charts/components/k6LoadTest), which is installed separately from any migration;
+the scenarios and presets themselves ride in a data image (migrations/k6_scripts, built from
+TrafficCapture/trafficLoadTest) that the examples mount at /scripts on stock grafana/k6 pods.
+
+A run is specified by a `scenario` (a script path under /scripts) and a `config` (a k6-config/*.env
+preset from the same mount, selected with the K6_PRESET env var); every preset value is overridable
+per run via named options or the repeatable `-e KEY=VALUE` bag, since real environment variables win
+over the preset file. Load is spread across `--parallelism` runner pods by k6 execution segments.
 
 Because the infra is a separate opt-in, these commands are inert (and hidden from `--help`) unless
 the TestRun CRD is present in the namespace — so a normal migration deployment cannot trigger a
@@ -29,7 +33,6 @@ from .testrun_utils import (
     get_testrun,
     delete_testrun,
     read_configmap,
-    list_presets,
     list_scenarios,
     loadtest_installed,
 )
@@ -38,11 +41,17 @@ logger = logging.getLogger(__name__)
 
 K6_APP_LABEL = "k6-load-test"
 
-# --scenario / --config are NOT restricted to these — the live sets are discovered from the cluster
-# (list_scenarios / list_presets) for shell completion, and any scenario present in the cluster is
-# launchable (custom scenarios included). These literals are only the completion fallback used when
-# the cluster is unreachable (e.g. tab-completing offline).
+# Env var the scenarios read to pick a load-profile preset from the ones in the mounted scripts
+# image (see TrafficCapture/trafficLoadTest/lib/config.js).
+PRESET_ENV = "K6_PRESET"
+
+# Launchable scenarios are discovered from the cluster (list_scenarios, from the chart's example
+# TestRuns); SCENARIOS is only the completion fallback used when the cluster is unreachable.
 SCENARIOS = ["ingest", "search", "mixed"]
+# Presets live in the scripts image, so there is nothing in the cluster to enumerate: this list
+# mirrors TrafficCapture/trafficLoadTest/k6-config/*.env (kept honest by a unit test). Neither
+# --scenario nor --config is restricted to these — a custom scripts image may ship others, and an
+# unknown preset fails fast in the pod with the list the image actually has.
 CONFIG_PRESETS = [
     "ingest-steady", "ingest-ramp", "ingest-burst",
     "search-steady", "search-deep-paging", "search-ramp", "search-burst",
@@ -71,7 +80,7 @@ def _complete_scenarios(ctx, param, incomplete):
 
 
 def _complete_presets(ctx, param, incomplete):
-    return [v for v in _cluster_values(list_presets, CONFIG_PRESETS) if v.startswith(incomplete)]
+    return [v for v in CONFIG_PRESETS if v.startswith(incomplete)]
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +163,7 @@ def _k6_testruns(namespace, scenario=None):
 # ---------------------------------------------------------------------------
 def load_example(namespace, scenario):
     """Load the chart-rendered example TestRun (JSON) for a scenario. Helm is the single source of
-    the run spec (items mount, image, K6_OUT, default preset); the console only patches it."""
+    the run spec (images, script path, K6_OUT, default preset); the console only patches it."""
     data = read_configmap(namespace, EXAMPLES_CONFIGMAP)
     if scenario not in data:
         available = ", ".join(sorted(data)) or "none"
@@ -164,8 +173,8 @@ def load_example(namespace, scenario):
 
 
 # Named run options → the scenario env vars each one sets. A value-carrying option is applied only
-# when it's non-empty, so leaving it off keeps whatever the preset's envFrom supplies. --rate and
-# --vus fan out to both the ingest and search vars because a scenario reads only its own pair.
+# when it's non-empty, so leaving it off keeps whatever the preset file supplies. --rate and --vus
+# fan out to both the ingest and search vars because a scenario reads only its own pair.
 _VALUE_ENV_VARS = (
     ("duration", ("DURATION",)),
     ("rate", ("INGEST_RATE", "SEARCH_RATE")),
@@ -196,8 +205,8 @@ def _parse_overrides(text):
 
 
 def _override_env(params):
-    """Per-run env overrides (these win over the preset's envFrom). Named flags fan out to the vars
-    the scenarios read; the -e bag is applied last, so it wins over the named flags."""
+    """Per-run env overrides (these win over the preset file). Named flags fan out to the vars the
+    scenarios read; the -e bag is applied last, so it wins over the named flags."""
     env = {}
     for key, names in _VALUE_ENV_VARS:
         if params.get(key):
@@ -237,19 +246,29 @@ def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=No
     }
 
 
+def _set_env(container, name, value):
+    """Set an env var on a TestRun container spec, replacing any existing entry with that name.
+
+    The example already carries K6_PRESET (and the K6_OUT trio), so appending would leave the
+    container with two entries of the same name and make the run depend on how the runtime resolves
+    that — replacing keeps the spec unambiguous.
+    """
+    env = [e for e in container.get("env", []) if e.get("name") != name]
+    env.append({"name": name, "value": str(value)})
+    container["env"] = env
+
+
 def build_testrun_spec(namespace, params):
-    """Load the scenario's example TestRun and patch it: swap the envFrom preset, append env
-    overrides (which win over envFrom), set parallelism, and pass any extra `k6 run` args. The
-    example already carries the items mount, image, K6_OUT, labels, and generateName."""
+    """Load the scenario's example TestRun and patch it: point K6_PRESET at the chosen preset, apply
+    the env overrides (which win over the preset, since the scenarios read real env vars over the
+    preset file), set parallelism, and pass any extra `k6 run` args. The example already carries the
+    images, the scripts mount, the script path under it, K6_OUT, labels, and generateName."""
     testrun = load_example(namespace, params["scenario"])
     runner = testrun["spec"]["runner"]
 
-    preset_ref = {"configMapRef": {"name": f"k6-preset-{params['configName']}"}}
-    if runner.get("envFrom"):
-        runner["envFrom"][0] = preset_ref
-    else:
-        runner["envFrom"] = [preset_ref]
-    runner.setdefault("env", []).extend(_override_env(params))
+    _set_env(runner, PRESET_ENV, params["configName"])
+    for entry in _override_env(params):
+        _set_env(runner, entry["name"], entry["value"])
 
     testrun["spec"]["parallelism"] = int(params.get("parallelism", 1))
     if params.get("extraArgs"):
@@ -262,18 +281,13 @@ def submit_k6_run(namespace, params):
     return create_testrun(namespace, build_testrun_spec(namespace, params))
 
 
-def _warn_if_unknown_preset(namespace, config_name):
-    """Warn (but never block) when the resolved config preset isn't among the cluster's presets. A
-    missing preset usually means the run's envFrom points at a ConfigMap that won't exist, so the
-    heads-up is useful — but custom/ad-hoc presets are allowed, so this never fails the run. Silent
-    if the preset list can't be fetched (don't cry wolf when we simply couldn't look)."""
-    try:
-        available = list_presets(namespace)
-    except Exception:
-        return
-    if available and config_name not in available:
-        click.echo(f"Note: config preset '{config_name}' not found in the cluster "
-                   f"(available: {', '.join(available)}); running anyway.", err=True)
+def _warn_if_unknown_preset(config_name):
+    """Warn (but never block) when the preset isn't one of the presets the scripts image ships.
+    A custom image may ship others, so this never fails the run — and if the preset really is
+    missing, the scenario stops at init with the list the image actually has."""
+    if config_name not in CONFIG_PRESETS:
+        click.echo(f"Note: config preset '{config_name}' is not one of the stock presets "
+                   f"({', '.join(CONFIG_PRESETS)}); running anyway.", err=True)
 
 
 def list_active_k6_runs(namespace):
@@ -368,7 +382,7 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
 
     try:
         load_k8s_config()
-        _warn_if_unknown_preset(namespace, config_name)
+        _warn_if_unknown_preset(config_name)
         name = submit_k6_run(namespace, params)
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)

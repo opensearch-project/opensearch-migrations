@@ -6,7 +6,7 @@
  * (INFO-heavy log levels, 2xx-heavy status codes).
  */
 
-import { randomElement, randomInt, randomBulkBatch as _randomBulkBatch } from './LIB_doc-utils.js';
+import { randomElement, randomInt, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
 
 // Weighted toward INFO to reflect typical production log volumes
 export const LEVELS       = ['DEBUG', 'INFO', 'INFO', 'INFO', 'WARN', 'ERROR', 'FATAL'];

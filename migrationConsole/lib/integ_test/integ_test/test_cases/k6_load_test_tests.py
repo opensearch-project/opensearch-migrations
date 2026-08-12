@@ -4,9 +4,10 @@ Instead of `generate-data`, this drives real load through the capture proxy with
 (k6-operator TestRun), then asserts the capture-and-replay pipeline moved that traffic to the
 target — i.e. the pipeline works *under load*, not just for a handful of hand-written docs.
 
-Requires the standalone k6LoadTest chart to be installed (operator + scenarios + RBAC). The test
-runner installs it when `--with-load-test` is passed; the case is explicit-selection only so it
-never runs in a normal migration suite.
+Requires the standalone k6LoadTest chart to be installed (operator + example TestRuns + RBAC) and
+the migrations/k6_scripts image, the data image mounted at /scripts that carries the scenarios and
+presets. The test runner installs the chart when `--with-load-test` is passed; the case is
+explicit-selection only so it never runs in a normal migration suite.
 """
 
 import logging

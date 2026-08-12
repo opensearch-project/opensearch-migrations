@@ -1,6 +1,8 @@
 """Tests for the `workflow k6` command group (loads chart-rendered example TestRuns + patches)."""
 
 import json
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch
 from click.testing import CliRunner
@@ -20,22 +22,24 @@ ENV = {"K6_LOADTEST_ENABLED": "true", "WORKFLOW_NAMESPACE": "ma"}
 
 
 def _example(scenario):
-    """A minimal stand-in for what the chart renders into k6-testrun-examples (flat mount)."""
-    vol = {"name": "scenarios", "configMap": {"name": "k6-scenarios"}}
-    mount = {"name": "scenarios", "mountPath": "/scripts"}
-    pod = {"image": "grafana/k6:1.0", "imagePullPolicy": "IfNotPresent",
-           "volumeMounts": [mount], "volumes": [vol]}
+    """A minimal stand-in for what the chart renders into k6-testrun-examples: stock grafana/k6 pods
+    with the scenarios and presets mounted at /scripts from the k6_scripts data image, and the
+    preset named by the K6_PRESET env var."""
+    volume = {"name": "scripts",
+              "image": {"reference": "migrations/k6_scripts:latest", "pullPolicy": "IfNotPresent"}}
+    pod = {"image": "grafana/k6:latest", "imagePullPolicy": "IfNotPresent",
+           "volumes": [volume], "volumeMounts": [{"name": "scripts", "mountPath": "/scripts"}]}
     return {
         "apiVersion": "k6.io/v1alpha1", "kind": "TestRun",
         "metadata": {"generateName": "k6-run-",
                      "labels": {"app": "k6-load-test", "k6-scenario": scenario}},
         "spec": {
             "parallelism": 1,
-            "script": {"localFile": f"/scripts/SCENARIO_{scenario}.js"},
+            "script": {"localFile": f"/scripts/scenarios/{scenario}.js"},
             "initializer": dict(pod),
             "runner": dict(pod,
-                           envFrom=[{"configMapRef": {"name": f"k6-preset-{scenario}-steady"}}],
-                           env=[{"name": "K6_OUT", "value": "opentelemetry"}]),
+                           env=[{"name": "K6_PRESET", "value": f"{scenario}-steady"},
+                                {"name": "K6_OUT", "value": "opentelemetry"}]),
         },
     }
 
@@ -110,15 +114,19 @@ class TestK6Run:
         spec = body["spec"]
         # example structure preserved
         assert body["kind"] == "TestRun"
-        assert spec["script"]["localFile"] == "/scripts/SCENARIO_ingest.js"
-        assert spec["runner"]["volumes"][0]["configMap"]["name"] == "k6-scenarios"  # flat mount kept
-        assert spec["initializer"]["volumes"] == spec["runner"]["volumes"]
+        assert spec["script"]["localFile"] == "/scripts/scenarios/ingest.js"
+        assert spec["initializer"]["image"] == spec["runner"]["image"]  # both run stock k6
+        # the scripts mount survives patching on BOTH pods — the initializer runs `k6 archive` and
+        # needs the same files the runners do
+        for pod in ("initializer", "runner"):
+            assert spec[pod]["volumes"][0]["image"]["reference"] == "migrations/k6_scripts:latest"
+            assert spec[pod]["volumeMounts"][0]["mountPath"] == "/scripts"
         # patched bits
         assert spec["parallelism"] == 3
-        assert spec["runner"]["envFrom"][0]["configMapRef"]["name"] == "k6-preset-ingest-steady"
         env = _env_map(body)
+        assert env["K6_PRESET"] == "ingest-steady"
         assert env["K6_OUT"] == "opentelemetry"          # from the example
-        assert env["CAPTURE_PROXY_URL"] == "https://p:9200"  # override wins over envFrom
+        assert env["CAPTURE_PROXY_URL"] == "https://p:9200"  # override wins over the preset
         assert env["INGEST_RATE"] == "80" and env["SEARCH_RATE"] == "80"  # --rate fans out
         assert "arguments" not in spec
 
@@ -127,13 +135,23 @@ class TestK6Run:
         _runner().invoke(workflow_cli, ["k6", "run", "--scenario", "ingest",
                                         "--config", "ingest-burst"], env=ENV)
         body = mock_create.call_args.args[1]
-        assert body["spec"]["runner"]["envFrom"][0]["configMapRef"]["name"] == "k6-preset-ingest-burst"
+        # replaced, not appended: exactly one K6_PRESET entry, carrying the chosen preset
+        presets = [e for e in body["spec"]["runner"]["env"] if e["name"] == "K6_PRESET"]
+        assert presets == [{"name": "K6_PRESET", "value": "ingest-burst"}]
 
     @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
     def test_default_config_is_scenario_steady(self, mock_create, cluster):
         _runner().invoke(workflow_cli, ["k6", "run", "--scenario", "search"], env=ENV)
         body = mock_create.call_args.args[1]
-        assert body["spec"]["runner"]["envFrom"][0]["configMapRef"]["name"] == "k6-preset-search-steady"
+        assert _env_map(body)["K6_PRESET"] == "search-steady"
+
+    @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
+    def test_override_replaces_example_env(self, mock_create, cluster):
+        """A -e override of a var the example already sets must replace it, not duplicate it —
+        two entries of the same name would leave the winner to the container runtime."""
+        _runner().invoke(workflow_cli, ["k6", "run", "-e", "K6_OUT=json"], env=ENV)
+        env = mock_create.call_args.args[1]["spec"]["runner"]["env"]
+        assert [e for e in env if e["name"] == "K6_OUT"] == [{"name": "K6_OUT", "value": "json"}]
 
     @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
     def test_extra_args_set_arguments(self, mock_create, cluster):
@@ -153,26 +171,21 @@ class TestK6Run:
         assert "Error submitting k6 run" in result.output
 
     @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
-    def test_unknown_preset_warns_but_runs(self, mock_create, monkeypatch):
-        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
-        monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
-        monkeypatch.setattr(k6mod, "list_presets",
-                            lambda ns: ["ingest-steady", "search-steady", "mixed-steady"])
+    def test_unknown_preset_warns_but_runs(self, mock_create, cluster):
+        # A custom runner image may ship its own presets, so an unrecognised name only warns.
         result = _runner().invoke(workflow_cli, [
-            "k6", "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
+            "k6", "run", "--scenario", "ingest", "--config", "home-brewed"], env=ENV)
         assert result.exit_code == 0, result.output
-        assert "not found in the cluster" in result.output  # warned
-        mock_create.assert_called_once()                    # but ran anyway
+        assert "not one of the stock presets" in result.output  # warned
+        mock_create.assert_called_once()                        # but ran anyway
+        assert _env_map(mock_create.call_args.args[1])["K6_PRESET"] == "home-brewed"
 
     @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
-    def test_known_preset_no_warning(self, mock_create, monkeypatch):
-        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
-        monkeypatch.setattr(k6mod, "read_configmap", _fake_read_configmap)
-        monkeypatch.setattr(k6mod, "list_presets", lambda ns: ["ingest-steady", "ingest-burst"])
+    def test_known_preset_no_warning(self, mock_create, cluster):
         result = _runner().invoke(workflow_cli, [
             "k6", "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
         assert result.exit_code == 0, result.output
-        assert "not found in the cluster" not in result.output
+        assert "not one of the stock presets" not in result.output
 
     @patch(f"{K6}.create_testrun", return_value="k6-run-xy")
     def test_custom_scenario_accepted(self, mock_create, monkeypatch):
@@ -185,7 +198,7 @@ class TestK6Run:
         assert result.exit_code == 0, result.output
         body = mock_create.call_args.args[1]
         assert body["metadata"]["labels"]["k6-scenario"] == "my-custom"
-        assert body["spec"]["script"]["localFile"] == "/scripts/SCENARIO_my-custom.js"
+        assert body["spec"]["script"]["localFile"] == "/scripts/scenarios/my-custom.js"
 
 
 class TestK6RunWait:
@@ -278,11 +291,10 @@ class TestCompletion:
         monkeypatch.setattr(k6mod, "list_scenarios", lambda ns: ["ingest", "mixed", "search"])
         assert k6mod._complete_scenarios(None, None, "mi") == ["mixed"]
 
-    def test_preset_completion_from_cluster(self, monkeypatch):
-        monkeypatch.setattr(k6mod, "load_k8s_config", lambda: None)
-        monkeypatch.setattr(k6mod, "get_current_namespace", lambda: "ma")
-        monkeypatch.setattr(k6mod, "list_presets", lambda ns: ["custom-a", "custom-b"])
-        assert k6mod._complete_presets(None, None, "custom-") == ["custom-a", "custom-b"]
+    def test_preset_completion_is_the_images_presets(self):
+        # Presets ship in the runner image, so completion needs no cluster at all.
+        assert k6mod._complete_presets(None, None, "ingest-") == [
+            p for p in k6mod.CONFIG_PRESETS if p.startswith("ingest-")]
 
     def test_completion_falls_back_when_offline(self, monkeypatch):
         def boom():
@@ -403,3 +415,29 @@ class TestK6Logs:
     def test_logs_follow(self, mock_run):
         _runner().invoke(workflow_cli, ["k6", "logs", "k6-run-a", "-f"], env=ENV)
         assert "-f" in mock_run.call_args.args[0]
+
+
+class TestPresetAndScenarioListsMatchTheImage:
+    """The scenarios and presets live in the runner image, not in the cluster, so nothing here can
+    discover them at runtime — these lists are hand-maintained hints for completion, the TUI
+    dropdown and the unknown-preset warning. Keep them honest against the sources the image is
+    built from (TrafficCapture/trafficLoadTest), which is the only thing that can drift."""
+
+    @staticmethod
+    def _load_test_dir():
+        d = Path(__file__).resolve().parents[5] / "TrafficCapture" / "trafficLoadTest"
+        if not d.is_dir():
+            pytest.skip("running outside a repo checkout (e.g. inside the console image)")
+        return d
+
+    def test_config_presets_match_the_env_files(self):
+        on_disk = sorted(p.stem for p in (self._load_test_dir() / "k6-config").glob("*.env"))
+        assert sorted(k6mod.CONFIG_PRESETS) == on_disk
+
+    def test_scenarios_match_the_scenario_scripts(self):
+        on_disk = sorted(p.stem for p in (self._load_test_dir() / "scenarios").glob("*.js"))
+        assert sorted(k6mod.SCENARIOS) == on_disk
+
+    def test_tui_fallback_presets_match(self):
+        from console_link.workflow.tui.k6_panel_modal import _FALLBACK_PRESETS
+        assert sorted(_FALLBACK_PRESETS) == sorted(k6mod.CONFIG_PRESETS)

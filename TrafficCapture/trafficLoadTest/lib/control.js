@@ -38,10 +38,11 @@
 
 import http from 'k6/http';
 import { sleep } from 'k6';
+import { CFG } from './config.js';
 
-const ENABLED    = (__ENV.CONTROL_ENABLED || 'false').toLowerCase() === 'true';
-const WEBDIS_URL = __ENV.WEBDIS_URL      || 'http://webdis:7379';
-const CMD_KEY    = __ENV.CONTROL_CMD_KEY || 'control_cmd';
+const ENABLED    = (CFG.CONTROL_ENABLED || 'false').toLowerCase() === 'true';
+const WEBDIS_URL = CFG.WEBDIS_URL      || 'http://webdis:7379';
+const CMD_KEY    = CFG.CONTROL_CMD_KEY || 'control_cmd';
 
 // Tag all control-poll requests distinctly so they don't inflate pipeline metrics.
 const POLL_PARAMS = { tags: { name: 'control_poll' } };

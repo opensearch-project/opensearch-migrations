@@ -12,10 +12,11 @@ rules:
   - apiGroups: ["k6.io"]
     resources: ["testruns"]
     verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  # Read the scenario / preset / image ConfigMaps to assemble a TestRun.
+  # Read the k6-testrun-examples ConfigMap (by name) to assemble a TestRun. Scenarios and presets
+  # live in the runner image, so there is nothing else here for the console to read.
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get", "list"]
+    verbs: ["get"]
   # Read runner pod status/logs for `workflow k6 list` / `logs`.
   - apiGroups: [""]
     resources: ["pods", "pods/log"]

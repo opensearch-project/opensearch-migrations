@@ -21,6 +21,10 @@ VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_
                          "SOLR_8.11", "SOLR_9.8"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
+# ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>. An ECR registry flattens every image
+# into one repo (tag "migrations_<image>_latest"), while any other registry keeps the
+# "<prefix>migrations/<image>" layout — both image lookups below branch on this.
+ECR_REGISTRY_PATTERN = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
 
 
 class TargetType(str, Enum):
@@ -74,7 +78,7 @@ class TestRunner:
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
                  trace_backend: str = "",
                  with_load_test: bool = False, k6_chart_path: str = "",
-                 load_test_image: str = "mirror.gcr.io/grafana/k6:latest") -> None:
+                 load_test_image: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -431,8 +435,28 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
+    def _resolve_load_test_image(self) -> Tuple[str, str]:
+        """(repository, tag) of the k6 runner image — stock grafana/k6, which runs the test. An
+        explicit load_test_image wins."""
+        if self.load_test_image:
+            repo, _, tag = self.load_test_image.rpartition(":")
+            return repo, tag
+        return "mirror.gcr.io/grafana/k6", "latest"
+
+    def _resolve_scripts_image(self) -> Tuple[str, str]:
+        """(repository, tag) of the k6 scripts image, the data image mounted at /scripts that
+        carries the scenarios and presets. Built from TrafficCapture/trafficLoadTest alongside the
+        other migrations/* images, so it follows the same registry convention as the migration
+        chart's images."""
+        if self.registry_prefix:
+            if re.match(ECR_REGISTRY_PATTERN, self.registry_prefix):
+                return self.registry_prefix.rstrip("/"), "migrations_k6_scripts_latest"
+            return f"{self.registry_prefix}migrations/k6_scripts", "latest"
+        return "migrations/k6_scripts", "latest"
+
     def _install_load_test_chart(self) -> None:
-        """Install the standalone k6LoadTest chart (operator + scenarios + RBAC) for --with-load-test.
+        """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC) for
+        --with-load-test.
 
         The chart depends on the k6-operator subchart, so vendor it first (offline from Chart.lock
         when already present, else fetch from the grafana repo).
@@ -444,10 +468,14 @@ class TestRunner:
         if subprocess.run(["helm", "dependency", "build", self.k6_chart_path],
                           capture_output=True, text=True).returncode != 0:
             subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
-        repo, _, tag = self.load_test_image.rpartition(":")
+        repo, tag = self._resolve_load_test_image()
+        scripts_repo, scripts_tag = self._resolve_scripts_image()
+        logger.info("k6 runner image: %s:%s (scripts: %s:%s)", repo, tag, scripts_repo, scripts_tag)
         if not self.k8s_service.helm_install(
                 chart_path=self.k6_chart_path, release_name="k6-load-test",
-                values={"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent"}):
+                values={"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent",
+                        "scriptsImage.repository": scripts_repo, "scriptsImage.tag": scripts_tag,
+                        "scriptsImage.pullPolicy": "Always"}):
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
@@ -470,9 +498,7 @@ class TestRunner:
                     chart_values = {}
                     if self.registry_prefix:
                         logger.info(f"Setting registry prefix to: {self.registry_prefix}")
-                        # ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>
-                        ecr_pattern = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
-                        is_ecr = re.match(ecr_pattern, self.registry_prefix) is not None
+                        is_ecr = re.match(ECR_REGISTRY_PATTERN, self.registry_prefix) is not None
                         if is_ecr:
                             repo = self.registry_prefix.rstrip("/")
                             mc_tag = "migrations_migration_console_latest"

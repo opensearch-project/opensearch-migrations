@@ -2,8 +2,12 @@
 
 Load tests run as TestRun CRs (k6.io/v1alpha1) managed by the k6-operator that ships in the
 standalone k6LoadTest chart — NOT as Argo workflows. This module is a thin CustomObjectsApi
-wrapper plus helpers to read that chart's ConfigMaps and detect whether the load-test infra is
-installed at all (so the `workflow k6` commands stay inert in a normal migration deployment).
+wrapper plus helpers to read that chart's example ConfigMap and detect whether the load-test infra
+is installed at all (so the `workflow k6` commands stay inert in a normal migration deployment).
+
+The scenarios and load-profile presets themselves are not in the cluster to be read: they are baked
+into a data image (migrations/k6_scripts, built from TrafficCapture/trafficLoadTest) that the
+example TestRuns mount at /scripts, so a run names them rather than supplying them.
 """
 
 import logging
@@ -17,17 +21,11 @@ K6_GROUP = "k6.io"
 K6_VERSION = "v1alpha1"
 K6_PLURAL = "testruns"
 
-# ConfigMaps rendered by the k6LoadTest chart.
-SCENARIOS_CONFIGMAP = "k6-scenarios"
-# One ready-to-run TestRun (JSON) per scenario — the single source of the run spec (items mount,
-# image, K6_OUT, default envFrom preset). The console loads and patches these rather than building
-# a spec from scratch, so Helm stays the one definition.
+# The one ConfigMap rendered by the k6LoadTest chart that the console reads: a ready-to-run TestRun
+# (JSON) per scenario — the single source of the run spec (image, script path, K6_OUT, default
+# preset). The console loads and patches these rather than building a spec from scratch, so Helm
+# stays the one definition.
 EXAMPLES_CONFIGMAP = "k6-testrun-examples"
-# Each load-profile preset is rendered as a ConfigMap named k6-preset-<name>, labeled
-# k6-preset=<name> (see charts/components/k6LoadTest/templates/k6-presets-configmap.yaml). The
-# label is how we enumerate the presets that actually exist in the cluster instead of hardcoding
-# them. The chart's RBAC already grants list on configmaps.
-PRESET_LABEL = "k6-preset"
 
 
 def create_testrun(namespace, body):
@@ -89,19 +87,6 @@ def read_configmap(namespace, name):
         if e.status == 404:
             return {}
         raise
-
-
-def list_presets(namespace):
-    """Config preset names available in the cluster, discovered from the k6-preset-* ConfigMaps the
-    k6LoadTest chart renders (each labeled k6-preset=<name>). Returns a sorted list, or [] when none
-    are found or the API call fails — callers fall back to their own default so the UI still works."""
-    core = client.CoreV1Api()
-    try:
-        result = core.list_namespaced_config_map(namespace=namespace, label_selector=PRESET_LABEL)
-    except ApiException:
-        return []
-    names = ((cm.metadata.labels or {}).get(PRESET_LABEL) for cm in result.items)
-    return sorted(name for name in names if name)
 
 
 def list_scenarios(namespace):

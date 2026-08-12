@@ -51,14 +51,15 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import * as nycTaxisDocs    from './GENERATOR_nyc_taxis_documents.js';
-import * as logsDocs         from './GENERATOR_logs_data_documents.js';
-import * as nycTaxisQueries  from './GENERATOR_nyc_taxis_queries.js';
-import * as logsQueries      from './GENERATOR_logs_data_queries.js';
-import { runSequence } from './LIB_sequences.js';
-import { pinned, spread } from './LIB_connection-control.js';
-import { registryFlush, registryWrite, registryRead } from './LIB_id-registry.js';
-import { checkControl } from './LIB_control.js';
+import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
+import * as logsDocs         from '../lib/data/logs_data/documents.js';
+import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
+import * as logsQueries      from '../lib/data/logs_data/queries.js';
+import { runSequence } from '../lib/sequences.js';
+import { pinned, spread } from '../lib/connection-control.js';
+import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
+import { checkControl } from '../lib/control.js';
+import { CFG } from '../lib/config.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends type suffixes; names here must NOT include them.
@@ -81,47 +82,47 @@ const idRegistryHits       = new Rate('mixed_id_registry_hits');
 
 // ── Schema selection ────────────────────────────────────────────────────────
 // All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCHEMA = __ENV.SCHEMA || 'nyc_taxis';
+const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
 const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
 
 const MAPPINGS = {
-  nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
-  logs_data: open('./SCHEMA_logs_data.json'),
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
 };
 const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL            = __ENV.CAPTURE_PROXY_URL        || 'https://capture-proxy:9200';
-const INDEX                = __ENV.INDEX_NAME               || SCHEMA;
-const INGEST_RATE          = parseInt(__ENV.INGEST_RATE      || '30');
-const SEARCH_RATE          = parseInt(__ENV.SEARCH_RATE      || '20');
-const INGEST_VUS           = parseInt(__ENV.INGEST_VUS       || '15');
-const INGEST_MAX_VUS       = parseInt(__ENV.INGEST_MAX_VUS   || '75');
-const SEARCH_VUS           = parseInt(__ENV.SEARCH_VUS       || '15');
-const SEARCH_MAX_VUS       = parseInt(__ENV.SEARCH_MAX_VUS   || '75');
-const DURATION             = __ENV.DURATION                 || '5m';
-const BATCH_SIZE           = parseInt(__ENV.BULK_BATCH_SIZE  || '20');
-const SEQ_FRACTION         = parseFloat(__ENV.SEQUENCE_FRACTION     || '0.15');
-const BULK_FRACTION        = parseFloat(__ENV.BULK_FRACTION         || '0.70');
-const CONSISTENCY_FRACTION = parseFloat(__ENV.CONSISTENCY_FRACTION  || '0.10');
-const FLAT_FRACTION        = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
-const AGG_FRACTION         = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
-const UPDATE_FRACTION      = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
+const PROXY_URL            = CFG.CAPTURE_PROXY_URL        || 'https://capture-proxy:9200';
+const INDEX                = CFG.INDEX_NAME               || SCHEMA;
+const INGEST_RATE          = parseInt(CFG.INGEST_RATE      || '30');
+const SEARCH_RATE          = parseInt(CFG.SEARCH_RATE      || '20');
+const INGEST_VUS           = parseInt(CFG.INGEST_VUS       || '15');
+const INGEST_MAX_VUS       = parseInt(CFG.INGEST_MAX_VUS   || '75');
+const SEARCH_VUS           = parseInt(CFG.SEARCH_VUS       || '15');
+const SEARCH_MAX_VUS       = parseInt(CFG.SEARCH_MAX_VUS   || '75');
+const DURATION             = CFG.DURATION                 || '5m';
+const BATCH_SIZE           = parseInt(CFG.BULK_BATCH_SIZE  || '20');
+const SEQ_FRACTION         = parseFloat(CFG.SEQUENCE_FRACTION     || '0.15');
+const BULK_FRACTION        = parseFloat(CFG.BULK_FRACTION         || '0.70');
+const CONSISTENCY_FRACTION = parseFloat(CFG.CONSISTENCY_FRACTION  || '0.10');
+const FLAT_FRACTION        = parseFloat(CFG.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION         = parseFloat(CFG.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION      = parseFloat(CFG.SEARCH_UPDATE_FRACTION || '0.10');
 
 // Precomputed cumulative dispatch thresholds for the non-consistency search mix
 const S_AGG    = FLAT_FRACTION;
 const S_UPDATE = FLAT_FRACTION + AGG_FRACTION;
 const S_WRITE  = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION;
-const CONNECTION_MODE      = __ENV.CONNECTION_MODE          || 'pinned';
-const NO_CONNECTION_REUSE  = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
-const EXECUTOR             = __ENV.EXECUTOR                 || 'constant-arrival-rate';
-const INGEST_RAMP_STAGES   = __ENV.INGEST_RAMP_STAGES
-  ? JSON.parse(__ENV.INGEST_RAMP_STAGES)
+const CONNECTION_MODE      = CFG.CONNECTION_MODE          || 'pinned';
+const NO_CONNECTION_REUSE  = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR             = CFG.EXECUTOR                 || 'constant-arrival-rate';
+const INGEST_RAMP_STAGES   = CFG.INGEST_RAMP_STAGES
+  ? JSON.parse(CFG.INGEST_RAMP_STAGES)
   : [{ duration: DURATION, target: INGEST_RATE }];
-const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
-  ? JSON.parse(__ENV.SEARCH_RAMP_STAGES)
+const SEARCH_RAMP_STAGES   = CFG.SEARCH_RAMP_STAGES
+  ? JSON.parse(CFG.SEARCH_RAMP_STAGES)
   : [{ duration: DURATION, target: SEARCH_RATE }];
 
 // ── Ring fill delay ────────────────────────────────────────────────────────
@@ -129,7 +130,7 @@ const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
 // at INGEST_RATE × (1 − SEQ_FRACTION) × (1 − BULK_FRACTION) per second. MIN_RING_FILL
 // converts a desired ID count into an estimated startTime delay for the search scenario,
 // so search VUs don't begin until the ring has enough entries to hit consistently.
-const MIN_RING_FILL     = parseInt(__ENV.MIN_RING_FILL || '0');
+const MIN_RING_FILL     = parseInt(CFG.MIN_RING_FILL || '0');
 const EST_ID_RATE       = INGEST_RATE * (1 - SEQ_FRACTION) * (1 - BULK_FRACTION);
 const RING_FILL_DELAY_S = MIN_RING_FILL > 0 && EST_ID_RATE > 0
   ? Math.ceil(MIN_RING_FILL / EST_ID_RATE)

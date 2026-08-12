@@ -38,11 +38,12 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import * as nycTaxisDocs from './GENERATOR_nyc_taxis_documents.js';
-import * as logsDocs     from './GENERATOR_logs_data_documents.js';
-import { runSequence } from './LIB_sequences.js';
-import { pinned, spread } from './LIB_connection-control.js';
-import { checkControl } from './LIB_control.js';
+import * as nycTaxisDocs from '../lib/data/nyc_taxis/documents.js';
+import * as logsDocs     from '../lib/data/logs_data/documents.js';
+import { runSequence } from '../lib/sequences.js';
+import { pinned, spread } from '../lib/connection-control.js';
+import { checkControl } from '../lib/control.js';
+import { CFG } from '../lib/config.js';
 
 // ── Custom metrics ─────────────────────────────────────────────────────────
 // k6 remote-write appends its own type suffix; names here must NOT include suffixes.
@@ -56,31 +57,31 @@ const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 
 // ── Schema selection ───────────────────────────────────────────────────────
 // All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCHEMA = __ENV.SCHEMA || 'nyc_taxis';
+const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs : nycTaxisDocs;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
 
 const MAPPINGS = {
-  nyc_taxis: open('./SCHEMA_nyc_taxis.json'),
-  logs_data: open('./SCHEMA_logs_data.json'),
+  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
+  logs_data: open('../data/logs_data/mapping.json'),
 };
 const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const PROXY_URL       = __ENV.CAPTURE_PROXY_URL   || 'https://capture-proxy:9200';
-const INDEX           = __ENV.INDEX_NAME          || SCHEMA;
-const RATE            = parseInt(__ENV.INGEST_RATE         || '50');
-const VUS             = parseInt(__ENV.INGEST_VUS          || '20');
-const MAX_VUS         = parseInt(__ENV.INGEST_MAX_VUS      || '100');
-const DURATION        = __ENV.DURATION            || '5m';
-const BATCH_SIZE      = parseInt(__ENV.BULK_BATCH_SIZE     || '20');
-const SEQ_FRACTION    = parseFloat(__ENV.SEQUENCE_FRACTION || '0.15');
-const BULK_FRACTION   = parseFloat(__ENV.BULK_FRACTION     || '0.70');
-const CONNECTION_MODE     = __ENV.CONNECTION_MODE           || 'pinned';
-const NO_CONNECTION_REUSE = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
-const EXECUTOR            = __ENV.EXECUTOR                 || 'constant-arrival-rate';
-const RAMP_STAGES     = __ENV.RAMP_STAGES
-  ? JSON.parse(__ENV.RAMP_STAGES)
+const PROXY_URL       = CFG.CAPTURE_PROXY_URL   || 'https://capture-proxy:9200';
+const INDEX           = CFG.INDEX_NAME          || SCHEMA;
+const RATE            = parseInt(CFG.INGEST_RATE         || '50');
+const VUS             = parseInt(CFG.INGEST_VUS          || '20');
+const MAX_VUS         = parseInt(CFG.INGEST_MAX_VUS      || '100');
+const DURATION        = CFG.DURATION            || '5m';
+const BATCH_SIZE      = parseInt(CFG.BULK_BATCH_SIZE     || '20');
+const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
+const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
+const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
+const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR            = CFG.EXECUTOR                 || 'constant-arrival-rate';
+const RAMP_STAGES     = CFG.RAMP_STAGES
+  ? JSON.parse(CFG.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
 
 // ── Connection params (resolved once per VU in init context) ───────────────

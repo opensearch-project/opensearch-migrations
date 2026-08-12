@@ -2,14 +2,22 @@
 
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay pipeline.
 The scenarios run on Kubernetes as **k6-operator `TestRun`** CRs, driven from the migration console
-(`workflow k6 …`), a thin shell helper, or plain `kubectl`. Everything k6 needs — the operator, the
-scenarios (as ConfigMaps), and the console's RBAC — ships in one **standalone, opt-in** chart:
-`deployment/k8s/charts/components/k6LoadTest`.
+(`workflow k6 …`), a thin shell helper, or plain `kubectl`.
+
+The load test itself — the scenario scripts, their libs, the document schemas and the load-profile
+presets — lives **in this directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
+image** (`migrations/k6_scripts`), mounted read-only at `/scripts` with a Kubernetes `image:` volume
+on pods running **stock `grafana/k6`**. That is the same mechanism as the migration's
+[mountable transforms](../../docs/MountableTransformsDesign.md), and it is why this chart requires
+**Kubernetes ≥ 1.35**. The cluster-side pieces (the operator, the example TestRuns, the console's
+RBAC) ship in one **standalone, opt-in** chart:
+`deployment/k8s/charts/components/k6LoadTest`. The chart holds no scenario content, so a run is
+specified by two names — a scenario (a script path under `/scripts`) and a preset (`K6_PRESET`).
 
 > **Deliberately separate from the migration.** The chart is **not** a dependency of any migration
-> aggregate, so a normal migration deployment contains no operator, no scenarios, no RBAC, and the
-> `workflow k6` commands are hidden/inert. Load testing only becomes possible after you explicitly
-> install this chart — nothing (and no agent) can trigger a load test by accident.
+> aggregate, so a normal migration deployment contains no operator, no example runs, no RBAC, and
+> the `workflow k6` commands are hidden/inert. Load testing only becomes possible after you
+> explicitly install this chart — nothing (and no agent) can trigger a load test by accident.
 
 > **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It targets
 > a reachable **Capture Proxy URL** and pushes metrics to the in-cluster **otel-collector**.
@@ -36,12 +44,15 @@ scenarios (as ConfigMaps), and the console's RBAC — ships in one **standalone,
 ## How it fits together
 
 ```text
+BUILD  (the load test itself — this directory)
+──────────────────────────────────────────────────────────────
+  TrafficCapture/trafficLoadTest [1] ──Dockerfile──► migrations/k6_scripts [2]  (FROM scratch)
+    scenarios/*.js  lib/**  data/*/mapping.json  k6-config/*.env   →   the whole image root
+
 INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
-  deployment/k8s/charts/components/k6LoadTest [1]
-    ├── Chart dependency: grafana/k6-operator [2]  ──►  TestRun CRD + controller
-    ├── ConfigMap/k6-scenarios [3]         (flat, type-prefixed files/k6/scripts/* → mounts at /scripts)
-    ├── ConfigMap/k6-preset-<name> [4]     (one per k6-config/*.env, one key per var → envFrom)
+  deployment/k8s/charts/components/k6LoadTest [3]     (deployment resources only — no scenarios)
+    ├── Chart dependency: grafana/k6-operator [4]  ──►  TestRun CRD + controller
     ├── ConfigMap/k6-testrun-examples [5]  (one ready-to-run TestRun JSON per scenario)
     └── Role/RoleBinding [6]               (grants the console SA rights on testruns.k6.io)
 
@@ -51,11 +62,11 @@ USAGE  (console optional — the example is the definition)
         └──────────────────┬───────────────┴──────────────────┘
                            ▼  load k6-testrun-examples.<scenario>, patch env/preset/parallelism
    TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
-     spec.parallelism · script.localFile=/scripts/SCENARIO_<scenario>.js
-     runner.envFrom ◄─ k6-preset-<config>   ;   runner.env ◄─ overrides (win) + K6_OUT
-     runner/initializer volumes ◄─ k6-scenarios (flat ConfigMap mounted at /scripts)
+     spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
+     runner.env ◄─ K6_PRESET=<config> + overrides (win over the preset) + K6_OUT
+     initializer+runner volumes ◄─ image: migrations/k6_scripts  →  mounted at /scripts
                            ▼  (operator: initializer → N runner pods)
-               k6 runner pods  (stock grafana/k6)
+     k6 runner pods  (stock grafana/k6 + the scripts image mounted at /scripts)
         ┌───────────────┴────────────────┐
    HTTPS│                                │ OTLP :4317  (K6_OUT=opentelemetry)
         ▼                                ▼
@@ -69,10 +80,10 @@ USAGE  (console optional — the example is the definition)
 
 | # | Piece | Source |
 |---|---|---|
-| 1 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
-| 2 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
-| 3 | Scenario code ConfigMap (flat) | `templates/k6-scenarios-configmap.yaml` (from `files/k6/scripts/`) |
-| 4 | Per-preset `envFrom` ConfigMaps | `templates/k6-presets-configmap.yaml` (parses `files/k6/k6-config/*.env`) |
+| 1 | Scenarios, libs, schemas, presets | `TrafficCapture/trafficLoadTest/{scenarios,lib,data,k6-config}` |
+| 2 | Scripts image (the data store) | `Dockerfile` here, built by `buildImages/build.gradle` as `migrations/k6_scripts` |
+| 3 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
+| 4 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
 | 5 | Example TestRuns (the run definition) | `templates/k6-testrun-examples.yaml` |
 | 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
 | 7 | `k6-run.sh` (console-independent submit) | `scripts/k6-run.sh` |
@@ -80,16 +91,43 @@ USAGE  (console optional — the example is the definition)
 | 9 | TUI k6 panel (`k`) | `.../workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
 | 10 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
 
-A run is specified by a `scenario` (script) and a `config` (a `k6-config/*.env` preset, applied via
-`envFrom`). Every value is overridable per run (`runner.env` wins over `envFrom`); load is spread
-across `--parallelism` runner pods by k6 execution segments.
+A run is specified by a `scenario` (a script under `/scripts`) and a `config` (a `k6-config/*.env`
+preset from the same mount, passed as `K6_PRESET`). Every value is overridable per run — the scenarios read
+real environment variables over the preset file — and load is spread across `--parallelism` runner
+pods by k6 execution segments.
 
 ---
 
 ## Install the load-test chart (opt-in)
 
-The chart depends on the `k6-operator` subchart, so vendor it once, then install into the migration
-namespace (`ma`). For local minikube the runner image comes from GCR's Docker Hub mirror.
+Build and push the **scripts image** first — it is what carries the scenarios and presets into the
+cluster (locally, `deployment/k8s/fillLocalRegistry.sh` puts it in the dev registry along with the
+other `migrations/*` images):
+
+```bash
+./gradlew :buildImages:buildImagesToRegistry     # builds migrations/k6_scripts with everything else
+```
+
+> **`migrations/k6_scripts` is build-it-yourself — it is not a released artifact.** Load testing is
+> a development/testing capability, so the image is deliberately **not** published to
+> `public.ecr.aws`/Docker Hub and is **not** mirrored by `aws-bootstrap.sh` (whose image list covers
+> only the four migration images). A cluster built purely from released artifacts therefore has no
+> scenarios — and no k6 chart either, since nothing in the EKS bootstrap installs it. The *runner*
+> image is unaffected: it is stock `grafana/k6`, an upstream artifact that mirrors normally. To
+> load-test a remote cluster, push the ~25 KB scripts image somewhere it can pull from:
+> ```bash
+> # ECR flattens images into one repo, tagged per image:
+> ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint=<acct>.dkr.ecr.<region>.amazonaws.com/<repo>
+> helm upgrade --install k6-load-test "$CHART" -n ma \
+>   --set scriptsImage.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
+>   --set scriptsImage.tag=migrations_k6_scripts_latest
+> ```
+> The test runner does exactly this for you when given `--registry-prefix` (see
+> [Integration test](#integration-test)).
+
+The chart depends on the `k6-operator` subchart, so vendor that once, then install into the
+migration namespace (`ma`), pointing `scriptsImage.repository` at wherever the image landed and
+`image.repository` at a `grafana/k6` mirror:
 
 ```bash
 CHART=deployment/k8s/charts/components/k6LoadTest
@@ -97,14 +135,19 @@ helm repo add grafana https://grafana.github.io/helm-charts
 helm dependency build "$CHART"          # vendors grafana/k6-operator into charts/
 
 helm upgrade --install k6-load-test "$CHART" -n ma \
-  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest
+  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest \
+  --set scriptsImage.repository=<registry>/migrations/k6_scripts --set scriptsImage.tag=latest
 ```
+
+> **Requires Kubernetes ≥ 1.35.** The examples mount the scenarios with an `image:` volume source
+> (ImageVolume), enabled by default from 1.35 — the chart declares this in `kubeVersion`, so an
+> older cluster fails the install rather than starting runners with an empty `/scripts`.
 
 Or let the data-plane script do it for you (it installs this chart alongside the capture proxy,
 source/target, Kafka and replayer):
 
 ```bash
-./buildImages/scripts/deployWorkflowComponents.sh up      # data plane + k6 chart
+./deployment/k8s/deployWorkflowComponents.sh up      # data plane + k6 chart
 ```
 
 Summing up, there are three ways the chart lands on a cluster - pick by context:
@@ -112,7 +155,7 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 | Route | Command | Use when |
 |---|---|---|
 | **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow k6` command. |
-| **Local data plane** | `./buildImages/scripts/deployWorkflowComponents.sh up` | Local minikube dev — installs k6 alongside the capture proxy, Kafka, replayer, etc. |
+| **Local data plane** | `./deployment/k8s/deployWorkflowComponents.sh up` | Local minikube dev — installs k6 alongside the capture proxy, Kafka, replayer, etc. |
 | **Integration tests** | `pipenv run app … --with-load-test` (the test runner) | Only to run the `Test0050` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
 
 All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
@@ -122,58 +165,69 @@ Verify:
 ```bash
 kubectl get crd testruns.k6.io
 kubectl -n ma get pods -l app.kubernetes.io/name=k6-operator
-kubectl -n ma get cm k6-scenarios k6-testrun-examples     # scenario code + ready-to-run examples
-kubectl -n ma get cm -l app=k6-load-test | grep k6-preset  # one envFrom ConfigMap per preset
+kubectl -n ma get cm k6-testrun-examples                  # ready-to-run examples
+# both images the run will pull — the k6 runtime and the scenarios:
+kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
+  | jq '{runner: .spec.runner.image, scripts: .spec.runner.volumes[0].image.reference}'
 ```
 
-On EKS the operator + runner images are mirrored to ECR via
-`deployment/k8s/charts/components/k6LoadTest/infra/mirror/k6-ecr-manifest.yaml`.
+On EKS the operator image, the `grafana/k6` runner image and the operator chart are mirrored to ECR
+via `deployment/k8s/charts/components/k6LoadTest/infra/mirror/k6-ecr-manifest.yaml` (opt-in —
+nothing mirrors it automatically). `migrations/k6_scripts` is **not** in that manifest: mirroring
+copies upstream artifacts, and it has no upstream — you build and push it yourself, as above.
 
 ---
 
 ## Updating scenarios, presets & other resources
 
-Everything k6 runs is a chart-rendered **ConfigMap** — the scenario scripts, the presets, the example
-TestRuns, and the Grafana dashboard. So there is **no image to rebuild**: after editing a source file
-you re-render the ConfigMaps with a `helm upgrade`, and the **next** run picks up the change.
+What k6 runs is **in the scripts image**; what Kubernetes needs to start a run is **in the chart**.
+Which side you edit decides whether you rebuild an image or run a `helm upgrade`.
 
-| Edit this | Source path | Rendered into | Template |
+| Edit this | Source path | Lands in | How to apply |
 |---|---|---|---|
-| Scenario / lib / generator / schema JS | `files/k6/scripts/*` | `k6-scenarios` ConfigMap (mounted at `/scripts`) | `k6-scenarios-configmap.yaml` |
-| Preset load-shape/config | `files/k6/k6-config/*.env` | one `k6-preset-<name>` ConfigMap each (`envFrom`) | `k6-presets-configmap.yaml` |
-| Grafana dashboard | `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `grafanaDashboard.yaml` |
-| Run distribution defaults (`parallelism`/`separate`/`cleanup`) | `values.yaml` (`testRun.*`) | `k6-testrun-examples` ConfigMap | `k6-testrun-examples.yaml` |
+| Scenario / lib / generator / schema JS | `scenarios/*.js`, `lib/**`, `data/<schema>/mapping.json` | `migrations/k6_scripts`, mounted at `/scripts` | rebuild + push the image |
+| Preset load-shape/config | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
+| Grafana dashboard | chart `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `helm upgrade` |
+| Run distribution defaults (`parallelism`/`separate`/`cleanup`) | chart `values.yaml` (`testRun.*`) | `k6-testrun-examples` ConfigMap | `helm upgrade` |
+| Runner image / tag | chart `values.yaml` (`image.*`) | every example's `spec.{initializer,runner}.image` | `helm upgrade` |
+| Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | every example's scripts volume `image.reference` | `helm upgrade` |
 
-**Apply the edit** — re-render into the same release (namespace `ma`):
+**Apply a scenario or preset edit** — rebuild the image, then submit a fresh run:
+
+```bash
+./gradlew :buildImages:buildImagesToRegistry            # rebuild + push migrations/k6_scripts
+./scripts/k6-run.sh ingest --config ingest-steady        # the new run pulls the new image
+```
+
+**Apply a chart edit** — re-render into the same release (namespace `ma`):
 
 ```bash
 CHART=deployment/k8s/charts/components/k6LoadTest
 helm upgrade k6-load-test "$CHART" -n ma \
-  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest --set image.pullPolicy=IfNotPresent
-```
-
-Then verify the ConfigMap actually changed and submit a fresh run:
-
-```bash
-kubectl -n ma get cm k6-scenarios -o "jsonpath={.data.SCENARIO_ingest\.js}" | head   # spot-check content
-./scripts/k6-run.sh ingest --config ingest-steady                                     # new run uses the new content
+  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest \
+  --set scriptsImage.repository=<registry>/migrations/k6_scripts --set scriptsImage.pullPolicy=Always
 ```
 
 Notes:
-- **In-flight runs are not affected.** ConfigMaps are read when the runner/initializer pods start, so
-  a run that is already going keeps the old scripts/presets — only runs submitted *after* the upgrade
-  see the edit. (This is also why editing is safe mid-test.)
-- **Re-supply the image values** on the `helm upgrade` (as shown). Do **not** use `--reuse-values` on
+- **Pull policy matters when the tag doesn't change.** Rebuilding `migrations/k6_scripts:latest`
+  only reaches new pods if they actually re-pull it — use `scriptsImage.pullPolicy=Always` while
+  iterating (what `deployWorkflowComponents.sh` and the test runner set), or pin the exact content
+  with `--set scriptsImage.digest=sha256:<hex>`, which wins over the tag.
+- **In-flight runs are not affected.** The image is pulled when the runner/initializer pods start, so
+  a run already going keeps the old scripts and presets. (This is also why editing is safe mid-test.)
+- **Adding a preset** means adding the `.env` file *and* registering it in `lib/config.js` — presets
+  are opened by literal path so `k6 archive` bundles all of them (see
+  [Design decisions](#design-decisions) §3). Also add the name to `CONFIG_PRESETS` in
+  `console_link/workflow/commands/k6.py`; a unit test fails if those two drift apart.
+- **Re-supply the image values** on a `helm upgrade` (as shown). Do **not** use `--reuse-values` on
   this release — it predates the `testRun` block and errors with a nil-pointer; pass the `--set
   image.*` overrides explicitly instead.
-- **Adding/removing a preset or scenario file** adds/removes its ConfigMap on the next upgrade (presets
-  are one ConfigMap per `.env`; scenarios share the flat `k6-scenarios` map).
 - **No `helm dependency build` needed** for file edits — that step only re-vendors the k6-operator
-  subchart, which is unchanged when you edit scenarios/presets.
+  subchart, which is unchanged when you edit scenarios or presets.
 - **Grafana dashboard** edits are imported by the kube-prometheus-stack Grafana sidecar a few seconds
   after the ConfigMap updates — no pod restart required.
 
-This ConfigMap-not-baked-image workflow is deliberate; see [Design decisions](#design-decisions) (§3).
+Keeping the load test out of ConfigMaps is deliberate; see [Design decisions](#design-decisions) (§3).
 
 ---
 
@@ -193,9 +247,9 @@ PROXY=https://capture-proxy:9201
 
 Three ways, all producing the same TestRun. **None requires the migration console** — it's
 optional convenience. The chart renders a ready-to-run TestRun per scenario into the
-`k6-testrun-examples` ConfigMap, with the scenario mount, runner image, `K6_OUT` metrics, and a
-default preset (via `envFrom`) all baked in. Override defaults by swapping the `envFrom` preset or
-adding `runner.env` entries — **`env` wins over `envFrom`** natively.
+`k6-testrun-examples` ConfigMap, with the runner image, the scripts image mounted at `/scripts`,
+`K6_OUT` metrics, and a default `K6_PRESET` all baked in. Override defaults by changing `K6_PRESET` or adding
+`runner.env` entries — the scenarios read **real environment variables over the preset file**.
 
 ### Distributing the run: `parallelism` & `separate`
 
@@ -238,8 +292,9 @@ kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" | kubectl 
 # With overrides (jq): different preset, parallelism, and an env override:
 kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
   | jq '.spec.parallelism=4
-        | .spec.runner.envFrom[0].configMapRef.name="k6-preset-ingest-burst"
-        | .spec.runner.env += [{"name":"INGEST_RATE","value":"120"}]' \
+        | .spec.runner.env = (.spec.runner.env | map(select(.name != "K6_PRESET")))
+        | .spec.runner.env += [{"name":"K6_PRESET","value":"ingest-burst"},
+                               {"name":"INGEST_RATE","value":"120"}]' \
   | kubectl -n ma create -f -
 ```
 Use `kubectl create` (not `apply`).
@@ -262,8 +317,8 @@ workflow k6 list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
 workflow k6 logs <run-name> -f
 workflow k6 stop <run-name>   |  --scenario mixed  |  --all
 ```
-`--config` swaps the `envFrom` preset; `--rate`/`--vus` fan out to the ingest+search vars; `-e
-KEY=VAL` and `--target` add `runner.env` overrides. TUI: `workflow manage` → **`k`** (launch + list
+`--config` sets `K6_PRESET`; `--rate`/`--vus` fan out to the ingest+search vars; `-e KEY=VAL` and
+`--target` add `runner.env` overrides. TUI: `workflow manage` → **`k`** (launch + list
 + stop). k6 runs are standalone TestRuns, so one never affects a migration workflow.
 
 > **`--parallelism` splits the load.** `--rate`/`--vus` are **global totals** k6 divides across the
@@ -281,9 +336,9 @@ KEY=VAL` and `--target` add `runner.env` overrides. TUI: `workflow manage` → *
 | chaos control | `-e CONTROL_ENABLED=true`, then drive via Webdis — also needs `registry.enabled=true` |
 | ignore thresholds | `--extra-args --no-thresholds` |
 
-The `k6-config/*.env` files are the source of truth: Helm renders each into a `k6-preset-<name>`
-ConfigMap, consumed via `envFrom`. (Metrics use `K6_OUT=opentelemetry`, not `--out` — see
-[Design decisions](#design-decisions).)
+The `k6-config/*.env` files are the source of truth: they are baked into the image and read at init
+time by `lib/config.js`, which merges the selected preset under the real environment variables.
+(Metrics use `K6_OUT=opentelemetry`, not `--out` — see [Design decisions](#design-decisions).)
 
 ---
 
@@ -294,8 +349,8 @@ in the [Configuration reference](#configuration-reference)):
 
 | Input | Default | Meaning |
 |---|---|---|
-| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/SCENARIO_<scenario>.js`) |
-| `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`) |
+| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
+| `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`), passed as `K6_PRESET` |
 | `--parallelism` | `1` (`workflow k6`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.separate`, default off) |
 | `--target` | preset's `CAPTURE_PROXY_URL` | Capture Proxy endpoint |
 | `--rate` | keep preset | request rate (sets `INGEST_RATE`+`SEARCH_RATE`) |
@@ -458,9 +513,9 @@ endpoint the dashboard reads.
 ## Tear down
 
 ```bash
-helm uninstall k6-load-test -n ma        # removes operator + scenarios + RBAC
+helm uninstall k6-load-test -n ma        # removes operator + example TestRuns + RBAC
 # or, if you brought it up via the data-plane script:
-./buildImages/scripts/deployWorkflowComponents.sh down
+./deployment/k8s/deployWorkflowComponents.sh down
 ```
 
 ---
@@ -509,10 +564,10 @@ Why the current setup looks the way it does (decision → rationale → alternat
 
 1. **Separate, opt-in chart — not part of the migration.** The load-test chart is *not* a
    dependency of any migration aggregate, so a normal migration deployment contains no operator,
-   no scenarios, no RBAC, and the `workflow k6` commands are hidden/inert. This is deliberate
+   no example runs, no RBAC, and the `workflow k6` commands are hidden/inert. This is deliberate
    safety: a user or an agent cannot accidentally fire a load test while running a migration.
    *Defense in depth:* four independent things are missing by default (the `testruns.k6.io` CRD,
-   the console RBAC, the scenario/preset ConfigMaps, and the visible CLI) — any one blocks a run.
+   the console RBAC, the example TestRuns, and the visible CLI) — any one blocks a run.
    *Rejected:* bundling k6 into `migrationAssistantWithArgo`, which would make load testing always
    present and discoverable.
 
@@ -521,29 +576,31 @@ Why the current setup looks the way it does (decision → rationale → alternat
    CRD-native lifecycle. *Cost:* a second orchestrator (the operator) alongside Argo — but it is
    scoped entirely to this opt-in chart. The earlier Argo `k6LoadTest.ts` template was retired.
 
-3. **Scenarios as a ConfigMap tree — not a baked custom image.** k6 runs on the **stock**
-   `grafana/k6` image; the scenarios ship as the `k6-scenarios` ConfigMap. Editing a scenario is a
-   `helm upgrade`, not an image rebuild. *Mechanism:* the scenario tree is **flattened** into one
-   directory (`files/k6/scripts/`), so ConfigMap keys are plain filenames and the ConfigMap
-   **mounts directly at `/scripts`** on both the runner and the initializer — no `items` projection.
-   Imports and `open()` are all `./`-relative. Because the flat dir mixes types, each file carries a
-   **`TYPE_` prefix** (`SCENARIO_`, `LIB_`, `GENERATOR_` for the doc/query builders, `SCHEMA_` for
-   the index-mapping JSON) — this also resolves the former `documents.js`/`queries.js`/`mapping.json`
-   name collisions. Total size (~130 KB) is well under the 1 MiB limit.
-   *Rejected:* a PVC (needs ReadWriteMany for multi-node parallelism, unavailable on minikube's
-   default storage) and a `k6 archive` tarball (reintroduces a build step, non-editable blob).
+3. **An OCI image is the data store — scenarios are files in this directory, not ConfigMaps.** The
+   whole load test (`scenarios/`, `lib/`, `data/`, `k6-config/`) lives here in its natural tree and
+   is published as `migrations/k6_scripts`, a `FROM scratch` image holding nothing but those files.
+   The chart mounts it read-only at `/scripts` with a Kubernetes `image:` volume on the initializer
+   and every runner, which otherwise run **`grafana/k6`**. Imports and `open()` are ordinary
+   relative paths and `script.localFile` is just a path under the mount. This is the same mechanism
+   the migration uses for [mountable transforms](../../docs/MountableTransformsDesign.md), down to
+   the `FROM scratch` + `COPY` Dockerfile and optional digest pinning.
+   *Costs:* editing a scenario is an image rebuild + push rather than a `helm upgrade`, and
+   ImageVolume means the chart requires k8s ≥ 1.35 (declared in `Chart.yaml`'s `kubeVersion`).
 
-4. **Presets are `envFrom` ConfigMaps; overrides are `env`; metrics via `K6_OUT`, not `--out`.**
-   Each `k6-config/*.env` is rendered into a `k6-preset-<name>` ConfigMap (one key per var) and
-   pulled in via `runner.envFrom`. Per-run overrides go in `runner.env`, and **Kubernetes makes
-   `env` win over `envFrom`** — so "defaults + overrides" is native, with no preset-parsing in any
-   tool. Metrics output is set with the `K6_OUT` env var because the operator also feeds
-   `spec.arguments` to the initializer's `k6 archive`, which rejects the run-only `--out` flag.
+4. **Presets are files in the image, selected by `K6_PRESET`; overrides are `env`; metrics via
+   `K6_OUT`, not `--out`.** `lib/config.js` `open()`s every `k6-config/*.env` and exports `CFG`, the
+   selected preset merged **under** `__ENV` — so a real environment variable always wins over the
+   preset, and per-run overrides stay plain `runner.env` entries. Scenarios read `CFG.X`, never
+   `__ENV.X` directly. *Mechanism note:* the presets are opened by **literal path**. k6 resolves `open()` at init time and the operator's initializer bundles the result into
+   the archive the runner pods execute; a computed path would bake in whichever preset the
+   *initializer* saw and no runner could pick another. Metrics output is set with the `K6_OUT` env
+   var because the operator also feeds `spec.arguments` to that same `k6 archive`, which rejects the
+   run-only `--out` flag.
 
 5. **Helm-rendered example TestRuns are the single definition; runs are kubectl-native; the console
    is optional.** The chart renders one ready-to-run TestRun per scenario into
-   `k6-testrun-examples` (the flat `/scripts` mount, image, `K6_OUT`, default `envFrom` preset,
-   labels, `generateName`). A run is `kubectl create` from that example (optionally patched), so it
+   `k6-testrun-examples` (runner image, the scripts image mounted at `/scripts`, the script path
+   under it, `K6_OUT`, default `K6_PRESET`, labels, `generateName`). A run is `kubectl create` from that example (optionally patched), so it
    works with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it,
    and `workflow k6` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`,
    TUI), guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no
@@ -560,11 +617,14 @@ Why the current setup looks the way it does (decision → rationale → alternat
    `Pending`). *Rejected:* hand-writing an `affinity` block per runner — `separate` is the
    CRD-native equivalent, valid since well before the vendored operator v1.5.0.
 
-7. **Stock images are mirrored, not pulled ad hoc.** The runner image comes from a chart value
-   (locally `mirror.gcr.io/grafana/k6`, GCR's Docker Hub mirror — same pattern as the data plane's
-   OpenSearch/Kafka images); on EKS the operator + runner images are mirrored to ECR via
-   `infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's mirror manifest so k6
-   mirroring is also opt-in.
+7. **Only the scenarios are ours; the runtime is upstream and mirrored normally.** The runner image
+   is `grafana/k6`, so it goes through the ordinary mirroring path
+   (`infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's manifest so k6 mirroring
+   is also opt-in). `migrations/k6_scripts` is deliberately **not** published as a release artifact
+   — load testing is a dev/test capability, so it is absent from `publishedRepoByImageName` and from
+   `aws-bootstrap.sh`'s image list. Whoever load-tests a cluster builds and pushes those 25 KB
+   themselves. *Rejected:* publishing a public k6 image, which would make a load generator part of
+   the released surface for every customer.
 
 8. **Validation scripts assume a running data plane.** A single parameterized
    `scripts/run_test.sh --scenario ingest|search|mixed|sequences [--shape steady|ramp|burst] [--run]`

@@ -52,12 +52,19 @@ KAFKA_TOPIC="logging-traffic-topic"
 DP_LABEL="part-of=k6-dataplane"
 CONSOLE_POD="migration-console-0"
 
-# k6 load-test chart (operator + scenarios + RBAC). Installed here — NOT by the migration deploy.
+# k6 load-test chart (operator + example TestRuns + RBAC). Installed here — NOT by the migration
+# deploy.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 K6_CHART="${SCRIPT_DIR}/charts/components/k6LoadTest"
 K6_RELEASE="k6-load-test"
-# Stock grafana/k6, pulled through GCR's Docker Hub mirror (same pattern as OS_IMAGE/KAFKA_IMAGE).
+# A run pulls two images. The runner is stock grafana/k6, through GCR's Docker Hub mirror (same
+# pattern as OS_IMAGE/KAFKA_IMAGE).
 K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6:latest}"
+# The scenarios and presets ride in migrations/k6_scripts (built from TrafficCapture/trafficLoadTest
+# by buildImages) and are mounted at /scripts. Being a migrations/* image it lives in the same
+# registry as the migration's own images, so the default is derived from captureProxyImage in
+# install_k6_chart rather than hardcoded. Set K6_SCRIPTS_IMAGE to point somewhere else.
+K6_SCRIPTS_IMAGE="${K6_SCRIPTS_IMAGE:-}"
 
 K() { kubectl --context "$CONTEXT" -n "$NAMESPACE" "$@"; }
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
@@ -235,19 +242,37 @@ YAML
 }
 
 install_k6_chart() {
-  say "Install k6 load-test chart (operator + scenarios + RBAC)"
+  say "Install k6 load-test chart (operator + example TestRuns + RBAC)"
   command -v helm >/dev/null || die "helm not found (needed to install the k6LoadTest chart)"
+  if [ -z "$K6_SCRIPTS_IMAGE" ]; then
+    # Reuse the registry the migration's own images came from: strip everything from "migrations/"
+    # onward off captureProxyImage (cmd_up already verified it is present) and append the scripts
+    # image. A registry that flattens images into one repo (ECR:
+    # <repo>:migrations_capture_proxy_latest) has no such prefix to reuse — pass
+    # K6_SCRIPTS_IMAGE explicitly there.
+    local proxy_img prefix; proxy_img=$(img captureProxyImage)
+    case "$proxy_img" in
+      *migrations/*) prefix="${proxy_img%migrations/*}" ;;
+      *)             prefix="" ;;
+    esac
+    K6_SCRIPTS_IMAGE="${prefix}migrations/k6_scripts:latest"
+  fi
   helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
   # Vendor the k6-operator subchart: offline from Chart.lock if already vendored, else fetch it.
   helm dependency build "$K6_CHART" >/dev/null 2>&1 \
     || helm dependency update "$K6_CHART" >/dev/null 2>&1 \
     || die "helm dependency build failed for $K6_CHART"
   local repo="${K6_IMAGE%:*}" tag="${K6_IMAGE##*:}"
+  local s_repo="${K6_SCRIPTS_IMAGE%:*}" s_tag="${K6_SCRIPTS_IMAGE##*:}"
+  # Always re-pull the scripts image: it is rebuilt in place under a moving tag while iterating on
+  # scenarios, so IfNotPresent would pin runner pods to whatever the node cached first.
   helm --kube-context "$CONTEXT" upgrade --install "$K6_RELEASE" "$K6_CHART" -n "$NAMESPACE" \
     --set image.repository="$repo" --set image.tag="$tag" --set image.pullPolicy=IfNotPresent \
+    --set scriptsImage.repository="$s_repo" --set scriptsImage.tag="$s_tag" \
+    --set scriptsImage.pullPolicy=Always \
     --timeout 300s 2>&1 | sed 's/^/  /'
   K rollout status deploy -l app.kubernetes.io/name=k6-operator --timeout=180s 2>&1 | tail -1 | sed 's/^/  /' || true
-  ok "k6 operator + scenarios installed (runner image: $K6_IMAGE)"
+  ok "k6 operator + example TestRuns installed (runner: $K6_IMAGE, scripts: $K6_SCRIPTS_IMAGE)"
 }
 
 cmd_up() {
@@ -306,7 +331,7 @@ cmd_status() {
 }
 
 cmd_down() {
-  say "Uninstall k6 load-test chart (operator + scenarios + RBAC)"
+  say "Uninstall k6 load-test chart (operator + example TestRuns + RBAC)"
   if command -v helm >/dev/null; then
     helm --kube-context "$CONTEXT" uninstall "$K6_RELEASE" -n "$NAMESPACE" 2>&1 | sed 's/^/  /' || true
   fi

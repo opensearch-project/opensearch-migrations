@@ -21,9 +21,9 @@ from textual.widgets import Static, Button, Input, Select, Checkbox, TextArea, R
 # Scenarios are discovered from the cluster (the k6-testrun-examples ConfigMap keys) and passed
 # into the modal. This literal is only a fallback for when that lookup returns nothing.
 _FALLBACK_SCENARIOS = ["ingest", "search", "mixed"]
-# Presets are discovered from the cluster (the k6-preset-* ConfigMaps) and passed into the modal.
-# This literal is only a fallback for when that lookup returns nothing — an API error, or a headless
-# test that constructs the modal without a cluster — so the config dropdown is never empty.
+# Presets live in the scripts image, so the caller passes in the CLI's list (k6.CONFIG_PRESETS).
+# This literal is only a fallback for when nothing is passed — e.g. a headless test that constructs
+# the modal directly — so the config dropdown is never empty.
 _FALLBACK_PRESETS = [
     "ingest-steady", "ingest-ramp", "ingest-burst",
     "search-steady", "search-deep-paging", "search-ramp", "search-burst",
@@ -136,7 +136,7 @@ class K6PanelModal(ModalScreen[Optional[dict]]):
         """Preset defaults for the (registry, control) toggles, so a freshly-opened box reflects
         what the run would do if left untouched. Only the mixed-* presets ship the consistency
         ring on (REGISTRY_ENABLED=true in k6-config/mixed-*.env); CONTROL_ENABLED is off in every
-        preset, and both default off in LIB_id-registry.js / LIB_control.js otherwise."""
+        preset, and both default off in lib/id-registry.js / lib/control.js otherwise."""
         preset = config_name or f"{scenario}-steady"
         return preset.startswith("mixed-"), False
 
