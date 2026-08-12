@@ -467,6 +467,7 @@ class TestArgoServiceFiltering:
             argo.get_workflow("missing-wf", "default")
 
         assert "404" in str(exc_info.value)
+        mock_response.close.assert_called_once()
 
 
 # --- PodScraperInterface Tests ---

@@ -1,5 +1,4 @@
 import atexit
-import ijson
 import json
 import requests
 import subprocess
@@ -9,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from console_link.workflow.commands.approve import approve_gate
+from console_link.workflow.services.argo_observation_service import (
+    load_slim_workflow,
+)
 from console_link.workflow.services.workflow_service import logger, WorkflowService
 
 
@@ -149,60 +151,15 @@ class ArgoWorkflowInterface:
 
 def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflowInterface:
     def _get_workflow_data_internal(service, name, namespace) -> tuple[str, dict]:
-        res = service.get_workflow_status(name, namespace, argo_url, token, insecure)
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        url = f"{argo_url}/api/v1/workflows/{namespace}/{name}"
-
-        resp = requests.get(url, headers=headers, verify=not insecure, stream=True)
-        if resp.status_code != 200:
-            raise requests.HTTPError(f"Request failed with status {resp.status_code}")
-
-        slim_nodes = {}
-        try:
-            parser = ijson.kvitems(resp.raw, 'status.nodes')
-            for node_id, node in parser:
-                # Only keep what is actually rendered in tree_utils
-                slim_nodes[node_id] = {
-                    "id": node_id,
-                    "displayName": node.get("displayName") or node_id,
-                    # no reason to keep the massive version
-                    "phase": node.get("phase"),
-                    "type": node.get("type"),
-                    "boundaryID": node.get("boundaryID"),
-                    "children": node.get("children", []),
-                    "startedAt": node.get("startedAt"),
-                    "finishedAt": node.get("finishedAt"),
-                    # Capture templateRef/templateName so tree_utils can identify approval nodes
-                    **({"templateRef": node["templateRef"]} if "templateRef" in node else {}),
-                    **({"templateName": node["templateName"]} if "templateName" in node else {}),
-                    **({"message": node["message"]} if "message" in node else {}),
-                    # Only keep inputs/outputs if they contain specific UI keys
-                    "inputs": {"parameters": [
-                        p for p in node.get("inputs", {}).get("parameters", [])
-                        if p['name'] in ('groupName_view', 'sortOrder_view', 'configContents', 'name', 'resourceName')
-                    ]},
-                    "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
-                                               p['name'] in ('statusOutput', 'overriddenPhase')],
-                                "artifacts": [a for a in node.get("outputs", {}).get("artifacts", []) if
-                                              a['name'] == 'statusOutput' or
-                                              a['name'] == 'metadataOutput']}
-                }
-        except Exception as e:
-            logger.error(f"Streaming parse failed: {e}")
-            raise
-        finally:
-            resp.close()
-
-        slim_data = {
-            "metadata": {"name": name,
-                         "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
-            "status": {
-                "nodes": slim_nodes,
-                "startedAt": res.get('started_at')
-            }
-        }
-
-        return res, slim_data
+        return load_slim_workflow(
+            service,
+            name,
+            namespace,
+            argo_url=argo_url,
+            token=token,
+            insecure=insecure,
+            request_get=requests.get,
+        )
 
     def approve(namespace: str, workflow_name: str, node_data: dict) -> WorkflowApproveResult:
         gate_name = None

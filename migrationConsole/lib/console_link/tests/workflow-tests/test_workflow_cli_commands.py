@@ -148,6 +148,60 @@ class TestWorkflowCLICommands:
         assert mock_server_class.call_args.kwargs["port"] == 9000
         assert mock_server_class.call_args.kwargs["public_url"] == "http://localhost:9000"
 
+    @patch('console_link.workflow.commands.manage.reset_terminal_mouse_reporting')
+    @patch('console_link.workflow.commands.manage._configure_file_logging')
+    @patch('console_link.workflow.commands.manage._serve_native_manage_app')
+    def test_manage_web_starts_native_server_without_tui_side_effects(
+        self,
+        mock_serve_web,
+        mock_configure_logging,
+        mock_reset_mouse,
+    ):
+        result = CliRunner().invoke(workflow_cli, [
+            'manage',
+            '--namespace', 'ma',
+            '--workflow-name', 'migration-workflow',
+            '--argo-server', 'https://argo.example:2746',
+            '--token', 'token',
+            '--web',
+            '--web-host', '0.0.0.0',
+            '--web-port', '8124',
+            '--web-static-dir', '/tmp/manage-web',
+            '--web-refresh-interval', '1.5',
+        ])
+
+        assert result.exit_code == 0
+        mock_serve_web.assert_called_once_with(
+            'migration-workflow',
+            'https://argo.example:2746',
+            'ma',
+            True,
+            'token',
+            '0.0.0.0',
+            8124,
+            '/tmp/manage-web',
+            1.5,
+        )
+        mock_configure_logging.assert_not_called()
+        mock_reset_mouse.assert_not_called()
+
+    @patch('console_link.workflow.commands.manage._serve_native_manage_app')
+    @patch('console_link.workflow.commands.manage._serve_manage_app')
+    def test_manage_rejects_native_web_and_textual_serve_together(
+        self,
+        mock_serve_textual,
+        mock_serve_web,
+    ):
+        result = CliRunner().invoke(
+            workflow_cli,
+            ['manage', '--serve', '--web'],
+        )
+
+        assert result.exit_code == 2
+        assert "--serve and --web cannot be used together" in result.output
+        mock_serve_textual.assert_not_called()
+        mock_serve_web.assert_not_called()
+
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
     @patch('console_link.workflow.commands.submit.delete_workflow')

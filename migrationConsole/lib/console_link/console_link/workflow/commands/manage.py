@@ -144,6 +144,35 @@ def _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
     server.serve(debug=serve_debug)
 
 
+def _serve_native_manage_app(
+    workflow_name,
+    argo_server,
+    namespace,
+    insecure,
+    token,
+    host,
+    port,
+    static_dir,
+    refresh_interval,
+):
+    from ..web.server import run_server
+
+    public_url = f"http://localhost:{port}"
+    click.echo(f"Serving native workflow manage on {public_url}")
+    click.echo(f"Listening on {host}:{port}; press Ctrl+C to stop.")
+    run_server(
+        namespace=namespace,
+        workflow_name=workflow_name,
+        argo_server=argo_server,
+        insecure=insecure,
+        token=token,
+        host=host,
+        port=port,
+        static_dir=static_dir,
+        refresh_interval=refresh_interval,
+    )
+
+
 # --- Entrypoint ---
 @click.command(name="manage")
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions, hidden=True)
@@ -171,13 +200,41 @@ def _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
               help='Browser-facing URL used for links and websockets. Defaults to '
                    'http://localhost:<port> for kubectl port-forward.')
 @click.option('--serve-debug', is_flag=True, hidden=True, envvar='WORKFLOW_MANAGE_SERVE_DEBUG')
+@click.option('--web', is_flag=True,
+              help='Run the native workflow manage web application and API.')
+@click.option('--web-host', default=MANAGE_SERVE_DEFAULT_HOST, show_default=True,
+              envvar='WORKFLOW_MANAGE_WEB_HOST',
+              help='Host/interface for the native web application to bind.')
+@click.option('--web-port', default=MANAGE_SERVE_DEFAULT_PORT, show_default=True,
+              type=click.IntRange(1, 65535), envvar='WORKFLOW_MANAGE_WEB_PORT',
+              help='Port for the native web application to bind.')
+@click.option('--web-static-dir', default=None, type=click.Path(path_type=str),
+              envvar='WORKFLOW_MANAGE_WEB_STATIC_DIR', hidden=True)
+@click.option('--web-refresh-interval', default=3.0, show_default=True, type=click.FloatRange(min=0.1),
+              envvar='WORKFLOW_MANAGE_WEB_REFRESH_INTERVAL', hidden=True)
 @click.pass_context
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view,
-                   serve, serve_host, serve_port, serve_public_url, serve_debug):
-    _configure_file_logging()  # Configure logging when command actually runs
+                   serve, serve_host, serve_port, serve_public_url, serve_debug,
+                   web, web_host, web_port, web_static_dir, web_refresh_interval):
+    if serve and web:
+        raise click.UsageError("--serve and --web cannot be used together")
+    if not web:
+        _configure_file_logging()  # Configure logging when the TUI command runs
     app = None
     try:
-        if serve:
+        if web:
+            _serve_native_manage_app(
+                workflow_name,
+                argo_server,
+                namespace,
+                insecure,
+                token,
+                web_host,
+                web_port,
+                web_static_dir,
+                web_refresh_interval,
+            )
+        elif serve:
             _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
                               resource_view, serve_host, serve_port, serve_public_url, serve_debug)
         else:
@@ -187,7 +244,7 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
     finally:
-        if not serve and not _running_under_textual_web_driver():
+        if not serve and not web and not _running_under_textual_web_driver():
             reset_terminal_mouse_reporting(sys.stdout)
 
     if app is not None:
