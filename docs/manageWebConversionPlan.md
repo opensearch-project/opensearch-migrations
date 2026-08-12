@@ -21,6 +21,8 @@ Read these related documents before changing code:
   selected.
 - [React UI System Comparison](../spikes/manage-web/UI_SYSTEM_COMPARISON.md) compares
   Cloudscape with React Aria Components and application-owned styling.
+- [Workflow Manage Parity Inventory](manageWebParityInventory.md) records capability
+  ownership, extraction targets, baseline tests, and explicit exclusions.
 
 The framework spikes and `manageConfig.cast.gz` are design evidence. They are not the
 production application and are not behavioral specifications.

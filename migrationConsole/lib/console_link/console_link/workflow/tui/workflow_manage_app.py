@@ -59,14 +59,19 @@ from ..commands.artifact_store import ArtifactStoreError
 from ..commands.crd_utils import RESETTABLE_PLURALS, parse_resource_path, resource_display_name
 from ..resource_tree import (
     CONFIG_MODE_LABELS,
-    approval_target_ref,
-    apply_config_overlays,
     resource_config_change_summary,
 )
 from ..manage_tree_schema import EDIT_ID_BY_TREE_ID, EDIT_RESOURCE_COLLECTION_PATHS
 from ..manage_tree_status import STATUS_PRIORITY, same_value_state, strip_status_badge
 from ..commands.show import read_managed_output
-from ..tree_utils import get_node_phase, is_approval_node
+from ..tree_utils import is_approval_node
+from ..application.manage_state import (
+    ManageStateService,
+    assign_workflow_progress,
+    iter_resource_nodes,
+    iter_running_approval_nodes,
+    workflow_has_active_rollout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +82,6 @@ DEFERRED_ERROR_NOTIFICATION_HOLD_SECONDS = 24 * 60 * 60
 NODE_TYPE_POD = "Pod"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
-ACTIVE_WORKFLOW_PHASES = {"Pending", PHASE_RUNNING}
-TERMINAL_WORKFLOW_PHASES = {PHASE_SUCCEEDED, "Failed", "Error"}
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
 DESC_SHOW_OUTPUT = "Show Output"
 DESC_VIEW_LOGS = "View Logs"
@@ -223,6 +226,12 @@ class WorkflowTreeApp(App):
         # Internal Application Metadata
         self._workflow_name = name
         self._namespace = namespace
+        self._manage_state_service = ManageStateService(
+            namespace=namespace,
+            workflow_name=name,
+            argo_service=argo_service,
+            config_service_provider=self._config_edit_service_or_default,
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -330,91 +339,30 @@ class WorkflowTreeApp(App):
 
     def _build_resource_sections(self, workflow_data: Dict):
         """Build resource sections with workflow steps merged (runs in worker thread)."""
-        from ..resource_tree import (
-            build_resource_tree, extract_workflow_steps_by_resource, mark_not_configured_groups,
-        )
-        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
-        sections = build_resource_tree(self._namespace)
-        if workflow_data and workflow_data.get('status', {}).get('nodes'):
-            tree_nodes = build_nested_workflow_tree(workflow_data)
-            filtered_tree = filter_tree_nodes(tree_nodes)
-            steps = extract_workflow_steps_by_resource(filtered_tree)
-            self._assign_workflow_progress(sections, steps)
-            mark_not_configured_groups(sections, filtered_tree)
-        try:
-            service = self._config_edit_service_or_default()
-            if hasattr(service, "load_resource_config_snapshots"):
-                snapshots = service.load_resource_config_snapshots(self._workflow_name)
-                self._last_resource_config_snapshots = snapshots
-                submitted_active = self._workflow_has_active_rollout(workflow_data)
-                apply_config_overlays(
-                    sections,
-                    submitted_resolved_config=snapshots.get("submitted") if submitted_active else None,
-                    pending_resolved_config=snapshots.get("pending"),
-                    deployed_console_config=snapshots.get("submitted_console") if not submitted_active else None,
-                    submitted_console_config=snapshots.get("submitted_console") if submitted_active else None,
-                    pending_console_config=snapshots.get("pending_console"),
-                )
-        except Exception:
-            logger.exception("Failed to load resource config change overlays")
+        sections = self._manage_state_service.build_resource_sections(workflow_data)
+        if self._manage_state_service.last_config_snapshots is not None:
+            self._last_resource_config_snapshots = (
+                self._manage_state_service.last_config_snapshots
+            )
         return sections
 
     @staticmethod
     def _workflow_has_active_rollout(workflow_data: Dict) -> bool:
         """Return whether the submitted config still represents an active rollout."""
-        status = (workflow_data or {}).get("status") or {}
-        phase = status.get("phase")
-        if phase in TERMINAL_WORKFLOW_PHASES:
-            return False
-        if phase in ACTIVE_WORKFLOW_PHASES:
-            return True
-
-        nodes = status.get("nodes") or {}
-        return any(
-            (node or {}).get("phase") in ACTIVE_WORKFLOW_PHASES
-            for node in nodes.values()
-        )
+        return workflow_has_active_rollout(workflow_data)
 
     @staticmethod
     def _assign_workflow_progress(sections, steps):
         """Attach workflow step subtrees to matching resource nodes."""
-        resources = [
-            resource
-            for section in sections
-            for group in section.groups
-            for resource in WorkflowTreeApp._iter_resource_nodes(group.resources)
-        ]
-        by_ref = {(resource.plural, resource.name): resource for resource in resources}
-        for resource in resources:
-            if resource.name in steps:
-                resource.workflow_progress = steps[resource.name]
-        for resource in resources:
-            for approval in WorkflowTreeApp._iter_running_approval_nodes(resource.workflow_progress or []):
-                target = approval_target_ref(approval)
-                if not target or target == (resource.plural, resource.name):
-                    continue
-                target_resource = by_ref.get(target)
-                if not target_resource:
-                    continue
-                existing = {step.get('id') for step in target_resource.workflow_progress or []}
-                if approval.get('id') not in existing:
-                    target_resource.workflow_progress = [
-                        *(target_resource.workflow_progress or []),
-                        approval,
-                    ]
+        assign_workflow_progress(sections, steps)
 
     @staticmethod
     def _iter_resource_nodes(resources):
-        for resource in resources:
-            yield resource
-            yield from WorkflowTreeApp._iter_resource_nodes(resource.children)
+        yield from iter_resource_nodes(resources)
 
     @staticmethod
     def _iter_running_approval_nodes(steps):
-        for step in steps:
-            if is_approval_node(step) and get_node_phase(step) == PHASE_RUNNING:
-                yield step
-            yield from WorkflowTreeApp._iter_running_approval_nodes(step.get('children', []))
+        yield from iter_running_approval_nodes(steps)
 
     def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
         """Handle pre-built resource sections on the main thread."""
