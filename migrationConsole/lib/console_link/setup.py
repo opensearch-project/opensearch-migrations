@@ -7,6 +7,7 @@ setup(
     packages=find_packages(exclude=("tests")),
     install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus",
                       "kubernetes", "rich>=14.0.0", "ruamel.yaml", "pydantic", "awscli",
+                      "fastapi>=0.115,<1", "uvicorn>=0.32,<1",
                       "ijson", "psutil", "textual>=8.2.7", "textual-serve"],
     entry_points={
         "console_scripts": [

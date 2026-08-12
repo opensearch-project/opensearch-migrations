@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "117e255cbe2cc8f2b5ec2f3594f7f97a5a69a431aafcde0159cc63265a9938d5"
+            "sha256": "f1f08d9dd383585f94cd40bdb0c6319a317b0236b1271eaf3e53533351ac1071"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1821,6 +1821,56 @@
             ],
             "markers": "python_version >= '3.10'",
             "version": "==1.24.2"
+        },
+        "annotated-doc": {
+            "hashes": [
+                "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
+                "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb"
+            ],
+            "markers": "python_version >= '3.9'",
+            "version": "==0.0.5"
+        },
+        "anyio": {
+            "hashes": [
+                "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+                "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f"
+            ],
+            "markers": "python_version >= '3.10'",
+            "version": "==4.14.2"
+        },
+        "fastapi": {
+            "hashes": [
+                "sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3",
+                "sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.10'",
+            "version": "==0.141.1"
+        },
+        "h11": {
+            "hashes": [
+                "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1",
+                "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==0.16.0"
+        },
+        "starlette": {
+            "hashes": [
+                "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c",
+                "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b"
+            ],
+            "markers": "python_version >= '3.10'",
+            "version": "==1.6.0"
+        },
+        "uvicorn": {
+            "hashes": [
+                "sha256:112ec661814189acbccd3f7b86460147cc065fc92c0821afa78918780e4354dd",
+                "sha256:e4403f9d93188cf9d1088e9f40e3acd12630e2df8675316704379a7fc20fff6a"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.10'",
+            "version": "==0.52.1"
         }
     },
     "develop": {
@@ -3390,6 +3440,39 @@
             ],
             "markers": "python_version >= '3.10'",
             "version": "==1.24.2"
+        },
+        "anyio": {
+            "hashes": [
+                "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+                "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f"
+            ],
+            "markers": "python_version >= '3.10'",
+            "version": "==4.14.2"
+        },
+        "h11": {
+            "hashes": [
+                "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1",
+                "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==0.16.0"
+        },
+        "httpcore": {
+            "hashes": [
+                "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+                "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==1.0.9"
+        },
+        "httpx": {
+            "hashes": [
+                "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc",
+                "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8'",
+            "version": "==0.28.1"
         }
     }
 }

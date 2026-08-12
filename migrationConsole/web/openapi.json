@@ -1,0 +1,644 @@
+{
+  "components": {
+    "schemas": {
+      "ApproveCapabilityV1": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalTargetId": {
+            "title": "Approvaltargetid",
+            "type": "string"
+          },
+          "kind": {
+            "const": "approve",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "approvalTargetId",
+          "label"
+        ],
+        "title": "ApproveCapabilityV1",
+        "type": "object"
+      },
+      "ComparisonV1": {
+        "additionalProperties": false,
+        "properties": {
+          "deployed": {
+            "$ref": "#/components/schemas/ValueStateV1"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "pending": {
+            "$ref": "#/components/schemas/ValueStateV1"
+          },
+          "pendingChanged": {
+            "title": "Pendingchanged",
+            "type": "boolean"
+          },
+          "submitted": {
+            "$ref": "#/components/schemas/ValueStateV1"
+          },
+          "submittedChanged": {
+            "title": "Submittedchanged",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "label",
+          "deployed",
+          "submitted",
+          "pending",
+          "submittedChanged",
+          "pendingChanged"
+        ],
+        "title": "ComparisonV1",
+        "type": "object"
+      },
+      "DetailV1": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "kind"
+        ],
+        "title": "DetailV1",
+        "type": "object"
+      },
+      "DiagnosticV1": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          }
+        },
+        "required": [
+          "severity",
+          "message"
+        ],
+        "title": "DiagnosticV1",
+        "type": "object"
+      },
+      "EditCapabilityV1": {
+        "additionalProperties": false,
+        "properties": {
+          "editTargetId": {
+            "title": "Edittargetid",
+            "type": "string"
+          },
+          "kind": {
+            "const": "edit",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          }
+        },
+        "required": [
+          "kind",
+          "editTargetId"
+        ],
+        "title": "EditCapabilityV1",
+        "type": "object"
+      },
+      "HealthV1": {
+        "additionalProperties": false,
+        "properties": {
+          "apiVersion": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "HealthV1",
+        "type": "object"
+      },
+      "LogsCapabilityV1": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "logs",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "logTargetId": {
+            "title": "Logtargetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "logTargetId"
+        ],
+        "title": "LogsCapabilityV1",
+        "type": "object"
+      },
+      "ManageNodeV1": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EditCapabilityV1"
+                },
+                {
+                  "$ref": "#/components/schemas/ApproveCapabilityV1"
+                },
+                {
+                  "$ref": "#/components/schemas/ResetCapabilityV1"
+                },
+                {
+                  "$ref": "#/components/schemas/LogsCapabilityV1"
+                },
+                {
+                  "$ref": "#/components/schemas/OutputCapabilityV1"
+                }
+              ]
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "childIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Childids",
+            "type": "array"
+          },
+          "comparisons": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonV1"
+            },
+            "title": "Comparisons",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/DetailV1"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticV1"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parentid"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "resourceName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resourcename"
+          },
+          "resourcePlural": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resourceplural"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "valueSummary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Valuesummary"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "kind",
+          "label",
+          "status"
+        ],
+        "title": "ManageNodeV1",
+        "type": "object"
+      },
+      "ManageSnapshotV1": {
+        "additionalProperties": false,
+        "properties": {
+          "formatVersion": {
+            "const": 1,
+            "title": "Formatversion",
+            "type": "integer"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "nodes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ManageNodeV1"
+            },
+            "title": "Nodes",
+            "type": "object"
+          },
+          "observedAt": {
+            "format": "date-time",
+            "title": "Observedat",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemV1"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "refreshError": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProblemV1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "rootIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rootids",
+            "type": "array"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workflowName": {
+            "title": "Workflowname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "formatVersion",
+          "revision",
+          "observedAt",
+          "namespace",
+          "workflowName",
+          "workflow",
+          "rootIds",
+          "nodes"
+        ],
+        "title": "ManageSnapshotV1",
+        "type": "object"
+      },
+      "OutputCapabilityV1": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "output",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "outputTargetId": {
+            "title": "Outputtargetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "outputTargetId"
+        ],
+        "title": "OutputCapabilityV1",
+        "type": "object"
+      },
+      "ProblemV1": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "message",
+          "retryable"
+        ],
+        "title": "ProblemV1",
+        "type": "object"
+      },
+      "ResetCapabilityV1": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "reset",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "resetTargetId": {
+            "title": "Resettargetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "resetTargetId",
+          "label"
+        ],
+        "title": "ResetCapabilityV1",
+        "type": "object"
+      },
+      "ValueStateV1": {
+        "additionalProperties": false,
+        "properties": {
+          "present": {
+            "title": "Present",
+            "type": "boolean"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Provenance"
+          },
+          "value": {
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "present"
+        ],
+        "title": "ValueStateV1",
+        "type": "object"
+      },
+      "WorkflowV1": {
+        "additionalProperties": false,
+        "properties": {
+          "finishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finishedat"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Startedat"
+          }
+        },
+        "required": [
+          "name",
+          "phase"
+        ],
+        "title": "WorkflowV1",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Workflow Manage API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/system/health": {
+      "get": {
+        "operationId": "health_api_v1_system_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

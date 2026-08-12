@@ -15,6 +15,8 @@ Click = "*"
 cerberus = "*"
 awscli = "*"
 pydantic = "==2.12.2"
+fastapi = ">=0.115,<1"
+uvicorn = ">=0.32,<1"
 rich = "==14.2.0"
 textual = ">=8.2.7"
 ijson = "*"
@@ -29,6 +31,7 @@ coverage = "*"
 moto = "*"
 testcontainers = {extras = ["k3s"], version = "*"}
 pytest-asyncio = "*"
+httpx = "*"
 
 [requires]
 python_version = "3.11"

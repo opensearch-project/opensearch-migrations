@@ -1,0 +1,121 @@
+:root {
+  color: #17212b;
+  background: #f4f6f8;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 20px;
+  border-bottom: 1px solid #d9e0e6;
+  background: #fff;
+}
+
+.app-header h1,
+.app-header p {
+  margin: 0;
+}
+
+.app-header h1 {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.app-header p {
+  color: #637180;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-right: 10px;
+  place-items: center;
+  border-radius: 6px;
+  color: #fff;
+  background: #163d57;
+}
+
+.brand-mark svg {
+  width: 19px;
+}
+
+.server-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: #4c5b68;
+  font-size: 13px;
+}
+
+.server-state svg {
+  width: 16px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #24814f;
+}
+
+.shell-loading {
+  display: flex;
+  min-height: calc(100vh - 64px);
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #4c5b68;
+  font-size: 14px;
+}
+
+.shell-loading svg {
+  width: 18px;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
