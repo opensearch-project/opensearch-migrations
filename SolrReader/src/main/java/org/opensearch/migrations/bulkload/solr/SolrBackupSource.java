@@ -266,7 +266,7 @@ public class SolrBackupSource implements DocumentSource {
             var reader = new IndexReader9(indexDir, false, null);
             var directoryReader = reader.getReader(mappedDir, segmentsFile);
 
-            rejectOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
                 () -> mappedSegmentDataFiles(fileNameMapping));
 
             log.atInfo().setMessage("Reading Solr backup (mapped): {} docs in {} segments from {}")
@@ -287,7 +287,7 @@ public class SolrBackupSource implements DocumentSource {
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
 
-            rejectOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
                 () -> listSegmentDataFiles(indexDir));
 
             log.atInfo().setMessage("Reading Solr backup: {} docs in {} segments from {}")
@@ -317,12 +317,13 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     /**
-     * Segment data with no commit point referencing it reads as zero documents and no error.
-     * The check is version-agnostic; SOLR-9091 is the common cause but not the only possible one.
-     * An empty collection has no segment data, so both conditions are required to fail.
+     * Segment data unreferenced by the commit point reads as zero documents and no error.
+     * An empty collection has no segment data, so both conditions are required to throw.
+     *
+     * @throws SolrBackupReadException if the backup has segment data but no documents
      */
-    private static void rejectOrphanedSegmentData(Path indexDir, int maxDoc, String segmentsFile,
-                                                  Supplier<List<String>> segmentDataFiles) {
+    private static void assertNoOrphanedSegmentData(Path indexDir, int maxDoc, String segmentsFile,
+                                                    Supplier<List<String>> segmentDataFiles) {
         if (maxDoc > 0) {
             return;
         }
