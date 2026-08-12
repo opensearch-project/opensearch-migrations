@@ -107,6 +107,39 @@ public class SolrCloudSegmentAndReplicaBackupTest {
         }
     }
 
+    /**
+     * Force-merging before BACKUP leaves one Lucene segment per shard. Runs on Solr 9, whose
+     * incremental layout stores UUID filenames, so segments are counted from the shard metadata
+     * rather than the directory listing.
+     */
+    @Test
+    void singleSegmentCloudBackupMigratesAllDocuments() throws Exception {
+        var solrVersion = SolrClusterContainer.SOLR_9;
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            solr.start();
+            target.start();
+
+            createCloudCollection(solr, solrVersion);
+            // Several batches first, so the merge is what reduces the count rather than the indexing.
+            indexInBatches(solr, DOC_COUNT, 4);
+            forceMerge(solr);
+
+            var schema = fetchSchema(solr, COLLECTION);
+            var collectionBackup = backupAndCopyToHost(solr, solrVersion).resolve(COLLECTION);
+
+            for (var shard : listShardMetadata(collectionBackup)) {
+                assertThat("force merge should leave one segment in " + shard.getFileName(),
+                    countSegmentsInMetadata(shard), equalTo(1));
+            }
+
+            migrate(collectionBackup, schema, solrVersion, target);
+            verifyDocCount(target, COLLECTION, DOC_COUNT);
+        }
+    }
+
     // --- Solr setup ---
 
     private static void createCloudCollection(
@@ -128,7 +161,8 @@ public class SolrCloudSegmentAndReplicaBackupTest {
                 + "&name=" + COLLECTION
                 + "&numShards=" + NUM_SHARDS
                 + "&replicationFactor=1"
-                + "&maxShardsPerNode=" + NUM_SHARDS
+                // maxShardsPerNode was removed in Solr 9.
+                + (solrVersion.major() < 9 ? "&maxShardsPerNode=" + NUM_SHARDS : "")
                 + (solrVersion.major() == 6 ? "&collection.configName=_default" : "")
                 + "&wt=json");
         log.atInfo().setMessage("CREATE response: {}").addArgument(create.getStdout()).log();
@@ -152,6 +186,14 @@ public class SolrCloudSegmentAndReplicaBackupTest {
                 "http://localhost:8983/solr/" + COLLECTION + "/update?commit=true",
                 "-d", sb.toString());
         }
+    }
+
+    /** Bounds the segment count from above: every shard is left with exactly one segment. */
+    private static void forceMerge(SolrClusterContainer solr) throws Exception {
+        var result = solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/" + COLLECTION
+                + "/update?optimize=true&maxSegments=1&waitSearcher=true");
+        log.atInfo().setMessage("optimize response: {}").addArgument(result.getStdout()).log();
     }
 
     private static void waitForCollectionActive(SolrClusterContainer solr, int expectedShards, int maxSeconds)
@@ -331,6 +373,31 @@ public class SolrCloudSegmentAndReplicaBackupTest {
             migrate(collectionBackup, schema, SolrClusterContainer.SOLR_8, target);
             verifyDocCount(target, COLLECTION, DOC_COUNT);
         }
+    }
+
+    private static java.util.List<Path> listShardMetadata(Path collectionBackup) throws IOException {
+        var metadataDir = collectionBackup.resolve("shard_backup_metadata");
+        if (!Files.isDirectory(metadataDir)) {
+            throw new IllegalStateException("No shard_backup_metadata under " + collectionBackup);
+        }
+        try (var files = Files.list(metadataDir)) {
+            return files.filter(p -> p.getFileName().toString().startsWith("md_shard")).sorted().toList();
+        }
+    }
+
+    /**
+     * The metadata maps each backed-up file's UUID to its Lucene name, and every segment
+     * contributes exactly one {@code .si}.
+     */
+    private static int countSegmentsInMetadata(Path shardMetadata) throws IOException {
+        var entries = MAPPER.readTree(Files.readString(shardMetadata));
+        var segments = 0;
+        for (var entry : entries) {
+            if (entry.path("fileName").asText("").endsWith(".si")) {
+                segments++;
+            }
+        }
+        return segments;
     }
 
     /** One md_shard<N>_*.json per shard in the incremental layout, regardless of replica count. */
