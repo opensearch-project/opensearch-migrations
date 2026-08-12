@@ -41,9 +41,12 @@ export class ConfigApiError extends Error {
   constructor(status: number, fallback: string, error: unknown) {
     const body = error as { detail?: ApiErrorDetail | string } | undefined;
     const detail = body?.detail;
-    const message = typeof detail === "string"
-      ? detail
-      : detail?.message ?? fallback;
+    let message = fallback;
+    if (typeof detail === "string") {
+      if (detail !== "Not Found") message = detail;
+    } else if (detail?.message) {
+      message = detail.message;
+    }
     super(message);
     this.name = "ConfigApiError";
     this.status = status;
@@ -80,7 +83,9 @@ export async function getConfigDraft(): Promise<ConfigDraft> {
   if (!response.ok || error || !data) {
     throw new ConfigApiError(
       response.status,
-      "Configuration is unavailable",
+      response.status === 404
+        ? "This Workflow Manage server does not provide configuration editing. Restart it with the current web application."
+        : "Configuration is unavailable",
       error,
     );
   }

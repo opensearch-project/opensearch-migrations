@@ -828,10 +828,14 @@ export function ConfigEditor({
     );
   }
   if (draftQuery.isError || !draft) {
+    const message = draftQuery.error instanceof Error
+      ? draftQuery.error.message
+      : "The server did not return a configuration draft.";
     return (
-      <main className="shell-error">
+      <main className="shell-error" role="alert">
         <AlertTriangle />
         <h2>Configuration is unavailable</h2>
+        <p>{message}</p>
         <button onClick={() => void draftQuery.refetch()} type="button">
           Try again
         </button>

@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 import json
+import logging
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
@@ -30,6 +31,7 @@ from .contracts import (
 
 
 DEFAULT_STATIC_DIR = Path(__file__).with_name("static")
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -102,7 +104,19 @@ def create_app(
         tags=["configuration"],
     )
     def open_config() -> ConfigDraftV1:
-        return ConfigDraftV1.from_domain(draft_service().open())
+        try:
+            return ConfigDraftV1.from_domain(draft_service().open())
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.exception("Failed to open the workflow configuration")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_unavailable",
+                    "message": str(error) or type(error).__name__,
+                },
+            ) from error
 
     @app.post(
         "/api/v1/config/operations",

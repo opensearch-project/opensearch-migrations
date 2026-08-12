@@ -22,6 +22,11 @@ import { ResourceTree } from "../features/tree/ResourceTree";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
 
 
+const HISTORY_GUARD_KEY = "__workflowManageGuard";
+const HISTORY_GUARD_MESSAGE =
+  "Leave Workflow Manage? Active operations will continue in the cluster.";
+
+
 function firstSelectableId(snapshot: ManageSnapshot): string | null {
   const resource = Object.values(snapshot.nodes).find(
     (node) => node.kind === "resource",
@@ -47,6 +52,51 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const [editTargetId, setEditTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const currentState = (
+      typeof window.history.state === "object" && window.history.state !== null
+        ? window.history.state as Record<string, unknown>
+        : {}
+    );
+    if (currentState[HISTORY_GUARD_KEY] !== "sentinel") {
+      window.history.replaceState(
+        { ...currentState, [HISTORY_GUARD_KEY]: "base" },
+        "",
+        window.location.href,
+      );
+      window.history.pushState(
+        { ...currentState, [HISTORY_GUARD_KEY]: "sentinel" },
+        "",
+        window.location.href,
+      );
+    }
+
+    const guardBackNavigation = () => {
+      if (!window.confirm(HISTORY_GUARD_MESSAGE)) {
+        const state = (
+          typeof window.history.state === "object"
+          && window.history.state !== null
+            ? window.history.state as Record<string, unknown>
+            : {}
+        );
+        window.history.pushState(
+          { ...state, [HISTORY_GUARD_KEY]: "sentinel" },
+          "",
+          window.location.href,
+        );
+        return;
+      }
+      window.removeEventListener("popstate", guardBackNavigation);
+      window.history.back();
+    };
+
+    window.addEventListener("popstate", guardBackNavigation);
+    return () => window.removeEventListener(
+      "popstate",
+      guardBackNavigation,
+    );
+  }, []);
 
   useEffect(() => {
     if (!state.data) return;

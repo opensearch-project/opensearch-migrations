@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
@@ -270,6 +276,52 @@ test("opens a generic configuration editor and explains generated values", async
     within(configTree).getByRole("treeitem", {
       name: /Advanced setting: quiet/,
     }),
+  ).toBeInTheDocument();
+});
+
+
+test("shows the server reason when configuration cannot be opened", async () => {
+  server.use(
+    http.get("*/api/v1/config", () =>
+      HttpResponse.json(
+        {
+          detail: {
+            code: "configuration_unavailable",
+            message: "CONFIG_PROCESSOR_DIR is not configured",
+          },
+        },
+        { status: 503 },
+      ),
+    ),
+  );
+  renderApp();
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  expect(
+    await screen.findByRole("heading", {
+      name: "Configuration is unavailable",
+    }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("CONFIG_PROCESSOR_DIR is not configured"))
+    .toBeInTheDocument();
+});
+
+
+test("guards browser back navigation before leaving workflow manage", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  renderApp();
+  await screen.findByRole("tree", { name: "Workflow resources" });
+
+  fireEvent.popState(window);
+
+  await waitFor(() => expect(confirm).toHaveBeenCalledWith(
+    "Leave Workflow Manage? Active operations will continue in the cluster.",
+  ));
+  expect(
+    screen.getByRole("heading", { name: "Workflow Manage" }),
   ).toBeInTheDocument();
 });
 

@@ -380,6 +380,30 @@ def test_config_routes_expose_recursive_edit_state_without_raw_yaml(tmp_path):
     assert "rawYaml" not in payload
 
 
+def test_config_open_returns_actionable_service_error(tmp_path):
+    drafts = _Drafts()
+
+    def fail_to_open():
+        raise RuntimeError("CONFIG_PROCESSOR_DIR is not configured")
+
+    drafts.open = fail_to_open
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "configuration_unavailable",
+            "message": "CONFIG_PROCESSOR_DIR is not configured",
+        }
+    }
+
+
 def test_config_operation_contract_is_discriminated_and_passed_to_the_service(tmp_path):
     drafts = _Drafts()
     app = create_app(
