@@ -36,6 +36,7 @@ import { ExternalResourceEditor } from "./ExternalResourceEditor";
 interface ConfigEditorProps {
   initialTargetId?: string | null;
   onClose: () => void;
+  resourceLabel: string;
 }
 
 
@@ -126,6 +127,34 @@ function findParent(nodes: EditNode[], nodeId: string): EditNode | null {
 }
 
 
+function findClosestNode(
+  nodes: EditNode[],
+  nodeId: string | null,
+): EditNode | null {
+  let candidate = nodeId;
+  while (candidate) {
+    const node = findNode(nodes, candidate);
+    if (node) return node;
+    const separator = candidate.lastIndexOf(".");
+    if (separator < 0) return null;
+    candidate = candidate.slice(0, separator);
+  }
+  return null;
+}
+
+
+function editScope(nodes: EditNode[], nodeId: string | null): EditNode | null {
+  const target = findClosestNode(nodes, nodeId);
+  if (!target || nodeChildren(target).length > 0) return target;
+  return findParent(nodes, target.id) ?? target;
+}
+
+
+function pathWithin(path: string[], scopePath: string[]): boolean {
+  return scopePath.every((part, index) => path[index] === part);
+}
+
+
 function initialExpanded(nodes: EditNode[]): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
@@ -134,7 +163,10 @@ function initialExpanded(nodes: EditNode[]): Set<string> {
     }
     nodeChildren(node).forEach(visit);
   };
-  nodes.forEach(visit);
+  nodes.forEach((node) => {
+    if (nodeChildren(node).length > 0) result.add(node.id);
+    nodeChildren(node).forEach(visit);
+  });
   return result;
 }
 
@@ -720,6 +752,7 @@ function FieldPanel({
 export function ConfigEditor({
   initialTargetId,
   onClose,
+  resourceLabel,
 }: ConfigEditorProps) {
   const queryClient = useQueryClient();
   const draftQuery = useQuery({
@@ -742,18 +775,33 @@ export function ConfigEditor({
     () => draft?.editState.nodes ?? [],
     [draft?.editState.nodes],
   );
+  const target = useMemo(
+    () => findClosestNode(nodes, initialTargetId ?? null),
+    [initialTargetId, nodes],
+  );
+  const scope = useMemo(
+    () => editScope(nodes, initialTargetId ?? null),
+    [initialTargetId, nodes],
+  );
+  const scopedNodes = useMemo(
+    () => scope ? [scope] : nodes,
+    [nodes, scope],
+  );
 
   useEffect(() => {
     if (!draft) return;
-    setExpanded((current) => current.size > 0
-      ? new Set([...current].filter((id) => findNode(nodes, id)))
-      : initialExpanded(nodes));
+    setExpanded((current) => {
+      const retained = new Set(
+        [...current].filter((id) => findNode(scopedNodes, id)),
+      );
+      return retained.size > 0 ? retained : initialExpanded(scopedNodes);
+    });
     setSelectedId((current) => (
-      findNode(nodes, current)
+      findNode(scopedNodes, current)
         ? current
-        : findNode(nodes, initialTargetId ?? null)?.id ?? nodes[0]?.id ?? null
+        : target?.id ?? scopedNodes[0]?.id ?? null
     ));
-  }, [draft, initialTargetId, nodes]);
+  }, [draft, scopedNodes, target]);
 
   useEffect(() => {
     if (!draft?.dirty) return;
@@ -766,11 +814,23 @@ export function ConfigEditor({
   }, [draft?.dirty]);
 
   const rows = useMemo(
-    () => treeRows(nodes, expanded, showOptional, showExpert),
-    [expanded, nodes, showExpert, showOptional],
+    () => treeRows(scopedNodes, expanded, showOptional, showExpert),
+    [expanded, scopedNodes, showExpert, showOptional],
   );
   const selected = findNode(nodes, selectedId);
   const parent = selected ? findParent(nodes, selected.id) : null;
+  const scopedDiagnostics = useMemo(
+    () => (draft?.editState.validation.diagnostics ?? []).filter(
+      (diagnostic) => (
+        !scope
+        || (diagnostic.path ?? []).length === 0
+        || pathWithin(diagnostic.path ?? [], scope.path)
+      ),
+    ),
+    [draft?.editState.validation.diagnostics, scope],
+  );
+  const scopeNeedsAttention = rows.some(({ node }) => nodeHasIssue(node))
+    || scopedDiagnostics.length > 0;
 
   const replaceDraft = async (promise: Promise<ConfigDraft>) => {
     setBusy(true);
@@ -821,10 +881,10 @@ export function ConfigEditor({
 
   if (draftQuery.isPending) {
     return (
-      <main className="shell-loading">
+      <section className="workspace shell-loading">
         <LoaderCircle className="spin" />
         <strong>Opening configuration</strong>
-      </main>
+      </section>
     );
   }
   if (draftQuery.isError || !draft) {
@@ -832,22 +892,26 @@ export function ConfigEditor({
       ? draftQuery.error.message
       : "The server did not return a configuration draft.";
     return (
-      <main className="shell-error" role="alert">
+      <section className="workspace shell-error" role="alert">
         <AlertTriangle />
         <h2>Configuration is unavailable</h2>
         <p>{message}</p>
         <button onClick={() => void draftQuery.refetch()} type="button">
           Try again
         </button>
-      </main>
+      </section>
     );
   }
 
   return (
-    <main className="config-editor">
+    <section
+      aria-label={`Edit ${resourceLabel} configuration`}
+      className="workspace config-editor"
+    >
       <header className="config-toolbar">
-        <div>
-          <h2>Configuration</h2>
+        <div className="config-toolbar-title">
+          <span>Configuration</span>
+          <h2>Edit {resourceLabel}</h2>
           <span>{draft.dirty ? "Unsaved changes" : "Saved configuration"}</span>
         </div>
         <div className="config-toolbar-filters">
@@ -870,33 +934,39 @@ export function ConfigEditor({
         </div>
         <div className="config-toolbar-actions">
           <button
+            aria-label="Reload draft"
             disabled={busy || draftQuery.isFetching}
             onClick={() => void draftQuery.refetch()}
+            title="Reload draft"
             type="button"
           >
             <RefreshCw className={draftQuery.isFetching ? "spin" : ""} />
-            Reload draft
+            <span>Reload draft</span>
           </button>
           <button
+            aria-label="Discard changes"
             disabled={busy || !draft.dirty}
             onClick={() => void replaceDraft(discardConfigDraft(
               draft.draftRevision,
             ))}
+            title="Discard changes"
             type="button"
           >
             <Undo2 />
-            Discard changes
+            <span>Discard changes</span>
           </button>
           <button
+            aria-label="Save changes"
             className="primary-button"
             disabled={busy || !draft.dirty}
             onClick={() => void replaceDraft(saveConfigDraft(
               draft.draftRevision,
             ))}
+            title="Save changes"
             type="button"
           >
             <Save />
-            Save changes
+            <span>Save changes</span>
           </button>
           <button
             aria-label="Close configuration"
@@ -917,6 +987,10 @@ export function ConfigEditor({
       ) : null}
       <div className="config-layout">
         <section className="config-tree-panel">
+          <header className="config-outline-header">
+            <strong>{scope?.label ?? "Workflow configuration"}</strong>
+            <span>{rows.length} visible fields</span>
+          </header>
           <div aria-label="Configuration fields" className="config-tree" role="tree">
             {rows.map(({ node, depth }, rowIndex) => {
               const children = nodeChildren(node);
@@ -968,7 +1042,7 @@ export function ConfigEditor({
                           return next;
                         });
                       } else {
-                        const parentNode = findParent(nodes, node.id);
+                        const parentNode = findParent(scopedNodes, node.id);
                         if (parentNode) {
                           rowElements.current.get(parentNode.id)?.focus();
                         }
@@ -1031,26 +1105,26 @@ export function ConfigEditor({
             <h3>Validation</h3>
           </header>
           <strong>
-            {draft.editState.validation.valid
-              ? "Configuration is valid"
-              : "Configuration needs attention"}
+            {scopeNeedsAttention
+              ? "This configuration needs attention"
+              : "This configuration is valid"}
           </strong>
-          {(draft.editState.validation.errors ?? []).map((error) => (
+          {!scope ? (draft.editState.validation.errors ?? []).map((error) => (
             <p key={error}>{error}</p>
-          ))}
-          {(draft.editState.validation.diagnostics ?? []).map(
+          )) : null}
+          {scopedDiagnostics.map(
             (diagnostic, index) => (
               <button
                 key={`${diagnostic.message}-${index}`}
                 onClick={() => {
-                  const target = nodes
+                  const diagnosticTarget = scopedNodes
                     .flatMap(function flatten(node): EditNode[] {
                       return [node, ...nodeChildren(node).flatMap(flatten)];
                     })
                     .find((node) => (
                       node.path.join(".") === (diagnostic.path ?? []).join(".")
                     ));
-                  if (target) setSelectedId(target.id);
+                  if (diagnosticTarget) setSelectedId(diagnosticTarget.id);
                 }}
                 type="button"
               >
@@ -1069,6 +1143,6 @@ export function ConfigEditor({
           ) : null}
         </aside>
       </div>
-    </main>
+    </section>
   );
 }

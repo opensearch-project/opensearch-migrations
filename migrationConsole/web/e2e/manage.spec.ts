@@ -164,7 +164,7 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit capture" }).click();
-  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   const configTree = page.getByRole("tree", { name: "Configuration fields" });
 
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
@@ -193,23 +193,39 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
 });
 
 
+test("keeps the resource overview visible during scoped editing", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  const resources = page.getByRole("tree", { name: "Workflow resources" });
+  await page.getByRole("button", { name: "Edit capture" }).click();
+
+  await expect(resources).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+  await expect(
+    page.getByRole("tree", { name: "Configuration fields" }),
+  ).toBeVisible();
+});
+
+
 test("guards browser back navigation without closing the editor", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "one browser is sufficient");
   await mockManageApi(page);
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit capture" }).click();
-  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
 
   const dialogPromise = page.waitForEvent("dialog");
-  await page.evaluate(() => window.history.back());
+  await page.evaluate("window.history.back()");
   const dialog = await dialogPromise;
   expect(dialog.message()).toBe(
     "Leave Workflow Manage? Active operations will continue in the cluster.",
   );
   await dialog.dismiss();
 
-  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
 });
 
 
@@ -280,7 +296,7 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit capture" }).click();
-  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   const configTree = page.getByRole("tree", { name: "Configuration fields" });
   await configTree.getByRole("treeitem", { name: /Timeout: 30/ }).click();

@@ -27,6 +27,12 @@ const HISTORY_GUARD_MESSAGE =
   "Leave Workflow Manage? Active operations will continue in the cluster.";
 
 
+interface EditContext {
+  resourceId: string;
+  targetId: string;
+}
+
+
 function firstSelectableId(snapshot: ManageSnapshot): string | null {
   const resource = Object.values(snapshot.nodes).find(
     (node) => node.kind === "resource",
@@ -51,7 +57,7 @@ export function App() {
   const eventConnection = useManageEvents(queryClient);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
-  const [editTargetId, setEditTargetId] = useState<string | null>(null);
+  const [editContext, setEditContext] = useState<EditContext | null>(null);
 
   useEffect(() => {
     const currentState = (
@@ -184,12 +190,7 @@ export function App() {
           )}
         </div>
       </header>
-      {editTargetId ? (
-        <ConfigEditor
-          initialTargetId={editTargetId}
-          onClose={() => setEditTargetId(null)}
-        />
-      ) : state.isPending ? (
+      {state.isPending ? (
         <main className="shell-loading">
           <LoaderCircle className="spin" aria-hidden="true" />
           <strong>Loading workflow state</strong>
@@ -234,6 +235,17 @@ export function App() {
                 </header>
                 <ResourceTree
                   onSelect={(nodeId) => {
+                    const node = state.data.nodes[nodeId];
+                    if (editContext) {
+                      const edit = node?.capabilities.find(
+                        (capability) => capability.kind === "edit",
+                      );
+                      if (!edit || edit.kind !== "edit") return;
+                      setEditContext({
+                        resourceId: nodeId,
+                        targetId: edit.editTargetId,
+                      });
+                    }
                     setSelectedId(nodeId);
                     setTreeOpen(false);
                   }}
@@ -241,10 +253,22 @@ export function App() {
                   snapshot={state.data}
                 />
               </section>
-              {selectedNode ? (
+              {editContext ? (
+                <ConfigEditor
+                  initialTargetId={editContext.targetId}
+                  onClose={() => setEditContext(null)}
+                  resourceLabel={
+                    state.data.nodes[editContext.resourceId]?.label
+                    ?? "resource"
+                  }
+                />
+              ) : selectedNode ? (
                 <ResourceWorkspace
                   node={selectedNode}
-                  onEdit={setEditTargetId}
+                  onEdit={(targetId) => setEditContext({
+                    resourceId: selectedNode.id,
+                    targetId,
+                  })}
                   snapshot={state.data}
                 />
               ) : (

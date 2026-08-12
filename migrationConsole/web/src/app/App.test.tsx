@@ -242,7 +242,7 @@ test("opens a generic configuration editor and explains generated values", async
   );
 
   expect(
-    await screen.findByRole("heading", { name: "Configuration" }),
+    await screen.findByRole("heading", { name: "Edit capture" }),
   ).toBeInTheDocument();
   const configTree = screen.getByRole("tree", {
     name: "Configuration fields",
@@ -280,6 +280,71 @@ test("opens a generic configuration editor and explains generated values", async
 });
 
 
+test("keeps resource context while scoping edit mode to the selected resource", async () => {
+  const scopedSnapshot = structuredClone(manageSnapshot);
+  const capture = scopedSnapshot.nodes["resource:captureproxies:capture"];
+  const replay = scopedSnapshot.nodes["resource:trafficreplays:replay"];
+  capture.capabilities = capture.capabilities.map((capability) => (
+    capability.kind === "edit"
+      ? {
+        ...capability,
+        editTargetId: "edit:sourceClusters.legacy.endpoint",
+      }
+      : capability
+  ));
+  replay.capabilities = replay.capabilities.map((capability) => (
+    capability.kind === "edit"
+      ? {
+        ...capability,
+        editTargetId: "edit:traffic.generated-resource.settings",
+      }
+      : capability
+  ));
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(scopedSnapshot),
+    ),
+  );
+  renderApp();
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  const resources = screen.getByRole("tree", {
+    name: "Workflow resources",
+  });
+  expect(resources).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Activity" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Edit capture" }))
+    .toBeInTheDocument();
+
+  const config = screen.getByRole("tree", {
+    name: "Configuration fields",
+  });
+  expect(await within(config).findByRole("treeitem", {
+    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  })).toBeInTheDocument();
+  expect(within(config).queryByRole("treeitem", {
+    name: /ConfigMap: transform-code/,
+  })).toBeNull();
+
+  await userEvent.click(within(resources).getByRole("treeitem", {
+    name: /^replay, Running$/,
+  }));
+
+  expect(await screen.findByRole("heading", { name: "Edit replay" }))
+    .toBeInTheDocument();
+  expect(await within(config).findByRole("treeitem", {
+    name: /ConfigMap: transform-code/,
+  })).toBeInTheDocument();
+  expect(within(config).queryByRole("treeitem", {
+    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  })).toBeNull();
+});
+
+
 test("shows the server reason when configuration cannot be opened", async () => {
   server.use(
     http.get("*/api/v1/config", () =>
@@ -306,6 +371,10 @@ test("shows the server reason when configuration cannot be opened", async () => 
     }),
   ).toBeInTheDocument();
   expect(screen.getByText("CONFIG_PROCESSOR_DIR is not configured"))
+    .toBeInTheDocument();
+  expect(screen.getByRole("tree", { name: "Workflow resources" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Activity" }))
     .toBeInTheDocument();
 });
 
@@ -749,7 +818,7 @@ test("closing a dirty editor discards the process-local draft before leaving", a
 
   expect(discardCalls).toBe(1);
   expect(confirm).toHaveBeenCalledOnce();
-  expect(await screen.findByRole("tree", { name: "Workflow resources" }))
+  expect(await screen.findByRole("button", { name: "Edit capture" }))
     .toBeInTheDocument();
   confirm.mockRestore();
 });

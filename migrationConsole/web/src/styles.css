@@ -811,16 +811,20 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   background: var(--surface);
 }
 
 .config-toolbar {
   display: flex;
-  flex: 0 0 58px;
+  flex: 0 0 auto;
+  min-height: 92px;
   align-items: center;
-  gap: 20px;
+  align-content: center;
+  flex-wrap: wrap;
+  gap: 7px 16px;
   min-width: 0;
-  padding: 8px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -833,12 +837,24 @@ button {
 }
 
 .config-toolbar h2 {
-  font-size: 16px;
+  font-size: 15px;
 }
 
-.config-toolbar > div:first-child > span {
+.config-toolbar-title {
+  min-width: 130px;
+}
+
+.config-toolbar-title > span {
+  display: block;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.config-toolbar-title > span:first-child {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .config-toolbar-filters,
@@ -859,6 +875,8 @@ button {
 }
 
 .config-toolbar-filters {
+  order: 3;
+  width: 100%;
   gap: 14px;
   color: var(--text-muted);
   font-size: 11px;
@@ -872,6 +890,7 @@ button {
 }
 
 .config-toolbar-actions {
+  flex-wrap: wrap;
   gap: 7px;
   margin-left: auto;
 }
@@ -946,19 +965,49 @@ button {
 .config-layout {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(300px, 340px) minmax(420px, 1fr) minmax(240px, 290px);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(110px, 180px);
   min-height: 0;
+  overflow: hidden;
 }
 
 .config-tree-panel {
   min-width: 0;
   overflow: auto;
   border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.config-outline-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  min-height: 53px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--surface-subtle);
 }
 
+.config-outline-header strong,
+.config-outline-header span {
+  display: block;
+}
+
+.config-outline-header strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-outline-header span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .config-tree {
-  min-width: 280px;
+  min-width: 0;
   padding: 6px 0 20px;
 }
 
@@ -968,7 +1017,8 @@ button {
   min-height: 39px;
   align-items: center;
   gap: 7px;
-  padding: 4px 10px 4px calc(8px + (var(--config-depth) - 1) * 15px);
+  padding: 4px 10px 4px calc(8px + (var(--config-depth) - 1) * 11px);
+  border-bottom: 1px solid #edf0f2;
   border-left: 3px solid transparent;
   cursor: default;
   font-size: 12px;
@@ -1208,10 +1258,11 @@ button {
 }
 
 .config-diagnostics {
+  grid-column: 1 / -1;
   min-width: 0;
   overflow: auto;
-  padding: 13px 14px 30px;
-  border-left: 1px solid var(--border);
+  padding: 12px 14px 20px;
+  border-top: 1px solid var(--border);
   background: var(--surface-subtle);
   font-size: 11px;
 }
@@ -1525,13 +1576,12 @@ button {
   }
 
   .config-layout {
-    grid-template-columns: minmax(280px, 320px) minmax(400px, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(110px, 170px);
   }
 
   .config-diagnostics {
-    grid-column: 2;
-    max-height: 190px;
+    grid-column: 1 / -1;
     border-top: 1px solid var(--border);
   }
 
@@ -1649,16 +1699,11 @@ button {
     width: 34px;
     padding: 0;
     overflow: hidden;
-    color: transparent;
     white-space: nowrap;
   }
 
-  .config-toolbar-actions > button:not(.icon-button) svg {
-    color: #17212b;
-  }
-
-  .config-toolbar-actions > .primary-button:not(.icon-button) svg {
-    color: #fff;
+  .config-toolbar-actions > button:not(.icon-button) span {
+    display: none;
   }
 
   .config-layout {
