@@ -1,6 +1,6 @@
 # React UI System Comparison
 
-Status: implementation spike; decision not yet settled
+Status: implementation spike completed; Cloudscape rejected for production use
 
 ## Options
 
@@ -82,13 +82,17 @@ React Aria provides a better escape path for specialized interaction. The applic
 more CSS and responsive behavior, but the resulting feature components are not constrained
 to an AWS-console composition.
 
-## Provisional Direction
+## Decision
 
-Prefer React Aria Components with application-owned styling unless implementation speed,
-AWS-console familiarity, and Cloudscape's responsive shell are judged more important than
-visual independence and package cost.
+Do not use Cloudscape for the production application. Its opinionated application shell,
+AWS-console composition, package cost, and integration constraints are not a good fit for
+the specialized workflow-management experience.
 
-This remains reversible while feature components depend on domain DTOs and application
-state rather than Cloudscape or React Aria types. It becomes expensive after the production
-shell, forms, dialogs, and operation surfaces are implemented broadly. Make the final
-choice before that work begins.
+Own the application layout and styling. Use focused accessible React libraries when they
+fit an interaction instead of requiring one comprehensive visual system. React Aria
+Components remains a strong candidate for common control behavior, but it is not a
+mandatory dependency for every feature. Keep domain DTOs, application state, and
+specialized widgets independent of any component-library data model.
+
+Retain both implementations as spike evidence. The Cloudscape page is not production
+scaffolding and must not be used as the starting point for the native application.

@@ -5,7 +5,9 @@ They are prototypes, not production application scaffolds.
 
 After React was selected, `react-ui-systems` added a second comparison between Cloudscape
 and React Aria Components with owned application styling. See
-[UI System Comparison](UI_SYSTEM_COMPARISON.md).
+[UI System Comparison](UI_SYSTEM_COMPARISON.md). The comparison rejected Cloudscape for
+production use. The production application will own its layout and styling and may use
+focused accessible React libraries where they fit.
 
 Both applications consume `@manage-spike/shared` and must demonstrate the same behavior:
 

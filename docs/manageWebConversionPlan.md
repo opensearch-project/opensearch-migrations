@@ -56,6 +56,7 @@ current browser serve mode.
 | API client | Generate TypeScript transport types and client functions from FastAPI OpenAPI |
 | Frontend remote-data cache | TanStack Query caches API responses in browser memory and reconciles normalized snapshots by stable ID |
 | Live updates | HTTP snapshots plus server-sent events; no WebSocket without a demonstrated need |
+| UI system | Do not use Cloudscape; own the application layout and styling, using focused accessible React libraries where they fit |
 | Config semantics | Continue to reside in the TypeScript config-processor |
 | Cluster semantics | Continue to reside in Python services using Kubernetes and Argo |
 | Save model | Explicit draft save with revision checks |
@@ -65,10 +66,14 @@ current browser serve mode.
 React is the selected frontend framework. This decision does not imply Next.js or an AWS
 visual component library. The application needs a static bundle, not server-side rendering.
 
-The React UI system is an open decision. Review the implemented Cloudscape and React Aria
-spikes before building the production application shell. In either option, domain DTOs,
-feature state, and specialized widgets such as the resource tree and log viewer remain
-application-owned rather than adopting library-specific data models.
+The Cloudscape spike is retained as design evidence but Cloudscape is not a production
+dependency. Its application-shell and visual-system constraints do not fit this
+specialized workflow closely enough to justify adopting them as the frontend foundation.
+Use application-owned layout and styling, and select focused libraries by capability.
+React Aria Components is a candidate for accessible control behavior where it fits, not a
+requirement to use one library for every control. Domain DTOs, feature state, and
+specialized widgets such as the resource tree and log viewer remain application-owned
+rather than adopting library-specific data models.
 
 ## Scope And Parity
 

@@ -5,6 +5,10 @@ This workspace compares two UI-system strategies for the selected React frontend
 - Cloudscape Design System;
 - React Aria Components with application-owned styling.
 
+The completed comparison rejected Cloudscape for production use. Both pages remain here
+as design evidence; neither is production scaffolding. The production application will
+own its layout and styling and may use focused accessible React libraries by capability.
+
 Both pages use the same `@manage-spike/shared` fixture, `useManageTree` state controller,
 and custom `ResourceTree`. The comparison therefore measures the application shell,
 forms, tabs, status, operations, logs, responsive behavior, styling ownership, and package
