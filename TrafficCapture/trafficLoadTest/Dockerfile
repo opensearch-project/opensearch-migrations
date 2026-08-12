@@ -9,9 +9,8 @@
 # ConfigMap and no custom k6 build.
 FROM scratch
 
-# Copied explicitly rather than `COPY . /` so the image root holds exactly the four directories the
-# scenarios resolve against.
+# Copied explicitly rather than `COPY . /` so the image root holds exactly the three directories the
+# scenarios resolve against (each schema's index mapping sits with its generators in lib/data/).
 COPY scenarios/ /scenarios/
 COPY lib/       /lib/
-COPY data/      /data/
 COPY k6-config/ /k6-config/

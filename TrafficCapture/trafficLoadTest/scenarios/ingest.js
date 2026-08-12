@@ -56,16 +56,10 @@ const sequenceErrors   = new Rate('ingest_sequence_errors');
 const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 
 // ── Schema selection ───────────────────────────────────────────────────────
-// All open() calls must happen at init time — k6 does not allow deferred file reads.
 const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs : nycTaxisDocs;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
-
-const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
-};
-const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
+const INDEX_MAPPING = docs.mapping;
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PROXY_URL       = CFG.CAPTURE_PROXY_URL   || 'https://capture-proxy:9200';

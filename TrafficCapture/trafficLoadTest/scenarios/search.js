@@ -61,16 +61,10 @@ const searchErrors       = new Rate('search_errors');
 const deepPagingErrors   = new Rate('search_deep_paging_errors');
 
 // ── Schema selection ────────────────────────────────────────────────────────
-// All open() calls must happen at init time — k6 does not allow deferred file reads.
 const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
 const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
-
-const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
-};
-const INDEX_MAPPING = MAPPINGS[SCHEMA] || MAPPINGS['nyc_taxis'];
+const INDEX_MAPPING = docs.mapping;
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const PROXY_URL          = CFG.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';

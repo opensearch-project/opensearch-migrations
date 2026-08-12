@@ -47,7 +47,7 @@ specified by two names — a scenario (a script path under `/scripts`) and a pre
 BUILD  (the load test itself — this directory)
 ──────────────────────────────────────────────────────────────
   TrafficCapture/trafficLoadTest [1] ──Dockerfile──► migrations/k6_scripts [2]  (FROM scratch)
-    scenarios/*.js  lib/**  data/*/mapping.json  k6-config/*.env   →   the whole image root
+    scenarios/*.js   lib/**   k6-config/*.env             →   the whole image root
 
 INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ Which side you edit decides whether you rebuild an image or run a `helm upgrade`
 
 | Edit this | Source path | Lands in | How to apply |
 |---|---|---|---|
-| Scenario / lib / generator / schema JS | `scenarios/*.js`, `lib/**`, `data/<schema>/mapping.json` | `migrations/k6_scripts`, mounted at `/scripts` | rebuild + push the image |
+| Scenario / lib / generator / schema JS | `scenarios/*.js`, `lib/**` | `migrations/k6_scripts`, mounted at `/scripts` | rebuild + push the image |
 | Preset load-shape/config | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
 | Grafana dashboard | chart `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `helm upgrade` |
 | Run distribution defaults (`parallelism`/`separate`/`cleanup`) | chart `values.yaml` (`testRun.*`) | `k6-testrun-examples` ConfigMap | `helm upgrade` |
@@ -553,8 +553,10 @@ equivalent on `aws-bootstrap.sh` or the `workflow k6` / `k6-run.sh` commands.
 - **Proxy TLS.** The proxy listens HTTPS with a self-signed cert; k6 uses
   `insecureSkipTLSVerify: true`. The source cluster behind the proxy runs plain HTTP.
 - **Document schemas.** Scripts select a generator via `SCHEMA`; each provides its own index
-  mapping (`data/<scenario>/mapping.json`), query samples and update-body generator. Adding a type
-  needs only new `lib/data/<name>/{documents,queries}.js` + `data/<name>/mapping.json`.
+  mapping, query samples and update-body generator, all in one folder per schema. `documents.js`
+  `open()`s its own `mapping.json` and re-exports it, so a scenario reads `docs.mapping` and never
+  names a schema's file paths. Adding a type needs only a new `lib/data/<name>/` holding
+  `documents.js`, `queries.js` and `mapping.json`.
 - **ID registry (mixed).** Cross-VU write-then-read state uses a Redis list via a Webdis HTTP proxy
   — k6's built-in `http` module calls Webdis (`GET /LPUSH/key/val`), so no xk6/native Redis build.
 
@@ -577,7 +579,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
    scoped entirely to this opt-in chart. The earlier Argo `k6LoadTest.ts` template was retired.
 
 3. **An OCI image is the data store — scenarios are files in this directory, not ConfigMaps.** The
-   whole load test (`scenarios/`, `lib/`, `data/`, `k6-config/`) lives here in its natural tree and
+   whole load test (`scenarios/`, `lib/`, `k6-config/`) lives here in its natural tree and
    is published as `migrations/k6_scripts`, a `FROM scratch` image holding nothing but those files.
    The chart mounts it read-only at `/scripts` with a Kubernetes `image:` volume on the initializer
    and every runner, which otherwise run **`grafana/k6`**. Imports and `open()` are ordinary
