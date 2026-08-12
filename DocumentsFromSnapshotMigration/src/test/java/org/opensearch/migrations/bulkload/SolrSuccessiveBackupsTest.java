@@ -88,7 +88,16 @@ public class SolrSuccessiveBackupsTest {
 
     static Stream<Arguments> standaloneVersions() {
         return Stream.of(
-            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0)
+            Arguments.of(SolrClusterContainer.SOLR_6, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SolrClusterContainer.SOLR_7, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SolrClusterContainer.SOLR_9, SearchClusterContainer.OS_V3_5_0)
+        );
+    }
+
+    static Stream<Arguments> singleSegmentVersions() {
+        return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_9, SearchClusterContainer.OS_V3_5_0)
         );
     }
 
@@ -207,10 +216,7 @@ public class SolrSuccessiveBackupsTest {
             solr.start();
             target.start();
 
-            var create = solr.execInContainer("solr", "create_core", "-c", COLLECTION);
-            if (create.getExitCode() != 0) {
-                throw new IllegalStateException("Failed to create core: " + create.getStderr());
-            }
+            createStandaloneCore(solr);
 
             var dataDir = solrDataDir(solr);
             indexDocs(solr, COLLECTION, OLD_DOCS);
@@ -221,19 +227,9 @@ public class SolrSuccessiveBackupsTest {
             indexDocs(solr, COLLECTION, NEW_DOCS);
             standaloneBackup(solr, "snap_v2", dataDir);
 
-            // Deliberately migrate the OLDER snapshot. Copy without the snapshot.<name>/ wrapper
-            // so segments_N land at the collection root, which is the flat standalone layout.
-            var backupRoot = tempDir.toPath().resolve("named_standalone_" + solrVersion.major());
-            var localCollection = backupRoot.resolve(COLLECTION);
-            Files.createDirectories(localCollection);
-            var find = solr.execInContainer("find", dataDir + "/snapshot.snap_v1", "-type", "f");
-            for (var line : find.getStdout().trim().split("\n")) {
-                if (line.isEmpty()) {
-                    continue;
-                }
-                var fileName = line.substring(line.lastIndexOf('/') + 1);
-                solr.copyFileFromContainer(line, localCollection.resolve(fileName).toString());
-            }
+            // Deliberately migrate the OLDER snapshot.
+            var backupRoot = copyFlatSnapshot(solr, dataDir + "/snapshot.snap_v1",
+                tempDir.toPath().resolve("named_standalone_" + solrVersion.major()));
 
             migrate(backupRoot, solrVersion, target);
 
@@ -244,7 +240,57 @@ public class SolrSuccessiveBackupsTest {
         }
     }
 
+    /**
+     * A force-merged index holds a single segment, so a backup taken after the merge exercises the
+     * reader's single-leaf path. Taken as the second of two snapshots, so the merge is the only
+     * thing separating them.
+     */
+    @ParameterizedTest(name = "single-segment standalone: {0} → {1}")
+    @MethodSource("singleSegmentVersions")
+    void singleSegmentStandaloneBackupMigratesAllDocuments(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+            createStandaloneCore(solr);
+
+            var dataDir = solrDataDir(solr);
+            indexDocs(solr, COLLECTION, OLD_DOCS);
+            indexDocs(solr, COLLECTION, SHARED_DOCS);
+            standaloneBackup(solr, "many_segments", dataDir);
+
+            indexDocs(solr, COLLECTION, NEW_DOCS);
+            optimizeToOneSegment(solr);
+            standaloneBackup(solr, "one_segment", dataDir);
+
+            assertSingleSegment(solr, dataDir + "/snapshot.one_segment");
+
+            var backupRoot = copyFlatSnapshot(solr, dataDir + "/snapshot.one_segment",
+                tempDir.toPath().resolve("one_segment_" + solrVersion.major()));
+
+            migrate(backupRoot, solrVersion, target);
+
+            verifyDocCount(target, COLLECTION,
+                OLD_DOCS.length + SHARED_DOCS.length + NEW_DOCS.length);
+            assertDocsPresent(target, OLD_DOCS);
+            assertDocsPresent(target, SHARED_DOCS);
+            assertDocsPresent(target, NEW_DOCS);
+        }
+    }
+
     // --- Solr setup ---
+
+    private static void createStandaloneCore(SolrClusterContainer solr) throws Exception {
+        var create = solr.execInContainer("solr", "create_core", "-c", COLLECTION);
+        if (create.getExitCode() != 0) {
+            throw new IllegalStateException("Failed to create core: " + create.getStderr());
+        }
+    }
 
     private static void createCloudCollection(
         SolrClusterContainer solr, SolrClusterContainer.SolrVersion solrVersion
@@ -323,6 +369,34 @@ public class SolrSuccessiveBackupsTest {
         throw new IllegalStateException("Standalone backup " + name + " produced no segments_* file");
     }
 
+    /**
+     * Copies a {@code snapshot.<name>/} directory without its wrapper, so segments_N land at the
+     * collection root — the flat standalone layout the reader expects.
+     */
+    private static Path copyFlatSnapshot(
+        SolrClusterContainer solr, String snapshotDir, Path backupRoot
+    ) throws Exception {
+        var localCollection = backupRoot.resolve(COLLECTION);
+        Files.createDirectories(localCollection);
+        var find = solr.execInContainer("find", snapshotDir, "-type", "f");
+        for (var line : find.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) {
+                continue;
+            }
+            var fileName = line.substring(line.lastIndexOf('/') + 1);
+            solr.copyFileFromContainer(line, localCollection.resolve(fileName).toString());
+        }
+        return backupRoot;
+    }
+
+    /** A force-merged index writes exactly one {@code _N.si}, one per segment. */
+    private static void assertSingleSegment(SolrClusterContainer solr, String snapshotDir) throws Exception {
+        var count = solr.execInContainer("sh", "-c",
+            "find " + snapshotDir + " -name '_*.si' -type f | wc -l");
+        assertEquals(1, Integer.parseInt(count.getStdout().trim()),
+            "Force-merged snapshot should hold exactly one segment");
+    }
+
     // --- Documents ---
 
     private static void indexDocs(SolrClusterContainer solr, String collection, String[][] docs) throws Exception {
@@ -333,6 +407,12 @@ public class SolrSuccessiveBackupsTest {
                 "-H", "Content-Type: application/json",
                 "-d", json);
         }
+    }
+
+    private static void optimizeToOneSegment(SolrClusterContainer solr) throws Exception {
+        solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/" + COLLECTION
+                + "/update?optimize=true&maxSegments=1&waitSearcher=true");
     }
 
     private static void deleteOldDocs(SolrClusterContainer solr) throws Exception {
