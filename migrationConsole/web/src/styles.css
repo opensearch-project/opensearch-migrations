@@ -1037,6 +1037,76 @@ button {
   text-transform: uppercase;
 }
 
+.pinned-config-context {
+  position: sticky;
+  z-index: 4;
+  top: 84px;
+  height: 0;
+  overflow: visible;
+}
+
+.pinned-context-row {
+  display: grid;
+  width: 100%;
+  min-height: 32px;
+  grid-template-columns: 42% minmax(0, 1fr) 90px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 3px 0 var(--accent);
+  color: var(--text);
+  background: #edf4f6;
+  font-size: 10px;
+  text-align: left;
+}
+
+.pinned-context-row:hover {
+  background: #e4eef1;
+}
+
+.pinned-context-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pinned-context-setting {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px
+    calc(10px + (var(--config-depth) - 1) * 12px);
+}
+
+.pinned-context-setting svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--text-muted);
+}
+
+.pinned-context-setting strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-context-value {
+  overflow: hidden;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-context-row > .field-status {
+  justify-self: end;
+  margin-right: 10px;
+}
+
 .config-table tbody th,
 .config-table tbody td {
   min-width: 0;
@@ -1185,13 +1255,13 @@ button {
 .inline-command-form {
   width: 100%;
   max-width: none;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: start;
   gap: 6px;
 }
 
-.inline-command-form {
-  align-items: center;
+.inline-command-form .field-help {
+  grid-column: 1 / -1;
 }
 
 .inline-text-editor input,
@@ -2040,8 +2110,30 @@ button {
   }
 
   .config-outline-header,
-  .config-table thead {
+  .config-table thead,
+  .pinned-config-context {
     position: static;
+  }
+
+  .pinned-config-context {
+    height: auto;
+  }
+
+  .pinned-context-row {
+    grid-template-columns: 42% minmax(0, 1fr) 48px;
+  }
+
+  .pinned-context-setting {
+    padding-left: calc(6px + (var(--config-depth) - 1) * 7px);
+  }
+
+  .pinned-context-value {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .pinned-context-row > .field-status {
+    display: none;
   }
 
   .config-setting-column {

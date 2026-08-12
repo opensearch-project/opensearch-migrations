@@ -270,6 +270,32 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
 });
 
 
+test("pins ancestor rows while scrolling nested configuration", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop scrolling coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit capture" }).click();
+  const config = page.getByRole("table", { name: "Configuration fields" });
+  await page.locator(".config-table-panel").hover();
+  await page.mouse.wheel(0, 220);
+
+  const context = page.getByRole("navigation", {
+    name: "Current configuration path",
+  });
+  await expect(
+    context.getByRole("button", { name: /^Source clusters 1 setting/ }),
+  ).toBeVisible();
+  await expect(
+    context.getByRole("button", { name: /^legacy 6 settings/ }),
+  ).toBeVisible();
+  await context.getByRole("button", { name: /Source clusters/ }).click();
+  await expect(
+    config.getByRole("row", { name: /Source clusters/ }),
+  ).toBeInViewport();
+});
+
+
 test("keeps the resource overview visible during scoped editing", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
   await mockManageApi(page);

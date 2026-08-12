@@ -711,6 +711,61 @@ test("allows an explicit ConfigMap and key when inventory is unavailable", async
 });
 
 
+test("promotes add commands to collection actions and keeps exact deletion", async () => {
+  const operations: unknown[] = [];
+  server.use(
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: `config-draft-command-${operations.length}`,
+      });
+    }),
+  );
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const config = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(config).queryByRole("row", {
+    name: /Add source cluster/,
+  })).toBeNull();
+
+  const sourceClusters = within(config).getByRole("row", {
+    name: /^Source clusters/,
+  });
+  await userEvent.click(within(sourceClusters).getByRole("button", {
+    name: "Add source cluster",
+  }));
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "source cluster name" }),
+    "modern",
+  );
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create source cluster",
+  }));
+  await waitFor(() => expect(operations).toHaveLength(1));
+
+  await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
+  await waitFor(() => expect(operations).toHaveLength(2));
+
+  expect(operations).toEqual([{
+    op: "add",
+    path: ["sourceClusters"],
+    value: { name: "modern" },
+  }, {
+    op: "removeConfig",
+    path: ["sourceClusters", "legacy"],
+  }]);
+  expect(confirm).toHaveBeenCalledWith("Remove legacy?");
+});
+
+
 test("focuses a newly added array item when command metadata requests it", async () => {
   server.use(
     http.post("*/api/v1/config/operations", () => {
@@ -753,7 +808,12 @@ test("focuses a newly added array item when command metadata requests it", async
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
-  await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
+  const transforms = within(configTree).getByRole("row", {
+    name: /^Transforms/,
+  });
+  await userEvent.click(within(transforms).getByRole("button", {
+    name: "Add transform",
+  }));
 
   expect(
     await within(configTree).findByRole("row", {

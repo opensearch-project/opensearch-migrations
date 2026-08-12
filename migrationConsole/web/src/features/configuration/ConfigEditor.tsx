@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -51,6 +52,18 @@ function nodeChildren(node: EditNode): EditNode[] {
 }
 
 
+function propertyChildren(node: EditNode): EditNode[] {
+  return nodeChildren(node).filter((child) => child.valueKind !== "command");
+}
+
+
+function addCommand(node: EditNode): EditNode | null {
+  return nodeChildren(node).find(
+    (child) => child.valueKind === "command",
+  ) ?? null;
+}
+
+
 function allNodeIds(nodes: EditNode[]): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
@@ -87,7 +100,7 @@ function visibleNode(
     && !node.valueAuthored
     && !nodeHasIssue(node)
   ) {
-    return nodeChildren(node).some((child) =>
+    return propertyChildren(node).some((child) =>
       visibleNode(child, showOptional, showExpert));
   }
   return true;
@@ -102,6 +115,7 @@ function treeRows(
 ): EditRow[] {
   const rows: EditRow[] = [];
   const visit = (node: EditNode, depth: number) => {
+    if (node.valueKind === "command") return;
     if (!visibleNode(node, showOptional, showExpert)) return;
     rows.push({ node, depth });
     if (expanded.has(node.id)) {
@@ -169,14 +183,14 @@ function pathWithin(path: string[], scopePath: string[]): boolean {
 function initialExpanded(nodes: EditNode[]): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
-    if (nodeChildren(node).length > 0 && node.collapsed !== true) {
+    if (propertyChildren(node).length > 0 && node.collapsed !== true) {
       result.add(node.id);
     }
-    nodeChildren(node).forEach(visit);
+    propertyChildren(node).forEach(visit);
   };
   nodes.forEach((node) => {
-    if (nodeChildren(node).length > 0) result.add(node.id);
-    nodeChildren(node).forEach(visit);
+    if (propertyChildren(node).length > 0) result.add(node.id);
+    propertyChildren(node).forEach(visit);
   });
   return result;
 }
@@ -513,40 +527,36 @@ function CommandEditor({
   commit,
   busy,
   onAdded,
+  onCancel,
+  onComplete,
 }: {
   node: EditNode;
   parent: EditNode | null;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
   onAdded: (nodeId: string, parentId: string | null) => void;
+  onCancel: () => void;
+  onComplete: () => void;
 }) {
   const requiresName = node.command?.requiresName !== false;
   const label = fieldName(node);
   const [name, setName] = useState("");
-  const pattern = hintRecord(node.validation).pattern;
+  const pattern = hintRecord(node.validation).pattern
+    ?? hintRecord(node.inputHint).pattern;
   return (
     <form
       className="field-form inline-command-form"
       onSubmit={(event) => {
         event.preventDefault();
         const trimmedName = name.trim();
-        const nextIndex = Array.isArray(parent?.value)
-          ? parent.value.length
-          : nodeChildren(parent ?? node).filter(
-            (child) => child.valueKind !== "command",
-          ).length;
-        const addedPath = [
-          ...node.path,
-          requiresName ? trimmedName : String(nextIndex),
-        ];
-        void commit({
-          op: "add",
-          path: node.path,
-          value: requiresName ? { name: trimmedName } : {},
-        }).then((applied) => {
-          if (applied && node.command?.autoEditAdded !== false) {
-            onAdded(`edit:${addedPath.join(".")}`, parent?.id ?? null);
-          }
+        void runAddCommand(
+          node,
+          parent,
+          trimmedName,
+          commit,
+          onAdded,
+        ).then((applied) => {
+          if (applied) onComplete();
         });
       }}
     >
@@ -555,6 +565,7 @@ function CommandEditor({
           <span className="sr-only">{label} name</span>
           <input
             aria-label={`${label} name`}
+            autoFocus
             onChange={(event) => setName(event.target.value)}
             pattern={typeof pattern === "string" ? pattern : undefined}
             required
@@ -563,17 +574,51 @@ function CommandEditor({
         </label>
       ) : null}
       <button
-        disabled={busy || Boolean(node.command?.blockedMessage)}
+        disabled={
+          busy
+          || Boolean(node.command?.blockedMessage)
+          || (requiresName && !name.trim())
+        }
         type="submit"
       >
         <Plus aria-hidden="true" />
-        Add {label}
+        Create {label}
       </button>
+      <button disabled={busy} onClick={onCancel} type="button">Cancel</button>
       {node.command?.blockedMessage
         ? <p className="field-help">{node.command.blockedMessage}</p>
         : null}
     </form>
   );
+}
+
+
+function runAddCommand(
+  node: EditNode,
+  parent: EditNode | null,
+  name: string,
+  commit: (operation: EditOperation) => Promise<boolean>,
+  onAdded: (nodeId: string, parentId: string | null) => void,
+): Promise<boolean> {
+  const requiresName = node.command?.requiresName !== false;
+  if (requiresName && !name) return Promise.resolve(false);
+  const nextIndex = Array.isArray(parent?.value)
+    ? parent.value.length
+    : propertyChildren(parent ?? node).length;
+  const addedPath = [
+    ...node.path,
+    requiresName ? name : String(nextIndex),
+  ];
+  return commit({
+    op: "add",
+    path: node.path,
+    value: requiresName ? { name } : {},
+  }).then((applied) => {
+    if (applied && node.command?.autoEditAdded !== false) {
+      onAdded(`edit:${addedPath.join(".")}`, parent?.id ?? null);
+    }
+    return applied;
+  });
 }
 
 
@@ -658,8 +703,10 @@ function ConfigPropertyRow({
   rowRef: (element: HTMLTableRowElement | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
-  const children = nodeChildren(node);
+  const children = propertyChildren(node);
+  const command = addCommand(node);
   const canRename = node.removable === true && parent?.valueKind === "record";
   const canUnset = (
     node.presence === "optional"
@@ -668,10 +715,12 @@ function ConfigPropertyRow({
   );
   const structured = (
     !node.externalRef
+    && !command
     && children.length === 0
     && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
   );
-  const showDetails = selected && (Boolean(node.externalRef) || structured);
+  const showDetails = adding
+    || (selected && (Boolean(node.externalRef) || structured));
   const name = fieldName(node);
 
   const valueEditor = node.externalRef ? (
@@ -699,14 +748,6 @@ function ConfigPropertyRow({
       commit={commit}
       node={node}
       onRevealChildren={onRevealChildren}
-    />
-  ) : node.valueKind === "command" ? (
-    <CommandEditor
-      busy={busy}
-      commit={commit}
-      node={node}
-      onAdded={onSelectAdded}
-      parent={parent}
     />
   ) : structured ? (
     <button
@@ -808,6 +849,31 @@ function ConfigPropertyRow({
             {node.status ?? "ok"}
           </span>
           <div className="property-actions">
+            {command ? (
+              <button
+                aria-label={`Add ${fieldName(command)}`}
+                disabled={busy || Boolean(command.command?.blockedMessage)}
+                onClick={() => {
+                  onSelect();
+                  if (command.command?.requiresName !== false) {
+                    setAdding(true);
+                  } else {
+                    void runAddCommand(
+                      command,
+                      node,
+                      "",
+                      commit,
+                      onSelectAdded,
+                    );
+                  }
+                }}
+                title={command.command?.blockedMessage
+                  ?? `Add ${fieldName(command)}`}
+                type="button"
+              >
+                <Plus aria-hidden="true" />
+              </button>
+            ) : null}
             {canRename ? (
               <button
                 aria-label={`Rename ${node.path.at(-1)}`}
@@ -896,6 +962,16 @@ function ConfigPropertyRow({
                     Cancel
                   </button>
                 </form>
+              ) : adding && command ? (
+                <CommandEditor
+                  busy={busy}
+                  commit={commit}
+                  node={command}
+                  onAdded={onSelectAdded}
+                  onCancel={() => setAdding(false)}
+                  onComplete={() => setAdding(false)}
+                  parent={node}
+                />
               ) : node.externalRef ? (
                 <ExternalResourceEditor
                   busy={busy}
@@ -939,6 +1015,8 @@ export function ConfigEditor({
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const configTablePanelRef = useRef<HTMLElement>(null);
   const rowElements = useRef(new Map<string, HTMLTableRowElement>());
   const knownRowIds = useRef<Set<string> | null>(null);
   const skipNextRowTracking = useRef(false);
@@ -1000,6 +1078,66 @@ export function ConfigEditor({
     () => treeRows(scopedNodes, expanded, showOptional, showExpert),
     [expanded, scopedNodes, showExpert, showOptional],
   );
+  const updatePinnedContext = useCallback(() => {
+    const panel = configTablePanelRef.current;
+    if (!panel || panel.scrollTop <= 1) {
+      setPinnedIds((current) => current.length === 0 ? current : []);
+      return;
+    }
+    const headerBottom = panel.querySelector("thead")
+      ?.getBoundingClientRect().bottom ?? panel.getBoundingClientRect().top;
+    const firstVisibleIndex = rows.findIndex(({ node }) => {
+      const element = rowElements.current.get(node.id);
+      return Boolean(element && element.getBoundingClientRect().bottom > headerBottom);
+    });
+    if (firstVisibleIndex < 0) return;
+
+    const firstVisible = rows[firstVisibleIndex];
+    let expectedDepth = firstVisible.depth - 1;
+    const nextPinnedIds: string[] = [];
+    for (
+      let index = firstVisibleIndex - 1;
+      index >= 0 && expectedDepth > 0;
+      index -= 1
+    ) {
+      const candidate = rows[index];
+      if (candidate.depth !== expectedDepth) continue;
+      nextPinnedIds.unshift(candidate.node.id);
+      expectedDepth -= 1;
+    }
+    setPinnedIds((current) => (
+      current.length === nextPinnedIds.length
+      && current.every((id, index) => id === nextPinnedIds[index])
+        ? current
+        : nextPinnedIds
+    ));
+  }, [rows]);
+  const pinnedRows = useMemo(
+    () => pinnedIds.flatMap((id) => {
+      const row = rows.find(({ node }) => node.id === id);
+      return row ? [row] : [];
+    }),
+    [pinnedIds, rows],
+  );
+  const scrollToRow = useCallback((nodeId: string) => {
+    const panel = configTablePanelRef.current;
+    const element = rowElements.current.get(nodeId);
+    if (!panel || !element) return;
+    const headerBottom = panel.querySelector("thead")
+      ?.getBoundingClientRect().bottom ?? panel.getBoundingClientRect().top;
+    panel.scrollTo({
+      behavior: "smooth",
+      top: Math.max(
+        0,
+        panel.scrollTop + element.getBoundingClientRect().top - headerBottom,
+      ),
+    });
+  }, []);
+  useEffect(() => {
+    updatePinnedContext();
+    window.addEventListener("resize", updatePinnedContext);
+    return () => window.removeEventListener("resize", updatePinnedContext);
+  }, [updatePinnedContext]);
   useEffect(() => {
     const currentIds = new Set(rows.map(({ node }) => node.id));
     if (skipNextRowTracking.current) {
@@ -1259,11 +1397,51 @@ export function ConfigEditor({
         </div>
       ) : null}
       <div className="config-layout">
-        <section className="config-table-panel">
+        <section
+          className="config-table-panel"
+          onScroll={updatePinnedContext}
+          ref={configTablePanelRef}
+        >
           <header className="config-outline-header">
             <strong>{scope?.label ?? "Workflow configuration"}</strong>
             <span>{rows.length} visible settings</span>
           </header>
+          {pinnedRows.length > 0 ? (
+            <nav
+              aria-label="Current configuration path"
+              className="pinned-config-context"
+            >
+              {pinnedRows.map(({ node, depth }) => (
+                <button
+                  className="pinned-context-row"
+                  key={node.id}
+                  onClick={() => {
+                    setSelectedId(node.id);
+                    scrollToRow(node.id);
+                  }}
+                  type="button"
+                >
+                  <span
+                    className="pinned-context-setting"
+                    style={{ "--config-depth": depth } as React.CSSProperties}
+                  >
+                    <ChevronRight aria-hidden="true" />
+                    <strong>{fieldName(node)}</strong>
+                  </span>
+                  <span className="pinned-context-value">
+                    {propertyChildren(node).length} {
+                      propertyChildren(node).length === 1
+                        ? "setting"
+                        : "settings"
+                    }
+                  </span>
+                  <span className={`field-status status-${node.status ?? "ok"}`}>
+                    {node.status ?? "ok"}
+                  </span>
+                </button>
+              ))}
+            </nav>
+          ) : null}
           <table aria-label="Configuration fields" className="config-table">
             <colgroup>
               <col className="config-setting-column" />
@@ -1295,7 +1473,7 @@ export function ConfigEditor({
                       revealChildrenFor.current = {
                         parentId: node.id,
                         previousChildIds: new Set(
-                          nodeChildren(node).map((child) => child.id),
+                          propertyChildren(node).map((child) => child.id),
                         ),
                       };
                       setExpanded((current) => new Set(current).add(node.id));
