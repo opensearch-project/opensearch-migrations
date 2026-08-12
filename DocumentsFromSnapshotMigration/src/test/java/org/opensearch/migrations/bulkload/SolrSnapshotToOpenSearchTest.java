@@ -343,7 +343,7 @@ public class SolrSnapshotToOpenSearchTest {
             // Copy backup from container to local temp dir
             var backupRoot = tempDir.toPath().resolve("multi_shard_backup");
             var containerBackupDir = backupLocation + "/multi_shard_backup/" + collection;
-            copyDirectoryFromContainer(solr, containerBackupDir, backupRoot.resolve(collection));
+            solr.copyDirectoryFromContainer(containerBackupDir, backupRoot.resolve(collection));
 
             // Fetch schema from the backup's latest zk_backup_N directory
             var schema = SolrSchemaXmlParser.findAndParse(backupRoot.resolve(collection));
@@ -1260,23 +1260,8 @@ public class SolrSnapshotToOpenSearchTest {
             ? backupLocation + "/" + backupName + "/" + collection
             : backupLocation + "/" + backupName;
         var collectionDir = backupRoot.resolve(collection);
-        copyDirectoryFromContainer(solr, containerBackupDir, collectionDir);
+        solr.copyDirectoryFromContainer(containerBackupDir, collectionDir);
         return backupRoot;
-    }
-
-    private static void copyDirectoryFromContainer(
-        SolrClusterContainer solr, String containerDir, Path localDir
-    ) throws Exception {
-        Files.createDirectories(localDir);
-        var findResult = solr.execInContainer("find", containerDir, "-type", "f");
-        for (var line : findResult.getStdout().trim().split("\n")) {
-            if (line.isEmpty()) continue;
-            var relativePath = line.substring(containerDir.length());
-            if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
-            var localFile = localDir.resolve(relativePath);
-            Files.createDirectories(localFile.getParent());
-            solr.copyFileFromContainer(line, localFile.toString());
-        }
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {

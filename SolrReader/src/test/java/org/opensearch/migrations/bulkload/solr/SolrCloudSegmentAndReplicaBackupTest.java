@@ -245,27 +245,8 @@ public class SolrCloudSegmentAndReplicaBackupTest {
 
         var localRoot = tempDir.toPath().resolve("cloud_backup_" + solrVersion.major() + "_"
             + System.nanoTime());
-        copyDirectoryFromContainer(solr, backupLocation + "/" + backupName, localRoot);
+        solr.copyDirectoryFromContainer(backupLocation + "/" + backupName, localRoot);
         return localRoot;
-    }
-
-    private static void copyDirectoryFromContainer(
-        SolrClusterContainer solr, String containerDir, Path localDir
-    ) throws Exception {
-        Files.createDirectories(localDir);
-        var find = solr.execInContainer("find", containerDir, "-type", "f");
-        for (var line : find.getStdout().trim().split("\n")) {
-            if (line.isEmpty()) {
-                continue;
-            }
-            var relative = line.substring(containerDir.length());
-            if (relative.startsWith("/")) {
-                relative = relative.substring(1);
-            }
-            var localFile = localDir.resolve(relative);
-            Files.createDirectories(localFile.getParent());
-            solr.copyFileFromContainer(line, localFile.toString());
-        }
     }
 
     /** Solr 6/7 Cloud BACKUP writes one {@code snapshot.shardN/} directory per shard. */

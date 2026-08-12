@@ -139,7 +139,7 @@ public class SolrSuccessiveBackupsTest {
                 dirList.getStdout().trim().split("\n").length, greaterThan(1));
 
             var backupRoot = tempDir.toPath().resolve("incremental_" + solrVersion.major());
-            copyDirectoryFromContainer(solr, containerBackupDir, backupRoot.resolve(COLLECTION));
+            solr.copyDirectoryFromContainer(containerBackupDir, backupRoot.resolve(COLLECTION));
 
             migrate(backupRoot, solrVersion, target);
 
@@ -188,7 +188,7 @@ public class SolrSuccessiveBackupsTest {
 
             // Deliberately migrate the OLDER backup.
             var backupRoot = tempDir.toPath().resolve("named_cloud_" + solrVersion.major());
-            copyDirectoryFromContainer(solr, backupLocation + "/backup_v1", backupRoot.resolve(COLLECTION));
+            solr.copyDirectoryFromContainer(backupLocation + "/backup_v1", backupRoot.resolve(COLLECTION));
 
             migrate(backupRoot, solrVersion, target);
 
@@ -463,21 +463,6 @@ public class SolrSuccessiveBackupsTest {
     private static RestClient restClient(SearchClusterContainer target) {
         return new RestClient(
             ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext());
-    }
-
-    private static void copyDirectoryFromContainer(
-        SolrClusterContainer solr, String containerDir, Path localDir
-    ) throws Exception {
-        Files.createDirectories(localDir);
-        var findResult = solr.execInContainer("find", containerDir, "-type", "f");
-        for (var line : findResult.getStdout().trim().split("\n")) {
-            if (line.isEmpty()) continue;
-            var relativePath = line.substring(containerDir.length());
-            if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
-            var localFile = localDir.resolve(relativePath);
-            Files.createDirectories(localFile.getParent());
-            solr.copyFileFromContainer(line, localFile.toString());
-        }
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {

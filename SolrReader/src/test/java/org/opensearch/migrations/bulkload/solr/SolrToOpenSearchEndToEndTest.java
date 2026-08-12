@@ -933,7 +933,7 @@ public class SolrToOpenSearchEndToEndTest {
             // descend the right amount.
             var localBackupRoot = tempDir.toPath().resolve("cloud_backup_local");
             var containerBackupDir = backupLocation + "/cloud_backup";
-            copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot);
+            solr.copyDirectoryFromContainer(containerBackupDir, localBackupRoot);
             // Diagnostic: log the local copy structure so layout differences across versions are visible.
             try (var walk = java.nio.file.Files.walk(localBackupRoot, 3)) {
                 walk.forEach(p -> log.atInfo().setMessage("Local backup tree: {}").addArgument(p).log());
@@ -1016,7 +1016,7 @@ public class SolrToOpenSearchEndToEndTest {
 
             // Copy backup
             var localBackupRoot = tempDir.toPath().resolve("meta_backup");
-            copyDirectoryFromContainer(solr,
+            solr.copyDirectoryFromContainer(
                 backupLocation + "/meta_backup/" + collection,
                 localBackupRoot.resolve(collection));
 
@@ -1291,7 +1291,7 @@ public class SolrToOpenSearchEndToEndTest {
         }
 
         var localBackupRoot = tempDir.toPath().resolve("cloud_backup_" + backupName);
-        copyDirectoryFromContainer(solr, backupLocation + "/" + backupName, localBackupRoot);
+        solr.copyDirectoryFromContainer(backupLocation + "/" + backupName, localBackupRoot);
         try (var walk = Files.walk(localBackupRoot, 3)) {
             walk.forEach(p -> log.atInfo().setMessage("Captured cloud backup tree: {}").addArgument(p).log());
         }
@@ -1403,26 +1403,6 @@ public class SolrToOpenSearchEndToEndTest {
         throw new IllegalStateException(
             "Collection " + collection + " did not become active within " + maxSeconds
                 + "s. Last CLUSTERSTATUS:\n" + finalStatus.getStdout());
-    }
-
-    /**
-     * Recursively copies a directory tree from a container to a local path.
-     * Uses 'find' to list all files, then copies each one individually.
-     */
-    private static void copyDirectoryFromContainer(
-        SolrClusterContainer solr, String containerDir, Path localDir
-    ) throws Exception {
-        Files.createDirectories(localDir);
-        var findResult = solr.execInContainer("find", containerDir, "-type", "f");
-        for (var line : findResult.getStdout().trim().split("\n")) {
-            if (line.isEmpty()) continue;
-            var relativePath = line.substring(containerDir.length());
-            if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
-            var localFile = localDir.resolve(relativePath);
-            Files.createDirectories(localFile.getParent());
-            solr.copyFileFromContainer(line, localFile.toString());
-        }
-        log.atInfo().setMessage("Copied {} to {}").addArgument(containerDir).addArgument(localDir).log();
     }
 
     private static void populateSolrDocuments(SolrClusterContainer solr, String collection, int count)

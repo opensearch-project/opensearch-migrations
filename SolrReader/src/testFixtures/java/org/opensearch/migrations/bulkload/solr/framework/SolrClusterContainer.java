@@ -1,5 +1,8 @@
 package org.opensearch.migrations.bulkload.solr.framework;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 
 import lombok.Getter;
@@ -118,6 +121,22 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
 
     public String getSolrUrl() {
         return "http://" + getHost() + ":" + getMappedPort(8983);
+    }
+
+    /** Copy a container directory tree to the host, preserving paths relative to {@code containerDir}. */
+    public void copyDirectoryFromContainer(String containerDir, Path localDir) throws IOException, InterruptedException {
+        Files.createDirectories(localDir);
+        var found = execInContainer("find", containerDir, "-type", "f");
+        for (var line : found.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) {
+                continue;
+            }
+            var relativePath = line.substring(containerDir.length()).replaceFirst("^/", "");
+            var localFile = localDir.resolve(relativePath);
+            Files.createDirectories(localFile.getParent());
+            copyFileFromContainer(line, localFile.toString());
+        }
+        log.atInfo().setMessage("Copied {} to {}").addArgument(containerDir).addArgument(localDir).log();
     }
 
     @Override
