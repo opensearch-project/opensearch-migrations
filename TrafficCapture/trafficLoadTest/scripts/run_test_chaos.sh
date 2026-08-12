@@ -26,7 +26,11 @@ echo -e "\n${BOLD}Chaos Control Validation — $(date '+%Y-%m-%d %H:%M:%S')${NC}
 echo "──────────────────────────────────────────────────"
 
 header "Step 1 — Service health"
-check_service_health "" kafka opensearch-source capture-proxy redis webdis
+# The pipeline itself is workflow-owned (CR phase + Deployment); redis/webdis are the chaos control
+# bus from the k6LoadTest chart, which this script requires (registry.enabled=true).
+check_migration_resources_ready
+check_workload_health
+check_service_health "" redis webdis
 
 if $WITH_RUN; then
   header "Step 2 — Submitting a controlled k6 run (CONTROL_ENABLED, 2m)"

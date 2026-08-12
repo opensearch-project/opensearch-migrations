@@ -18,6 +18,7 @@ welcome feedback and contributions to optimize costs.
 | Script                            | Purpose                                                                                         |
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
 | buildSolr6Image.sh                | Builds a custom solr image and deploys it to the local image registry                           |
+| deployCdcWorkflow.sh              | Brings up a capture-and-replay (CDC) pipeline by submitting a migration workflow from a config  |
 | fillLocalRegistry.sh              | Sets up local registry, builds and pushes images to that local registry                         |
 | forwardAllServicePorts.sh         | Port-forwards all services to localhost to make them accessible from the host machine           |
 | generateWorkflowSchemaArtifact.sh | Generates the workflow schema artifact                                                          |
@@ -30,6 +31,20 @@ welcome feedback and contributions to optimize costs.
 | updateArgoWorkflowTemplate.sh     | Updates `clusterWorkflows.yaml` in case changes were made to it and need update in running argo |
 
 See the [kind instructions](#install-kind) below for more details about specific scripts.
+
+`deployCdcWorkflow.sh` is the one to reach for when you want a running capture proxy and replayer
+locally. It is a driver over the supported path rather than an alternate deployment mechanism: it
+renders a migration config (`configs/cdcLoadTest.yaml`, or your own with `-f`), feeds it to
+`workflow configure edit --stdin` + `workflow submit` in the migration console, and waits on the
+resulting CRs. Because the topology lives in the config, any CDC shape is expressible without
+changing the script. Run `kindTesting.sh` first — it expects the control plane and clusters to exist.
+
+```bash
+./deployCdcWorkflow.sh render   # dry run: show the config that would be submitted
+./deployCdcWorkflow.sh up       # submit + wait for CaptureProxy/TrafficReplay to report Ready
+./deployCdcWorkflow.sh status   # CR phases, workflow phase, proxy endpoint
+./deployCdcWorkflow.sh down     # delete the migration resources
+```
 
 ## Quick Start
 

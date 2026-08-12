@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # scripts/lib/common.sh — shared helpers for the k6 load-test validation scripts.
 #
-# These validate the k6-operator setup against an ALREADY-RUNNING data plane (bring it up first
-# with buildImages/scripts/deployWorkflowComponents.sh). k6 runs are submitted as TestRuns through
+# These validate the k6-operator setup against an ALREADY-RUNNING CDC pipeline (bring it up first
+# with deployment/k8s/deployCdcWorkflow.sh up). k6 runs are submitted as TestRuns through
 # the migration console (`workflow k6 …`); assertions query the in-cluster services via kubectl.
+#
+# The pipeline is the one the migration workflow builds, so the things being asserted on are
+# workflow-owned: the capture proxy and replayer are Deployments labelled
+# migrations.opensearch.org/task, and Kafka is a Strimzi cluster — NOT the bare `kafka` /
+# `opensearch-source` Deployments an older, hand-rolled data plane used to create.
+#
+# Kafka assertions go through `console kafka` in the migration console pod. That is a deliberate
+# dependency: the workflow's Kafka exposes only a TLS listener with SCRAM auth, so talking to it
+# directly from a shell would mean rebuilding the truststore and credential plumbing that the
+# console already has. k6 runs themselves still go through k6-run.sh, so submitting load remains
+# console-independent.
 #
 # Source at the top of each script:
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   source "$SCRIPT_DIR/lib/common.sh"
 #
-# Env overrides: CONTEXT=<kube-context>  NAMESPACE=ma
+# Env overrides: CONTEXT=<kube-context>  NAMESPACE=ma  PROXY_NAME=capture-proxy
+#                PROXY_URL=…  KAFKA_TOPIC=…  SOURCE_URL=…  TARGET_URL=…
 
 set -euo pipefail
 
@@ -17,16 +29,48 @@ set -euo pipefail
 CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
 NAMESPACE="${NAMESPACE:-ma}"
 PROM_SVC="${PROM_SVC:-kube-prometheus-stack-prometheus:9090}"
-PROXY_URL="${PROXY_URL:-https://capture-proxy:9200}"
-KAFKA_TOPIC="${KAFKA_TOPIC:-logging-traffic-topic}"
-# Any in-cluster pod with curl + service DNS, used for proxy/Webdis/Prometheus probes. A data-plane
-# pod is used (not the console) so the whole validation path is console-independent.
-CURL_POD="${CURL_POD:-deploy/opensearch-source}"
+CONSOLE_POD="${CONSOLE_POD:-migration-console-0}"
+
+# The proxy's name is its key in the migration config's traffic.proxies, and the Kafka topic
+# defaults to that same name (traffic.proxies.<name>.kafkaTopic overrides it).
+PROXY_NAME="${PROXY_NAME:-capture-proxy}"
+KAFKA_TOPIC="${KAFKA_TOPIC:-$PROXY_NAME}"
+
+# Source/target endpoints. The workflow's clusters are whatever the config pointed at; these
+# defaults match the testClusters chart, which serves HTTPS with basic auth.
+SOURCE_URL="${SOURCE_URL:-https://elasticsearch-master-headless:9200}"
+TARGET_URL="${TARGET_URL:-https://opensearch-cluster-master-headless:9200}"
+CLUSTER_USERNAME="${CLUSTER_USERNAME:-admin}"
+CLUSTER_PASSWORD="${CLUSTER_PASSWORD:-admin}"
+
+# Any in-cluster pod with curl + service DNS, used for proxy/Prometheus probes. The old data-plane
+# pod (deploy/opensearch-source) no longer exists — the clusters come from their own charts now —
+# so the console pod is the reliable choice.
+CURL_POD="${CURL_POD:-$CONSOLE_POD}"
 # Console-independent run submitter (reads the chart's example TestRuns, kubectl-creates one).
 K6_RUN="${K6_RUN:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/k6-run.sh}"
 
 K()  { kubectl --context "$CONTEXT" -n "$NAMESPACE" "$@"; }
 kcurl() { K exec "$CURL_POD" -- curl "$@"; }
+console_exec() { K exec "$CONSOLE_POD" -- /bin/bash -lc "$*"; }
+
+# The endpoint the CaptureProxy CR published, so the scripts follow the deployed listenPort instead
+# of assuming one. Falls back to the workflow's default port when the CR cannot be read.
+resolve_proxy_url() {
+  local ep
+  ep="$(K get captureproxy.migrations.opensearch.org "$PROXY_NAME" \
+        -o jsonpath='{.status.serviceEndpoint}' 2>/dev/null || true)"
+  echo "https://${ep:-${PROXY_NAME}:9201}"
+}
+PROXY_URL="${PROXY_URL:-$(resolve_proxy_url)}"
+
+# The proxy and replayer Deployment names. The replayer's is composed by the config processor
+# (<proxy>-<target>-<replayer>), so both are discovered by the label the workflow stamps on them
+# rather than guessed.
+deployment_for_task() {
+  K get deploy -l "migrations.opensearch.org/task=$1" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+}
 
 # ── Colors and counters ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
@@ -42,6 +86,13 @@ header() { echo -e "\n${BOLD}$1${NC}"; }
 submit_k6() {
   # Submit a k6 run WITHOUT waiting; echo the generated run name.
   local scenario="" config="" parallelism="" extra=""; local -a extra_env=()
+  # The proxy forwards to the source without adding credentials, so runs submitted from here carry
+  # the same ones the probes use. Harmless against a cluster with security disabled — it simply
+  # ignores the header — so this needs no auth/no-auth switch. A caller passing its own
+  # -e AUTH_USERNAME still wins, since later -e entries override earlier ones.
+  if [[ -n "$CLUSTER_USERNAME" ]]; then
+    extra_env+=(-e "AUTH_USERNAME=$CLUSTER_USERNAME" -e "AUTH_PASSWORD=$CLUSTER_PASSWORD")
+  fi
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scenario) scenario="$2"; shift ;;
@@ -145,20 +196,22 @@ prom_check_latency_p95() {
   else info "${name} p95 not yet in Prometheus — may need a moment to scrape"; fi
 }
 
-# ── Kafka (data-plane deployment 'kafka') ──────────────────────────────────────
+# ── Kafka (Strimzi cluster, reached through `console kafka`) ───────────────────
+# `console kafka describe-topic-records <topic>` prints a header plus one row per partition:
+#   TOPIC                          PARTITION  RECORDS
+#   capture-proxy                  0          180
+# Summing the RECORDS column gives the same end-offset total the old kafka-get-offsets.sh call did.
 kafka_total_offset() {
-  local total=0 line count
-  while IFS= read -r line; do
-    count=$(echo "$line" | awk -F: '{print $3}' | tr -d '[:space:]')
-    [[ "$count" =~ ^[0-9]+$ ]] && (( total += count )) || true
-  done < <(K exec deploy/kafka -- /opt/kafka/bin/kafka-get-offsets.sh \
-             --bootstrap-server localhost:9092 --topic "$KAFKA_TOPIC" 2>/dev/null || true)
+  local total=0 records
+  while read -r _topic _partition records _rest; do
+    [[ "$records" =~ ^[0-9]+$ ]] && (( total += records )) || true
+  done < <(console_exec "console kafka describe-topic-records '$KAFKA_TOPIC'" 2>/dev/null | tail -n +2 || true)
   echo "$total"
 }
 
 check_kafka_topic() {
-  if K exec deploy/kafka -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list 2>/dev/null \
-     | grep -q "$KAFKA_TOPIC"; then pass "$KAFKA_TOPIC exists"
+  if console_exec "console kafka list-topics" 2>/dev/null | grep -qx "$KAFKA_TOPIC"; then
+    pass "$KAFKA_TOPIC exists"
   else fail "$KAFKA_TOPIC not found — proxy may not have connected to Kafka yet"; fi
 }
 
@@ -168,9 +221,53 @@ check_kafka_messages() {
   else fail "Kafka end offset: $total messages — expected ≥${min}"; fi
 }
 
-# ── Service health (data-plane deployments) ────────────────────────────────────
+# ── Pipeline health ────────────────────────────────────────────────────────────
+# Every migration CR reports Ready. This is the workflow's own readiness signal, and it covers
+# Kafka — which has no Deployment to inspect, being a Strimzi StatefulSet.
+check_migration_resources_ready() {
+  local label="${1:-}" inventory notready
+  inventory="$(K get kafkaclusters,capturedtraffics,captureproxies,trafficreplays \
+    -o jsonpath='{range .items[*]}{.kind}{"/"}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null || true)"
+  if [[ -z "$inventory" ]]; then
+    fail "no migration resources found${label:+ $label} — is the CDC workflow deployed?"
+    return
+  fi
+  notready="$(grep -v ' Ready$' <<<"$inventory" || true)"
+  if [[ -z "$notready" ]]; then
+    pass "all migration resources Ready${label:+ $label} ($(grep -c . <<<"$inventory") resources)"
+  else
+    fail "migration resources not Ready${label:+ $label}: $(tr '\n' ' ' <<<"$notready")"
+  fi
+}
+
+# Availability of the workflow-owned workloads. Addressed by the task label the workflow stamps on
+# them, because the replayer's Deployment name is composed by the config processor. Kafka has no
+# Deployment to check — it is a Strimzi StatefulSet, covered by check_migration_resources_ready.
+# Usage: check_workload_health "(post-burst)"
+check_workload_health() {
+  local label="${1:-}" task d ready found
+  for task in captureProxy trafficReplayer; do
+    found=false
+    while read -r d; do
+      [[ -z "$d" ]] && continue
+      found=true
+      ready=$(K get deploy "$d" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "")
+      if [[ "${ready:-0}" -ge 1 ]] 2>/dev/null; then pass "$d is available${label:+ $label}"
+      else fail "$d is not available${label:+ $label} (availableReplicas: ${ready:-0})"; fi
+    done < <(deployment_for_task "$task")
+    if [[ "$found" == false ]]; then
+      fail "no Deployment labelled task=$task${label:+ $label}"
+    fi
+  done
+  # Explicit: the loop's last command is a test that is false on the happy path, so without this the
+  # function would return 1 and `set -e` would abort the caller right after everything passed.
+  return 0
+}
+
+# Plain Deployment availability by name. Used for workloads that are NOT workflow-owned and so keep
+# fixed names — redis and webdis, which the k6LoadTest chart deploys when registry.enabled=true.
+# Usage: check_service_health "(post-burst)" redis webdis
 check_service_health() {
-  # Usage: check_service_health "(post-burst)" kafka opensearch-source capture-proxy
   local label="${1:-}"; shift
   for d in "$@"; do
     local ready
@@ -181,17 +278,29 @@ check_service_health() {
 }
 
 check_proxy_ready() {
-  # The capture proxy answers HTTPS with a self-signed cert; -k skips verification.
-  if kcurl -sk -o /dev/null -w '%{http_code}' "${PROXY_URL}/_cluster/health" 2>/dev/null | grep -q '^200$'; then
-    pass "Capture Proxy is serving ($PROXY_URL)"
-  else fail "Capture Proxy not reachable at $PROXY_URL"; fi
+  # The capture proxy answers HTTPS with a self-signed cert; -k skips verification. It forwards to
+  # the source cluster rather than answering itself, so the request needs whatever credentials the
+  # source wants — an unauthenticated probe comes back 401 from the source, not from the proxy.
+  local code
+  code=$(kcurl -sk -u "$CLUSTER_USERNAME:$CLUSTER_PASSWORD" \
+           -o /dev/null -w '%{http_code}' "${PROXY_URL}/_cluster/health" 2>/dev/null || true)
+  if [[ "$code" == "200" ]]; then pass "Capture Proxy is serving ($PROXY_URL)"
+  else fail "Capture Proxy not reachable at $PROXY_URL (HTTP ${code:-no response})"; fi
 }
 
-# ── OpenSearch (source / target) ───────────────────────────────────────────────
+# ── OpenSearch / Elasticsearch (source / target) ───────────────────────────────
 os_query() {
   # Raw GET against a cluster: os_query source "/nyc_taxis/_count"
-  local which="${1:-source}" path="$2"
-  K exec "deploy/opensearch-${which}" -- curl -s "localhost:9200${path}" 2>/dev/null || true
+  # The clusters are provided by their own charts now, not by the data plane, so they are reached
+  # over the network from CURL_POD rather than by exec'ing into them. -k because the test clusters
+  # serve a self-signed cert; credentials are ignored by a cluster running without auth.
+  local which="${1:-source}" path="$2" url
+  case "$which" in
+    source) url="$SOURCE_URL" ;;
+    target) url="$TARGET_URL" ;;
+    *) echo ""; return ;;
+  esac
+  kcurl -sk -u "$CLUSTER_USERNAME:$CLUSTER_PASSWORD" "${url}${path}" 2>/dev/null || true
 }
 
 check_opensearch_docs() {

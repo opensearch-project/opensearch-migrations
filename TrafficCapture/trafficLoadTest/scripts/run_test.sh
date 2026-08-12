@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validation + example runner for the k6 load-test scenarios against a running data plane
-# (bring it up first with buildImages/scripts/deployWorkflowComponents.sh up). Optionally submits a
+# (bring it up first with deployment/k8s/deployCdcWorkflow.sh up). Optionally submits a
 # k6 run, then asserts the capture-and-replay pipeline and the scenario's Prometheus metrics via
 # kubectl / PromQL. The runtime control plane (pause/resume/set-rate) is validated separately by
 # run_test_chaos.sh.
@@ -93,10 +93,14 @@ fi
 
 # ── Shared checks ─────────────────────────────────────────────────────────────
 header "Service health"
+# Kafka, the captured-traffic topic, the proxy and the replayer are all workflow-owned, so their
+# readiness is the CRs' phase; the Deployment check then confirms pods are actually serving.
+check_migration_resources_ready
+check_workload_health
+# redis/webdis back the mixed scenario's id registry, and come from the k6LoadTest chart
+# (registry.enabled=true) rather than from the migration workflow.
 if [[ "$SCENARIO" == "mixed" ]]; then
-  check_service_health "" kafka opensearch-source capture-proxy redis webdis
-else
-  check_service_health "" kafka opensearch-source capture-proxy
+  check_service_health "" redis webdis
 fi
 
 # Ramp/burst shapes: report the peak arrival rate reached (constant-rate steady runs skip this).

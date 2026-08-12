@@ -36,7 +36,7 @@
  *                            e.g. '[{"duration":"2m","target":100},{"duration":"1m","target":0}]'
  */
 
-import http from 'k6/http';
+import http from '../lib/http-client.js';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -67,7 +67,7 @@ const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
 const INDEX_MAPPING = docs.mapping;
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL          = CFG.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
+const PROXY_URL          = CFG.CAPTURE_PROXY_URL      || 'https://capture-proxy:9201';
 const INDEX              = CFG.INDEX_NAME             || SCHEMA;
 const RATE               = parseInt(CFG.SEARCH_RATE      || '50');
 const VUS                = parseInt(CFG.SEARCH_VUS       || '30');

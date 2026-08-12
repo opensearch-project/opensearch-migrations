@@ -1,0 +1,74 @@
+# CDC (capture-and-replay) migration config — the default input to deployCdcWorkflow.sh.
+#
+# This is an ordinary migration config: the same thing you would write by hand and feed to
+# `workflow configure edit`, nothing script-specific about its shape. The script renders the
+# ${...} placeholders below and submits it; everything else here is literal.
+#
+# NOTE: this file is a TEMPLATE and does not parse as YAML until rendered — the two AUTH_BLOCK
+# placeholders occupy whole lines, because "no auth" has to mean the authConfig key is absent
+# entirely (see below), and a text placeholder cannot conditionally omit a key while still leaving
+# valid YAML behind. The script validates the RENDERED result before submitting it. A config you
+# pass with -f needs no placeholders and should be ordinary, directly-valid YAML.
+#
+# Comments are substituted too, so placeholders are named WITHOUT the ${...} syntax throughout this
+# header — spelling one out here would expand it into the comment and corrupt the rendered file.
+#
+# Placeholders (and ONLY these) are substituted, so a config with no placeholders passes through
+# untouched — which is what `deployCdcWorkflow.sh up -f my-config.yaml` relies on:
+#
+#   SOURCE_ENDPOINT / TARGET_ENDPOINT   discovered from the deployed clusters, or set explicitly
+#   SOURCE_VERSION                      source engine version
+#   SOURCE_AUTH_BLOCK / TARGET_AUTH_BLOCK
+#                                       an `authConfig:` stanza when the cluster wants auth, or
+#                                       empty when it does not. `authConfig` is an optional union
+#                                       in the schema, so "no auth" means the key is ABSENT — an
+#                                       empty `authConfig: {}` fails validation.
+#   PROXY_NAME / PROXY_PORT / PROXY_SERVICE_TYPE / PROXY_REPLICAS
+#   REPLAYER_NAME / SPEEDUP_FACTOR
+#
+# To express a different CDC topology — more proxies, more replayers, an S3 traffic source, an
+# external Kafka, cert-manager TLS — edit this file (or pass your own with -f). The script reads
+# the resource names back out of the config to decide what to wait on, so it needs no changes.
+
+# Capture-and-replay only: no snapshot, no metadata migration, no backfill.
+skipApprovals: true
+snapshotMigrationConfigs: []
+
+sourceClusters:
+  source1:
+    endpoint: "${SOURCE_ENDPOINT}"
+    version: "${SOURCE_VERSION}"
+    allowInsecure: true
+${SOURCE_AUTH_BLOCK}
+
+targetClusters:
+  target1:
+    endpoint: "${TARGET_ENDPOINT}"
+    allowInsecure: true
+${TARGET_AUTH_BLOCK}
+
+# An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
+kafkaClusterConfiguration:
+  default:
+    autoCreate: {}
+
+traffic:
+  proxies:
+    ${PROXY_NAME}:
+      source: source1
+      proxyConfig:
+        listenPort: ${PROXY_PORT}
+        noCapture: false
+        podReplicas: ${PROXY_REPLICAS}
+        # ClusterIP, not the LoadBalancer default: kind has no load-balancer controller, and the
+        # workflow's readiness gate blocks until a LoadBalancer reports ingress, so LoadBalancer
+        # would hang here until it times out. Use LoadBalancer on a cloud cluster.
+        serviceType: ${PROXY_SERVICE_TYPE}
+
+  replayers:
+    ${REPLAYER_NAME}:
+      fromCapturedTraffic: ${PROXY_NAME}
+      toTarget: target1
+      replayerConfig:
+        speedupFactor: ${SPEEDUP_FACTOR}
+        observedPacketConnectionTimeout: 30

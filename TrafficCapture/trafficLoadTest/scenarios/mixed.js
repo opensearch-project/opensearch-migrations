@@ -48,7 +48,7 @@
  *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
  */
 
-import http from 'k6/http';
+import http from '../lib/http-client.js';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -88,7 +88,7 @@ const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.r
 const INDEX_MAPPING = docs.mapping;
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL            = CFG.CAPTURE_PROXY_URL        || 'https://capture-proxy:9200';
+const PROXY_URL            = CFG.CAPTURE_PROXY_URL        || 'https://capture-proxy:9201';
 const INDEX                = CFG.INDEX_NAME               || SCHEMA;
 const INGEST_RATE          = parseInt(CFG.INGEST_RATE      || '30');
 const SEARCH_RATE          = parseInt(CFG.SEARCH_RATE      || '20');

@@ -3,7 +3,7 @@
 # exercise multiple simultaneous load tests. Unlike the old docker-compose version, the runs live
 # in the cluster — no background processes to babysit; list/stop them with the console CLI.
 #
-# Assumes the data plane is up (deployWorkflowComponents.sh up).
+# Assumes the data plane is up (deployCdcWorkflow.sh up).
 #
 # Usage:
 #   ./scripts/start_multiple_k6.sh           # submit the default fleet, then wait (Ctrl+C stops all)

@@ -7,7 +7,7 @@
  * config, so schema modules only need to declare config — no query logic to repeat.
  */
 
-import http from 'k6/http';
+import http from './http-client.js';
 import { check } from 'k6';
 
 function pick(arr) {
