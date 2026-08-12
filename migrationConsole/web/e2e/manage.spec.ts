@@ -179,6 +179,14 @@ async function mockManageApi(page: Page) {
     });
   });
   return {
+    setCaptureEditTarget(targetId: string) {
+      const capture = snapshot.nodes["resource:captureproxies:capture"];
+      capture.capabilities = capture.capabilities.map((capability) => (
+        capability.kind === "edit"
+          ? { ...capability, editTargetId: targetId }
+          : capability
+      ));
+    },
     insertCapture() {
       const insertedId = "resource:captureproxies:capture-next";
       snapshot = {
@@ -293,6 +301,53 @@ test("pins ancestor rows while scrolling nested configuration", async ({ page },
   await expect(
     config.getByRole("row", { name: /Source clusters/ }),
   ).toBeInViewport();
+});
+
+
+test("transitions scoped parents before their full row scrolls away", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop scrolling coverage");
+  const api = await mockManageApi(page);
+  api.setCaptureEditTarget("edit:sourceClusters.legacy.endpoint");
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit capture" }).click();
+  await expect(
+    page.getByRole("button", { name: "Add source cluster" }),
+  ).toBeVisible();
+  await page.getByRole("checkbox", { name: "Show optional fields" }).check();
+  await page.getByRole("checkbox", { name: "Show expert fields" }).check();
+
+  const config = page.getByRole("table", { name: "Configuration fields" });
+  const authentication = config.getByRole("row", { name: /Authentication/ });
+  const columnHeader = config.getByRole("columnheader", { name: "Setting" });
+  const panel = page.locator(".config-table-panel");
+  await panel.hover();
+  const context = page.getByRole("navigation", {
+    name: "Current configuration path",
+  });
+  const pinnedAuthentication = context.getByRole("button", {
+    name: /^Authentication/,
+  });
+  for (
+    let attempt = 0;
+    attempt < 20 && await pinnedAuthentication.count() === 0;
+    attempt += 1
+  ) {
+    await page.mouse.wheel(0, 20);
+  }
+  await expect(
+    pinnedAuthentication,
+  ).toBeVisible();
+  await expect(
+    context.getByRole("button", { name: /^legacy/ }),
+  ).toHaveCount(0);
+
+  const authenticationBox = await authentication.boundingBox();
+  const headerBox = await columnHeader.boundingBox();
+  expect(authenticationBox).not.toBeNull();
+  expect(headerBox).not.toBeNull();
+  expect(authenticationBox!.y + authenticationBox!.height)
+    .toBeGreaterThan(headerBox!.y + headerBox!.height);
 });
 
 

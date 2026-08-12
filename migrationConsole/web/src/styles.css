@@ -962,6 +962,36 @@ button {
   text-decoration: underline;
 }
 
+.config-context-add {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 620px);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.config-context-add > header strong,
+.config-context-add > header span {
+  display: block;
+}
+
+.config-context-add > header strong {
+  font-size: 12px;
+}
+
+.config-context-add > header span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.config-context-add .inline-command-form {
+  max-width: 620px;
+}
+
 .config-layout {
   display: grid;
   flex: 1 1 auto;
@@ -1059,6 +1089,7 @@ button {
   background: #edf4f6;
   font-size: 10px;
   text-align: left;
+  will-change: opacity, transform;
 }
 
 .pinned-context-row:hover {
@@ -1140,6 +1171,17 @@ button {
 
 .config-property-row.inserted {
   animation: row-insert 380ms ease-out;
+}
+
+.config-property-row.context-transition > th > *,
+.config-property-row.context-transition > .property-state-cell > * {
+  opacity: var(--context-content-opacity);
+}
+
+.config-property-row.context-transition
+  > td:not(.property-state-cell) > * {
+  opacity: var(--context-detail-opacity);
+  pointer-events: none;
 }
 
 .property-heading {
@@ -2098,6 +2140,10 @@ button {
 
   .config-toolbar-actions > button:not(.icon-button) span {
     display: none;
+  }
+
+  .config-context-add {
+    grid-template-columns: 1fr;
   }
 
   .config-layout {

@@ -345,6 +345,63 @@ test("keeps resource context while scoping edit mode to the selected resource", 
 });
 
 
+test("offers the owning collection add action from a scoped resource editor", async () => {
+  const scopedSnapshot = structuredClone(manageSnapshot);
+  const capture = scopedSnapshot.nodes["resource:captureproxies:capture"];
+  capture.capabilities = capture.capabilities.map((capability) => (
+    capability.kind === "edit"
+      ? {
+        ...capability,
+        editTargetId: "edit:sourceClusters.legacy.endpoint",
+      }
+      : capability
+  ));
+  const operations: unknown[] = [];
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(scopedSnapshot),
+    ),
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "config-draft-added-from-scope",
+      });
+    }),
+  );
+  renderApp();
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const config = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(config).queryByRole("row", {
+    name: /^Source clusters/,
+  })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Add source cluster",
+  }));
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "source cluster name" }),
+    "next-source",
+  );
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create source cluster",
+  }));
+
+  await waitFor(() => expect(operations).toEqual([{
+    op: "add",
+    path: ["sourceClusters"],
+    value: { name: "next-source" },
+  }]));
+});
+
+
 test("shows the server reason when configuration cannot be opened", async () => {
   server.use(
     http.get("*/api/v1/config", () =>

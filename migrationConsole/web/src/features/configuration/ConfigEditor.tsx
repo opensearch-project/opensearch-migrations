@@ -47,6 +47,22 @@ interface EditRow {
 }
 
 
+interface PinnedContext {
+  id: string;
+  progress: number;
+}
+
+
+interface AddContext {
+  command: EditNode;
+  parent: EditNode;
+}
+
+
+const PINNED_CONTEXT_HEIGHT = 32;
+const PINNED_CONTEXT_TRANSITION = 28;
+
+
 function nodeChildren(node: EditNode): EditNode[] {
   return node.children ?? [];
 }
@@ -61,6 +77,20 @@ function addCommand(node: EditNode): EditNode | null {
   return nodeChildren(node).find(
     (child) => child.valueKind === "command",
   ) ?? null;
+}
+
+
+function nearestAddContext(
+  nodes: EditNode[],
+  nodeId: string | null,
+): AddContext | null {
+  let candidate = findClosestNode(nodes, nodeId);
+  while (candidate) {
+    const command = addCommand(candidate);
+    if (command) return { command, parent: candidate };
+    candidate = findParent(nodes, candidate.id);
+  }
+  return null;
 }
 
 
@@ -683,6 +713,7 @@ function ConfigPropertyRow({
   onRevealChildren,
   onToggle,
   rowRef,
+  contextProgress,
 }: {
   draft: ConfigDraft;
   node: EditNode;
@@ -701,6 +732,7 @@ function ConfigPropertyRow({
   onRevealChildren: () => void;
   onToggle: () => void;
   rowRef: (element: HTMLTableRowElement | null) => void;
+  contextProgress: number;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -773,6 +805,7 @@ function ConfigPropertyRow({
           `status-${node.status ?? "ok"}`,
           selected ? "selected" : "",
           inserted ? "inserted" : "",
+          contextProgress > 0 ? "context-transition" : "",
         ].join(" ")}
         onClick={(event) => {
           const targetElement = event.target as HTMLElement;
@@ -781,6 +814,11 @@ function ConfigPropertyRow({
           }
         }}
         ref={rowRef}
+        style={{
+          "--context-pin-progress": contextProgress,
+          "--context-content-opacity": 1 - contextProgress,
+          "--context-detail-opacity": 1 - contextProgress * 0.65,
+        } as React.CSSProperties}
         tabIndex={selected ? 0 : -1}
       >
         <th scope="row">
@@ -1006,8 +1044,12 @@ export function ConfigEditor({
   const [selectedId, setSelectedId] = useState<string | null>(
     initialTargetId ?? null,
   );
+  const [activeTargetId, setActiveTargetId] = useState<string | null>(
+    initialTargetId ?? null,
+  );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
+  const [contextAdding, setContextAdding] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
@@ -1015,8 +1057,9 @@ export function ConfigEditor({
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
-  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
   const configTablePanelRef = useRef<HTMLElement>(null);
+  const pinUpdateFrame = useRef<number | null>(null);
   const rowElements = useRef(new Map<string, HTMLTableRowElement>());
   const knownRowIds = useRef<Set<string> | null>(null);
   const skipNextRowTracking = useRef(false);
@@ -1032,17 +1075,26 @@ export function ConfigEditor({
     [draft?.editState.nodes],
   );
   const target = useMemo(
-    () => findClosestNode(nodes, initialTargetId ?? null),
-    [initialTargetId, nodes],
+    () => findClosestNode(nodes, activeTargetId),
+    [activeTargetId, nodes],
   );
   const scope = useMemo(
-    () => editScope(nodes, initialTargetId ?? null),
-    [initialTargetId, nodes],
+    () => editScope(nodes, activeTargetId),
+    [activeTargetId, nodes],
   );
   const scopedNodes = useMemo(
     () => scope ? [scope] : nodes,
     [nodes, scope],
   );
+  const contextualAdd = useMemo(
+    () => nearestAddContext(nodes, scope?.id ?? target?.id ?? null),
+    [nodes, scope?.id, target?.id],
+  );
+
+  useEffect(() => {
+    setActiveTargetId(initialTargetId ?? null);
+    setContextAdding(false);
+  }, [initialTargetId]);
 
   useEffect(() => {
     if (!draft) return;
@@ -1078,66 +1130,118 @@ export function ConfigEditor({
     () => treeRows(scopedNodes, expanded, showOptional, showExpert),
     [expanded, scopedNodes, showExpert, showOptional],
   );
+  const rowAncestors = useMemo(() => {
+    const stack: EditRow[] = [];
+    return rows.map((row) => {
+      while (stack.at(-1)?.depth >= row.depth) stack.pop();
+      const ancestors = [...stack];
+      stack.push(row);
+      return ancestors;
+    });
+  }, [rows]);
   const updatePinnedContext = useCallback(() => {
     const panel = configTablePanelRef.current;
     if (!panel || panel.scrollTop <= 1) {
-      setPinnedIds((current) => current.length === 0 ? current : []);
+      setPinnedContext((current) => current.length === 0 ? current : []);
       return;
     }
     const headerBottom = panel.querySelector("thead")
       ?.getBoundingClientRect().bottom ?? panel.getBoundingClientRect().top;
-    const firstVisibleIndex = rows.findIndex(({ node }) => {
+    let activeIndex = -1;
+    rows.forEach(({ node }, index) => {
       const element = rowElements.current.get(node.id);
-      return Boolean(element && element.getBoundingClientRect().bottom > headerBottom);
+      if (!element) return;
+      const ancestors = (rowAncestors[index] ?? []).filter(
+        ({ node: ancestor }) => ancestor.id !== scope?.id,
+      );
+      const activationTop = (
+        headerBottom
+        + ancestors.length * PINNED_CONTEXT_HEIGHT
+        + PINNED_CONTEXT_TRANSITION
+      );
+      if (element.getBoundingClientRect().top <= activationTop) {
+        activeIndex = index;
+      }
     });
-    if (firstVisibleIndex < 0) return;
+    if (activeIndex < 0) return;
 
-    const firstVisible = rows[firstVisibleIndex];
-    let expectedDepth = firstVisible.depth - 1;
-    const nextPinnedIds: string[] = [];
-    for (
-      let index = firstVisibleIndex - 1;
-      index >= 0 && expectedDepth > 0;
-      index -= 1
-    ) {
-      const candidate = rows[index];
-      if (candidate.depth !== expectedDepth) continue;
-      nextPinnedIds.unshift(candidate.node.id);
-      expectedDepth -= 1;
-    }
-    setPinnedIds((current) => (
-      current.length === nextPinnedIds.length
-      && current.every((id, index) => id === nextPinnedIds[index])
+    const activeHasVisibleChildren = (
+      rows[activeIndex + 1]?.depth > rows[activeIndex].depth
+    );
+    const nextPinned = [
+      ...(rowAncestors[activeIndex] ?? []),
+      ...(activeHasVisibleChildren ? [rows[activeIndex]] : []),
+    ]
+      .filter(({ node }) => node.id !== scope?.id)
+      .map(({ node }, index) => {
+        const element = rowElements.current.get(node.id);
+        const rowTop = element?.getBoundingClientRect().top ?? headerBottom;
+        const slotTop = headerBottom + index * PINNED_CONTEXT_HEIGHT;
+        return {
+          id: node.id,
+          progress: Math.max(0, Math.min(
+            1,
+            (slotTop + PINNED_CONTEXT_TRANSITION - rowTop)
+              / PINNED_CONTEXT_TRANSITION,
+          )),
+        };
+      })
+      .filter(({ progress }) => progress > 0);
+    setPinnedContext((current) => (
+      current.length === nextPinned.length
+      && current.every((item, index) => (
+        item.id === nextPinned[index].id
+        && Math.abs(item.progress - nextPinned[index].progress) < 0.01
+      ))
         ? current
-        : nextPinnedIds
+        : nextPinned
     ));
-  }, [rows]);
+  }, [rowAncestors, rows, scope?.id]);
   const pinnedRows = useMemo(
-    () => pinnedIds.flatMap((id) => {
-      const row = rows.find(({ node }) => node.id === id);
-      return row ? [row] : [];
+    () => pinnedContext.flatMap((context) => {
+      const row = rows.find(({ node }) => node.id === context.id);
+      return row ? [{ ...row, progress: context.progress }] : [];
     }),
-    [pinnedIds, rows],
+    [pinnedContext, rows],
   );
+  const schedulePinnedContextUpdate = useCallback(() => {
+    if (pinUpdateFrame.current !== null) return;
+    pinUpdateFrame.current = window.requestAnimationFrame(() => {
+      pinUpdateFrame.current = null;
+      updatePinnedContext();
+    });
+  }, [updatePinnedContext]);
   const scrollToRow = useCallback((nodeId: string) => {
     const panel = configTablePanelRef.current;
     const element = rowElements.current.get(nodeId);
     if (!panel || !element) return;
     const headerBottom = panel.querySelector("thead")
       ?.getBoundingClientRect().bottom ?? panel.getBoundingClientRect().top;
+    const rowIndex = rows.findIndex(({ node }) => node.id === nodeId);
+    const pinnedAncestors = (rowAncestors[rowIndex] ?? []).filter(
+      ({ node }) => node.id !== scope?.id,
+    ).length;
+    const targetTop = headerBottom
+      + pinnedAncestors * PINNED_CONTEXT_HEIGHT;
     panel.scrollTo({
       behavior: "smooth",
       top: Math.max(
         0,
-        panel.scrollTop + element.getBoundingClientRect().top - headerBottom,
+        panel.scrollTop + element.getBoundingClientRect().top - targetTop,
       ),
     });
-  }, []);
+  }, [rowAncestors, rows, scope?.id]);
   useEffect(() => {
     updatePinnedContext();
-    window.addEventListener("resize", updatePinnedContext);
-    return () => window.removeEventListener("resize", updatePinnedContext);
-  }, [updatePinnedContext]);
+    window.addEventListener("resize", schedulePinnedContextUpdate);
+    return () => {
+      window.removeEventListener("resize", schedulePinnedContextUpdate);
+      if (pinUpdateFrame.current !== null) {
+        window.cancelAnimationFrame(pinUpdateFrame.current);
+        pinUpdateFrame.current = null;
+      }
+    };
+  }, [schedulePinnedContextUpdate, updatePinnedContext]);
   useEffect(() => {
     const currentIds = new Set(rows.map(({ node }) => node.id));
     if (skipNextRowTracking.current) {
@@ -1277,6 +1381,14 @@ export function ConfigEditor({
     queueMicrotask(() => rowElements.current.get(nodeId)?.focus());
   };
 
+  const selectContextAdded = (
+    nodeId: string,
+    parentId: string | null,
+  ) => {
+    setActiveTargetId(nodeId);
+    selectAdded(nodeId, parentId);
+  };
+
   const close = async () => {
     if (!await waitForPendingCommit()) return;
     const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
@@ -1348,6 +1460,35 @@ export function ConfigEditor({
           </label>
         </div>
         <div className="config-toolbar-actions">
+          {contextualAdd ? (
+            <button
+              aria-expanded={contextAdding || undefined}
+              aria-label={`Add ${fieldName(contextualAdd.command)}`}
+              disabled={
+                busy
+                || Boolean(contextualAdd.command.command?.blockedMessage)
+              }
+              onClick={() => {
+                if (contextualAdd.command.command?.requiresName !== false) {
+                  setContextAdding((current) => !current);
+                } else {
+                  void runAddCommand(
+                    contextualAdd.command,
+                    contextualAdd.parent,
+                    "",
+                    commit,
+                    selectContextAdded,
+                  );
+                }
+              }}
+              title={contextualAdd.command.command?.blockedMessage
+                ?? `Add ${fieldName(contextualAdd.command)}`}
+              type="button"
+            >
+              <Plus />
+              <span>Add {fieldName(contextualAdd.command)}</span>
+            </button>
+          ) : null}
           <button
             aria-label="Reload draft"
             disabled={busy || draftQuery.isFetching}
@@ -1396,10 +1537,30 @@ export function ConfigEditor({
           <button onClick={() => setProblem("")} type="button">Dismiss</button>
         </div>
       ) : null}
+      {contextAdding && contextualAdd ? (
+        <section
+          aria-label={`Add ${fieldName(contextualAdd.command)}`}
+          className="config-context-add"
+        >
+          <header>
+            <strong>Add {fieldName(contextualAdd.command)}</strong>
+            <span>{fieldName(contextualAdd.parent)}</span>
+          </header>
+          <CommandEditor
+            busy={busy}
+            commit={commit}
+            node={contextualAdd.command}
+            onAdded={selectContextAdded}
+            onCancel={() => setContextAdding(false)}
+            onComplete={() => setContextAdding(false)}
+            parent={contextualAdd.parent}
+          />
+        </section>
+      ) : null}
       <div className="config-layout">
         <section
           className="config-table-panel"
-          onScroll={updatePinnedContext}
+          onScroll={schedulePinnedContextUpdate}
           ref={configTablePanelRef}
         >
           <header className="config-outline-header">
@@ -1411,13 +1572,17 @@ export function ConfigEditor({
               aria-label="Current configuration path"
               className="pinned-config-context"
             >
-              {pinnedRows.map(({ node, depth }) => (
+              {pinnedRows.map(({ node, depth, progress }) => (
                 <button
                   className="pinned-context-row"
                   key={node.id}
                   onClick={() => {
                     setSelectedId(node.id);
                     scrollToRow(node.id);
+                  }}
+                  style={{
+                    opacity: progress,
+                    transform: `translateY(${(1 - progress) * 6}px)`,
                   }}
                   type="button"
                 >
@@ -1462,6 +1627,10 @@ export function ConfigEditor({
                   <ConfigPropertyRow
                     busy={busy}
                     commit={commit}
+                    contextProgress={
+                      pinnedContext.find(({ id }) => id === node.id)?.progress
+                      ?? 0
+                    }
                     depth={depth}
                     draft={draft}
                     expanded={isExpanded}
