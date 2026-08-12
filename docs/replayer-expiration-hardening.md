@@ -13,6 +13,7 @@
 5. [Phase 1 — Epsilon Lookahead + Scanner + Proxy Cap](#5-phase-1--epsilon-lookahead--scanner--proxy-cap)
 6. [Phase 2 — Decoupled Tuple API + Response Recreation](#6-phase-2--decoupled-tuple-api--response-recreation)
 7. [Rejected Approaches](#7-rejected-approaches)
+8. [Dependencies on PR #3231](#8-dependencies-on-pr-3231)
 
 ---
 
@@ -23,7 +24,7 @@ conditions:
 
 **Category A — bugs (Phase 0):** Two code paths in the accumulator could permanently orphan
 offsets in `OffsetLifecycleTracker`, regardless of configuration. Both are fixed as of
-PR #3225.
+PR #3225. PR #3231 identifies two more in the same family — see §8.
 
 **Category B — design limits (Phase 1):** A connection whose source-time span exceeds
 `lookahead − connectionTimeout` cannot be expired by the current timestamp-driven mechanism
@@ -242,6 +243,14 @@ replaces the guarantee that validation was protecting.
 **Effect:** buffered records collapse from ~400s of traffic to ~30s. Memory held = the real
 working set (in-flight connections' accumulated bytes) + ε of read-ahead.
 
+> **Depends on the `isWorkOutstanding()` guard.** This memory bound holds only because the
+> frontier stays coupled to completed work — a stalled target slows reading. PR #3231 proposes
+> removing that guard, which decouples read-ahead from progress and makes it a pure function of
+> the replay clock. If that lands, ε alone no longer bounds memory and this section needs an
+> explicit read-ahead cap. See §8.
+
+
+
 **Frontier advancement under ε:** the idle-updater becomes the primary driver, pushing the
 barrier toward the replay clock whenever no work is outstanding. A request spanning 360s of
 source time is read *incrementally* as the replay clock crawls through it — no expiry needed,
@@ -288,6 +297,13 @@ is what bounds the scan: the scanner reads a fixed window ahead, never the whole
 The second row is a hard requirement: when removing a partition we **must not** commit
 messages that another replayer session would otherwise handle. This matches the existing
 `TRAFFIC_SOURCE_READER_INTERRUPTED` suppression in `commitTrafficStreams`.
+
+**Today's status enum cannot express both rows.** `ReconstructionStatus.EXPIRED_PREMATURELY` is
+*not* in `commitTrafficStreams`' suppress set (which holds only `CLOSED_PREMATURELY` and
+`TRAFFIC_SOURCE_READER_INTERRUPTED`), so any expiry routed through it commits. Phase 1 must
+therefore either add a status that distinguishes confirmed-dead from out-of-runway, or pass the
+commit decision explicitly alongside the status. This was surfaced by reviewing PR #3231, whose
+force-expiry path fires `EXPIRED_PREMATURELY` and consequently commits — see §8.
 
 ### 5.3 Capture proxy: max connection/request duration
 
@@ -465,3 +481,89 @@ that has to be tracked correctly. `--max-concurrent-requests` already throttles 
 count (to avoid port exhaustion) but does not bound lookahead buffers. If we truly need to
 buffer more, the preference is to keep going and let the OOM happen, with metrics good enough
 to distinguish "slow target" from "rough traffic stream."
+
+---
+
+## 8. Dependencies on PR #3231
+
+[PR #3231](https://github.com/opensearch-project/opensearch-migrations/pull/3231) fixes an active
+rebalance/drain-gate incident in the same machinery this design rewrites. Detailed
+change-by-change analysis lives in
+[`replayer-3231-review-notes.md`](replayer-3231-review-notes.md); this section records only what
+*this* document has to change depending on how that PR settles.
+
+The PR is expected to change substantially before merge, so treat the specifics below as
+conditional. Re-check them against what actually lands before implementing Phase 1.
+
+### 8.1 Phase 0 grows by two bugs
+
+Two of #3231's changes are Phase 0 material — same family as F1/F2, i.e. machinery that silently
+drops something it was required to deliver:
+
+- **`BlockingTrafficSource` never delegated the close callbacks.** It implements
+  `ITrafficCaptureSource` without overriding `onNetworkConnectionClosed` or
+  `onConnectionAccumulationComplete`, both of which are `default {}` no-ops. Since production
+  wires `setGlobalOnSessionClose` through a `BlockingTrafficSource`, **every** close notification
+  was silently swallowed instead of reaching `KafkaTrafficCaptureSource`, so the synthetic-close
+  counter never decremented and the drain gate never reopened. This is the incident's root cause
+  and is a genuine deadlock, not a slow path.
+- **`closeClientConnectionChannel` called `schedule.clear()`**, dropping pending futures without
+  completing them — leaking `requestWorkTracker` entries and `TrafficStreamLimiter` permits and
+  stalling `OnlineRadixSorter`. `drainWithCancellation()` completes them exceptionally instead,
+  matching what `cancelConnection` already does.
+
+Once these land, fold them into §4 as F3/F4. Their existence strengthens rather than weakens the
+design's premise: the failure mode that matters here is *silent* loss of a required signal, and
+it has now appeared four times in four different places.
+
+### 8.2 If the `isWorkOutstanding()` guard is removed (§5.1 at risk)
+
+#3231 proposes deleting the guard in `ReplayEngine.updateContentTimeControllerWhenIdling`. The
+review recommends against it, but if it lands:
+
+- **§5.1's memory argument breaks.** ε bounds read-ahead only while the frontier is coupled to
+  completed work. Without the guard, a stalled target no longer slows reading, so read-ahead
+  becomes unbounded in the one scenario where bounding it matters most. Phase 1 would need an
+  explicit read-ahead cap (a record or byte count), which §7 rejects as a poorly-behaved
+  proxy — so we'd be picking the least-bad option rather than a good one.
+- **§3's "bounded-slow" classification needs revisiting.** "Frontier gated by the slowest
+  outstanding send" is currently classified as not-a-lock precisely because sends are bounded by
+  `MAX_RETRIES × targetServerResponseTimeout`. Removing the guard doesn't invalidate that
+  reasoning, but it does mean the symptom it describes disappears for a reason unrelated to
+  fixing it.
+
+Preferred outcome: the guard stays, and the reported gate-freeze turns out to be a symptom of the
+orphaned futures fixed above (futures that never complete ⇒ work that is outstanding forever ⇒ a
+genuinely unbounded stall). That would make the guard removal unnecessary and leave §5.1 intact.
+
+### 8.3 If wall-clock force-expiry lands (§5.2 conflict)
+
+#3231 adds force-expiry to the accumulator heartbeat, keyed on
+`System.currentTimeMillis() − newestPacketTimestampInMillis`. That subtracts a **source**
+timestamp from a **wall** clock, which only means anything at `speedup == 1` on live traffic; on
+a historical capture every connection looks arbitrarily stale and gets expired immediately — and
+because it fires `EXPIRED_PREMATURELY`, those expirations **commit**. The review recommends
+dropping it.
+
+If any form of it lands, Phase 1 **must remove it**, not coexist with it. Two expiry mechanisms
+racing — one asking "has enough time passed?", the other "do follow-up records exist?" — resolve
+in favor of whichever fires first, and the impatient one always does. That would silently defeat
+the scanner's entire purpose while leaving it in the codebase looking authoritative.
+
+### 8.4 Smaller adjustments
+
+- **§5.4's metrics table should absorb #3231's observability work** rather than duplicate it.
+  Its `TrackingKafkaConsumer` heartbeat reports the *worst* commit head across all partitions,
+  which is strictly better than the arbitrary-first-partition behavior the table assumed.
+  Caveat unchanged: that `age` derives from `peekHeadMetadata().addedAt` (wall-clock at
+  insertion), which is a stall signal, **not** the backside ceiling.
+- **Expect merge conflicts.** #3231 renames `logHeartbeat` → `heartbeatAndExpireStaleConnections`
+  and touches `CapturedTrafficToHttpTransactionAccumulator`, `ReplayEngine`,
+  `KafkaTrafficCaptureSource`, and `TrafficReplayer`'s heartbeat scheduler — all Phase 1 files.
+  If the force-expiry is dropped the rename should go with it, which removes most of the overlap.
+- **Phase 2's commit-on-exception semantics interact with #3231's `finally`-commit change.**
+  Phase 2 multiplies the number of independent commit callbacks by four, so whatever exception
+  policy is settled for change 1 (see the review's three-class table: deterministic → commit
+  loudly; transient → retry then halt without committing; teardown → neither commit nor crash)
+  must be applied per-part, not per-transaction. Settling that policy in #3231 first is the
+  cheaper order.
