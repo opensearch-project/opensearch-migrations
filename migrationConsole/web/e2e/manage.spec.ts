@@ -1,10 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { manageSnapshot } from "../src/test/fixtures";
+import { configDraft, manageSnapshot } from "../src/test/fixtures";
 
 
 async function mockManageApi(page: Page) {
   let snapshot = structuredClone(manageSnapshot);
+  let draft = structuredClone(configDraft);
   await page.route("**/api/v1/system/health", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -22,6 +23,109 @@ async function mockManageApi(page: Page) {
       contentType: "text/event-stream",
       headers: { "Cache-Control": "no-cache" },
       body: "retry: 60000\nevent: heartbeat\ndata: {}\n\n",
+    });
+  });
+  await page.route("**/api/v1/config", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/config/operations", async (route) => {
+    draft = {
+      ...draft,
+      dirty: true,
+      draftRevision: `${draft.draftRevision}-next`,
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/config/save", async (route) => {
+    draft = {
+      ...draft,
+      dirty: false,
+      baseRevision: draft.draftRevision,
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/config/discard", async (route) => {
+    draft = structuredClone(configDraft);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/external-resources?*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        nodeId: "edit:traffic.transform.configMap",
+        draftRevision: draft.draftRevision,
+        displayName: "Transform ConfigMap",
+        rows: [{
+          name: "transform-code",
+          kind: "ConfigMap",
+          group: "",
+          version: "v1",
+          keys: ["main.js", "settings.json"],
+          status: "matching",
+          message: "",
+          current: true,
+        }],
+      }),
+    });
+  });
+  await page.route("**/api/v1/external-resources/select", async (route) => {
+    draft = {
+      ...draft,
+      dirty: true,
+      draftRevision: `${draft.draftRevision}-selected`,
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/external-resources/details?*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        nodeId: "edit:traffic.transform.configMap",
+        draftRevision: draft.draftRevision,
+        displayName: "Transform ConfigMap",
+        name: "transform-code",
+        kind: "ConfigMap",
+        resourceType: null,
+        keys: ["main.js", "settings.json"],
+        fieldValues: {
+          name: "transform-code",
+          contents: "export default () => true;",
+        },
+        hiddenFields: [],
+        missing: false,
+        message: null,
+      }),
+    });
+  });
+  await page.route("**/api/v1/external-resources/save", async (route) => {
+    draft = {
+      ...draft,
+      dirty: true,
+      draftRevision: `${draft.draftRevision}-external-save`,
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        draft,
+        name: "transform-code",
+        kind: "ConfigMap",
+        message: "ConfigMap updated: transform-code",
+      }),
     });
   });
   return {
@@ -54,6 +158,41 @@ async function mockManageApi(page: Page) {
 }
 
 
+test("edits generic configuration and selects a ConfigMap key", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit capture" }).click();
+  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  const configTree = page.getByRole("tree", { name: "Configuration fields" });
+
+  await page.getByRole("checkbox", { name: "Show optional fields" }).check();
+  await configTree.getByRole("treeitem", { name: /Timeout: 30/ }).click();
+  await expect(page.getByText("Generated value")).toBeVisible();
+  await expect(page.getByText("runtime timeout")).toBeVisible();
+
+  await configTree.getByRole("treeitem", {
+    name: /ConfigMap: transform-code/,
+  }).click();
+  await page.getByRole("button", {
+    name: "Browse Kubernetes resources",
+  }).click();
+  await expect(
+    page.getByLabel("Keys in transform-code").getByText("settings.json"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Inspect transform-code" }).click();
+  await expect(page.getByText("export default () => true;")).toBeVisible();
+  await page.getByRole("button", { name: "Back to resources" }).click();
+  await page.getByRole("button", {
+    name: "Use transform-code and key main.js",
+  }).click();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Saved configuration")).toBeVisible();
+});
+
+
 test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop interaction coverage");
   const api = await mockManageApi(page);
@@ -67,7 +206,7 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   await expect(page.getByText("Load balancer is unavailable in this cluster"))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "Edit capture" }))
-    .toBeDisabled();
+    .toBeEnabled();
 
   await capture.focus();
   await page.keyboard.press("ArrowDown");
@@ -112,6 +251,28 @@ test("keeps tree and activity reachable at narrow width", async ({ page }, testI
   );
   const hasHorizontalOverflow = scrollWidth > clientWidth;
   expect(hasHorizontalOverflow).toBe(false);
+});
+
+
+test("keeps configuration editing usable at narrow width", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "narrow", "narrow interaction coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit capture" }).click();
+  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "Show optional fields" }).check();
+  const configTree = page.getByRole("tree", { name: "Configuration fields" });
+  await configTree.getByRole("treeitem", { name: /Timeout: 30/ }).click();
+  await expect(page.getByText("runtime timeout")).toBeVisible();
+
+  const scrollWidth = await page.evaluate<number>(
+    "document.documentElement.scrollWidth",
+  );
+  const clientWidth = await page.evaluate<number>(
+    "document.documentElement.clientWidth",
+  );
+  expect(scrollWidth > clientWidth).toBe(false);
 });
 
 

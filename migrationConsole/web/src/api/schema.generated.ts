@@ -4,6 +4,142 @@
  */
 
 export interface paths {
+    "/api/v1/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open Config */
+        get: operations["open_config_api_v1_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Config */
+        post: operations["discard_config_api_v1_config_discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Config Operation */
+        post: operations["apply_config_operation_api_v1_config_operations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Config */
+        post: operations["save_config_api_v1_config_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External Resources */
+        get: operations["external_resources_api_v1_external_resources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-resources/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External Resource Details */
+        get: operations["external_resource_details_api_v1_external_resources_details_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-resources/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save External Resource */
+        post: operations["save_external_resource_api_v1_external_resources_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-resources/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Select External Resource */
+        post: operations["select_external_resource_api_v1_external_resources_select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/manage/events": {
         parameters: {
             query?: never;
@@ -59,6 +195,25 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AddEditOperationV1 */
+        AddEditOperationV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "add";
+            /** Path */
+            path: string[];
+            /** Value */
+            value: unknown;
+        };
+        /** ApplyEditOperationRequestV1 */
+        ApplyEditOperationRequestV1: {
+            /** Expecteddraftrevision */
+            expectedDraftRevision: string;
+            /** Operation */
+            operation: components["schemas"]["SetEditOperationV1"] | components["schemas"]["UnsetEditOperationV1"] | components["schemas"]["RemoveConfigEditOperationV1"] | components["schemas"]["RenameConfigEditOperationV1"] | components["schemas"]["AddEditOperationV1"];
+        };
         /** ApproveCapabilityV1 */
         ApproveCapabilityV1: {
             /** Approvaltargetid */
@@ -85,6 +240,16 @@ export interface components {
             /** Submittedchanged */
             submittedChanged: boolean;
         };
+        /** ConfigDraftV1 */
+        ConfigDraftV1: {
+            /** Baserevision */
+            baseRevision: string;
+            /** Dirty */
+            dirty: boolean;
+            /** Draftrevision */
+            draftRevision: string;
+            editState: components["schemas"]["EditStateV1"];
+        };
         /** DetailV1 */
         DetailV1: {
             /** Kind */
@@ -108,6 +273,11 @@ export interface components {
              */
             source: string | null;
         };
+        /** DraftRevisionRequestV1 */
+        DraftRevisionRequestV1: {
+            /** Expecteddraftrevision */
+            expectedDraftRevision: string;
+        };
         /** EditCapabilityV1 */
         EditCapabilityV1: {
             /** Edittargetid */
@@ -122,6 +292,268 @@ export interface components {
              * @default null
              */
             label: string | null;
+        };
+        /** EditCommandV1 */
+        EditCommandV1: {
+            /**
+             * Autoeditadded
+             * @default true
+             */
+            autoEditAdded: boolean;
+            /** Blockedmessage */
+            blockedMessage?: string | null;
+            /**
+             * Editadded
+             * @default false
+             */
+            editAdded: boolean;
+            /**
+             * Requiresname
+             * @default true
+             */
+            requiresName: boolean;
+        };
+        /** EditDiagnosticV1 */
+        EditDiagnosticV1: {
+            /** Message */
+            message: string;
+            /** Path */
+            path?: string[];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "required" | "error" | "warning" | "gated" | "blocked";
+        };
+        /** EditNodeV1 */
+        EditNodeV1: {
+            /** Children */
+            children?: components["schemas"]["EditNodeV1"][];
+            /** Collapsed */
+            collapsed?: boolean | null;
+            command?: components["schemas"]["EditCommandV1"] | null;
+            /** Description */
+            description?: string | null;
+            /** Diagnostics */
+            diagnostics?: components["schemas"]["EditDiagnosticV1"][];
+            /** Effectivedefault */
+            effectiveDefault?: {
+                [key: string]: unknown;
+            } | null;
+            /** Essential */
+            essential?: boolean | null;
+            /** Expert */
+            expert?: boolean | null;
+            /** Externalref */
+            externalRef?: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Inputhint */
+            inputHint?: {
+                [key: string]: unknown;
+            } | null;
+            /** Label */
+            label: string;
+            /** Path */
+            path: string[];
+            /** Presence */
+            presence?: ("required" | "optional") | null;
+            /** Removable */
+            removable?: boolean | null;
+            /** Required */
+            required?: boolean | null;
+            /** Status */
+            status?: ("ok" | "required" | "error" | "warning" | "changed" | "gated" | "blocked") | null;
+            statusCounts?: components["schemas"]["EditStatusCountsV1"] | null;
+            /** Validation */
+            validation?: {
+                [key: string]: string;
+            } | null;
+            /** Value */
+            value?: unknown;
+            /** Valueauthored */
+            valueAuthored?: boolean | null;
+            /** Valuedefaulted */
+            valueDefaulted?: boolean | null;
+            /**
+             * Valuekind
+             * @enum {string}
+             */
+            valueKind: "object" | "record" | "array" | "union" | "boolean" | "scalar" | "command";
+            /** Valuetype */
+            valueType?: ("string" | "number" | "boolean") | null;
+            /** Variants */
+            variants?: components["schemas"]["EditVariantV1"][];
+        };
+        /** EditProvenanceV1 */
+        EditProvenanceV1: {
+            /** Lossy */
+            lossy: boolean;
+            /**
+             * Source
+             * @constant
+             */
+            source: "pending-yaml";
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** EditStateV1 */
+        EditStateV1: {
+            /**
+             * Formatversion
+             * @constant
+             */
+            formatVersion: 1;
+            /** Nodes */
+            nodes: components["schemas"]["EditNodeV1"][];
+            provenance: components["schemas"]["EditProvenanceV1"];
+            validation: components["schemas"]["EditValidationV1"];
+        };
+        /** EditStatusCountsV1 */
+        EditStatusCountsV1: {
+            /**
+             * Blocked
+             * @default 0
+             */
+            blocked: number;
+            /**
+             * Changed
+             * @default 0
+             */
+            changed: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Gated
+             * @default 0
+             */
+            gated: number;
+            /**
+             * Required
+             * @default 0
+             */
+            required: number;
+            /**
+             * Warnings
+             * @default 0
+             */
+            warnings: number;
+        };
+        /** EditValidationV1 */
+        EditValidationV1: {
+            /** Diagnostics */
+            diagnostics?: components["schemas"]["EditDiagnosticV1"][];
+            /** Errors */
+            errors?: string[];
+            /** Valid */
+            valid: boolean;
+        };
+        /** EditVariantV1 */
+        EditVariantV1: {
+            /** Childschema */
+            childSchema?: components["schemas"]["EditNodeV1"][];
+            /** Description */
+            description?: string | null;
+            /** Label */
+            label: string;
+            /** Value */
+            value: unknown;
+        };
+        /** ExternalResourceDetailsV1 */
+        ExternalResourceDetailsV1: {
+            /** Displayname */
+            displayName: string;
+            /** Draftrevision */
+            draftRevision: string;
+            /** Fieldvalues */
+            fieldValues?: {
+                [key: string]: string;
+            };
+            /** Hiddenfields */
+            hiddenFields?: string[];
+            /** Keys */
+            keys?: string[];
+            /** Kind */
+            kind: string;
+            /** Message */
+            message?: string | null;
+            /**
+             * Missing
+             * @default false
+             */
+            missing: boolean;
+            /** Name */
+            name: string;
+            /** Nodeid */
+            nodeId: string;
+            /** Resourcetype */
+            resourceType?: string | null;
+        };
+        /** ExternalResourceInventoryV1 */
+        ExternalResourceInventoryV1: {
+            /** Displayname */
+            displayName: string;
+            /** Draftrevision */
+            draftRevision: string;
+            /** Nodeid */
+            nodeId: string;
+            /** Rows */
+            rows: components["schemas"]["ExternalResourceRowV1"][];
+        };
+        /** ExternalResourceMutationV1 */
+        ExternalResourceMutationV1: {
+            draft: components["schemas"]["ConfigDraftV1"];
+            /** Kind */
+            kind: string;
+            /** Message */
+            message: string;
+            /** Name */
+            name: string;
+        };
+        /** ExternalResourceRowV1 */
+        ExternalResourceRowV1: {
+            /** Apiversion */
+            apiVersion?: string | null;
+            /**
+             * Current
+             * @default false
+             */
+            current: boolean;
+            /**
+             * Group
+             * @default
+             */
+            group: string;
+            /** Keys */
+            keys?: string[];
+            /** Kind */
+            kind: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Name */
+            name: string;
+            /** Namespaced */
+            namespaced?: boolean | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "matching" | "warn" | "error";
+            /** Type */
+            type?: string | null;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -270,6 +702,28 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** RemoveConfigEditOperationV1 */
+        RemoveConfigEditOperationV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "removeConfig";
+            /** Path */
+            path: string[];
+        };
+        /** RenameConfigEditOperationV1 */
+        RenameConfigEditOperationV1: {
+            /** Newname */
+            newName: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "renameConfig";
+            /** Path */
+            path: string[];
+        };
         /** ResetCapabilityV1 */
         ResetCapabilityV1: {
             /**
@@ -281,6 +735,73 @@ export interface components {
             label: string;
             /** Resettargetid */
             resetTargetId: string;
+        };
+        /** SaveExternalResourceRequestV1 */
+        SaveExternalResourceRequestV1: {
+            /** Confirmations */
+            confirmations?: {
+                [key: string]: string;
+            };
+            /** Existingname */
+            existingName?: string | null;
+            /** Expecteddraftrevision */
+            expectedDraftRevision: string;
+            /** Nodeid */
+            nodeId: string;
+            /** Values */
+            values: {
+                [key: string]: string;
+            };
+        };
+        /** SelectExternalResourceRequestV1 */
+        SelectExternalResourceRequestV1: {
+            /**
+             * Acceptwarning
+             * @default false
+             */
+            acceptWarning: boolean;
+            /** Expecteddraftrevision */
+            expectedDraftRevision: string;
+            /**
+             * Group
+             * @default
+             */
+            group: string;
+            /** Key */
+            key?: string | null;
+            /** Kind */
+            kind: string;
+            /**
+             * Manual
+             * @default false
+             */
+            manual: boolean;
+            /** Name */
+            name: string;
+            /** Nodeid */
+            nodeId: string;
+        };
+        /** SetEditOperationV1 */
+        SetEditOperationV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set";
+            /** Path */
+            path: string[];
+            /** Value */
+            value: unknown;
+        };
+        /** UnsetEditOperationV1 */
+        UnsetEditOperationV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "unset";
+            /** Path */
+            path: string[];
         };
         /** ValidationError */
         ValidationError: {
@@ -338,6 +859,256 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    open_config_api_v1_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+        };
+    };
+    discard_config_api_v1_config_discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRevisionRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_config_operation_api_v1_config_operations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyEditOperationRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_config_api_v1_config_save_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRevisionRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    external_resources_api_v1_external_resources_get: {
+        parameters: {
+            query: {
+                nodeId: string;
+                expectedDraftRevision: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalResourceInventoryV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    external_resource_details_api_v1_external_resources_details_get: {
+        parameters: {
+            query: {
+                nodeId: string;
+                expectedDraftRevision: string;
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalResourceDetailsV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_external_resource_api_v1_external_resources_save_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveExternalResourceRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalResourceMutationV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_external_resource_api_v1_external_resources_select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectExternalResourceRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     manage_events_api_v1_manage_events_get: {
         parameters: {
             query?: never;

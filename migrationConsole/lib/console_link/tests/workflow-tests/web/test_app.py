@@ -4,6 +4,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from console_link.workflow.application.config_drafts import (
+    ConfigDraft,
+    ConfigDraftConflict,
+    ExternalResourceDetails,
+    ExternalResourceInventory,
+    ExternalResourceMutation,
+)
 from console_link.workflow.application.models import ManageNode, ManageSnapshot
 from console_link.workflow.application.observations import (
     Observation,
@@ -219,3 +226,354 @@ def test_manage_state_without_a_runtime_coordinator_is_unavailable(tmp_path):
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Workflow observation is not configured"
+
+
+def _edit_state():
+    return {
+        "formatVersion": 1,
+        "provenance": {
+            "source": "pending-yaml",
+            "lossy": False,
+            "warnings": [],
+        },
+        "nodes": [{
+            "id": "edit:traffic",
+            "path": ["traffic"],
+            "label": "Traffic",
+            "valueKind": "object",
+            "presence": "optional",
+            "expert": False,
+            "essential": True,
+            "status": "warning",
+            "statusCounts": {"warnings": 1},
+            "diagnostics": [{
+                "severity": "warning",
+                "message": "Check this branch",
+                "path": ["traffic"],
+            }],
+            "children": [{
+                "id": "edit:traffic.enabled",
+                "path": ["traffic", "enabled"],
+                "label": "enabled: true",
+                "value": True,
+                "valueAuthored": True,
+                "valueType": "boolean",
+                "valueKind": "boolean",
+                "status": "ok",
+                "children": [],
+            }],
+        }],
+        "validation": {
+            "valid": True,
+            "errors": [],
+            "diagnostics": [],
+        },
+    }
+
+
+class _Drafts:
+    def __init__(self):
+        self.current = ConfigDraft(
+            base_revision="base-1",
+            draft_revision="draft-1",
+            dirty=False,
+            edit_state=_edit_state(),
+        )
+        self.operation = None
+        self.expected_revision = None
+        self.saved = False
+        self.discarded = False
+        self.selection = None
+        self.external_read = None
+        self.external_save = None
+
+    def open(self):
+        return self.current
+
+    def apply(self, expected_revision, operation):
+        self.expected_revision = expected_revision
+        self.operation = operation
+        return self.current
+
+    def save(self, expected_revision):
+        self.expected_revision = expected_revision
+        self.saved = True
+        return self.current
+
+    def discard(self, expected_revision):
+        self.expected_revision = expected_revision
+        self.discarded = True
+        return self.current
+
+    def list_external_resources(self, expected_revision, node_id):
+        self.expected_revision = expected_revision
+        return ExternalResourceInventory(
+            node_id=node_id,
+            draft_revision=self.current.draft_revision,
+            display_name="Transform ConfigMap",
+            rows=[{
+                "name": "transform",
+                "kind": "ConfigMap",
+                "group": "",
+                "version": "v1",
+                "keys": ["main.js", "settings.json"],
+                "status": "matching",
+                "message": "",
+                "current": True,
+            }],
+        )
+
+    def select_external_resource(self, **selection):
+        self.selection = selection
+        return self.current
+
+    def read_external_resource(self, expected_revision, node_id, name):
+        self.external_read = {
+            "expected_revision": expected_revision,
+            "node_id": node_id,
+            "name": name,
+        }
+        return ExternalResourceDetails(
+            node_id=node_id,
+            draft_revision=self.current.draft_revision,
+            display_name="HTTP Basic Auth Secret",
+            name=name,
+            kind="Secret",
+            resource_type="kubernetes.io/basic-auth",
+            keys=["password", "username"],
+            field_values={
+                "secretName": name,
+                "username": "admin",
+            },
+            hidden_fields=["password"],
+            missing=False,
+            message=None,
+        )
+
+    def save_external_resource(self, **request):
+        self.external_save = request
+        return ExternalResourceMutation(
+            draft=self.current,
+            name="next-creds",
+            kind="Secret",
+            message="Secret updated: next-creds",
+        )
+
+
+def test_config_routes_expose_recursive_edit_state_without_raw_yaml(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["baseRevision"] == "base-1"
+    assert payload["draftRevision"] == "draft-1"
+    assert payload["dirty"] is False
+    assert payload["editState"]["nodes"][0]["children"][0]["value"] is True
+    assert payload["editState"]["nodes"][0]["essential"] is True
+    assert "rawYaml" not in payload
+
+
+def test_config_operation_contract_is_discriminated_and_passed_to_the_service(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/operations",
+            json={
+                "expectedDraftRevision": "draft-1",
+                "operation": {
+                    "op": "renameConfig",
+                    "path": ["traffic", "old"],
+                    "newName": "next",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert drafts.expected_revision == "draft-1"
+    assert drafts.operation == {
+        "op": "renameConfig",
+        "path": ["traffic", "old"],
+        "newName": "next",
+    }
+
+
+def test_config_save_and_discard_use_expected_revision(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        saved = client.post(
+            "/api/v1/config/save",
+            json={"expectedDraftRevision": "draft-1"},
+        )
+        discarded = client.post(
+            "/api/v1/config/discard",
+            json={"expectedDraftRevision": "draft-1"},
+        )
+
+    assert saved.status_code == 200
+    assert discarded.status_code == 200
+    assert drafts.saved is True
+    assert drafts.discarded is True
+
+
+def test_config_revision_conflict_returns_current_recoverable_draft(tmp_path):
+    drafts = _Drafts()
+
+    def conflict(_expected_revision, _operation):
+        raise ConfigDraftConflict(drafts.current)
+
+    drafts.apply = conflict
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/operations",
+            json={
+                "expectedDraftRevision": "stale",
+                "operation": {
+                    "op": "set",
+                    "path": ["traffic", "enabled"],
+                    "value": False,
+                },
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "draft_revision_conflict"
+    assert response.json()["detail"]["current"]["draftRevision"] == "draft-1"
+
+
+def test_external_routes_return_keys_and_submit_exact_selection(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        inventory = client.get(
+            "/api/v1/external-resources",
+            params={
+                "nodeId": "edit:traffic.transform.configMap",
+                "expectedDraftRevision": "draft-1",
+            },
+        )
+        selected = client.post(
+            "/api/v1/external-resources/select",
+            json={
+                "expectedDraftRevision": "draft-1",
+                "nodeId": "edit:traffic.transform.configMap",
+                "name": "transform",
+                "kind": "ConfigMap",
+                "group": "",
+                "key": "main.js",
+                "acceptWarning": False,
+                "manual": True,
+            },
+        )
+
+    assert inventory.status_code == 200
+    assert inventory.json()["rows"][0]["keys"] == ["main.js", "settings.json"]
+    assert "values" not in inventory.json()["rows"][0]
+    assert selected.status_code == 200
+    assert drafts.selection == {
+        "expected_revision": "draft-1",
+        "node_id": "edit:traffic.transform.configMap",
+        "name": "transform",
+        "kind": "ConfigMap",
+        "group": "",
+        "key": "main.js",
+        "accept_warning": False,
+        "manual": True,
+    }
+
+
+def test_external_detail_and_save_routes_never_return_secret_values(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        details = client.get(
+            "/api/v1/external-resources/details",
+            params={
+                "nodeId": "edit:source.auth.secretName",
+                "expectedDraftRevision": "draft-1",
+                "name": "source-creds",
+            },
+        )
+        saved = client.post(
+            "/api/v1/external-resources/save",
+            json={
+                "expectedDraftRevision": "draft-1",
+                "nodeId": "edit:source.auth.secretName",
+                "values": {
+                    "secretName": "next-creds",
+                    "username": "root",
+                    "password": "",
+                },
+                "confirmations": {"password": ""},
+                "existingName": "source-creds",
+            },
+        )
+
+    assert details.status_code == 200
+    assert details.json()["fieldValues"] == {
+        "secretName": "source-creds",
+        "username": "admin",
+    }
+    assert details.json()["hiddenFields"] == ["password"]
+    assert "values" not in details.json()
+    assert "password" not in json.dumps(details.json()["fieldValues"])
+    assert drafts.external_read == {
+        "expected_revision": "draft-1",
+        "node_id": "edit:source.auth.secretName",
+        "name": "source-creds",
+    }
+
+    assert saved.status_code == 200
+    assert saved.json()["name"] == "next-creds"
+    assert saved.json()["message"] == "Secret updated: next-creds"
+    assert saved.json()["draft"]["draftRevision"] == "draft-1"
+    assert drafts.external_save == {
+        "expected_revision": "draft-1",
+        "node_id": "edit:source.auth.secretName",
+        "values": {
+            "secretName": "next-creds",
+            "username": "root",
+            "password": "",
+        },
+        "confirmations": {"password": ""},
+        "existing_name": "source-creds",
+    }
+
+
+def test_config_routes_without_a_draft_service_are_unavailable(tmp_path):
+    app = create_app(static_dir=_static_bundle(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Configuration editing is not configured"

@@ -17,6 +17,7 @@ import {
 } from "../api/client";
 import { useManageEvents } from "../api/useManageEvents";
 import { ActivityPanel } from "../features/activity/ActivityPanel";
+import { ConfigEditor } from "../features/configuration/ConfigEditor";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
 
@@ -45,6 +46,7 @@ export function App() {
   const eventConnection = useManageEvents(queryClient);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
+  const [editTargetId, setEditTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!state.data) return;
@@ -132,7 +134,12 @@ export function App() {
           )}
         </div>
       </header>
-      {state.isPending ? (
+      {editTargetId ? (
+        <ConfigEditor
+          initialTargetId={editTargetId}
+          onClose={() => setEditTargetId(null)}
+        />
+      ) : state.isPending ? (
         <main className="shell-loading">
           <LoaderCircle className="spin" aria-hidden="true" />
           <strong>Loading workflow state</strong>
@@ -185,7 +192,11 @@ export function App() {
                 />
               </section>
               {selectedNode ? (
-                <ResourceWorkspace node={selectedNode} snapshot={state.data} />
+                <ResourceWorkspace
+                  node={selectedNode}
+                  onEdit={setEditTargetId}
+                  snapshot={state.data}
+                />
               ) : (
                 <section className="workspace empty-state">
                   <h2>Select a resource</h2>

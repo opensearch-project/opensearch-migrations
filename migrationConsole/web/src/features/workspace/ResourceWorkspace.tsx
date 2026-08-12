@@ -28,7 +28,13 @@ function capabilityIcon(kind: string) {
 }
 
 
-function ResourceActions({ node }: { node: ManageNode }) {
+function ResourceActions({
+  node,
+  onEdit,
+}: {
+  node: ManageNode;
+  onEdit: (targetId: string) => void;
+}) {
   if (node.capabilities.length === 0) return null;
   return (
     <div className="resource-actions" aria-label="Available actions">
@@ -38,9 +44,16 @@ function ResourceActions({ node }: { node: ManageNode }) {
         return (
           <button
             aria-label={label}
-            disabled
+            disabled={capability.kind !== "edit"}
             key={`${capability.kind}-${label}`}
-            title="This action is shown for parity and is enabled in a later phase"
+            onClick={() => {
+              if (capability.kind === "edit") {
+                onEdit(capability.editTargetId);
+              }
+            }}
+            title={capability.kind === "edit"
+              ? label
+              : "This action is enabled in a later phase"}
             type="button"
           >
             <Icon aria-hidden="true" />
@@ -124,9 +137,11 @@ function Comparisons({ node }: { node: ManageNode }) {
 
 export function ResourceWorkspace({
   node,
+  onEdit,
 }: {
   node: ManageNode;
   snapshot: ManageSnapshot;
+  onEdit: (targetId: string) => void;
 }) {
   return (
     <article className="workspace">
@@ -140,7 +155,7 @@ export function ResourceWorkspace({
           {node.phase ?? node.status}
         </span>
       </header>
-      <ResourceActions node={node} />
+      <ResourceActions node={node} onEdit={onEdit} />
       <dl className="facts-grid">
         <div>
           <dt>Status</dt>

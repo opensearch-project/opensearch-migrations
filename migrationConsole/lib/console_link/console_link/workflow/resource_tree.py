@@ -133,6 +133,7 @@ class ResourceNode:
     workflow_progress: Optional[List[Dict[str, Any]]] = None
     config_diff: Optional[Dict[str, Any]] = None
     config_presence: Dict[str, bool] = field(default_factory=dict)
+    config_edit_target_id: Optional[str] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     virtual_adoption: Optional[Dict[str, Any]] = None
     tree_id: Optional[str] = None
@@ -209,6 +210,11 @@ def apply_config_overlays(
     }
 
     for key, node in deployed.items():
+        node.config_edit_target_id = _config_edit_target_id(
+            pending.get(key),
+            submitted.get(key),
+            deployed_config.get(key),
+        )
         node.diagnostics = _merged_resource_diagnostics(submitted.get(key), pending.get(key))
         node.display_fields = _merged_display_fields(deployed_config.get(key), submitted.get(key), pending.get(key))
         node.config_presence = _build_config_presence(
@@ -244,6 +250,11 @@ def apply_config_overlays(
                 deployed=key in deployed_config,
                 submitted=key in submitted if submitted_available else None,
                 pending=key in pending if pending_available else None,
+            ),
+            config_edit_target_id=_config_edit_target_id(
+                pending.get(key),
+                submitted.get(key),
+                deployed_config.get(key),
             ),
         )
         virtual.config_diff = _build_config_diff(
@@ -293,6 +304,50 @@ def _build_config_presence(
     if pending is not None:
         presence['pending'] = pending
     return presence
+
+
+def _config_edit_target_id(*resources: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Find the owning edit branch from config-processor parameter provenance."""
+    for resource in resources:
+        provenance = (resource or {}).get("parameterProvenance") or {}
+        paths = [
+            [str(part) for part in entry.get("sourcePath") or []]
+            for entry in provenance.values()
+            if isinstance(entry, dict) and entry.get("sourcePath")
+        ]
+        if not paths:
+            continue
+        by_root: Dict[str, List[List[str]]] = {}
+        for path in paths:
+            by_root.setdefault(path[0], []).append(path)
+        ranked = sorted(
+            by_root.values(),
+            key=lambda group: len(group),
+            reverse=True,
+        )
+        if len(ranked) > 1 and len(ranked[0]) == len(ranked[1]):
+            prefix = _common_path_prefix(paths)
+        else:
+            prefix = _common_path_prefix(ranked[0])
+        if prefix:
+            return f"edit:{'.'.join(prefix)}"
+    return None
+
+
+def _common_path_prefix(paths: List[List[str]]) -> List[str]:
+    prefix = list(paths[0])
+    for path in paths[1:]:
+        shared = 0
+        while (
+            shared < len(prefix)
+            and shared < len(path)
+            and prefix[shared] == path[shared]
+        ):
+            shared += 1
+        prefix = prefix[:shared]
+        if not prefix:
+            break
+    return prefix
 
 
 def resource_config_change_summary(sections: List[ResourceSection]) -> Dict[str, int]:

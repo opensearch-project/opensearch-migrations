@@ -134,6 +134,11 @@ export interface ExternalResourceCreateDescriptor {
 export type ExternalRefSelectionDescriptor =
     | { target: 'scalarName' }
     | {
+        target: 'fileRefConfigMap';
+        nameField: string;
+        pathField: string;
+    }
+    | {
         target: 'objectRef';
         nameField?: string;
         kindField?: string;
@@ -387,6 +392,11 @@ const FILE_REF_CONFIG_MAP_EXTERNAL_REF: ExternalRefHint = kubernetesResourceRef(
     displayName: 'ConfigMap',
     description: 'Kubernetes ConfigMap containing the referenced file key.',
     resourceTypes: [CORE_V1_CONFIG_MAP],
+    selection: {
+        target: 'fileRefConfigMap',
+        nameField: 'configMap',
+        pathField: 'path',
+    },
 });
 
 const TLS_SECRET_EXTERNAL_REF: ExternalRefHint = {

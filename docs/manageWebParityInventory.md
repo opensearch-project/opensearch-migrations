@@ -1,6 +1,6 @@
 # Workflow Manage Web Parity Inventory
 
-Status: Phase 0 ownership and regression baseline
+Status: Phase 4 configuration editing complete
 
 This inventory identifies how required `workflow manage` capabilities reach the native web
 application. A checked ownership item means that the implementation path and test home are
@@ -38,7 +38,7 @@ capability.
 | `WorkflowTreeApp._workflow_has_active_rollout` | Extract | presentation-neutral active-rollout helper |
 | `WorkflowTreeApp._assign_workflow_progress` and recursive helpers | Extract | presentation-neutral workflow/resource association |
 | `WorkflowTreeApp._workflow_output_ref_map` | Extract later | `OutputService` in Phase 5 |
-| `WorkflowTreeApp` config draft fields and apply/save workers | Extract later | `ConfigDraftService` in Phase 4 |
+| `WorkflowTreeApp` config draft fields and apply/save workers | Extracted | `ConfigDraftService` in Phase 4 |
 | `WorkflowTreeApp` submit worker | Extract later | review service and `OperationManager` in Phase 6 |
 | `WorkflowTreeApp` approval callback | Extract later | `ApprovalService` in Phase 7 |
 | `WorkflowTreeApp` reset command construction | Replace later | direct reset planning/execution service in Phase 7 |

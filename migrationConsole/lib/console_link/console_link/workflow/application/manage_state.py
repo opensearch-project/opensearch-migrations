@@ -454,7 +454,10 @@ def _resource_capabilities(
     capabilities = [
         ManageCapability(
             kind="edit",
-            target_id=f"edit:{resource.plural}:{resource.name}",
+            target_id=(
+                resource.config_edit_target_id
+                or f"edit:{resource.plural}:{resource.name}"
+            ),
             label=f"Edit {resource.name}",
         ),
     ]

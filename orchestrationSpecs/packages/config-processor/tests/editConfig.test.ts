@@ -2111,7 +2111,11 @@ describe("editConfig state", () => {
             externalRef: {
                 kind: "kubernetesResource",
                 purpose: "file-ref-config-map",
-                selection: {target: "scalarName"},
+                selection: {
+                    target: "fileRefConfigMap",
+                    nameField: "configMap",
+                    pathField: "path",
+                },
                 k8s: {
                     resourceTypes: [{group: "", version: "v1", kind: "ConfigMap", namespaced: true}],
                 },
@@ -2560,7 +2564,11 @@ describe("editConfig state", () => {
             externalRef: {
                 kind: "kubernetesResource",
                 purpose: "file-ref-config-map",
-                selection: {target: "scalarName"},
+                selection: {
+                    target: "fileRefConfigMap",
+                    nameField: "configMap",
+                    pathField: "path",
+                },
                 k8s: {
                     resourceTypes: [{group: "", version: "v1", kind: "ConfigMap", namespaced: true}],
                 },

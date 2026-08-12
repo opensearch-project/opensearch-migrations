@@ -39,7 +39,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
   letter-spacing: 0;
 }
@@ -804,6 +806,697 @@ button {
   animation: spin 900ms linear infinite;
 }
 
+.config-editor {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.config-toolbar {
+  display: flex;
+  flex: 0 0 58px;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-toolbar h2,
+.config-toolbar p,
+.config-toolbar span,
+.config-field-panel h3,
+.config-diagnostics h3 {
+  margin: 0;
+}
+
+.config-toolbar h2 {
+  font-size: 16px;
+}
+
+.config-toolbar > div:first-child > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.config-toolbar-filters,
+.config-toolbar-actions,
+.field-actions,
+.value-provenance,
+.external-picker header,
+.external-picker-header-actions,
+.external-resource-heading,
+.external-resource-actions,
+.external-resource-form > header,
+.external-resource-view > header,
+.external-resource-view > header > div:last-child,
+.external-form-actions,
+.config-diagnostics header {
+  display: flex;
+  align-items: center;
+}
+
+.config-toolbar-filters {
+  gap: 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.config-toolbar-filters label,
+.boolean-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.config-toolbar-actions {
+  gap: 7px;
+  margin-left: auto;
+}
+
+.config-toolbar-actions > button,
+.field-form > button,
+.field-actions > button,
+.rename-form > button,
+.external-resource-actions button,
+.external-form-actions button,
+.selection-warning button,
+.secondary-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.config-toolbar-actions button svg,
+.field-form button svg,
+.field-actions button svg,
+.external-resource-actions button svg,
+.external-form-actions button svg,
+.secondary-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.config-toolbar-actions > button:disabled,
+.field-form > button:disabled,
+.field-actions > button:disabled,
+.external-resource-actions button:disabled {
+  opacity: 0.5;
+}
+
+.config-toolbar-actions .primary-button,
+.field-form > button[type="submit"] {
+  border-color: #155d68;
+  color: #fff;
+  background: var(--accent);
+}
+
+.config-problem {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e7aaa5;
+  color: #7e2f2a;
+  background: #fff0ef;
+  font-size: 12px;
+}
+
+.config-problem svg {
+  width: 16px;
+}
+
+.config-problem button {
+  margin-left: auto;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-decoration: underline;
+}
+
+.config-layout {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(300px, 340px) minmax(420px, 1fr) minmax(240px, 290px);
+  min-height: 0;
+}
+
+.config-tree-panel {
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.config-tree {
+  min-width: 280px;
+  padding: 6px 0 20px;
+}
+
+.config-tree-row {
+  display: grid;
+  grid-template-columns: 20px 9px minmax(0, 1fr) auto;
+  min-height: 39px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px calc(8px + (var(--config-depth) - 1) * 15px);
+  border-left: 3px solid transparent;
+  cursor: default;
+  font-size: 12px;
+}
+
+.config-tree-row:hover {
+  background: #edf2f4;
+}
+
+.config-tree-row.selected {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.config-tree-row > button {
+  display: grid;
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+
+.config-tree-row > button svg {
+  width: 14px;
+}
+
+.config-tree-spacer {
+  width: 20px;
+}
+
+.config-tree-row > span:nth-of-type(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-tree-row em {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.config-field-panel {
+  min-width: 0;
+  overflow: auto;
+  padding: 18px 22px 40px;
+}
+
+.config-field-panel > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-field-panel > header > div {
+  min-width: 0;
+}
+
+.config-field-panel > header span:first-child {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+}
+
+.config-field-panel h3 {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.field-status {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.field-description {
+  max-width: 760px;
+  margin: 14px 0 8px;
+  color: #344757;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.value-provenance {
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0;
+}
+
+.value-provenance span {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  font-size: 10px;
+}
+
+.effective-default {
+  max-width: 760px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--running);
+  background: #eef5fb;
+  font-size: 12px;
+}
+
+.effective-default p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.field-diagnostics {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.field-diagnostics > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid #edc685;
+  color: #724309;
+  background: #fff8e8;
+  font-size: 12px;
+}
+
+.field-diagnostics svg {
+  flex: 0 0 auto;
+  width: 15px;
+}
+
+.field-editor {
+  max-width: 760px;
+  margin-top: 18px;
+}
+
+.field-form,
+.rename-form {
+  display: grid;
+  max-width: 620px;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 9px;
+}
+
+.field-form label,
+.rename-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.field-form input[type="text"],
+.field-form input[type="number"],
+.field-form select,
+.field-form textarea,
+.rename-form input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: #17212b;
+  background: var(--surface);
+}
+
+.field-form textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.field-form .boolean-field {
+  display: flex;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  color: #17212b;
+}
+
+.field-help,
+.field-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+.regex-help {
+  grid-column: 1 / -1;
+  font-size: 11px;
+}
+
+.regex-help p {
+  margin: 0 0 5px;
+  color: var(--text-muted);
+}
+
+.regex-help a {
+  color: var(--accent);
+}
+
+.field-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.field-actions .danger-button {
+  border-color: #d69a95;
+  color: var(--danger);
+}
+
+.rename-form {
+  margin-top: 18px;
+}
+
+.config-diagnostics {
+  min-width: 0;
+  overflow: auto;
+  padding: 13px 14px 30px;
+  border-left: 1px solid var(--border);
+  background: var(--surface-subtle);
+  font-size: 11px;
+}
+
+.config-diagnostics header {
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.config-diagnostics header svg {
+  width: 16px;
+  color: var(--warning);
+}
+
+.config-diagnostics > strong {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+
+.config-diagnostics > p {
+  color: var(--text-muted);
+}
+
+.config-diagnostics > button {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+  background: var(--surface);
+}
+
+.config-diagnostics > button span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--warning);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.external-picker {
+  border: 1px solid var(--border);
+}
+
+.external-entry {
+  display: grid;
+  gap: 9px;
+}
+
+.external-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.external-picker > header {
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.external-picker > header strong,
+.external-picker > header span {
+  display: block;
+}
+
+.external-picker > header span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.external-resource-list {
+  max-height: 430px;
+  overflow: auto;
+}
+
+.external-resource-row {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.external-resource-row:last-child {
+  border-bottom: 0;
+}
+
+.external-resource-row.status-warn {
+  box-shadow: inset 3px 0 var(--warning);
+}
+
+.external-resource-heading {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.external-resource-heading span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.external-resource-heading em {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 9px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.external-resource-row p {
+  margin: 6px 0;
+  color: var(--warning);
+  font-size: 11px;
+}
+
+.external-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.external-keys span {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  background: #f2f6f7;
+}
+
+.empty-keys {
+  display: block;
+  margin: 8px 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.external-resource-actions {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.external-resource-actions button {
+  min-height: 28px;
+  font-size: 10px;
+}
+
+.external-picker-header-actions,
+.external-resource-view > header > div:last-child,
+.external-form-actions {
+  gap: 7px;
+}
+
+.external-resource-form,
+.external-resource-view {
+  border: 1px solid var(--border);
+}
+
+.external-resource-form > header,
+.external-resource-view > header {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.external-resource-form > header strong,
+.external-resource-form > header span,
+.external-resource-view > header strong,
+.external-resource-view > header span {
+  display: block;
+}
+
+.external-resource-form > header span,
+.external-resource-view > header span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.external-form-fields {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.external-form-field {
+  display: grid;
+  gap: 10px;
+}
+
+.external-form-field > label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.external-form-field input,
+.external-form-field select,
+.external-form-field textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.external-form-field textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.external-resource-form > .field-error {
+  padding: 0 14px;
+}
+
+.external-form-actions {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.external-resource-values {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.external-resource-values > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.external-resource-values > div:last-child {
+  border-bottom: 0;
+}
+
+.external-resource-values dt {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.external-resource-values dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.external-resource-values pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.hidden-value {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.selection-warning {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edc685;
+  color: #724309;
+  background: #fff8e8;
+  font-size: 11px;
+}
+
+.selection-warning svg {
+  width: 15px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -828,6 +1521,21 @@ button {
   }
 
   .health-state {
+    display: none;
+  }
+
+  .config-layout {
+    grid-template-columns: minmax(280px, 320px) minmax(400px, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .config-diagnostics {
+    grid-column: 2;
+    max-height: 190px;
+    border-top: 1px solid var(--border);
+  }
+
+  .config-toolbar-filters {
     display: none;
   }
 }
@@ -912,6 +1620,81 @@ button {
   .state-banner span {
     overflow: visible;
     white-space: normal;
+  }
+
+  .config-editor {
+    overflow: auto;
+  }
+
+  .config-toolbar {
+    position: sticky;
+    z-index: 10;
+    top: 0;
+    min-height: 112px;
+    flex-wrap: wrap;
+    align-content: center;
+  }
+
+  .config-toolbar-filters {
+    display: flex;
+    order: 3;
+    width: 100%;
+  }
+
+  .config-toolbar-actions {
+    gap: 4px;
+  }
+
+  .config-toolbar-actions > button:not(.icon-button) {
+    width: 34px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+    white-space: nowrap;
+  }
+
+  .config-toolbar-actions > button:not(.icon-button) svg {
+    color: #17212b;
+  }
+
+  .config-toolbar-actions > .primary-button:not(.icon-button) svg {
+    color: #fff;
+  }
+
+  .config-layout {
+    display: block;
+    overflow: visible;
+  }
+
+  .config-tree-panel {
+    max-height: 310px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .config-field-panel {
+    overflow: visible;
+    padding: 16px;
+  }
+
+  .config-diagnostics {
+    max-height: none;
+    overflow: visible;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .field-form,
+  .rename-form {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-warning {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .selection-warning button {
+    grid-column: 2;
   }
 }
 

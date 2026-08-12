@@ -8,6 +8,7 @@ import uvicorn
 
 from ..application.manage_state import ManageStateService
 from ..application.observations import ObservationCoordinator
+from ..application.config_drafts import ConfigDraftService
 from ..models.utils import load_k8s_config
 from ..services.argo_observation_service import make_argo_observation_service
 from ..services.config_edit_service import ConfigEditService
@@ -41,7 +42,13 @@ def run_server(
         state_service,
         refresh_interval=refresh_interval,
     )
-    app = create_app(static_dir=static_dir, coordinator=coordinator)
+    app = create_app(
+        static_dir=static_dir,
+        coordinator=coordinator,
+        config_drafts=ConfigDraftService(
+            ConfigEditService(namespace=namespace),
+        ),
+    )
     uvicorn.run(
         app,
         host=host,

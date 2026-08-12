@@ -2,10 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { getHealth } from "../api/client";
-import { manageSnapshot } from "../test/fixtures";
+import { configDraft, manageSnapshot } from "../test/fixtures";
 import { server } from "../test/server";
 import { App } from "./App";
 
@@ -54,7 +54,7 @@ test("renders real manage state with exact-node details and capabilities", async
   expect(screen.getAllByRole("cell", { name: "LoadBalancer" })).toHaveLength(2);
   expect(screen.getByRole("cell", { name: "ClusterIP" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Edit capture" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Edit capture" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Logs for capture" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reset capture" })).toBeDisabled();
 });
@@ -226,4 +226,478 @@ test("shows stale and partial-observation problems without hiding last good data
   expect(
     screen.getByRole("tree", { name: "Workflow resources" }),
   ).toBeInTheDocument();
+});
+
+
+test("opens a generic configuration editor and explains generated values", async () => {
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Configuration" }),
+  ).toBeInTheDocument();
+  const configTree = screen.getByRole("tree", {
+    name: "Configuration fields",
+  });
+  expect(
+    within(configTree).queryByRole("treeitem", { name: /Timeout: 30/ }),
+  ).toBeNull();
+
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Show optional fields" }),
+  );
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /Timeout: 30/ }),
+  );
+
+  expect(screen.getByText("Generated value")).toBeInTheDocument();
+  expect(screen.getByText("runtime timeout")).toBeInTheDocument();
+  expect(
+    screen.getByText("Generated from the standard runtime profile."),
+  ).toBeInTheDocument();
+
+  expect(
+    within(configTree).queryByRole("treeitem", {
+      name: /Advanced setting: quiet/,
+    }),
+  ).toBeNull();
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Show expert fields" }),
+  );
+  expect(
+    within(configTree).getByRole("treeitem", {
+      name: /Advanced setting: quiet/,
+    }),
+  ).toBeInTheDocument();
+});
+
+
+test("navigates configuration rows without changing selection until activation", async () => {
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+  const endpoint = within(configTree).getByRole("treeitem", {
+    name: /Endpoint: https:\/\/legacy.example.com:9200/,
+  });
+  await userEvent.click(endpoint);
+  endpoint.focus();
+
+  await userEvent.keyboard("{ArrowDown}");
+  const allowInsecure = within(configTree).getByRole("treeitem", {
+    name: /Allow insecure: false/,
+  });
+  expect(allowInsecure).toHaveFocus();
+  expect(endpoint).toHaveAttribute("aria-selected", "true");
+  expect(allowInsecure).toHaveAttribute("aria-selected", "false");
+
+  await userEvent.keyboard("{Enter}");
+  expect(allowInsecure).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("checkbox", { name: "Allow insecure" }))
+    .toBeInTheDocument();
+});
+
+
+test("submits scalar, exact-node rename, union, and add operations", async () => {
+  const operations: unknown[] = [];
+  server.use(
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: `config-draft-${operations.length + 1}`,
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", {
+      name: /Endpoint: https:\/\/legacy.example.com:9200/,
+    }),
+  );
+  const valueInput = screen.getByRole("textbox", { name: "Endpoint" });
+  await userEvent.clear(valueInput);
+  await userEvent.type(valueInput, "https://next.example.com:9200");
+  await userEvent.click(screen.getByRole("button", { name: "Apply value" }));
+
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /^legacy/ }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Rename legacy" }));
+  const nameInput = screen.getByRole("textbox", { name: "Configuration name" });
+  expect(nameInput).toHaveAttribute("pattern", "^[a-z0-9-]+$");
+  await userEvent.clear(nameInput);
+  await userEvent.type(nameInput, "modern");
+  await userEvent.click(screen.getByRole("button", { name: "Apply rename" }));
+
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /Authentication/ }),
+  );
+  await userEvent.selectOptions(
+    screen.getByRole("combobox", { name: "Authentication" }),
+    "sigv4",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Apply option" }));
+
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /Snapshot: nightly/ }),
+  );
+  const snapshotChoice = screen.getByRole("combobox", { name: "Snapshot" });
+  expect(
+    within(snapshotChoice).getByRole("option", { name: "weekly" }),
+  ).toBeInTheDocument();
+  await userEvent.selectOptions(snapshotChoice, "weekly");
+  expect(
+    screen.getByText("Generated from the source snapshot definitions."),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Apply value" }));
+
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /\+ Add transform/ }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
+
+  expect(operations).toEqual([
+    {
+      op: "set",
+      path: ["sourceClusters", "legacy", "endpoint"],
+      value: "https://next.example.com:9200",
+    },
+    {
+      op: "renameConfig",
+      path: ["sourceClusters", "legacy"],
+      newName: "modern",
+    },
+    {
+      op: "set",
+      path: ["sourceClusters", "legacy", "authConfig"],
+      value: "sigv4",
+    },
+    {
+      op: "set",
+      path: ["sourceClusters", "legacy", "snapshotName"],
+      value: "weekly",
+    },
+    {
+      op: "add",
+      path: ["traffic", "transforms"],
+      value: {},
+    },
+  ]);
+});
+
+
+test("shows ConfigMap keys and selects the map plus key together", async () => {
+  let selection: unknown;
+  server.use(
+    http.post("*/api/v1/external-resources/select", async ({ request }) => {
+      selection = await request.json();
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "config-draft-selected",
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", {
+      name: /ConfigMap: transform-code/,
+    }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Browse Kubernetes resources" }),
+  );
+
+  expect(await screen.findByText("main.js")).toBeInTheDocument();
+  expect(screen.getByText("settings.json")).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Use transform-code and key main.js",
+    }),
+  );
+
+  expect(selection).toEqual({
+    expectedDraftRevision: "config-draft-1",
+    nodeId: "edit:traffic.transform.configMap",
+    name: "transform-code",
+    kind: "ConfigMap",
+    group: "",
+    key: "main.js",
+    acceptWarning: false,
+    manual: false,
+  });
+});
+
+
+test("allows an explicit ConfigMap and key when inventory is unavailable", async () => {
+  let selection: unknown;
+  server.use(
+    http.post("*/api/v1/external-resources/select", async ({ request }) => {
+      selection = await request.json();
+      return HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "config-draft-manual-selection",
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", {
+      name: /ConfigMap: transform-code/,
+    }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Enter reference manually" }),
+  );
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Resource name" }),
+    "private-transform",
+  );
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "ConfigMap key" }),
+    "transform.js",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Use unverified reference" }),
+  );
+
+  expect(selection).toEqual({
+    expectedDraftRevision: "config-draft-1",
+    nodeId: "edit:traffic.transform.configMap",
+    name: "private-transform",
+    kind: "ConfigMap",
+    group: "",
+    key: "transform.js",
+    acceptWarning: true,
+    manual: true,
+  });
+});
+
+
+test("focuses a newly added array item when command metadata requests it", async () => {
+  server.use(
+    http.post("*/api/v1/config/operations", () => {
+      const updated = structuredClone(configDraft);
+      const traffic = updated.editState.nodes.find(
+        (node) => node.id === "edit:traffic",
+      );
+      const transforms = traffic?.children.find(
+        (node) => node.id === "edit:traffic.transforms",
+      );
+      if (!transforms) throw new Error("Missing transforms fixture");
+      transforms.children = [{
+        id: "edit:traffic.transforms.0",
+        path: ["traffic", "transforms", "0"],
+        label: "transform 1: configured",
+        value: {},
+        valueAuthored: true,
+        valueKind: "object",
+        presence: "required",
+        removable: true,
+        status: "required",
+        diagnostics: [{
+          severity: "required",
+          message: "entryPoint is required.",
+          path: ["traffic", "transforms", "0", "entryPoint"],
+        }],
+        children: [],
+      }, ...transforms.children];
+      return HttpResponse.json({
+        ...updated,
+        dirty: true,
+        draftRevision: "config-draft-added",
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", { name: /\+ Add transform/ }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
+
+  expect(
+    await within(configTree).findByRole("treeitem", {
+      name: "transform 1: configured",
+    }),
+  ).toHaveAttribute("aria-selected", "true");
+});
+
+
+test("views and creates descriptor-driven ConfigMaps without raw YAML", async () => {
+  let saveRequest: unknown;
+  server.use(
+    http.post("*/api/v1/external-resources/save", async ({ request }) => {
+      saveRequest = await request.json();
+      return HttpResponse.json({
+        draft: {
+          ...configDraft,
+          dirty: true,
+          draftRevision: "config-draft-created",
+        },
+        name: "next-transform",
+        kind: "ConfigMap",
+        message: "ConfigMap created: next-transform",
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+  const configTree = await screen.findByRole("tree", {
+    name: "Configuration fields",
+  });
+  await userEvent.click(
+    within(configTree).getByRole("treeitem", {
+      name: /ConfigMap: transform-code/,
+    }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Browse Kubernetes resources" }),
+  );
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Inspect transform-code" }),
+  );
+  expect(await screen.findByText("export default () => true;"))
+    .toBeInTheDocument();
+  expect(screen.queryByText(/raw YAML/i)).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Back to resources" }));
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Create Transform ConfigMap" }),
+  );
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "ConfigMap name" }),
+    "next-transform",
+  );
+  const key = screen.getByRole("textbox", { name: "Key" });
+  expect(key).toHaveValue("transform.js");
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "JavaScript" }),
+    "export default () => false;",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Create resource" }));
+
+  expect(saveRequest).toEqual({
+    expectedDraftRevision: "config-draft-1",
+    nodeId: "edit:traffic.transform.configMap",
+    values: {
+      name: "next-transform",
+      key: "transform.js",
+      contents: "export default () => false;",
+    },
+    confirmations: {},
+    existingName: null,
+  });
+});
+
+
+test("saves and discards explicit dirty drafts", async () => {
+  let saved = false;
+  let discarded = false;
+  server.use(
+    http.get("*/api/v1/config", () =>
+      HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "dirty-draft",
+      }),
+    ),
+    http.post("*/api/v1/config/save", () => {
+      saved = true;
+      return HttpResponse.json(configDraft);
+    }),
+    http.post("*/api/v1/config/discard", () => {
+      discarded = true;
+      return HttpResponse.json(configDraft);
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(saved).toBe(true);
+
+  server.use(
+    http.get("*/api/v1/config", () =>
+      HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "dirty-again",
+      }),
+    ),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Reload draft" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(discarded).toBe(true);
+});
+
+
+test("closing a dirty editor discards the process-local draft before leaving", async () => {
+  let discardCalls = 0;
+  server.use(
+    http.get("*/api/v1/config", () =>
+      HttpResponse.json({
+        ...configDraft,
+        dirty: true,
+        draftRevision: "dirty-close",
+      }),
+    ),
+    http.post("*/api/v1/config/discard", () => {
+      discardCalls += 1;
+      return HttpResponse.json(configDraft);
+    }),
+  );
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Close configuration" }),
+  );
+
+  expect(discardCalls).toBe(1);
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("tree", { name: "Workflow resources" }))
+    .toBeInTheDocument();
+  confirm.mockRestore();
 });

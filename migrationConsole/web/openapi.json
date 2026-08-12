@@ -1,6 +1,78 @@
 {
   "components": {
     "schemas": {
+      "AddEditOperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "add",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "op",
+          "path",
+          "value"
+        ],
+        "title": "AddEditOperationV1",
+        "type": "object"
+      },
+      "ApplyEditOperationRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedDraftRevision": {
+            "title": "Expecteddraftrevision",
+            "type": "string"
+          },
+          "operation": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/AddEditOperationV1",
+                "removeConfig": "#/components/schemas/RemoveConfigEditOperationV1",
+                "renameConfig": "#/components/schemas/RenameConfigEditOperationV1",
+                "set": "#/components/schemas/SetEditOperationV1",
+                "unset": "#/components/schemas/UnsetEditOperationV1"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SetEditOperationV1"
+              },
+              {
+                "$ref": "#/components/schemas/UnsetEditOperationV1"
+              },
+              {
+                "$ref": "#/components/schemas/RemoveConfigEditOperationV1"
+              },
+              {
+                "$ref": "#/components/schemas/RenameConfigEditOperationV1"
+              },
+              {
+                "$ref": "#/components/schemas/AddEditOperationV1"
+              }
+            ],
+            "title": "Operation"
+          }
+        },
+        "required": [
+          "expectedDraftRevision",
+          "operation"
+        ],
+        "title": "ApplyEditOperationRequestV1",
+        "type": "object"
+      },
       "ApproveCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -67,6 +139,34 @@
         "title": "ComparisonV1",
         "type": "object"
       },
+      "ConfigDraftV1": {
+        "additionalProperties": false,
+        "properties": {
+          "baseRevision": {
+            "title": "Baserevision",
+            "type": "string"
+          },
+          "dirty": {
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "draftRevision": {
+            "title": "Draftrevision",
+            "type": "string"
+          },
+          "editState": {
+            "$ref": "#/components/schemas/EditStateV1"
+          }
+        },
+        "required": [
+          "baseRevision",
+          "draftRevision",
+          "dirty",
+          "editState"
+        ],
+        "title": "ConfigDraftV1",
+        "type": "object"
+      },
       "DetailV1": {
         "additionalProperties": false,
         "properties": {
@@ -128,6 +228,20 @@
         "title": "DiagnosticV1",
         "type": "object"
       },
+      "DraftRevisionRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedDraftRevision": {
+            "title": "Expecteddraftrevision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedDraftRevision"
+        ],
+        "title": "DraftRevisionRequestV1",
+        "type": "object"
+      },
       "EditCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -158,6 +272,736 @@
           "editTargetId"
         ],
         "title": "EditCapabilityV1",
+        "type": "object"
+      },
+      "EditCommandV1": {
+        "additionalProperties": false,
+        "properties": {
+          "autoEditAdded": {
+            "default": true,
+            "title": "Autoeditadded",
+            "type": "boolean"
+          },
+          "blockedMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockedmessage"
+          },
+          "editAdded": {
+            "default": false,
+            "title": "Editadded",
+            "type": "boolean"
+          },
+          "requiresName": {
+            "default": true,
+            "title": "Requiresname",
+            "type": "boolean"
+          }
+        },
+        "title": "EditCommandV1",
+        "type": "object"
+      },
+      "EditDiagnosticV1": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "required",
+              "error",
+              "warning",
+              "gated",
+              "blocked"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "message"
+        ],
+        "title": "EditDiagnosticV1",
+        "type": "object"
+      },
+      "EditNodeV1": {
+        "additionalProperties": false,
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/EditNodeV1"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "collapsed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collapsed"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditCommandV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/EditDiagnosticV1"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "effectiveDefault": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effectivedefault"
+          },
+          "essential": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Essential"
+          },
+          "expert": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expert"
+          },
+          "externalRef": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Externalref"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "inputHint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputhint"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "presence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "optional"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presence"
+          },
+          "removable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removable"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "required",
+                  "error",
+                  "warning",
+                  "changed",
+                  "gated",
+                  "blocked"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "statusCounts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditStatusCountsV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation"
+          },
+          "value": {
+            "title": "Value"
+          },
+          "valueAuthored": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valueauthored"
+          },
+          "valueDefaulted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valuedefaulted"
+          },
+          "valueKind": {
+            "enum": [
+              "object",
+              "record",
+              "array",
+              "union",
+              "boolean",
+              "scalar",
+              "command"
+            ],
+            "title": "Valuekind",
+            "type": "string"
+          },
+          "valueType": {
+            "anyOf": [
+              {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valuetype"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EditVariantV1"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "label",
+          "valueKind"
+        ],
+        "title": "EditNodeV1",
+        "type": "object"
+      },
+      "EditProvenanceV1": {
+        "additionalProperties": false,
+        "properties": {
+          "lossy": {
+            "title": "Lossy",
+            "type": "boolean"
+          },
+          "source": {
+            "const": "pending-yaml",
+            "title": "Source",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "lossy"
+        ],
+        "title": "EditProvenanceV1",
+        "type": "object"
+      },
+      "EditStateV1": {
+        "additionalProperties": false,
+        "properties": {
+          "formatVersion": {
+            "const": 1,
+            "title": "Formatversion",
+            "type": "integer"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/EditNodeV1"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/EditProvenanceV1"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/EditValidationV1"
+          }
+        },
+        "required": [
+          "formatVersion",
+          "provenance",
+          "nodes",
+          "validation"
+        ],
+        "title": "EditStateV1",
+        "type": "object"
+      },
+      "EditStatusCountsV1": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked": {
+            "default": 0,
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "changed": {
+            "default": 0,
+            "title": "Changed",
+            "type": "integer"
+          },
+          "errors": {
+            "default": 0,
+            "title": "Errors",
+            "type": "integer"
+          },
+          "gated": {
+            "default": 0,
+            "title": "Gated",
+            "type": "integer"
+          },
+          "required": {
+            "default": 0,
+            "title": "Required",
+            "type": "integer"
+          },
+          "warnings": {
+            "default": 0,
+            "title": "Warnings",
+            "type": "integer"
+          }
+        },
+        "title": "EditStatusCountsV1",
+        "type": "object"
+      },
+      "EditValidationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/EditDiagnosticV1"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid"
+        ],
+        "title": "EditValidationV1",
+        "type": "object"
+      },
+      "EditVariantV1": {
+        "additionalProperties": false,
+        "properties": {
+          "childSchema": {
+            "items": {
+              "$ref": "#/components/schemas/EditNodeV1"
+            },
+            "title": "Childschema",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "EditVariantV1",
+        "type": "object"
+      },
+      "ExternalResourceDetailsV1": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "draftRevision": {
+            "title": "Draftrevision",
+            "type": "string"
+          },
+          "fieldValues": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fieldvalues",
+            "type": "object"
+          },
+          "hiddenFields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hiddenfields",
+            "type": "array"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "missing": {
+            "default": false,
+            "title": "Missing",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "resourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourcetype"
+          }
+        },
+        "required": [
+          "nodeId",
+          "draftRevision",
+          "displayName",
+          "name",
+          "kind"
+        ],
+        "title": "ExternalResourceDetailsV1",
+        "type": "object"
+      },
+      "ExternalResourceInventoryV1": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "draftRevision": {
+            "title": "Draftrevision",
+            "type": "string"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalResourceRowV1"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodeId",
+          "draftRevision",
+          "displayName",
+          "rows"
+        ],
+        "title": "ExternalResourceInventoryV1",
+        "type": "object"
+      },
+      "ExternalResourceMutationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/ConfigDraftV1"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft",
+          "name",
+          "kind",
+          "message"
+        ],
+        "title": "ExternalResourceMutationV1",
+        "type": "object"
+      },
+      "ExternalResourceRowV1": {
+        "additionalProperties": false,
+        "properties": {
+          "apiVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apiversion"
+          },
+          "current": {
+            "default": false,
+            "title": "Current",
+            "type": "boolean"
+          },
+          "group": {
+            "default": "",
+            "title": "Group",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespaced": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespaced"
+          },
+          "status": {
+            "enum": [
+              "matching",
+              "warn",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "status"
+        ],
+        "title": "ExternalResourceRowV1",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -523,6 +1367,57 @@
         "title": "ProblemV1",
         "type": "object"
       },
+      "RemoveConfigEditOperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "removeConfig",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "title": "RemoveConfigEditOperationV1",
+        "type": "object"
+      },
+      "RenameConfigEditOperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "newName": {
+            "title": "Newname",
+            "type": "string"
+          },
+          "op": {
+            "const": "renameConfig",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "path",
+          "newName"
+        ],
+        "title": "RenameConfigEditOperationV1",
+        "type": "object"
+      },
       "ResetCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -546,6 +1441,156 @@
           "label"
         ],
         "title": "ResetCapabilityV1",
+        "type": "object"
+      },
+      "SaveExternalResourceRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Confirmations",
+            "type": "object"
+          },
+          "existingName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existingname"
+          },
+          "expectedDraftRevision": {
+            "title": "Expecteddraftrevision",
+            "type": "string"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expectedDraftRevision",
+          "nodeId",
+          "values"
+        ],
+        "title": "SaveExternalResourceRequestV1",
+        "type": "object"
+      },
+      "SelectExternalResourceRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptWarning": {
+            "default": false,
+            "title": "Acceptwarning",
+            "type": "boolean"
+          },
+          "expectedDraftRevision": {
+            "title": "Expecteddraftrevision",
+            "type": "string"
+          },
+          "group": {
+            "default": "",
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "manual": {
+            "default": false,
+            "title": "Manual",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedDraftRevision",
+          "nodeId",
+          "name",
+          "kind"
+        ],
+        "title": "SelectExternalResourceRequestV1",
+        "type": "object"
+      },
+      "SetEditOperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "set",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "op",
+          "path",
+          "value"
+        ],
+        "title": "SetEditOperationV1",
+        "type": "object"
+      },
+      "UnsetEditOperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "unset",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "title": "UnsetEditOperationV1",
         "type": "object"
       },
       "ValidationError": {
@@ -672,6 +1717,343 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/config": {
+      "get": {
+        "operationId": "open_config_api_v1_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Open Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/config/discard": {
+      "post": {
+        "operationId": "discard_config_api_v1_config_discard_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/config/operations": {
+      "post": {
+        "operationId": "apply_config_operation_api_v1_config_operations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyEditOperationRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Config Operation",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/config/save": {
+      "post": {
+        "operationId": "save_config_api_v1_config_save_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/external-resources": {
+      "get": {
+        "operationId": "external_resources_api_v1_external_resources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "nodeId",
+            "required": true,
+            "schema": {
+              "title": "Nodeid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expectedDraftRevision",
+            "required": true,
+            "schema": {
+              "title": "Expecteddraftrevision",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalResourceInventoryV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "External Resources",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/external-resources/details": {
+      "get": {
+        "operationId": "external_resource_details_api_v1_external_resources_details_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "nodeId",
+            "required": true,
+            "schema": {
+              "title": "Nodeid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expectedDraftRevision",
+            "required": true,
+            "schema": {
+              "title": "Expecteddraftrevision",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalResourceDetailsV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "External Resource Details",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/external-resources/save": {
+      "post": {
+        "operationId": "save_external_resource_api_v1_external_resources_save_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveExternalResourceRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalResourceMutationV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save External Resource",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/external-resources/select": {
+      "post": {
+        "operationId": "select_external_resource_api_v1_external_resources_select_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectExternalResourceRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select External Resource",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
     "/api/v1/manage/events": {
       "get": {
         "operationId": "manage_events_api_v1_manage_events_get",
