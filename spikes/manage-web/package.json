@@ -1,0 +1,21 @@
+{
+  "name": "manage-web-framework-spikes",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "shared",
+    "react",
+    "angular",
+    "vue"
+  ],
+  "scripts": {
+    "dev:react": "npm run dev --workspace @manage-spike/react",
+    "dev:angular": "npm run dev --workspace @manage-spike/angular",
+    "dev:vue": "npm run dev --workspace @manage-spike/vue",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=18.19"
+  }
+}

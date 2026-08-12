@@ -1,0 +1,571 @@
+<header class="app-header">
+  <div class="brand">
+    <span class="brand__mark" aria-hidden="true">
+      <lucide-icon name="git-branch" [size]="18"></lucide-icon>
+    </span>
+    <div>
+      <strong>Workflow Manage</strong>
+      <span>migration</span>
+    </div>
+  </div>
+
+  <div class="environment" aria-label="Current environment">
+    <span><b>Namespace</b> ma-demo</span>
+    <span><b>Cluster</b> kind-local</span>
+    <span class="freshness">
+      <span class="status-dot status-dot--running"></span>
+      Observed {{ lastRefresh() }}
+    </span>
+  </div>
+
+  <div class="header-actions">
+    <button
+      class="icon-button"
+      type="button"
+      data-testid="refresh-status"
+      title="Refresh cluster status"
+      aria-label="Refresh cluster status"
+      (click)="simulateStatusRefresh()"
+    >
+      <lucide-icon name="refresh-cw" [size]="16"></lucide-icon>
+    </button>
+    <button class="button button--secondary" type="button" (click)="runReview()">
+      <lucide-icon name="check" [size]="16"></lucide-icon>
+      Review
+    </button>
+    <button class="button button--primary" type="button" (click)="runReview()">
+      <lucide-icon name="send" [size]="15"></lucide-icon>
+      Submit
+    </button>
+  </div>
+</header>
+
+<main class="workspace">
+  <aside class="tree-panel" aria-label="Workflow resources">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">Resources</span>
+        <h1>Migration workflow</h1>
+      </div>
+      <span
+        class="mode-badge"
+        [class.mode-badge--editing]="state().mode === 'edit'"
+      >
+        {{ state().mode === "edit" ? "Editing" : "Inspecting" }}
+      </span>
+    </div>
+
+    <div class="tree-toolbar">
+      <label class="search-field">
+        <lucide-icon name="search" [size]="15"></lucide-icon>
+        <span class="sr-only">Filter resources</span>
+        <input
+          type="search"
+          placeholder="Filter resources"
+          [value]="filterText()"
+          (input)="setFilter($event)"
+        >
+        @if (filterText()) {
+          <button type="button" aria-label="Clear filter" (click)="clearFilter()">
+            <lucide-icon name="x" [size]="14"></lucide-icon>
+          </button>
+        }
+      </label>
+      <button
+        class="icon-button"
+        type="button"
+        title="Expand live migration"
+        aria-label="Expand live migration"
+        (click)="toggleExpanded('section-live')"
+      >
+        <lucide-icon name="list-tree" [size]="16"></lucide-icon>
+      </button>
+    </div>
+
+    <div
+      class="resource-tree"
+      role="tree"
+      aria-label="Workflow resource tree"
+      [attr.aria-multiselectable]="false"
+    >
+      @for (row of visibleRows(); track row.node.id) {
+        <div
+          class="tree-row"
+          role="treeitem"
+          tabindex="0"
+          [attr.data-node-id]="row.node.id"
+          [attr.aria-level]="row.level"
+          [attr.aria-selected]="selectedId() === row.node.id"
+          [attr.aria-expanded]="row.hasChildren ? row.expanded : null"
+          [class.tree-row--selected]="selectedId() === row.node.id"
+          [class.tree-row--new]="recentlyInsertedIds().has(row.node.id)"
+          [class.tree-row--diagnostic]="row.node.kind === 'diagnostic'"
+          [style.--tree-depth]="row.level"
+          (click)="selectNode(row.node.id)"
+          (keydown)="handleTreeKey($event, row)"
+        >
+          <button
+            class="tree-row__disclosure"
+            type="button"
+            tabindex="-1"
+            [disabled]="!row.hasChildren"
+            [attr.aria-label]="
+              row.hasChildren
+                ? (row.expanded ? 'Collapse ' : 'Expand ') + row.node.label
+                : null
+            "
+            (click)="toggleExpanded(row.node.id, $event)"
+          >
+            @if (row.hasChildren) {
+              <lucide-icon
+                [name]="row.expanded ? 'chevron-down' : 'chevron-right'"
+                [size]="14"
+              ></lucide-icon>
+            }
+          </button>
+          <span
+            class="node-icon"
+            [class.node-icon--field]="row.node.kind === 'config-field'"
+            aria-hidden="true"
+          >
+            @switch (row.node.kind) {
+              @case ("section") {
+                <lucide-icon name="layers-3" [size]="15"></lucide-icon>
+              }
+              @case ("group") {
+                <lucide-icon name="list-tree" [size]="15"></lucide-icon>
+              }
+              @case ("resource") {
+                <lucide-icon name="git-branch" [size]="15"></lucide-icon>
+              }
+              @case ("diagnostic") {
+                <lucide-icon name="circle-alert" [size]="15"></lucide-icon>
+              }
+              @default {
+                <lucide-icon name="settings-2" [size]="15"></lucide-icon>
+              }
+            }
+          </span>
+          <span class="tree-row__content">
+            <span class="tree-row__label">{{ row.node.label }}</span>
+            @if (row.node.valueSummary) {
+              <span class="tree-row__summary">{{ row.node.valueSummary }}</span>
+            }
+          </span>
+          <span
+            class="severity-mark"
+            [attr.data-severity]="row.node.severity"
+            [attr.aria-label]="severityLabel(row.node)"
+            [title]="severityLabel(row.node)"
+          ></span>
+        </div>
+      } @empty {
+        <div class="tree-empty">
+          <lucide-icon name="search" [size]="20"></lucide-icon>
+          <span>No matching resources</span>
+        </div>
+      }
+    </div>
+
+    <div class="tree-footer">
+      <span>{{ treeStatusText() }}</span>
+      <span>↑↓ navigate · ←→ expand</span>
+    </div>
+  </aside>
+
+  <section class="detail-panel" aria-labelledby="detail-title">
+    @if (selectedNode(); as node) {
+      <div class="detail-heading">
+        <div class="detail-heading__identity">
+          <div class="resource-glyph" aria-hidden="true">
+            <lucide-icon name="git-branch" [size]="19"></lucide-icon>
+          </div>
+          <div>
+            <span class="breadcrumb">{{ parentLabel(node) }}</span>
+            <h2 id="detail-title">{{ node.label }}</h2>
+          </div>
+        </div>
+        <div class="detail-heading__status">
+          <span class="status-chip" [attr.data-severity]="node.severity">
+            <span class="status-dot"></span>
+            {{ node.phase ?? severityLabel(node) }}
+          </span>
+          @if (state().mode === "inspect") {
+            <button
+              class="button button--secondary"
+              type="button"
+              data-testid="enter-edit-mode"
+              (click)="enterEditMode()"
+            >
+              <lucide-icon name="pencil" [size]="15"></lucide-icon>
+              Edit configuration
+            </button>
+          } @else {
+            <button
+              class="button button--ghost"
+              type="button"
+              data-testid="leave-edit-mode"
+              (click)="leaveEditMode()"
+            >
+              Leave edit mode
+            </button>
+            <button
+              class="button button--secondary"
+              type="button"
+              data-testid="add-transform"
+              [disabled]="!canAddTransform()"
+              (click)="addTransform()"
+            >
+              <lucide-icon name="plus" [size]="15"></lucide-icon>
+              Add transform
+            </button>
+          }
+        </div>
+      </div>
+
+      <nav class="detail-tabs" aria-label="Resource details">
+        @for (tab of tabs; track tab.id) {
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="activeTab() === tab.id"
+            [class.detail-tab--active]="activeTab() === tab.id"
+            (click)="setActiveTab(tab.id)"
+          >
+            <lucide-icon [name]="tab.icon" [size]="15"></lucide-icon>
+            {{ tab.label }}
+            @if (tab.id === "logs" && logsRunning()) {
+              <span class="tab-live-dot" aria-label="Streaming"></span>
+            }
+          </button>
+        }
+      </nav>
+
+      <div class="detail-content">
+        @switch (activeTab()) {
+          @case ("overview") {
+            <section class="overview-grid" aria-label="Resource overview">
+              <div class="overview-main">
+                <div class="section-heading">
+                  <div>
+                    <span class="eyebrow">Resource</span>
+                    <h3>Current state</h3>
+                  </div>
+                  <span class="resource-id">{{ node.id }}</span>
+                </div>
+                <p class="resource-description">
+                  {{ node.description ?? "Workflow resource managed by the current migration." }}
+                </p>
+
+                <dl class="metadata-list">
+                  <div>
+                    <dt>Phase</dt>
+                    <dd>{{ node.phase ?? "Available" }}</dd>
+                  </div>
+                  <div>
+                    <dt>Observed value</dt>
+                    <dd>{{ node.valueSummary ?? "No current value" }}</dd>
+                  </div>
+                  <div>
+                    <dt>Configuration</dt>
+                    <dd>{{ state().mode === "edit" ? "Pending edits visible" : "Deployed" }}</dd>
+                  </div>
+                  <div>
+                    <dt>Last observation</dt>
+                    <dd>{{ lastRefresh() }}</dd>
+                  </div>
+                </dl>
+
+                @if (selectedDiagnostics().length > 0) {
+                  <div class="diagnostics" aria-label="Diagnostics">
+                    @for (diagnostic of selectedDiagnostics(); track diagnostic.id) {
+                      <div class="diagnostic">
+                        <lucide-icon name="circle-alert" [size]="17"></lucide-icon>
+                        <div>
+                          <strong>{{ diagnostic.label }}</strong>
+                          <p>{{ diagnostic.diagnostic ?? diagnostic.description }}</p>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+
+              <aside class="actions-tool" aria-label="Available actions">
+                <div class="section-heading">
+                  <div>
+                    <span class="eyebrow">Capabilities</span>
+                    <h3>Available actions</h3>
+                  </div>
+                </div>
+                <div class="action-list">
+                  @if (node.capabilities?.includes("approve")) {
+                    <button type="button" (click)="runReview()">
+                      <span><lucide-icon name="shield-check" [size]="16"></lucide-icon></span>
+                      <span><b>Approve replay</b><small>Review target and continue</small></span>
+                      <lucide-icon name="chevron-right" [size]="15"></lucide-icon>
+                    </button>
+                  }
+                  @if (node.capabilities?.includes("logs")) {
+                    <button
+                      type="button"
+                      data-testid="follow-logs-action"
+                      (click)="startLogs()"
+                    >
+                      <span><lucide-icon name="terminal" [size]="16"></lucide-icon></span>
+                      <span><b>Follow logs</b><small>Stream without leaving the app</small></span>
+                      <lucide-icon name="chevron-right" [size]="15"></lucide-icon>
+                    </button>
+                  }
+                  @if (node.capabilities?.includes("reset")) {
+                    <button type="button">
+                      <span><lucide-icon name="rotate-ccw" [size]="16"></lucide-icon></span>
+                      <span><b>Plan reset</b><small>Preview affected resources</small></span>
+                      <lucide-icon name="chevron-right" [size]="15"></lucide-icon>
+                    </button>
+                  }
+                  @if (node.capabilities?.includes("output")) {
+                    <button type="button" (click)="setActiveTab('output')">
+                      <span><lucide-icon name="file-output" [size]="16"></lucide-icon></span>
+                      <span><b>View output</b><small>Inspect structured stage output</small></span>
+                      <lucide-icon name="chevron-right" [size]="15"></lucide-icon>
+                    </button>
+                  }
+                  @if (!node.capabilities?.length) {
+                    <p class="empty-copy">No actions are available for this node.</p>
+                  }
+                </div>
+              </aside>
+            </section>
+          }
+
+          @case ("configuration") {
+            <section class="configuration" aria-label="Configuration editor">
+              <div class="section-heading section-heading--configuration">
+                <div>
+                  <span class="eyebrow">Pending configuration</span>
+                  <h3>{{ node.label }}</h3>
+                  <p>Changes remain local until the workflow is reviewed and submitted.</p>
+                </div>
+                @if (state().mode === "edit") {
+                  <span class="change-count">{{ configurationFields().length }} fields in scope</span>
+                }
+              </div>
+
+              @if (state().mode !== "edit") {
+                <div class="configuration-empty">
+                  <lucide-icon name="settings-2" [size]="24"></lucide-icon>
+                  <h4>Configuration is read-only</h4>
+                  <p>Enter edit mode to reveal editable nodes in place in the resource tree.</p>
+                  <button
+                    class="button button--primary"
+                    type="button"
+                    data-testid="enter-edit-mode-empty"
+                    (click)="enterEditMode()"
+                  >
+                    <lucide-icon name="pencil" [size]="15"></lucide-icon>
+                    Edit configuration
+                  </button>
+                </div>
+              } @else if (configurationFields().length > 0) {
+                <div class="field-list">
+                  @for (field of configurationFields(); track field.id) {
+                    <div class="field-row">
+                      <div class="field-row__label">
+                        <span class="field-group">{{ parentLabel(field) }}</span>
+                        <label [attr.for]="'field-' + field.id">{{ field.label }}</label>
+                        @if (field.description) {
+                          <p>{{ field.description }}</p>
+                        }
+                      </div>
+                      <app-config-field [node]="field"></app-config-field>
+                      @if (field.severity === "changed") {
+                        <span class="changed-flag">Modified</span>
+                      }
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="configuration-empty">
+                  <lucide-icon name="list-tree" [size]="24"></lucide-icon>
+                  <h4>Select a configured resource</h4>
+                  <p>The editable fields were inserted beneath capture-proxy and traffic-replayer.</p>
+                </div>
+              }
+            </section>
+          }
+
+          @case ("activity") {
+            <section class="activity-view" aria-label="Resource activity">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">Observed events</span>
+                  <h3>Activity</h3>
+                </div>
+              </div>
+              <ol class="timeline">
+                <li>
+                  <span class="timeline__icon timeline__icon--running">
+                    <lucide-icon name="refresh-cw" [size]="15"></lucide-icon>
+                  </span>
+                  <div><b>Status reconciled</b><p>Cluster state matched the current workflow revision.</p></div>
+                  <time>{{ lastRefresh() }}</time>
+                </li>
+                <li>
+                  <span class="timeline__icon"><lucide-icon name="check-circle-2" [size]="15"></lucide-icon></span>
+                  <div><b>Capture proxy became ready</b><p>Service endpoint is available inside the cluster.</p></div>
+                  <time>6 min ago</time>
+                </li>
+                <li>
+                  <span class="timeline__icon"><lucide-icon name="clock-3" [size]="15"></lucide-icon></span>
+                  <div><b>Replay paused for approval</b><p>The operation is waiting without blocking this session.</p></div>
+                  <time>12 min ago</time>
+                </li>
+              </ol>
+            </section>
+          }
+
+          @case ("logs") {
+            <section class="logs-view" aria-label="Log stream">
+              <div class="logs-toolbar">
+                <div>
+                  <span class="eyebrow">Container</span>
+                  <strong>traffic-replayer / replayer</strong>
+                </div>
+                <div>
+                  <button
+                    class="button button--ghost"
+                    type="button"
+                    data-testid="clear-logs"
+                    (click)="clearLogs()"
+                    [disabled]="logs().length === 0"
+                  >
+                    Clear
+                  </button>
+                  @if (logsRunning()) {
+                    <button
+                      class="button button--danger"
+                      type="button"
+                      data-testid="stop-logs"
+                      (click)="stopLogs()"
+                    >
+                      <lucide-icon name="square" [size]="14"></lucide-icon>
+                      Stop stream
+                    </button>
+                  } @else {
+                    <button
+                      class="button button--primary"
+                      type="button"
+                      data-testid="start-logs"
+                      (click)="startLogs()"
+                    >
+                      <lucide-icon name="play" [size]="14"></lucide-icon>
+                      Start stream
+                    </button>
+                  }
+                </div>
+              </div>
+              <div class="log-terminal" #logViewport tabindex="0" aria-label="Streaming log output">
+                @for (line of logs(); track $index) {
+                  <div><span>{{ $index + 1 }}</span>{{ line }}</div>
+                } @empty {
+                  <div class="log-terminal__empty">Log stream is stopped. Start it to receive new lines.</div>
+                }
+              </div>
+              <div class="logs-status" aria-live="polite">
+                <span [class.status-dot--running]="logsRunning()" class="status-dot"></span>
+                {{ logsRunning() ? "Connected · new lines follow automatically" : "Disconnected" }}
+              </div>
+            </section>
+          }
+
+          @case ("output") {
+            <section class="output-view" aria-label="Workflow output">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">Structured output</span>
+                  <h3>Replay result</h3>
+                </div>
+              </div>
+              <div class="output-stage">
+                <span class="output-stage__state"><lucide-icon name="check-circle-2" [size]="16"></lucide-icon></span>
+                <div><b>Evaluate</b><p>Target checks completed successfully.</p></div>
+                <code>targetVersion: 2.15.0</code>
+              </div>
+              <div class="output-stage">
+                <span class="output-stage__state output-stage__state--running"><lucide-icon name="refresh-cw" [size]="16"></lucide-icon></span>
+                <div><b>Migrate</b><p>Capture-replay workflow is active.</p></div>
+                <code>processed: 18,420</code>
+              </div>
+            </section>
+          }
+        }
+      </div>
+    }
+  </section>
+
+  <aside class="operations-panel" aria-label="Active operations">
+    <div class="operations-heading">
+      <div>
+        <span class="eyebrow">Session</span>
+        <h2>Operations</h2>
+      </div>
+      <span class="operation-count">{{ operations().length }}</span>
+    </div>
+
+    <div class="operation-list">
+      @for (operation of operations(); track operation.id) {
+        <article class="operation">
+          <div class="operation__heading">
+            <span class="operation__state" [attr.data-state]="operation.state">
+              @if (operation.state === "succeeded") {
+                <lucide-icon name="check-circle-2" [size]="16"></lucide-icon>
+              } @else {
+                <span class="spinner" aria-hidden="true"></span>
+              }
+            </span>
+            <div>
+              <strong>{{ operation.label }}</strong>
+              <span>{{ operation.phase }}</span>
+            </div>
+            @if (operation.state === "succeeded") {
+              <button
+                class="icon-button icon-button--small"
+                type="button"
+                aria-label="Dismiss operation"
+                (click)="dismissOperation(operation.id)"
+              >
+                <lucide-icon name="x" [size]="13"></lucide-icon>
+              </button>
+            }
+          </div>
+          <div
+            class="progress"
+            role="progressbar"
+            [attr.aria-label]="operation.label"
+            [attr.aria-valuenow]="operation.progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span [style.width.%]="operation.progress"></span>
+          </div>
+          <div class="operation__footer">
+            <span>{{ operation.progress }}%</span>
+            <button type="button">View resource</button>
+          </div>
+        </article>
+      } @empty {
+        <div class="operations-empty">
+          <lucide-icon name="check-circle-2" [size]="23"></lucide-icon>
+          <b>No active operations</b>
+          <span>New actions will remain visible here while they run.</span>
+        </div>
+      }
+    </div>
+
+    <div class="session-summary">
+      <span class="status-dot status-dot--running"></span>
+      <div><b>Cluster watch active</b><span>Updates do not interrupt navigation</span></div>
+    </div>
+  </aside>
+</main>
