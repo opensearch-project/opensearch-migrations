@@ -4,6 +4,7 @@ import subprocess
 import time
 import uuid
 from kubernetes import client
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
 from .cdc_base import load_k8s_config, wait_for_proxy_ready
@@ -19,6 +20,8 @@ INNER_WORKFLOW_NAME = "migration-workflow"
 # Helm-managed ConfigMap holding the deployment-provisioned bucket the workflow also takes its
 # snapshot repo URI from (LocalStack locally, real S3 in AWS).
 DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
+
+SNAPSHOT_MIGRATION_PLURAL = "snapshotmigrations"
 
 
 def run_console(args: list, timeout: int = 180) -> subprocess.CompletedProcess:
@@ -183,28 +186,39 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                                             doc_id=self.failing_doc_id, expected_status_code=404,
                                             max_attempts=3, delay=2.0)
 
-        workflow_uid = self.argo_service.get_workflow_uid(workflow_name=self.workflow_name)
+        # The stream's session is the owning SnapshotMigration's UID, not the workflow's.
+        session_uid = self._snapshot_migration_uid()
 
         record = self._await_failed_document_record()
         self._assert_field(record, "documentId", self.failing_doc_id)
         self._assert_field(record, "failureType", "mapper_parsing_exception")
         self._assert_field(record, "failureClass", "NON_RETRYABLE")
         self._assert_field(record, "targetIndex", self.index_name)
-        self._assert_field(record, "sessionId", workflow_uid)
+        self._assert_field(record, "sessionId", session_uid)
 
-        status = self._await_completed_with_errors()
-        self._assert_field(status, "status", "CompletedWithErrors")
-        self._assert_field(status, "failed_documents_present", True)
-        self._assert_field(status, "percentage_completed", 100.0)
-        shard_total = status.get("shard_total")
-        shard_complete = status.get("shard_complete")
-        if shard_total != shard_complete:
-            raise AssertionError(
-                f"Backfill reported CompletedWithErrors with shard_complete={shard_complete} != "
-                f"shard_total={shard_total}: {status}"
-            )
-        self._assert_session_location(status, workflow_uid)
+        self._assert_session_location(session_uid)
+        self._assert_backfill_completed_with_errors()
         logger.info("Failed document observed through the console: %s", record)
+
+    def _snapshot_migration_uid(self) -> str:
+        """UID of this run's SnapshotMigration, which is what RFS stamps as the stream session."""
+        migration = self._snapshot_migration()
+        uid = (migration.get("metadata", {}) or {}).get("uid")
+        if not uid:
+            raise AssertionError(f"SnapshotMigration has no metadata.uid: {migration}")
+        return uid
+
+    def _snapshot_migration(self) -> dict:
+        """The single SnapshotMigration this test's workflow created. Several would make the
+        console ambiguous too — it requires --migration to choose."""
+        load_k8s_config()
+        items = client.CustomObjectsApi().list_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION, namespace=self.argo_service.namespace,
+            plural=SNAPSHOT_MIGRATION_PLURAL).get("items", []) or []
+        if len(items) != 1:
+            names = sorted((it.get("metadata", {}) or {}).get("name", "?") for it in items)
+            raise AssertionError(f"Expected exactly one SnapshotMigration, found {len(items)}: {names}")
+        return items[0]
 
     @staticmethod
     def _assert_field(payload: dict, field: str, expected):
@@ -213,14 +227,18 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             raise AssertionError(f"Expected {field}={expected!r}, got {actual!r}: {payload}")
 
     @staticmethod
-    def _assert_session_location(status: dict, workflow_uid: str):
-        """The reported stream location must belong to this run's session."""
-        location = status.get("failed_document_stream_location")
-        if not location:
-            raise AssertionError(f"Deep status did not report a failed document stream location: {status}")
-        if f"session={workflow_uid}" not in location:
+    def _assert_session_location(session_uid: str):
+        """The location the console reports must belong to this run's session."""
+        location = run_console(["failed-document-stream", "location"])
+        if location.returncode != 0:
             raise AssertionError(
-                f"Failed document stream location {location!r} does not belong to session {workflow_uid!r}"
+                f"`console failed-document-stream location` failed (rc={location.returncode}). "
+                f"stdout={location.stdout!r} stderr={location.stderr!r}"
+            )
+        if f"session={session_uid}" not in location.stdout:
+            raise AssertionError(
+                f"Failed document stream location {location.stdout!r} does not belong to "
+                f"session {session_uid!r}"
             )
 
     def _await_failed_document_record(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
@@ -237,14 +255,30 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             f"Last read {len(records)} record(s): {records}"
         )
 
-    def _await_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
-        status = {}
+    def _assert_backfill_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0):
+        """Read the backfill outcome from SnapshotMigration.status, which the RFS monitor patches
+        from `console backfill status --deep-check`.
+
+        Not run here directly: that command needs env.backfill, which Environment.from_k8s_resource_catalog
+        never populates, so it only works against a services.yaml (--config-file) like the monitor uses.
+        """
+        backfill = {}
         for _ in range(max_attempts):
-            status = run_console_json(["backfill", "status", "--deep-check"])
-            if status.get("status") == "CompletedWithErrors":
-                return status
+            backfill = (self._snapshot_migration().get("status", {}) or {}).get("documentBackfill", {}) or {}
+            if backfill.get("phase") == "CompletedWithErrors":
+                break
             time.sleep(delay)
-        raise AssertionError(f"Backfill never reported CompletedWithErrors. Last status: {status}")
+        else:
+            raise AssertionError(f"Backfill never reported CompletedWithErrors. Last status: {backfill}")
+
+        summary = backfill.get("summary", {}) or {}
+        self._assert_field(summary, "percentageCompleted", 100)
+        migrated, total = summary.get("shardsMigrated"), summary.get("shardsTotal")
+        if migrated != total:
+            raise AssertionError(
+                f"Backfill reported CompletedWithErrors with shardsMigrated={migrated} != "
+                f"shardsTotal={total}: {summary}"
+            )
 
 
 class Test0008OptionalSnapshotStages(MATestBase):
