@@ -390,7 +390,11 @@ test("offers top-level add actions in navigation during scoped editing", async (
   const resourceNavigation = screen.getByRole("region", {
     name: "Resource navigation",
   });
-  await userEvent.click(within(resourceNavigation).getByRole("button", {
+  const sourceGroup = within(resourceNavigation)
+    .getAllByRole("treeitem", { name: /^Sources,/ })
+    .find((item) => item.getAttribute("aria-level") === "2");
+  expect(sourceGroup).toBeDefined();
+  await userEvent.click(await within(sourceGroup!).findByRole("button", {
     name: "Add source cluster",
   }));
   await userEvent.type(
@@ -937,6 +941,80 @@ test("opens a pending removal with a resource fallback target as a tombstone", a
   });
   expect(within(resourceNavigation).getByRole("button", {
     name: "Add source cluster",
+  })).toBeInTheDocument();
+});
+
+
+test("shows a newly added resource while the server operation is pending", async () => {
+  let releaseOperation: (() => void) | null = null;
+  const operationStarted = new Promise<void>((resolve) => {
+    releaseOperation = resolve;
+  });
+  const updatedDraft = structuredClone(configDraft);
+  const sources = updatedDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  if (!sources) throw new Error("Missing source collection fixture");
+  const addCommand = sources.children.find(
+    (node) => node.id === "edit:sourceClusters:add",
+  );
+  if (!addCommand) throw new Error("Missing source add command fixture");
+  sources.children = [
+    ...sources.children.filter((node) => node !== addCommand),
+    {
+      id: "edit:sourceClusters.immediate",
+      path: ["sourceClusters", "immediate"],
+      label: "immediate",
+      valueKind: "object",
+      status: "required",
+      statusCounts: {
+        required: 1,
+        errors: 0,
+        warnings: 0,
+        changed: 0,
+        gated: 0,
+        blocked: 0,
+      },
+      diagnostics: [],
+      children: [],
+    },
+    addCommand,
+  ];
+  updatedDraft.dirty = true;
+  updatedDraft.draftRevision = "config-draft-immediate";
+
+  server.use(
+    http.post("*/api/v1/config/operations", async () => {
+      await operationStarted;
+      return HttpResponse.json(updatedDraft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const sourceGroup = screen.getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "2");
+  expect(sourceGroup).toBeDefined();
+  await userEvent.click(await within(sourceGroup!).findByRole("button", {
+    name: "Add source cluster",
+  }));
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "source cluster name" }),
+    "immediate",
+  );
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create source cluster",
+  }));
+
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^immediate, Syncing configuration$/,
+  })).toHaveAttribute("aria-selected", "true");
+
+  releaseOperation?.();
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^immediate, Addition pending submission$/,
   })).toBeInTheDocument();
 });
 

@@ -347,78 +347,6 @@ button {
   box-shadow: 0 0 0 2px rgb(23 107 120 / 15%);
 }
 
-.tree-add-resources {
-  flex: 0 0 auto;
-  padding: 9px 11px 11px;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-subtle);
-}
-
-.tree-add-resources header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-
-.tree-add-resources header strong {
-  font-size: 11px;
-}
-
-.tree-add-resources header span,
-.tree-add-resources p {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.tree-add-resources p {
-  margin: 4px 0 0;
-}
-
-.tree-add-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-}
-
-.tree-add-grid button {
-  display: inline-flex;
-  min-width: 0;
-  min-height: 34px;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--surface);
-  text-align: left;
-}
-
-.tree-add-grid button:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.tree-add-grid button:disabled {
-  opacity: 0.5;
-}
-
-.tree-add-grid button svg {
-  flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
-}
-
-.tree-add-grid button span {
-  min-width: 0;
-  font-size: 10px;
-  line-height: 12px;
-  white-space: normal;
-}
-
 .tree-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -435,7 +363,7 @@ button {
 .tree-row {
   position: relative;
   display: grid;
-  grid-template-columns: 22px 12px minmax(0, 1fr) 24px;
+  grid-template-columns: 22px 12px minmax(0, 1fr) auto;
   align-items: center;
   height: var(--row-height);
   padding: 0 6px 0 calc((var(--tree-depth) - 1) * 14px);
@@ -485,6 +413,12 @@ button {
 .tree-row .status-dot {
   width: 7px;
   height: 7px;
+}
+
+.tree-syncing-indicator {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
 }
 
 .status-running .status-dot,
@@ -543,6 +477,87 @@ button {
   background: var(--warning);
   font-size: 10px;
   font-weight: 700;
+}
+
+.tree-row-tools {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 20px;
+}
+
+.tree-group-add {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--accent);
+  background: transparent;
+}
+
+.tree-group-add:hover:not(:disabled),
+.tree-group-add:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.tree-group-add:disabled {
+  opacity: 0.45;
+}
+
+.tree-group-add svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tree-group-add-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 3px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 210px;
+  max-width: 270px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgb(19 31 40 / 18%);
+}
+
+.tree-group-add-menu button {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  text-align: left;
+}
+
+.tree-group-add-menu button:hover:not(:disabled),
+.tree-group-add-menu button:focus-visible {
+  background: var(--surface-subtle);
+}
+
+.tree-group-add-menu button svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+
+.tree-group-add-menu button span {
+  font-size: 11px;
+  line-height: 14px;
+  white-space: normal;
 }
 
 .tree-empty {

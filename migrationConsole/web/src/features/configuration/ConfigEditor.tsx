@@ -34,13 +34,23 @@ import {
   type EditOperation,
 } from "../../api/client";
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
-import type { ResourceAddController } from "./resourceAdds";
+import {
+  pendingResourceAddition,
+  resourceAddPlacement,
+  type PendingResourceAddition,
+  type ResourceAddController,
+} from "./resourceAdds";
 
 
 interface ConfigEditorProps {
   initialTargetId?: string | null;
   onClose: () => void;
   onExitReady: (handler: (() => void) | null) => void;
+  onResourceAddStarted: (addition: PendingResourceAddition) => void;
+  onResourceAddSettled: (
+    addition: PendingResourceAddition,
+    applied: boolean,
+  ) => void;
   onResourceAddsReady: (controller: ResourceAddController | null) => void;
   onSubmitted: () => void;
   removalState?: string | null;
@@ -76,17 +86,6 @@ interface PendingRemoval {
 
 const PINNED_CONTEXT_HEIGHT = 32;
 const PINNED_CONTEXT_TRANSITION = 28;
-const TOP_LEVEL_RESOURCE_PATHS = new Set([
-  "sourceClusters",
-  "targetClusters",
-  "snapshotMigrationConfigs",
-  "traffic.kafkaClusters",
-  "traffic.s3Sources",
-  "traffic.proxies",
-  "traffic.replayers",
-]);
-
-
 function nodeChildren(node: EditNode): EditNode[] {
   return node.children ?? [];
 }
@@ -107,7 +106,7 @@ function addCommand(node: EditNode): EditNode | null {
 function topLevelAddContexts(nodes: EditNode[]): AddContext[] {
   const result: AddContext[] = [];
   const visit = (node: EditNode) => {
-    if (TOP_LEVEL_RESOURCE_PATHS.has(node.path.join("."))) {
+    if (resourceAddPlacement(node.path)) {
       const command = addCommand(node);
       if (command) result.push({ command, parent: node });
     }
@@ -580,6 +579,7 @@ function CommandEditor({
   parent,
   commit,
   busy,
+  execute,
   onAdded,
   onCancel,
   onComplete,
@@ -588,6 +588,7 @@ function CommandEditor({
   parent: EditNode | null;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
+  execute?: (name: string) => Promise<boolean>;
   onAdded: (nodeId: string, parentId: string | null) => void;
   onCancel: () => void;
   onComplete: () => void;
@@ -603,13 +604,16 @@ function CommandEditor({
       onSubmit={(event) => {
         event.preventDefault();
         const trimmedName = name.trim();
-        void runAddCommand(
-          node,
-          parent,
-          trimmedName,
-          commit,
-          onAdded,
-        ).then((applied) => {
+        const operation = execute
+          ? execute(trimmedName)
+          : runAddCommand(
+            node,
+            parent,
+            trimmedName,
+            commit,
+            onAdded,
+          );
+        void operation.then((applied) => {
           if (applied) onComplete();
         });
       }}
@@ -1056,6 +1060,8 @@ export function ConfigEditor({
   initialTargetId,
   onClose,
   onExitReady,
+  onResourceAddStarted,
+  onResourceAddSettled,
   onResourceAddsReady,
   onSubmitted,
   removalState,
@@ -1127,12 +1133,16 @@ export function ConfigEditor({
     [nodes],
   );
   const resourceAddOptions = useMemo(
-    () => topLevelAdds.map((context) => ({
-      id: context.command.id,
-      label: fieldName(context.command),
-      disabled: Boolean(context.command.command?.blockedMessage),
-      disabledReason: context.command.command?.blockedMessage,
-    })),
+    () => topLevelAdds.flatMap((context) => {
+      const placement = resourceAddPlacement(context.parent.path);
+      return placement ? [{
+        id: context.command.id,
+        label: fieldName(context.command),
+        disabled: Boolean(context.command.command?.blockedMessage),
+        disabledReason: context.command.command?.blockedMessage,
+        placement,
+      }] : [];
+    }),
     [topLevelAdds],
   );
 
@@ -1508,18 +1518,34 @@ export function ConfigEditor({
     selectAdded(nodeId, parentId);
   };
 
+  const runTopLevelAdd = (context: AddContext, name: string) => {
+    const option = resourceAddOptions.find(
+      (candidate) => candidate.id === context.command.id,
+    );
+    if (!option) return Promise.resolve(false);
+    const nextIndex = Array.isArray(context.parent.value)
+      ? context.parent.value.length
+      : propertyChildren(context.parent).length;
+    const addition = pendingResourceAddition(option, name, nextIndex);
+    onResourceAddStarted(addition);
+    return runAddCommand(
+      context.command,
+      context.parent,
+      name,
+      commit,
+      selectContextAdded,
+    ).then((applied) => {
+      onResourceAddSettled(addition, applied);
+      return applied;
+    });
+  };
+
   const requestAdd = (context: AddContext) => {
     if (context.command.command?.requiresName !== false) {
       setAddingContext(context);
       return;
     }
-    void runAddCommand(
-      context.command,
-      context.parent,
-      "",
-      commit,
-      selectContextAdded,
-    );
+    void runTopLevelAdd(context, "");
   };
   resourceAddRequest.current = (optionId) => {
     const context = topLevelAdds.find(
@@ -1556,17 +1582,12 @@ export function ConfigEditor({
   useEffect(() => {
     onResourceAddsReady({
       options: resourceAddOptions,
-      status: draftQuery.isPending
-        ? "loading"
-        : draftQuery.isError ? "unavailable" : "ready",
       busy,
       add: (optionId) => resourceAddRequest.current(optionId),
     });
     return () => onResourceAddsReady(null);
   }, [
     busy,
-    draftQuery.isError,
-    draftQuery.isPending,
     onResourceAddsReady,
     resourceAddOptions,
   ]);
@@ -1696,6 +1717,7 @@ export function ConfigEditor({
           <CommandEditor
             busy={busy}
             commit={commit}
+            execute={(name) => runTopLevelAdd(addingContext, name)}
             node={addingContext.command}
             onAdded={selectContextAdded}
             onCancel={() => setAddingContext(null)}

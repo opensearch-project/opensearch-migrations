@@ -16,6 +16,7 @@ import {
   getHealth,
   getManageState,
   reconcileManageState,
+  type ConfigDraft,
   type ManageSnapshot,
 } from "../api/client";
 import { useManageEvents } from "../api/useManageEvents";
@@ -26,6 +27,7 @@ import {
   projectEditSnapshot,
 } from "../features/configuration/editProjection";
 import type {
+  PendingResourceAddition,
   ResourceAddController,
 } from "../features/configuration/resourceAdds";
 import { ResourceTree } from "../features/tree/ResourceTree";
@@ -51,6 +53,20 @@ function firstSelectableId(snapshot: ManageSnapshot): string | null {
 }
 
 
+function draftHasEditTarget(
+  draft: ConfigDraft | undefined,
+  targetId: string,
+): boolean {
+  if (!draft) return false;
+  const visit = (nodes: ConfigDraft["editState"]["nodes"]): boolean => (
+    nodes.some((node) => (
+      node.id === targetId || visit(node.children ?? [])
+    ))
+  );
+  return visit(draft.editState.nodes);
+}
+
+
 export function App() {
   const queryClient = useQueryClient();
   const health = useQuery({
@@ -70,6 +86,8 @@ export function App() {
   const [editContext, setEditContext] = useState<EditContext | null>(null);
   const [resourceAdds, setResourceAdds] =
     useState<ResourceAddController | null>(null);
+  const [pendingResourceAdditions, setPendingResourceAdditions] =
+    useState<PendingResourceAddition[]>([]);
   const editExitRef = useRef<(() => void) | null>(null);
   const configDraft = useQuery({
     queryKey: ["config-draft"],
@@ -126,10 +144,19 @@ export function App() {
   const displayedState = useMemo(
     () => (
       state.data && editContext
-        ? projectEditSnapshot(state.data, configDraft.data)
+        ? projectEditSnapshot(
+          state.data,
+          configDraft.data,
+          pendingResourceAdditions,
+        )
         : state.data
     ),
-    [configDraft.data, editContext, state.data],
+    [
+      configDraft.data,
+      editContext,
+      pendingResourceAdditions,
+      state.data,
+    ],
   );
 
   useEffect(() => {
@@ -166,6 +193,54 @@ export function App() {
   ) => {
     setResourceAdds(controller);
   }, []);
+  const resourceAddStarted = useCallback((
+    addition: PendingResourceAddition,
+  ) => {
+    setPendingResourceAdditions((current) => [
+      ...current.filter((candidate) => candidate.id !== addition.id),
+      addition,
+    ]);
+    setSelectedId(addition.id);
+  }, []);
+  const resourceAddSettled = useCallback((
+    addition: PendingResourceAddition,
+    applied: boolean,
+  ) => {
+    if (!applied) {
+      setPendingResourceAdditions((current) => current.filter(
+        (candidate) => candidate.id !== addition.id,
+      ));
+      return;
+    }
+    const currentDraft = queryClient.getQueryData<ConfigDraft>([
+      "config-draft",
+    ]);
+    setPendingResourceAdditions((current) => (
+      draftHasEditTarget(currentDraft, addition.editTargetId)
+        ? current.filter((candidate) => candidate.id !== addition.id)
+        : current.map((candidate) => (
+          candidate.id === addition.id
+            ? { ...candidate, status: "awaiting-draft" }
+            : candidate
+        ))
+    ));
+    setSelectedId(addition.id);
+    setEditContext({
+      resourceId: addition.id,
+      targetId: addition.editTargetId,
+    });
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!configDraft.data) return;
+    setPendingResourceAdditions((current) => {
+      const next = current.filter((addition) => (
+        addition.status === "syncing"
+        || !draftHasEditTarget(configDraft.data, addition.editTargetId)
+      ));
+      return next.length === current.length ? current : next;
+    });
+  }, [configDraft.data]);
 
   const startEditing = () => {
     if (!state.data) return;
@@ -346,6 +421,8 @@ export function App() {
                   initialTargetId={editContext.targetId}
                   onClose={() => setEditContext(null)}
                   onExitReady={registerEditExit}
+                  onResourceAddSettled={resourceAddSettled}
+                  onResourceAddStarted={resourceAddStarted}
                   onResourceAddsReady={registerResourceAdds}
                   onSubmitted={() => {
                     setEditContext(null);
