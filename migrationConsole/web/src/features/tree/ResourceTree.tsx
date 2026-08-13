@@ -7,9 +7,12 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Search } from "lucide-react";
 
 import type { ManageNode, ManageSnapshot } from "../../api/client";
+import type {
+  ResourceAddController,
+} from "../configuration/resourceAdds";
 
 
 interface VisibleRow {
@@ -22,6 +25,7 @@ interface ResourceTreeProps {
   snapshot: ManageSnapshot;
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
+  resourceAdds: ResourceAddController | null;
 }
 
 
@@ -171,6 +175,7 @@ export function ResourceTree({
   snapshot,
   selectedId,
   onSelect,
+  resourceAdds,
 }: ResourceTreeProps) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -306,6 +311,37 @@ export function ResourceTree({
           value={filter}
         />
       </label>
+      {resourceAdds ? (
+        <section aria-label="Add resources" className="tree-add-resources">
+          <header>
+            <strong>Add resources</strong>
+            <span>Top-level configuration</span>
+          </header>
+          {resourceAdds.status === "loading" ? (
+            <p>Loading resource types</p>
+          ) : resourceAdds.status === "unavailable" ? (
+            <p>Resource types unavailable</p>
+          ) : resourceAdds.options.length === 0 ? (
+            <p>No resource types can be added</p>
+          ) : (
+            <div className="tree-add-grid">
+              {resourceAdds.options.map((option) => (
+                <button
+                  aria-label={`Add ${option.label}`}
+                  disabled={resourceAdds.busy || option.disabled}
+                  key={option.id}
+                  onClick={() => resourceAdds.add(option.id)}
+                  title={option.disabledReason ?? `Add ${option.label}`}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" />
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
       <div className="tree-scroll" data-testid="tree-scroller">
         <div aria-label="Workflow resources" className="resource-tree" role="tree">
           {rows.map((row) => (

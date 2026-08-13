@@ -34,12 +34,14 @@ import {
   type EditOperation,
 } from "../../api/client";
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
+import type { ResourceAddController } from "./resourceAdds";
 
 
 interface ConfigEditorProps {
   initialTargetId?: string | null;
   onClose: () => void;
   onExitReady: (handler: (() => void) | null) => void;
+  onResourceAddsReady: (controller: ResourceAddController | null) => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceLabel: string;
@@ -1054,6 +1056,7 @@ export function ConfigEditor({
   initialTargetId,
   onClose,
   onExitReady,
+  onResourceAddsReady,
   onSubmitted,
   removalState,
   resourceLabel,
@@ -1072,7 +1075,6 @@ export function ConfigEditor({
   );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addingContext, setAddingContext] = useState<AddContext | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
@@ -1096,6 +1098,7 @@ export function ConfigEditor({
     parentId: string;
     previousChildIds: Set<string>;
   } | null>(null);
+  const resourceAddRequest = useRef<(optionId: string) => void>(() => {});
 
   const draft = draftQuery.data;
   const nodes = useMemo(
@@ -1123,10 +1126,18 @@ export function ConfigEditor({
     () => topLevelAddContexts(nodes),
     [nodes],
   );
+  const resourceAddOptions = useMemo(
+    () => topLevelAdds.map((context) => ({
+      id: context.command.id,
+      label: fieldName(context.command),
+      disabled: Boolean(context.command.command?.blockedMessage),
+      disabledReason: context.command.command?.blockedMessage,
+    })),
+    [topLevelAdds],
+  );
 
   useEffect(() => {
     setActiveTargetId(initialTargetId ?? null);
-    setAddMenuOpen(false);
     setAddingContext(null);
   }, [initialTargetId]);
 
@@ -1498,7 +1509,6 @@ export function ConfigEditor({
   };
 
   const requestAdd = (context: AddContext) => {
-    setAddMenuOpen(false);
     if (context.command.command?.requiresName !== false) {
       setAddingContext(context);
       return;
@@ -1510,6 +1520,12 @@ export function ConfigEditor({
       commit,
       selectContextAdded,
     );
+  };
+  resourceAddRequest.current = (optionId) => {
+    const context = topLevelAdds.find(
+      ({ command }) => command.id === optionId,
+    );
+    if (context) requestAdd(context);
   };
 
   const close = async () => {
@@ -1536,6 +1552,24 @@ export function ConfigEditor({
     });
     return () => onExitReady(null);
   });
+
+  useEffect(() => {
+    onResourceAddsReady({
+      options: resourceAddOptions,
+      status: draftQuery.isPending
+        ? "loading"
+        : draftQuery.isError ? "unavailable" : "ready",
+      busy,
+      add: (optionId) => resourceAddRequest.current(optionId),
+    });
+    return () => onResourceAddsReady(null);
+  }, [
+    busy,
+    draftQuery.isError,
+    draftQuery.isPending,
+    onResourceAddsReady,
+    resourceAddOptions,
+  ]);
 
   if (draftQuery.isPending) {
     return (
@@ -1595,46 +1629,6 @@ export function ConfigEditor({
           </label>
         </div> : null}
         <div className="config-toolbar-actions">
-          {topLevelAdds.length > 0 ? (
-            <div className="resource-add-control">
-              <button
-                aria-expanded={addMenuOpen}
-                aria-haspopup="menu"
-                aria-label="Add resource"
-                disabled={busy}
-                onClick={() => setAddMenuOpen((current) => !current)}
-                title="Add a top-level configuration resource"
-                type="button"
-              >
-                <Plus />
-                <span>Add resource</span>
-              </button>
-              {addMenuOpen ? (
-                <div
-                  aria-label="Resource types"
-                  className="resource-add-menu"
-                  role="menu"
-                >
-                  {topLevelAdds.map((context) => (
-                    <button
-                      disabled={Boolean(
-                        context.command.command?.blockedMessage,
-                      )}
-                      key={context.command.id}
-                      onClick={() => requestAdd(context)}
-                      role="menuitem"
-                      title={context.command.command?.blockedMessage
-                        ?? `Add ${fieldName(context.command)}`}
-                      type="button"
-                    >
-                      <Plus aria-hidden="true" />
-                      <span>Add {fieldName(context.command)}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
           <button
             aria-label="Revert unsaved changes"
             disabled={

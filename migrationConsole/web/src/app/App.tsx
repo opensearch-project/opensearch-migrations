@@ -25,6 +25,9 @@ import {
   editTarget,
   projectEditSnapshot,
 } from "../features/configuration/editProjection";
+import type {
+  ResourceAddController,
+} from "../features/configuration/resourceAdds";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
 
@@ -65,6 +68,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const [editContext, setEditContext] = useState<EditContext | null>(null);
+  const [resourceAdds, setResourceAdds] =
+    useState<ResourceAddController | null>(null);
   const editExitRef = useRef<(() => void) | null>(null);
   const configDraft = useQuery({
     queryKey: ["config-draft"],
@@ -155,6 +160,11 @@ export function App() {
 
   const registerEditExit = useCallback((handler: (() => void) | null) => {
     editExitRef.current = handler;
+  }, []);
+  const registerResourceAdds = useCallback((
+    controller: ResourceAddController | null,
+  ) => {
+    setResourceAdds(controller);
   }, []);
 
   const startEditing = () => {
@@ -298,7 +308,10 @@ export function App() {
             </main>
           ) : (
             <main className="manage-layout">
-              <section className={`tree-panel ${treeOpen ? "open" : ""}`}>
+              <section
+                aria-label="Resource navigation"
+                className={`tree-panel ${treeOpen ? "open" : ""}`}
+              >
                 <header className="panel-header">
                   <div>
                     <h2>{editContext ? "Configuration" : "Resources"}</h2>
@@ -323,6 +336,7 @@ export function App() {
                     setSelectedId(nodeId);
                     setTreeOpen(false);
                   }}
+                  resourceAdds={editContext ? resourceAdds : null}
                   selectedId={selectedId}
                   snapshot={displayedState}
                 />
@@ -332,6 +346,7 @@ export function App() {
                   initialTargetId={editContext.targetId}
                   onClose={() => setEditContext(null)}
                   onExitReady={registerEditExit}
+                  onResourceAddsReady={registerResourceAdds}
                   onSubmitted={() => {
                     setEditContext(null);
                     void queryClient.invalidateQueries({

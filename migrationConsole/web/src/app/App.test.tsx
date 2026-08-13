@@ -351,7 +351,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
 });
 
 
-test("offers the owning collection add action from a scoped resource editor", async () => {
+test("offers top-level add actions in navigation during scoped editing", async () => {
   const scopedSnapshot = structuredClone(manageSnapshot);
   const capture = scopedSnapshot.nodes["resource:captureproxies:capture"];
   capture.capabilities = capture.capabilities.map((capability) => (
@@ -387,8 +387,10 @@ test("offers the owning collection add action from a scoped resource editor", as
     name: /^Source clusters/,
   })).toBeNull();
 
-  await userEvent.click(screen.getByRole("button", { name: "Add resource" }));
-  await userEvent.click(screen.getByRole("menuitem", {
+  const resourceNavigation = screen.getByRole("region", {
+    name: "Resource navigation",
+  });
+  await userEvent.click(within(resourceNavigation).getByRole("button", {
     name: "Add source cluster",
   }));
   await userEvent.type(
@@ -930,8 +932,10 @@ test("opens a pending removal with a resource fallback target as a tombstone", a
   expect(screen.queryByRole("table", {
     name: "Configuration fields",
   })).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "Add resource" }));
-  expect(screen.getByRole("menuitem", {
+  const resourceNavigation = screen.getByRole("region", {
+    name: "Resource navigation",
+  });
+  expect(within(resourceNavigation).getByRole("button", {
     name: "Add source cluster",
   })).toBeInTheDocument();
 });

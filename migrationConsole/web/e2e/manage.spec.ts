@@ -317,7 +317,10 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
-  await expect(page.getByRole("button", { name: "Add resource" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Resource navigation" })
+      .getByRole("button", { name: "Add source cluster" }),
+  ).toBeVisible();
   const config = page.getByRole("table", { name: "Configuration fields" });
   const auth = config.getByRole("row", { name: /Authentication/ });
   await auth.getByRole("combobox", { name: "Authentication" })
@@ -366,7 +369,8 @@ test("transitions scoped parents before their full row scrolls away", async ({ p
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(
-    page.getByRole("button", { name: "Add resource" }),
+    page.getByRole("region", { name: "Resource navigation" })
+      .getByRole("button", { name: "Add source cluster" }),
   ).toBeVisible();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   await page.getByRole("checkbox", { name: "Show expert fields" }).check();
@@ -555,6 +559,12 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
+  await page.getByRole("button", { name: "Open resources" }).click();
+  await expect(
+    page.getByRole("region", { name: "Resource navigation" })
+      .getByRole("button", { name: "Add source cluster" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close resources" }).click();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   const configTree = page.getByRole("table", { name: "Configuration fields" });
   await configTree.getByRole("row", { name: /Timeout/ }).click();

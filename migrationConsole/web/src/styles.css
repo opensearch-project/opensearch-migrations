@@ -347,6 +347,78 @@ button {
   box-shadow: 0 0 0 2px rgb(23 107 120 / 15%);
 }
 
+.tree-add-resources {
+  flex: 0 0 auto;
+  padding: 9px 11px 11px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.tree-add-resources header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.tree-add-resources header strong {
+  font-size: 11px;
+}
+
+.tree-add-resources header span,
+.tree-add-resources p {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.tree-add-resources p {
+  margin: 4px 0 0;
+}
+
+.tree-add-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tree-add-grid button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.tree-add-grid button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tree-add-grid button:disabled {
+  opacity: 0.5;
+}
+
+.tree-add-grid button svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+
+.tree-add-grid button span {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 12px;
+  white-space: normal;
+}
+
 .tree-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -921,7 +993,6 @@ button {
 }
 
 .config-toolbar-actions > button,
-.resource-add-control > button,
 .field-form > button,
 .field-actions > button,
 .rename-form > button,
@@ -941,7 +1012,6 @@ button {
 }
 
 .config-toolbar-actions button svg,
-.resource-add-control button svg,
 .field-form button svg,
 .field-actions button svg,
 .external-resource-actions button svg,
@@ -952,7 +1022,6 @@ button {
 }
 
 .config-toolbar-actions > button:disabled,
-.resource-add-control > button:disabled,
 .field-form > button:disabled,
 .field-actions > button:disabled,
 .external-resource-actions button:disabled {
@@ -970,55 +1039,6 @@ button {
   border-color: #244a63;
   color: #fff;
   background: #244a63;
-}
-
-.resource-add-control {
-  position: relative;
-}
-
-.resource-add-menu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 5px);
-  left: 0;
-  display: grid;
-  width: max-content;
-  min-width: 230px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
-  background: var(--surface);
-  box-shadow: 0 12px 30px rgb(19 31 40 / 18%);
-}
-
-.resource-add-menu button {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 9px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 3px;
-  color: var(--text);
-  background: transparent;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.resource-add-menu button:hover,
-.resource-add-menu button:focus-visible {
-  background: var(--surface-subtle);
-}
-
-.resource-add-menu button:disabled {
-  opacity: 0.5;
-}
-
-.resource-add-menu button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .status-removed .status-dot {
@@ -2449,26 +2469,15 @@ button {
     gap: 4px;
   }
 
-  .config-toolbar-actions > button:not(.icon-button),
-  .resource-add-control > button {
+  .config-toolbar-actions > button:not(.icon-button) {
     width: 34px;
     padding: 0;
     overflow: hidden;
     white-space: nowrap;
   }
 
-  .config-toolbar-actions > button:not(.icon-button) span,
-  .resource-add-control > button span {
+  .config-toolbar-actions > button:not(.icon-button) span {
     display: none;
-  }
-
-  .resource-add-menu {
-    position: fixed;
-    top: 62px;
-    right: 10px;
-    left: 10px;
-    width: auto;
-    max-width: none;
   }
 
   .config-context-add {
