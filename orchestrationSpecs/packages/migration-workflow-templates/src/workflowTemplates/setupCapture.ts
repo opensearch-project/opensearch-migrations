@@ -600,6 +600,26 @@ export const SetupCapture = WorkflowBuilder.create({
         )
     )
 
+    .addTemplate("failCaptureProxySetup", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVarsFromRecord({
+                CAPTURE_PROXY_NAME: b.inputs.resourceName,
+            })
+            // setupProxy is allowed to fail long enough to patch the CR status.
+            // This final step propagates that failure to every owning template.
+            .addArgs([`
+set -euo pipefail
+echo "CaptureProxy/$CAPTURE_PROXY_NAME setup failed; the resource status was patched to Error" >&2
+exit 1
+`])
+        )
+    )
+
 
     .addTemplate("setupProxy", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
@@ -964,7 +984,7 @@ export const SetupCapture = WorkflowBuilder.create({
                         checksumNotDone(c.reconcileCaptureProxyResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                         managedByWorkflow
                     )}),
-                    continueOn: {failed: true}
+                    continueOn: {failed: true, error: true}
                 }
             )
             .addStep("setupProxyWithConfiguredKafka", INTERNAL, "setupProxy", c =>
@@ -987,7 +1007,7 @@ export const SetupCapture = WorkflowBuilder.create({
                         checksumNotDone(c.reconcileCaptureProxyResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                         expr.not(managedByWorkflow)
                     )}),
-                    continueOn: {failed: true}
+                    continueOn: {failed: true, error: true}
                 }
             )
             .addStep("patchCaptureProxyError", ResourceManagement, "patchCaptureProxyError", c =>
@@ -996,8 +1016,30 @@ export const SetupCapture = WorkflowBuilder.create({
                     phase: expr.literal("Error"),
                 }),
                 {when: c => ({templateExp: expr.or(
-                    expr.equals(c.setupProxy.status, "Failed"),
-                    expr.equals(c.setupProxyWithConfiguredKafka.status, "Failed")
+                    expr.or(
+                        expr.equals(c.setupProxy.status, "Failed"),
+                        expr.equals(c.setupProxy.status, "Error")
+                    ),
+                    expr.or(
+                        expr.equals(c.setupProxyWithConfiguredKafka.status, "Failed"),
+                        expr.equals(c.setupProxyWithConfiguredKafka.status, "Error")
+                    )
+                )})}
+            )
+            .addStep("failAfterProxyError", INTERNAL, "failCaptureProxySetup", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.proxyName,
+                }),
+                {when: c => ({templateExp: expr.or(
+                    expr.or(
+                        expr.equals(c.setupProxy.status, "Failed"),
+                        expr.equals(c.setupProxy.status, "Error")
+                    ),
+                    expr.or(
+                        expr.equals(c.setupProxyWithConfiguredKafka.status, "Failed"),
+                        expr.equals(c.setupProxyWithConfiguredKafka.status, "Error")
+                    )
                 )})}
             );
         })
