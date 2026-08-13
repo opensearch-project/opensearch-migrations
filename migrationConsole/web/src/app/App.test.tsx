@@ -75,8 +75,94 @@ test("renders real manage state with exact-node details and capabilities", async
   })).toBeDisabled();
   expect(screen.getByText("1 configuration error")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Edit capture" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Logs for capture" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Logs for capture" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
+});
+
+
+test("starts pauses and explicitly stops bounded resource logs", async () => {
+  let startRequest: unknown;
+  let stoppedStream: string | undefined;
+  server.use(
+    http.post("*/api/v1/log-streams", async ({ request }) => {
+      startRequest = await request.json();
+      return HttpResponse.json({
+        id: "log-stream-test",
+        target: {
+          id: "log-target-all",
+          label: "All matching containers",
+          kind: "aggregate",
+          podName: null,
+          podUid: null,
+          container: null,
+          restartCount: null,
+          previous: false,
+          supportsFollow: true,
+        },
+        state: "following",
+        page: {
+          events: [{
+            sequence: 4,
+            receivedAt: "2026-08-13T20:00:01Z",
+            timestamp: "2026-08-13T20:00:00Z",
+            podName: "capture-0",
+            podUid: "pod-uid",
+            container: "capture-proxy",
+            restartCount: 0,
+            previous: false,
+            message: "waitForProxyEndpointReady timed out",
+            kind: "error",
+          }],
+          beforeCursor: "cursor-4",
+          afterCursor: "cursor-4",
+          atAvailableStart: true,
+          atBufferEnd: true,
+          historyTruncated: true,
+          state: "following",
+        },
+      }, { status: 201 });
+    }),
+    http.delete(
+      "*/api/v1/log-streams/:streamId",
+      ({ params }) => {
+        stoppedStream = String(params.streamId);
+        return HttpResponse.json({
+          id: params.streamId,
+          state: "stopped",
+          message: null,
+        });
+      },
+    ),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Logs for capture",
+  }));
+  expect(await screen.findByRole("region", { name: "Managed logs" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "Log target" }))
+    .toHaveValue("log-target-all");
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Start logs",
+  }));
+  expect(await screen.findByText(
+    "waitForProxyEndpointReady timed out",
+  )).toBeInTheDocument();
+  expect(startRequest).toEqual({
+    targetId: "log-target-all",
+    tailLines: 500,
+    follow: true,
+    pageSize: 200,
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+  expect(screen.getByRole("button", { name: "Resume" }))
+    .toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(stoppedStream).toBe("log-stream-test"));
+  expect(screen.getByRole("button", { name: "Start logs" })).toBeEnabled();
 });
 
 

@@ -31,6 +31,14 @@ from ..application.outputs import (
     OutputDescriptor,
     OutputInventory,
 )
+from ..application.logs import (
+    LogEvent,
+    LogPage,
+    LogStream,
+    LogStreamStatus,
+    LogTarget,
+    LogTargetInventory,
+)
 
 
 class WebModel(BaseModel):
@@ -579,6 +587,122 @@ class OutputContentV1(WebModel):
             size=content.size,
             message=content.message,
         )
+
+
+class LogTargetV1(WebModel):
+    id: str
+    label: str
+    kind: Literal["aggregate", "container"]
+    pod_name: Optional[str] = None
+    pod_uid: Optional[str] = None
+    container: Optional[str] = None
+    restart_count: Optional[int] = None
+    previous: bool
+    supports_follow: bool
+
+    @classmethod
+    def from_domain(cls, target: LogTarget) -> "LogTargetV1":
+        return cls.model_validate(target.__dict__)
+
+
+class LogTargetInventoryV1(WebModel):
+    node_id: str
+    capability_target_id: str
+    targets: List[LogTargetV1]
+    message: Optional[str] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        inventory: LogTargetInventory,
+    ) -> "LogTargetInventoryV1":
+        return cls(
+            node_id=inventory.node_id,
+            capability_target_id=inventory.capability_target_id,
+            targets=[
+                LogTargetV1.from_domain(target)
+                for target in inventory.targets
+            ],
+            message=inventory.message,
+        )
+
+
+class StartLogStreamRequestV1(WebModel):
+    target_id: str
+    tail_lines: int = Field(default=1000, ge=1, le=5000)
+    follow: bool = True
+    page_size: int = Field(default=200, ge=1, le=1000)
+
+
+class LogEventV1(WebModel):
+    sequence: int
+    received_at: datetime
+    timestamp: Optional[datetime] = None
+    pod_name: str
+    pod_uid: str
+    container: str
+    restart_count: int
+    previous: bool
+    message: str
+    kind: Literal["log", "error"] = "log"
+
+    @classmethod
+    def from_domain(cls, event: LogEvent) -> "LogEventV1":
+        return cls.model_validate(event.__dict__)
+
+
+class LogPageV1(WebModel):
+    events: List[LogEventV1]
+    before_cursor: Optional[str] = None
+    after_cursor: Optional[str] = None
+    at_available_start: bool
+    at_buffer_end: bool
+    history_truncated: bool
+    state: Literal["starting", "following", "ended", "stopped", "error"]
+
+    @classmethod
+    def from_domain(cls, page: LogPage) -> "LogPageV1":
+        return cls(
+            events=[
+                LogEventV1.from_domain(event)
+                for event in page.events
+            ],
+            before_cursor=page.before_cursor,
+            after_cursor=page.after_cursor,
+            at_available_start=page.at_available_start,
+            at_buffer_end=page.at_buffer_end,
+            history_truncated=page.history_truncated,
+            state=page.state,
+        )
+
+
+class LogStreamV1(WebModel):
+    id: str
+    target: LogTargetV1
+    state: Literal["starting", "following", "ended", "stopped", "error"]
+    page: LogPageV1
+
+    @classmethod
+    def from_domain(cls, stream: LogStream) -> "LogStreamV1":
+        return cls(
+            id=stream.id,
+            target=LogTargetV1.from_domain(stream.target),
+            state=stream.state,
+            page=LogPageV1.from_domain(stream.page),
+        )
+
+
+class LogStreamStatusV1(WebModel):
+    id: str
+    state: Literal["starting", "following", "ended", "stopped", "error"]
+    message: Optional[str] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        status: LogStreamStatus,
+    ) -> "LogStreamStatusV1":
+        return cls.model_validate(status.__dict__)
 
 
 class ExternalResourceRowV1(WebModel):

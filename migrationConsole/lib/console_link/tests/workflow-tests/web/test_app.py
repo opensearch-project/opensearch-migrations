@@ -14,7 +14,19 @@ from console_link.workflow.application.config_drafts import (
     ExternalResourceInventory,
     ExternalResourceMutation,
 )
-from console_link.workflow.application.models import ManageNode, ManageSnapshot
+from console_link.workflow.application.logs import (
+    LogEvent,
+    LogPage,
+    LogStream,
+    LogStreamStatus,
+    LogTarget,
+    LogTargetInventory,
+)
+from console_link.workflow.application.models import (
+    ManageCapability,
+    ManageNode,
+    ManageSnapshot,
+)
 from console_link.workflow.application.observations import (
     Observation,
     ObservationEvent,
@@ -356,6 +368,166 @@ def test_output_route_distinguishes_stale_and_read_failures(tmp_path):
     assert stale.json()["detail"]["code"] == "output_stale"
     assert failed.status_code == 502
     assert failed.json()["detail"]["code"] == "output_read_failed"
+
+
+class _Logs:
+    def __init__(self):
+        self.target = LogTarget(
+            id="log-target-opaque",
+            label="capture-0 / capture-proxy",
+            kind="container",
+            pod_name="capture-0",
+            pod_uid="pod-uid",
+            container="capture-proxy",
+            restart_count=1,
+            previous=False,
+            supports_follow=True,
+        )
+        self.event = LogEvent(
+            sequence=7,
+            received_at="2026-08-13T20:00:01Z",
+            timestamp="2026-08-13T20:00:00Z",
+            pod_name="capture-0",
+            pod_uid="pod-uid",
+            container="capture-proxy",
+            restart_count=1,
+            previous=False,
+            message="proxy is ready",
+        )
+        self.calls = []
+        self.stopped = False
+
+    def list_targets(self, node_id, capability_target_id):
+        self.calls.append(("targets", node_id, capability_target_id))
+        return LogTargetInventory(
+            node_id=node_id,
+            capability_target_id=capability_target_id,
+            targets=(self.target,),
+        )
+
+    def start(self, target_id, tail_lines, follow, page_size):
+        self.calls.append((
+            "start",
+            target_id,
+            tail_lines,
+            follow,
+            page_size,
+        ))
+        return LogStream(
+            id="log-stream-opaque",
+            target=self.target,
+            state="following",
+            page=self.page("log-stream-opaque"),
+        )
+
+    def page(self, stream_id, before=None, after=None, limit=200):
+        self.calls.append(("page", stream_id, before, after, limit))
+        return LogPage(
+            events=(self.event,),
+            before_cursor="before-7",
+            after_cursor="after-7",
+            at_available_start=True,
+            at_buffer_end=True,
+            history_truncated=False,
+            state="following",
+        )
+
+    def stop(self, stream_id):
+        self.stopped = True
+        return LogStreamStatus(id=stream_id, state="stopped")
+
+    def shutdown(self):
+        self.stopped = True
+
+
+def _log_snapshot():
+    snapshot = _snapshot()
+    node = snapshot.nodes["resource:captureproxies:capture"]
+    node = ManageNode(
+        **{
+            **node.__dict__,
+            "capabilities": (
+                ManageCapability(
+                    "logs",
+                    "logs:captureproxies:capture",
+                    "Logs for capture",
+                ),
+            ),
+        }
+    )
+    return ManageSnapshot(
+        **{
+            **snapshot.__dict__,
+            "nodes": {node.id: node},
+        }
+    )
+
+
+def test_log_routes_use_node_capability_and_server_issued_targets(tmp_path):
+    logs = _Logs()
+    coordinator = _Coordinator(Observation(snapshot=_log_snapshot()))
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        coordinator=coordinator,
+        logs=logs,
+    )
+
+    with TestClient(app) as client:
+        targets = client.get(
+            "/api/v1/nodes/resource:captureproxies:capture/log-targets"
+        )
+        started = client.post(
+            "/api/v1/log-streams",
+            json={
+                "targetId": "log-target-opaque",
+                "tailLines": 500,
+                "follow": True,
+                "pageSize": 100,
+            },
+        )
+        page = client.get(
+            "/api/v1/log-streams/log-stream-opaque/pages",
+            params={"before": "before-7", "limit": 50},
+        )
+        stopped = client.delete(
+            "/api/v1/log-streams/log-stream-opaque"
+        )
+
+    assert targets.status_code == 200
+    assert targets.json()["targets"][0]["podName"] == "capture-0"
+    assert started.status_code == 201
+    assert started.json()["page"]["events"][0]["message"] == "proxy is ready"
+    assert page.status_code == 200
+    assert stopped.json()["state"] == "stopped"
+    assert logs.calls[0] == (
+        "targets",
+        "resource:captureproxies:capture",
+        "logs:captureproxies:capture",
+    )
+    assert logs.calls[1] == (
+        "start",
+        "log-target-opaque",
+        500,
+        True,
+        100,
+    )
+    assert logs.stopped is True
+
+
+def test_log_targets_require_a_capability_on_the_observed_node(tmp_path):
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        coordinator=_Coordinator(Observation(snapshot=_snapshot())),
+        logs=_Logs(),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/nodes/resource:captureproxies:capture/log-targets"
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "logs_unavailable"
 
 
 class _Approvals:

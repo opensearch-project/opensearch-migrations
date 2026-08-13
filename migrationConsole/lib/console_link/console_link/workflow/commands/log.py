@@ -22,16 +22,10 @@ from .crd_utils import (
     resource_display_name,
 )
 from ..models.utils import load_k8s_config, get_current_namespace
+from ..application.logs import LogUnavailable, resource_log_selector
 
 
 logger = logging.getLogger(__name__)
-_RESOURCE_OUTPUT_LABELS = {'strimzi.io/cluster'}
-# Labels present on CRs but not propagated to workflow pods.
-_LABELS_NOT_PROPAGATED_TO_PODS = {
-    'migrations.opensearch.org/run-number',
-    'migrations.opensearch.org/workflow-name',
-}
-
 # `workflow log` is intentionally for pod logs only. Durable command output is
 # handled by the workflow templates instead: the few output-producing steps
 # write explicit small artifacts under migration-outputs/<resource>/<name>/,
@@ -180,17 +174,12 @@ def _resource_label_selectors(ctx, namespace, resource_name, prefix):
     if not resource:
         click.echo(f"No migration resource matching '{resource_name}'.", err=True)
         ctx.exit(1)
-    labels = resource.get('metadata', {}).get('labels', {}) or {}
-    selectors = [
-        f"{key}={value}"
-        for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
-        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
-    ]
-    if not selectors:
+    try:
+        return resource_log_selector(resource, prefix).split(",")
+    except LogUnavailable:
         click.echo(f"Migration resource '{resource_name}' has no output labels.", err=True)
         ctx.exit(1)
-    return selectors
+        return []
 
 
 def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):

@@ -225,6 +225,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/log-streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Log Stream */
+        post: operations["start_log_stream_api_v1_log_streams_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/log-streams/{stream_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Stop Log Stream */
+        delete: operations["stop_log_stream_api_v1_log_streams__stream_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/log-streams/{stream_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream Log Events */
+        get: operations["stream_log_events_api_v1_log_streams__stream_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/log-streams/{stream_id}/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Log Page */
+        get: operations["read_log_page_api_v1_log_streams__stream_id__pages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/manage/events": {
         parameters: {
             query?: never;
@@ -251,6 +319,23 @@ export interface paths {
         };
         /** Manage State */
         get: operations["manage_state_api_v1_manage_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/log-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Log Targets */
+        get: operations["list_log_targets_api_v1_nodes__node_id__log_targets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -874,6 +959,115 @@ export interface components {
              */
             status: "ok";
         };
+        /** LogEventV1 */
+        LogEventV1: {
+            /** Container */
+            container: string;
+            /**
+             * Kind
+             * @default log
+             * @enum {string}
+             */
+            kind: "log" | "error";
+            /** Message */
+            message: string;
+            /** Podname */
+            podName: string;
+            /** Poduid */
+            podUid: string;
+            /** Previous */
+            previous: boolean;
+            /**
+             * Receivedat
+             * Format: date-time
+             */
+            receivedAt: string;
+            /** Restartcount */
+            restartCount: number;
+            /** Sequence */
+            sequence: number;
+            /** Timestamp */
+            timestamp?: string | null;
+        };
+        /** LogPageV1 */
+        LogPageV1: {
+            /** Aftercursor */
+            afterCursor?: string | null;
+            /** Atavailablestart */
+            atAvailableStart: boolean;
+            /** Atbufferend */
+            atBufferEnd: boolean;
+            /** Beforecursor */
+            beforeCursor?: string | null;
+            /** Events */
+            events: components["schemas"]["LogEventV1"][];
+            /** Historytruncated */
+            historyTruncated: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "starting" | "following" | "ended" | "stopped" | "error";
+        };
+        /** LogStreamStatusV1 */
+        LogStreamStatusV1: {
+            /** Id */
+            id: string;
+            /** Message */
+            message?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "starting" | "following" | "ended" | "stopped" | "error";
+        };
+        /** LogStreamV1 */
+        LogStreamV1: {
+            /** Id */
+            id: string;
+            page: components["schemas"]["LogPageV1"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "starting" | "following" | "ended" | "stopped" | "error";
+            target: components["schemas"]["LogTargetV1"];
+        };
+        /** LogTargetInventoryV1 */
+        LogTargetInventoryV1: {
+            /** Capabilitytargetid */
+            capabilityTargetId: string;
+            /** Message */
+            message?: string | null;
+            /** Nodeid */
+            nodeId: string;
+            /** Targets */
+            targets: components["schemas"]["LogTargetV1"][];
+        };
+        /** LogTargetV1 */
+        LogTargetV1: {
+            /** Container */
+            container?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "aggregate" | "container";
+            /** Label */
+            label: string;
+            /** Podname */
+            podName?: string | null;
+            /** Poduid */
+            podUid?: string | null;
+            /** Previous */
+            previous: boolean;
+            /** Restartcount */
+            restartCount?: number | null;
+            /** Supportsfollow */
+            supportsFollow: boolean;
+        };
         /** LogsCapabilityV1 */
         LogsCapabilityV1: {
             /**
@@ -1215,6 +1409,26 @@ export interface components {
             path: string[];
             /** Value */
             value: unknown;
+        };
+        /** StartLogStreamRequestV1 */
+        StartLogStreamRequestV1: {
+            /**
+             * Follow
+             * @default true
+             */
+            follow: boolean;
+            /**
+             * Pagesize
+             * @default 200
+             */
+            pageSize: number;
+            /**
+             * Taillines
+             * @default 1000
+             */
+            tailLines: number;
+            /** Targetid */
+            targetId: string;
         };
         /** UnsetEditOperationV1 */
         UnsetEditOperationV1: {
@@ -1695,6 +1909,141 @@ export interface operations {
             };
         };
     };
+    start_log_stream_api_v1_log_streams_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartLogStreamRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogStreamV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_log_stream_api_v1_log_streams__stream_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stream_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogStreamStatusV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_log_events_api_v1_log_streams__stream_id__events_get: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                stream_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancellable log event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_log_page_api_v1_log_streams__stream_id__pages_get: {
+        parameters: {
+            query?: {
+                before?: string | null;
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                stream_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogPageV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     manage_events_api_v1_manage_events_get: {
         parameters: {
             query?: never;
@@ -1743,6 +2092,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManageSnapshotV1"];
+                };
+            };
+        };
+    };
+    list_log_targets_api_v1_nodes__node_id__log_targets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogTargetInventoryV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

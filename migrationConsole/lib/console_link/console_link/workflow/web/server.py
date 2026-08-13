@@ -10,6 +10,7 @@ from ..application.manage_state import ManageStateService
 from ..application.observations import ObservationCoordinator
 from ..application.config_drafts import ConfigDraftService
 from ..application.outputs import OutputService
+from ..application.logs import KubernetesLogSource, LogStreamService
 from ..application.operations import OperationManager
 from ..application.actions import ApprovalService
 from ..application.resets import ResetService
@@ -48,6 +49,12 @@ def run_server(
         refresh_interval=refresh_interval,
     )
     operation_manager = OperationManager()
+    log_streams = LogStreamService(
+        KubernetesLogSource(
+            namespace=namespace,
+            workflow_name=workflow_name,
+        )
+    )
 
     def load_workflow():
         result, workflow = argo_service.get_workflow(
@@ -75,6 +82,7 @@ def run_server(
             workflow_loader=load_workflow,
         ),
         resets=ResetService(namespace=namespace),
+        logs=log_streams,
     )
     uvicorn.run(
         app,

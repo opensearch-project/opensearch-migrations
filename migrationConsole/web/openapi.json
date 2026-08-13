@@ -1345,6 +1345,334 @@
         "title": "HealthV1",
         "type": "object"
       },
+      "LogEventV1": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "title": "Container",
+            "type": "string"
+          },
+          "kind": {
+            "default": "log",
+            "enum": [
+              "log",
+              "error"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "podName": {
+            "title": "Podname",
+            "type": "string"
+          },
+          "podUid": {
+            "title": "Poduid",
+            "type": "string"
+          },
+          "previous": {
+            "title": "Previous",
+            "type": "boolean"
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "title": "Receivedat",
+            "type": "string"
+          },
+          "restartCount": {
+            "title": "Restartcount",
+            "type": "integer"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "sequence",
+          "receivedAt",
+          "podName",
+          "podUid",
+          "container",
+          "restartCount",
+          "previous",
+          "message"
+        ],
+        "title": "LogEventV1",
+        "type": "object"
+      },
+      "LogPageV1": {
+        "additionalProperties": false,
+        "properties": {
+          "afterCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aftercursor"
+          },
+          "atAvailableStart": {
+            "title": "Atavailablestart",
+            "type": "boolean"
+          },
+          "atBufferEnd": {
+            "title": "Atbufferend",
+            "type": "boolean"
+          },
+          "beforeCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beforecursor"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LogEventV1"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "historyTruncated": {
+            "title": "Historytruncated",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "following",
+              "ended",
+              "stopped",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "atAvailableStart",
+          "atBufferEnd",
+          "historyTruncated",
+          "state"
+        ],
+        "title": "LogPageV1",
+        "type": "object"
+      },
+      "LogStreamStatusV1": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "following",
+              "ended",
+              "stopped",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "LogStreamStatusV1",
+        "type": "object"
+      },
+      "LogStreamV1": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "page": {
+            "$ref": "#/components/schemas/LogPageV1"
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "following",
+              "ended",
+              "stopped",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/LogTargetV1"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "state",
+          "page"
+        ],
+        "title": "LogStreamV1",
+        "type": "object"
+      },
+      "LogTargetInventoryV1": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilityTargetId": {
+            "title": "Capabilitytargetid",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/LogTargetV1"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodeId",
+          "capabilityTargetId",
+          "targets"
+        ],
+        "title": "LogTargetInventoryV1",
+        "type": "object"
+      },
+      "LogTargetV1": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "aggregate",
+              "container"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "podName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Podname"
+          },
+          "podUid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poduid"
+          },
+          "previous": {
+            "title": "Previous",
+            "type": "boolean"
+          },
+          "restartCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restartcount"
+          },
+          "supportsFollow": {
+            "title": "Supportsfollow",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "previous",
+          "supportsFollow"
+        ],
+        "title": "LogTargetV1",
+        "type": "object"
+      },
       "LogsCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -2233,6 +2561,39 @@
         "title": "SetEditOperationV1",
         "type": "object"
       },
+      "StartLogStreamRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "follow": {
+            "default": true,
+            "title": "Follow",
+            "type": "boolean"
+          },
+          "pageSize": {
+            "default": 200,
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Pagesize",
+            "type": "integer"
+          },
+          "tailLines": {
+            "default": 1000,
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Taillines",
+            "type": "integer"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId"
+        ],
+        "title": "StartLogStreamRequestV1",
+        "type": "object"
+      },
       "UnsetEditOperationV1": {
         "additionalProperties": false,
         "properties": {
@@ -2925,6 +3286,243 @@
         ]
       }
     },
+    "/api/v1/log-streams": {
+      "post": {
+        "operationId": "start_log_stream_api_v1_log_streams_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLogStreamRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogStreamV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Log Stream",
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/api/v1/log-streams/{stream_id}": {
+      "delete": {
+        "operationId": "stop_log_stream_api_v1_log_streams__stream_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogStreamStatusV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Log Stream",
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/api/v1/log-streams/{stream_id}/events": {
+      "get": {
+        "operationId": "stream_log_events_api_v1_log_streams__stream_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {}
+            },
+            "description": "Cancellable log event stream"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Log Events",
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/api/v1/log-streams/{stream_id}/pages": {
+      "get": {
+        "operationId": "read_log_page_api_v1_log_streams__stream_id__pages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogPageV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Log Page",
+        "tags": [
+          "logs"
+        ]
+      }
+    },
     "/api/v1/manage/events": {
       "get": {
         "operationId": "manage_events_api_v1_manage_events_get",
@@ -2991,6 +3589,48 @@
         "summary": "Manage State",
         "tags": [
           "manage"
+        ]
+      }
+    },
+    "/api/v1/nodes/{node_id}/log-targets": {
+      "get": {
+        "operationId": "list_log_targets_api_v1_nodes__node_id__log_targets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogTargetInventoryV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Log Targets",
+        "tags": [
+          "logs"
         ]
       }
     },

@@ -16,6 +16,14 @@ export type ResetPlan = components["schemas"]["ResetPlanV1"];
 export type OutputInventory = components["schemas"]["OutputInventoryV1"];
 export type OutputDescriptor = components["schemas"]["OutputDescriptorV1"];
 export type OutputContent = components["schemas"]["OutputContentV1"];
+export type LogTargetInventory =
+  components["schemas"]["LogTargetInventoryV1"];
+export type LogTarget = components["schemas"]["LogTargetV1"];
+export type LogStream = components["schemas"]["LogStreamV1"];
+export type LogStreamStatus =
+  components["schemas"]["LogStreamStatusV1"];
+export type LogPage = components["schemas"]["LogPageV1"];
+export type LogEvent = components["schemas"]["LogEventV1"];
 export type EditNode = components["schemas"]["EditNodeV1"];
 export type EditOperation =
   components["schemas"]["ApplyEditOperationRequestV1"]["operation"];
@@ -343,6 +351,118 @@ export async function getOutputContent(
 export function outputDownloadUrl(outputId: string): string {
   const params = new URLSearchParams({ outputId });
   return `/api/v1/outputs/download?${params.toString()}`;
+}
+
+
+export async function getLogTargets(
+  nodeId: string,
+): Promise<LogTargetInventory> {
+  const { data, error, response } = await client.GET(
+    "/api/v1/nodes/{node_id}/log-targets",
+    { params: { path: { node_id: nodeId } } },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Log targets are unavailable",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function startLogStream(
+  targetId: string,
+  options: {
+    tailLines: number;
+    follow: boolean;
+    pageSize?: number;
+  },
+): Promise<LogStream> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/log-streams",
+    {
+      body: {
+        targetId,
+        tailLines: options.tailLines,
+        follow: options.follow,
+        pageSize: options.pageSize ?? 200,
+      },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Logs could not be started",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function getLogPage(
+  streamId: string,
+  options: {
+    before?: string;
+    after?: string;
+    limit?: number;
+  } = {},
+): Promise<LogPage> {
+  const { data, error, response } = await client.GET(
+    "/api/v1/log-streams/{stream_id}/pages",
+    {
+      params: {
+        path: { stream_id: streamId },
+        query: {
+          before: options.before,
+          after: options.after,
+          limit: options.limit ?? 200,
+        },
+      },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Buffered logs could not be read",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function stopLogStream(
+  streamId: string,
+): Promise<LogStreamStatus> {
+  const { data, error, response } = await client.DELETE(
+    "/api/v1/log-streams/{stream_id}",
+    { params: { path: { stream_id: streamId } } },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "The log stream could not be stopped",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export function logEventsUrl(
+  streamId: string,
+  afterSequence: number,
+): string {
+  const params = new URLSearchParams({
+    after: String(afterSequence),
+  });
+  return (
+    `/api/v1/log-streams/${encodeURIComponent(streamId)}/events?`
+    + params.toString()
+  );
 }
 
 

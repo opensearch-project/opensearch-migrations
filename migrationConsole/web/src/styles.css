@@ -1197,9 +1197,193 @@ button {
   color: var(--danger);
 }
 
+.log-panel {
+  padding-top: 0;
+}
+
+.log-setup,
+.log-toolbar,
+.log-setup label,
+.log-setup button,
+.log-toolbar button {
+  display: flex;
+  align-items: center;
+}
+
+.log-setup {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.log-setup label {
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.log-setup select {
+  min-height: 30px;
+  max-width: 310px;
+  padding: 4px 24px 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 11px;
+}
+
+.log-setup .log-follow-toggle {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 500;
+}
+
+.log-setup button,
+.log-toolbar button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 28px;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  font-size: 10px;
+}
+
+.log-setup button {
+  min-height: 30px;
+  margin-left: auto;
+  border-color: #8fb9bf;
+  color: #145d68;
+}
+
+.log-setup button svg,
+.log-toolbar button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.log-toolbar {
+  min-height: 34px;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface-subtle);
+}
+
+.log-connection {
+  flex: 0 0 auto;
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.log-connection.state-live {
+  color: var(--success);
+}
+
+.log-connection.state-reconnecting {
+  color: var(--warning);
+}
+
+.log-boundary,
+.log-error {
+  margin: 0;
+  padding: 5px 8px;
+  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  background: #f8fafb;
+  font-size: 10px;
+}
+
+.log-error {
+  color: var(--danger);
+  background: #fff4f3;
+}
+
+.log-viewer {
+  height: min(430px, 48vh);
+  min-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  color: #dce6eb;
+  background: #17212b;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  scrollbar-gutter: stable;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 82px minmax(140px, 220px) minmax(300px, 1fr);
+  min-height: 22px;
+  border-bottom: 1px solid #263541;
+}
+
+.log-line time,
+.log-line > span,
+.log-line code {
+  min-width: 0;
+  padding: 3px 7px;
+}
+
+.log-line time,
+.log-line > span {
+  overflow: hidden;
+  color: #8fa6b5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-line code {
+  color: inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.log-line-error {
+  color: #ffb8b2;
+  background: #321e20;
+}
+
+.log-empty {
+  padding: 24px;
+  color: #8fa6b5;
+  text-align: center;
+}
+
 @media (max-width: 760px) {
   .output-context {
     grid-template-columns: repeat(2, minmax(90px, 1fr));
+  }
+
+  .log-setup label:first-child {
+    width: 100%;
+  }
+
+  .log-setup label:first-child select {
+    flex: 1;
+    max-width: none;
+  }
+
+  .log-line {
+    grid-template-columns: 70px minmax(120px, 170px) minmax(240px, 1fr);
+  }
+
+  .log-toolbar {
+    justify-content: flex-start;
+    overflow-x: auto;
   }
 }
 

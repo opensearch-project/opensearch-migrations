@@ -10,6 +10,7 @@ import {
 
 import type { ManageNode } from "../../api/client";
 import { OutputPanel } from "../output/OutputPanel";
+import { LogPanel } from "../logviewer/LogPanel";
 import {
   ApprovalDialog,
   ResetDialog,
@@ -41,10 +42,12 @@ function capabilityIcon(kind: string) {
 function ResourceActions({
   node,
   onOutput,
+  onLogs,
   onAction,
 }: {
   node: ManageNode;
   onOutput: (targetId: string) => void;
+  onLogs: (targetId: string) => void;
   onAction: (action: PendingAction) => void;
 }) {
   const capabilities = node.capabilities.filter(
@@ -61,6 +64,11 @@ function ResourceActions({
             ? capability.outputTargetId
             : null
         );
+        const logTarget = (
+          capability.kind === "logs"
+            ? capability.logTargetId
+            : null
+        );
         const approvalTarget = (
           capability.kind === "approve"
             ? capability.approvalTargetId
@@ -75,17 +83,18 @@ function ResourceActions({
         return (
           <button
             aria-label={label}
-            disabled={!outputTarget && !actionTarget}
+            disabled={!outputTarget && !logTarget && !actionTarget}
             key={`${capability.kind}-${label}`}
             onClick={() => {
               if (outputTarget) onOutput(outputTarget);
+              else if (logTarget) onLogs(logTarget);
               else if (approvalTarget) {
                 onAction({ kind: "approve", targetId: approvalTarget });
               } else if (resetTarget) {
                 onAction({ kind: "reset", targetId: resetTarget });
               }
             }}
-            title={outputTarget || actionTarget
+            title={outputTarget || logTarget || actionTarget
               ? label
               : "This action is enabled in a later phase"}
             type="button"
@@ -175,10 +184,12 @@ export function ResourceWorkspace({
   node: ManageNode;
 }) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
+  const [logTarget, setLogTarget] = useState<string | null>(null);
   const [pendingAction, setPendingAction] =
     useState<PendingAction | null>(null);
   useEffect(() => {
     setOutputTarget(null);
+    setLogTarget(null);
     setPendingAction(null);
   }, [node.id]);
   return (
@@ -195,9 +206,22 @@ export function ResourceWorkspace({
       </header>
       <ResourceActions
         node={node}
+        onLogs={(targetId) => {
+          setOutputTarget(null);
+          setLogTarget(targetId);
+        }}
         onAction={setPendingAction}
-        onOutput={setOutputTarget}
+        onOutput={(targetId) => {
+          setLogTarget(null);
+          setOutputTarget(targetId);
+        }}
       />
+      {logTarget ? (
+        <LogPanel
+          nodeId={node.id}
+          onClose={() => setLogTarget(null)}
+        />
+      ) : null}
       {outputTarget ? (
         <OutputPanel
           onClose={() => setOutputTarget(null)}

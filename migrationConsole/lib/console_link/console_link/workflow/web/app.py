@@ -1,6 +1,7 @@
 """FastAPI application factory for native workflow manage."""
 
 from contextlib import asynccontextmanager
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -21,6 +22,7 @@ from ..application.outputs import (
     OutputStale,
     OutputUnavailable,
 )
+from ..application.logs import LogTargetStale, LogUnavailable
 from ..application.operations import (
     OperationEvent,
     OperationWorkResult,
@@ -45,6 +47,11 @@ from .contracts import (
     ExternalResourceInventoryV1,
     ExternalResourceMutationV1,
     HealthV1,
+    LogEventV1,
+    LogPageV1,
+    LogStreamStatusV1,
+    LogStreamV1,
+    LogTargetInventoryV1,
     ManageSnapshotV1,
     OutputContentV1,
     OutputInventoryV1,
@@ -54,6 +61,7 @@ from .contracts import (
     ResetPlanV1,
     SaveExternalResourceRequestV1,
     SelectExternalResourceRequestV1,
+    StartLogStreamRequestV1,
 )
 
 
@@ -69,6 +77,7 @@ def create_app(
     operations: Optional[Any] = None,
     approvals: Optional[Any] = None,
     resets: Optional[Any] = None,
+    logs: Optional[Any] = None,
     workflow_name: str = "migration",
 ) -> FastAPI:
     @asynccontextmanager
@@ -82,6 +91,8 @@ def create_app(
                 await coordinator.stop()
             if operations is not None and hasattr(operations, "shutdown"):
                 operations.shutdown()
+            if logs is not None and hasattr(logs, "shutdown"):
+                logs.shutdown()
 
     app = FastAPI(
         title="Workflow Manage API",
@@ -164,6 +175,14 @@ def create_app(
             )
         return resets
 
+    def log_service():
+        if logs is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Managed logs are not configured",
+            )
+        return logs
+
     @app.get(
         "/api/v1/outputs",
         response_model=OutputInventoryV1,
@@ -236,6 +255,166 @@ def create_app(
                 "Content-Disposition": f'attachment; filename="{filename}"',
             },
         )
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/log-targets",
+        response_model=LogTargetInventoryV1,
+        response_model_exclude_none=True,
+        tags=["logs"],
+    )
+    async def list_log_targets(node_id: str) -> LogTargetInventoryV1:
+        if coordinator is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Workflow observation is not configured",
+            )
+        observation = await coordinator.get_observation()
+        node = observation.snapshot.nodes.get(node_id)
+        capability = next(
+            (
+                item for item in (node.capabilities if node else ())
+                if item.kind == "logs"
+            ),
+            None,
+        )
+        if capability is None:
+            raise _log_error(
+                404,
+                "logs_unavailable",
+                "Logs are not available for this item.",
+            )
+        try:
+            inventory = await asyncio.to_thread(
+                log_service().list_targets,
+                node_id,
+                capability.target_id,
+            )
+            return LogTargetInventoryV1.from_domain(inventory)
+        except (LogUnavailable, LogTargetStale) as error:
+            raise _log_error(404, "logs_unavailable", error) from error
+        except Exception as error:
+            logger.exception("Failed to resolve log targets")
+            raise _log_error(502, "logs_read_failed", error) from error
+
+    @app.post(
+        "/api/v1/log-streams",
+        response_model=LogStreamV1,
+        response_model_exclude_none=True,
+        status_code=201,
+        tags=["logs"],
+    )
+    async def start_log_stream(
+        request_body: StartLogStreamRequestV1,
+    ) -> LogStreamV1:
+        try:
+            stream = await asyncio.to_thread(
+                log_service().start,
+                request_body.target_id,
+                tail_lines=request_body.tail_lines,
+                follow=request_body.follow,
+                page_size=request_body.page_size,
+            )
+            return LogStreamV1.from_domain(stream)
+        except LogTargetStale as error:
+            raise _log_error(409, "log_target_stale", error) from error
+        except LogUnavailable as error:
+            raise _log_error(404, "logs_unavailable", error) from error
+        except Exception as error:
+            logger.exception("Failed to start log stream")
+            raise _log_error(502, "logs_read_failed", error) from error
+
+    @app.get(
+        "/api/v1/log-streams/{stream_id}/pages",
+        response_model=LogPageV1,
+        response_model_exclude_none=True,
+        tags=["logs"],
+    )
+    async def read_log_page(
+        stream_id: str,
+        before: Annotated[Optional[str], Query()] = None,
+        after: Annotated[Optional[str], Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+    ) -> LogPageV1:
+        try:
+            page = await asyncio.to_thread(
+                log_service().page,
+                stream_id,
+                before=before,
+                after=after,
+                limit=limit,
+            )
+            return LogPageV1.from_domain(page)
+        except LogUnavailable as error:
+            raise _log_error(404, "logs_unavailable", error) from error
+
+    @app.get(
+        "/api/v1/log-streams/{stream_id}/events",
+        tags=["logs"],
+        responses={
+            200: {
+                "content": {"text/event-stream": {}},
+                "description": "Cancellable log event stream",
+            },
+        },
+    )
+    async def stream_log_events(
+        request: Request,
+        stream_id: str,
+        after: Annotated[int, Query(ge=0)] = 0,
+        last_event_id: Annotated[
+            Optional[str],
+            Header(alias="Last-Event-ID"),
+        ] = None,
+    ) -> StreamingResponse:
+        cursor = max(after, _event_id(last_event_id))
+        try:
+            log_service().status(stream_id)
+        except LogUnavailable as error:
+            raise _log_error(404, "logs_unavailable", error) from error
+
+        async def event_stream() -> AsyncIterator[str]:
+            nonlocal cursor
+            while not await request.is_disconnected():
+                events = await asyncio.to_thread(
+                    log_service().wait_for_events,
+                    stream_id,
+                    after_sequence=cursor,
+                    timeout=10,
+                )
+                for event in events:
+                    cursor = event.sequence
+                    yield _encode_log_sse(event)
+                status = log_service().status(stream_id)
+                if status.state in ("ended", "stopped", "error"):
+                    yield _encode_log_status_sse(status)
+                    break
+                if not events:
+                    yield ": heartbeat\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.delete(
+        "/api/v1/log-streams/{stream_id}",
+        response_model=LogStreamStatusV1,
+        response_model_exclude_none=True,
+        tags=["logs"],
+    )
+    async def stop_log_stream(stream_id: str) -> LogStreamStatusV1:
+        try:
+            status = await asyncio.to_thread(
+                log_service().stop,
+                stream_id,
+            )
+            return LogStreamStatusV1.from_domain(status)
+        except LogUnavailable as error:
+            raise _log_error(404, "logs_unavailable", error) from error
 
     @app.get(
         "/api/v1/config",
@@ -838,6 +1017,32 @@ def _encode_operation_sse(event: OperationEvent) -> str:
     )
 
 
+def _encode_log_sse(event: Any) -> str:
+    data = json.dumps(
+        LogEventV1.from_domain(event).model_dump(
+            by_alias=True,
+            exclude_none=True,
+            mode="json",
+        ),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"id: {event.sequence}\nevent: log\ndata: {data}\n\n"
+
+
+def _encode_log_status_sse(status: Any) -> str:
+    data = json.dumps(
+        LogStreamStatusV1.from_domain(status).model_dump(
+            by_alias=True,
+            exclude_none=True,
+            mode="json",
+        ),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"event: stream-state\ndata: {data}\n\n"
+
+
 def _register_contract_schemas(app: FastAPI) -> None:
     """Include contracts that are introduced before their resource routes."""
     default_openapi = app.openapi
@@ -857,6 +1062,16 @@ def _register_contract_schemas(app: FastAPI) -> None:
 
 
 app = create_app()
+
+
+def _log_error(status: int, code: str, error: Any) -> HTTPException:
+    return HTTPException(
+        status_code=status,
+        detail={
+            "code": code,
+            "message": str(error),
+        },
+    )
 
 
 def _draft_conflict(error: ConfigDraftConflict) -> HTTPException:
