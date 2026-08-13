@@ -908,6 +908,44 @@ test("keeps a deleted source selected as a tombstone and previews dependents", a
 });
 
 
+test("opens a pending removal with a resource fallback target as a tombstone", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = snapshot.nodes["resource:captureproxies:capture"];
+  source.label = "source";
+  source.resourcePlural = "sourceconfigs";
+  source.resourceName = "source";
+  source.valueSummary = "Removal pending submission";
+  source.configPresence = {
+    deployed: true,
+    pending: false,
+  };
+  source.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:sourceconfigs:source",
+    label: "Edit source",
+  }];
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+  );
+  renderApp();
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit source" }),
+  );
+
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^source, Removal pending submission$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText(
+    "This source is marked for removal from the configuration.",
+  )).toBeInTheDocument();
+  expect(screen.queryByRole("table", {
+    name: "Configuration fields",
+  })).toBeNull();
+});
+
+
 test("focuses a newly added array item when command metadata requests it", async () => {
   server.use(
     http.post("*/api/v1/config/operations", () => {

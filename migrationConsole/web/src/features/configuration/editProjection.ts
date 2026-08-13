@@ -64,10 +64,20 @@ export function projectEditSnapshot(
     Object.entries(snapshot.nodes).map(([nodeId, node]) => {
       if (node.kind === "workflow-step") return [nodeId, node];
       const targetId = editTarget(node);
+      const pendingRemoval = (
+        node.configPresence?.pending === false
+        && (
+          node.configPresence.deployed === true
+          || node.configPresence.submitted === true
+        )
+      );
       if (
-        !targetId
-        || !isConfigResourceTarget(targetId)
-        || editNodes.has(targetId)
+        !pendingRemoval
+        && (
+          !targetId
+          || !isConfigResourceTarget(targetId)
+          || editNodes.has(targetId)
+        )
       ) {
         return [nodeId, node];
       }
