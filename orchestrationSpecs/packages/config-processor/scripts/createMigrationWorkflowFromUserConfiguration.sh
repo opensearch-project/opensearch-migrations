@@ -20,6 +20,7 @@ shift  # Remove first argument, leaving any additional args in $@
 # other arguments for the config processor.
 RUN_NONCE=""
 QUIET=0
+WORKFLOW_NAME="migration-workflow"
 ALL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,6 +38,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             RUN_NONCE="$2"
+            shift 2
+            ;;
+        --workflow-name)
+            if [[ $# -lt 2 || -z "$2" ]]; then
+                echo "Error: --workflow-name requires a value" >&2
+                exit 1
+            fi
+            WORKFLOW_NAME="$2"
             shift 2
             ;;
         *)
@@ -75,10 +84,17 @@ fi
 echo "Using migration run number: $RUN_NUMBER"
 echo "Using snapshot nonce: $RUN_NONCE"
 
-WORKFLOW_NAME="migration-workflow"
-
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" "${ALL_ARGS[@]}"
+INITIALIZE_ARGS=(
+    --user-config "$CONFIG_FILENAME"
+    --output-dir "$TEMP_DIR"
+    --workflow-name "$WORKFLOW_NAME"
+    --run-number "$RUN_NUMBER"
+)
+if [[ ${#ALL_ARGS[@]} -gt 0 ]]; then
+    INITIALIZE_ARGS+=("${ALL_ARGS[@]}")
+fi
+$INITIALIZE_CMD "${INITIALIZE_ARGS[@]}"
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then

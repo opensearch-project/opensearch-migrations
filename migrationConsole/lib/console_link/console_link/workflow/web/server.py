@@ -14,6 +14,7 @@ from ..application.logs import KubernetesLogSource, LogStreamService
 from ..application.operations import OperationManager
 from ..application.actions import ApprovalService
 from ..application.resets import ResetService
+from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from ..models.utils import load_k8s_config
 from ..services.argo_observation_service import make_argo_observation_service
 from ..services.config_edit_service import ConfigEditService
@@ -95,7 +96,7 @@ def run_server(
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--namespace", default="ma")
-    parser.add_argument("--workflow-name", default="migration")
+    parser.add_argument("--workflow-name", default=DEFAULT_WORKFLOW_NAME)
     parser.add_argument(
         "--argo-server",
         default="http://argo-server:2746",

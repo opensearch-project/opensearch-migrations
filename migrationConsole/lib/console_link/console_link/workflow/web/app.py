@@ -33,6 +33,7 @@ from ..application.resets import (
     ResetPlanStale,
     ResetUnavailable,
 )
+from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from .contracts import (
     ApplyEditOperationRequestV1,
     ApproveRequestV1,
@@ -78,7 +79,7 @@ def create_app(
     approvals: Optional[Any] = None,
     resets: Optional[Any] = None,
     logs: Optional[Any] = None,
-    workflow_name: str = "migration",
+    workflow_name: str = DEFAULT_WORKFLOW_NAME,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):

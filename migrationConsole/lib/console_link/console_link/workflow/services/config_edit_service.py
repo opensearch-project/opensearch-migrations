@@ -13,6 +13,7 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from ..commands.argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
+from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from ..commands.crd_utils import list_resources_full
 from ..commands.secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
 from ..external_resource_validation import (
@@ -274,7 +275,7 @@ class ConfigEditService:
 
     def submit_saved_config(
         self,
-        workflow_name: str = "migration",
+        workflow_name: str = DEFAULT_WORKFLOW_NAME,
         unique_run_nonce: Optional[str] = None,
     ) -> Dict[str, Any]:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
