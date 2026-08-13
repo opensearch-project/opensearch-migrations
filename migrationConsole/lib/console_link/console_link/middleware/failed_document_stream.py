@@ -299,5 +299,3 @@ def delete_session(cfg: FailedDocumentStreamConfig) -> int:
         client.delete_objects(Bucket=cfg.bucket, Delete={"Objects": batch})
         deleted += len(batch)
     return deleted
-
-
