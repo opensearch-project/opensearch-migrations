@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  LogOut,
   LoaderCircle,
   Pencil,
   Plus,
@@ -40,6 +39,7 @@ import { ExternalResourceEditor } from "./ExternalResourceEditor";
 interface ConfigEditorProps {
   initialTargetId?: string | null;
   onClose: () => void;
+  onExitReady: (handler: (() => void) | null) => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceLabel: string;
@@ -74,6 +74,15 @@ interface PendingRemoval {
 
 const PINNED_CONTEXT_HEIGHT = 32;
 const PINNED_CONTEXT_TRANSITION = 28;
+const TOP_LEVEL_RESOURCE_PATHS = new Set([
+  "sourceClusters",
+  "targetClusters",
+  "snapshotMigrationConfigs",
+  "traffic.kafkaClusters",
+  "traffic.s3Sources",
+  "traffic.proxies",
+  "traffic.replayers",
+]);
 
 
 function nodeChildren(node: EditNode): EditNode[] {
@@ -93,17 +102,17 @@ function addCommand(node: EditNode): EditNode | null {
 }
 
 
-function nearestAddContext(
-  nodes: EditNode[],
-  nodeId: string | null,
-): AddContext | null {
-  let candidate = findClosestNode(nodes, nodeId);
-  while (candidate) {
-    const command = addCommand(candidate);
-    if (command) return { command, parent: candidate };
-    candidate = findParent(nodes, candidate.id);
-  }
-  return null;
+function topLevelAddContexts(nodes: EditNode[]): AddContext[] {
+  const result: AddContext[] = [];
+  const visit = (node: EditNode) => {
+    if (TOP_LEVEL_RESOURCE_PATHS.has(node.path.join("."))) {
+      const command = addCommand(node);
+      if (command) result.push({ command, parent: node });
+    }
+    propertyChildren(node).forEach(visit);
+  };
+  nodes.forEach(visit);
+  return result;
 }
 
 
@@ -1044,6 +1053,7 @@ function ConfigPropertyRow({
 export function ConfigEditor({
   initialTargetId,
   onClose,
+  onExitReady,
   onSubmitted,
   removalState,
   resourceLabel,
@@ -1062,7 +1072,8 @@ export function ConfigEditor({
   );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
-  const [contextAdding, setContextAdding] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addingContext, setAddingContext] = useState<AddContext | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
@@ -1108,18 +1119,15 @@ export function ConfigEditor({
     ),
     [activeTargetId, globalTarget, nodes, scope, target],
   );
-  const contextualAdd = useMemo(
-    () => (
-      removalState
-        ? null
-        : nearestAddContext(nodes, scope?.id ?? target?.id ?? null)
-    ),
-    [nodes, removalState, scope?.id, target?.id],
+  const topLevelAdds = useMemo(
+    () => topLevelAddContexts(nodes),
+    [nodes],
   );
 
   useEffect(() => {
     setActiveTargetId(initialTargetId ?? null);
-    setContextAdding(false);
+    setAddMenuOpen(false);
+    setAddingContext(null);
   }, [initialTargetId]);
 
   useEffect(() => {
@@ -1489,6 +1497,21 @@ export function ConfigEditor({
     selectAdded(nodeId, parentId);
   };
 
+  const requestAdd = (context: AddContext) => {
+    setAddMenuOpen(false);
+    if (context.command.command?.requiresName !== false) {
+      setAddingContext(context);
+      return;
+    }
+    void runAddCommand(
+      context.command,
+      context.parent,
+      "",
+      commit,
+      selectContextAdded,
+    );
+  };
+
   const close = async () => {
     setActionPending(true);
     try {
@@ -1506,6 +1529,13 @@ export function ConfigEditor({
       setActionPending(false);
     }
   };
+
+  useEffect(() => {
+    onExitReady(() => {
+      void close();
+    });
+    return () => onExitReady(null);
+  });
 
   if (draftQuery.isPending) {
     return (
@@ -1565,34 +1595,45 @@ export function ConfigEditor({
           </label>
         </div> : null}
         <div className="config-toolbar-actions">
-          {contextualAdd ? (
-            <button
-              aria-expanded={contextAdding || undefined}
-              aria-label={`Add ${fieldName(contextualAdd.command)}`}
-              disabled={
-                busy
-                || Boolean(contextualAdd.command.command?.blockedMessage)
-              }
-              onClick={() => {
-                if (contextualAdd.command.command?.requiresName !== false) {
-                  setContextAdding((current) => !current);
-                } else {
-                  void runAddCommand(
-                    contextualAdd.command,
-                    contextualAdd.parent,
-                    "",
-                    commit,
-                    selectContextAdded,
-                  );
-                }
-              }}
-              title={contextualAdd.command.command?.blockedMessage
-                ?? `Add ${fieldName(contextualAdd.command)}`}
-              type="button"
-            >
-              <Plus />
-              <span>Add {fieldName(contextualAdd.command)}</span>
-            </button>
+          {topLevelAdds.length > 0 ? (
+            <div className="resource-add-control">
+              <button
+                aria-expanded={addMenuOpen}
+                aria-haspopup="menu"
+                aria-label="Add resource"
+                disabled={busy}
+                onClick={() => setAddMenuOpen((current) => !current)}
+                title="Add a top-level configuration resource"
+                type="button"
+              >
+                <Plus />
+                <span>Add resource</span>
+              </button>
+              {addMenuOpen ? (
+                <div
+                  aria-label="Resource types"
+                  className="resource-add-menu"
+                  role="menu"
+                >
+                  {topLevelAdds.map((context) => (
+                    <button
+                      disabled={Boolean(
+                        context.command.command?.blockedMessage,
+                      )}
+                      key={context.command.id}
+                      onClick={() => requestAdd(context)}
+                      role="menuitem"
+                      title={context.command.command?.blockedMessage
+                        ?? `Add ${fieldName(context.command)}`}
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" />
+                      <span>Add {fieldName(context.command)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : null}
           <button
             aria-label="Revert unsaved changes"
@@ -1640,16 +1681,6 @@ export function ConfigEditor({
             <Send />
             <span>Save and submit</span>
           </button>
-          <button
-            aria-label="Exit editing"
-            disabled={actionPending || (busy && !hasLocalEdits)}
-            onClick={() => void close()}
-            title="Discard unsaved changes and leave editing"
-            type="button"
-          >
-            <LogOut />
-            <span>Exit editing</span>
-          </button>
         </div>
       </header>
       {problem ? (
@@ -1659,23 +1690,23 @@ export function ConfigEditor({
           <button onClick={() => setProblem("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {!removalState && contextAdding && contextualAdd ? (
+      {addingContext ? (
         <section
-          aria-label={`Add ${fieldName(contextualAdd.command)}`}
+          aria-label={`Add ${fieldName(addingContext.command)}`}
           className="config-context-add"
         >
           <header>
-            <strong>Add {fieldName(contextualAdd.command)}</strong>
-            <span>{fieldName(contextualAdd.parent)}</span>
+            <strong>Add {fieldName(addingContext.command)}</strong>
+            <span>{fieldName(addingContext.parent)}</span>
           </header>
           <CommandEditor
             busy={busy}
             commit={commit}
-            node={contextualAdd.command}
+            node={addingContext.command}
             onAdded={selectContextAdded}
-            onCancel={() => setContextAdding(false)}
-            onComplete={() => setContextAdding(false)}
-            parent={contextualAdd.parent}
+            onCancel={() => setAddingContext(null)}
+            onComplete={() => setAddingContext(null)}
+            parent={addingContext.parent}
           />
         </section>
       ) : null}

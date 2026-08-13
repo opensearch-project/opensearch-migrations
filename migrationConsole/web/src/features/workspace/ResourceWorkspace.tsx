@@ -2,13 +2,12 @@ import {
   CheckCircle2,
   FileOutput,
   Logs,
-  Pencil,
   RotateCcw,
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
 
-import type { ManageNode, ManageSnapshot } from "../../api/client";
+import type { ManageNode } from "../../api/client";
 
 
 function displayValue(value: { present: boolean; value?: unknown }): string {
@@ -20,7 +19,6 @@ function displayValue(value: { present: boolean; value?: unknown }): string {
 
 
 function capabilityIcon(kind: string) {
-  if (kind === "edit") return Pencil;
   if (kind === "logs") return Logs;
   if (kind === "reset") return RotateCcw;
   if (kind === "approve") return ShieldCheck;
@@ -28,32 +26,22 @@ function capabilityIcon(kind: string) {
 }
 
 
-function ResourceActions({
-  node,
-  onEdit,
-}: {
-  node: ManageNode;
-  onEdit: (targetId: string) => void;
-}) {
-  if (node.capabilities.length === 0) return null;
+function ResourceActions({ node }: { node: ManageNode }) {
+  const capabilities = node.capabilities.filter(
+    (capability) => capability.kind !== "edit",
+  );
+  if (capabilities.length === 0) return null;
   return (
     <div className="resource-actions" aria-label="Available actions">
-      {node.capabilities.map((capability) => {
+      {capabilities.map((capability) => {
         const Icon = capabilityIcon(capability.kind);
         const label = capability.label ?? capability.kind;
         return (
           <button
             aria-label={label}
-            disabled={capability.kind !== "edit"}
+            disabled
             key={`${capability.kind}-${label}`}
-            onClick={() => {
-              if (capability.kind === "edit") {
-                onEdit(capability.editTargetId);
-              }
-            }}
-            title={capability.kind === "edit"
-              ? label
-              : "This action is enabled in a later phase"}
+            title="This action is enabled in a later phase"
             type="button"
           >
             <Icon aria-hidden="true" />
@@ -137,11 +125,8 @@ function Comparisons({ node }: { node: ManageNode }) {
 
 export function ResourceWorkspace({
   node,
-  onEdit,
 }: {
   node: ManageNode;
-  snapshot: ManageSnapshot;
-  onEdit: (targetId: string) => void;
 }) {
   return (
     <article className="workspace">
@@ -155,7 +140,7 @@ export function ResourceWorkspace({
           {node.phase ?? node.status}
         </span>
       </header>
-      <ResourceActions node={node} onEdit={onEdit} />
+      <ResourceActions node={node} />
       <dl className="facts-grid">
         <div>
           <dt>Status</dt>

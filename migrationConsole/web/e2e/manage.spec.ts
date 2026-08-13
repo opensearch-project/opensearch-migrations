@@ -274,7 +274,7 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
   await mockManageApi(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   const configTree = page.getByRole("table", { name: "Configuration fields" });
   const endpoint = configTree.getByRole("textbox", { name: "Endpoint" });
@@ -316,7 +316,8 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
   await mockManageApi(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
+  await expect(page.getByRole("button", { name: "Add resource" })).toBeVisible();
   const config = page.getByRole("table", { name: "Configuration fields" });
   const auth = config.getByRole("row", { name: /Authentication/ });
   await auth.getByRole("combobox", { name: "Authentication" })
@@ -336,7 +337,7 @@ test("pins ancestor rows while scrolling nested configuration", async ({ page },
   await mockManageApi(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   const config = page.getByRole("table", { name: "Configuration fields" });
   await page.locator(".config-table-panel").hover();
   await page.mouse.wheel(0, 220);
@@ -363,9 +364,9 @@ test("transitions scoped parents before their full row scrolls away", async ({ p
   api.setCaptureEditTarget("edit:sourceClusters.legacy.endpoint");
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(
-    page.getByRole("button", { name: "Add source cluster" }),
+    page.getByRole("button", { name: "Add resource" }),
   ).toBeVisible();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   await page.getByRole("checkbox", { name: "Show expert fields" }).check();
@@ -410,7 +411,7 @@ test("keeps the resource overview visible during scoped editing", async ({ page 
   await page.goto("/");
 
   const resources = page.getByRole("tree", { name: "Workflow resources" });
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
 
   await expect(resources).toBeVisible();
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
@@ -425,7 +426,7 @@ test("keeps a removed resource in context for the edit session", async ({ page }
   api.makeCaptureSource();
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit legacy" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(page.getByRole("button", { name: "Revert unsaved changes" }))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "Save configuration" }))
@@ -471,7 +472,7 @@ test("guards browser back navigation without closing the editor", async ({ page 
   await mockManageApi(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
 
   const dialogPromise = page.waitForEvent("dialog");
@@ -498,7 +499,7 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   await expect(page.getByRole("heading", { name: "capture" })).toBeVisible();
   await expect(page.getByText("Load balancer is unavailable in this cluster"))
     .toBeVisible();
-  await expect(page.getByRole("button", { name: "Edit capture" }))
+  await expect(page.getByRole("button", { name: "Edit configuration" }))
     .toBeEnabled();
 
   await capture.focus();
@@ -552,7 +553,7 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
   await mockManageApi(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Edit capture" }).click();
+  await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect(page.getByRole("heading", { name: "Edit capture" })).toBeVisible();
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   const configTree = page.getByRole("table", { name: "Configuration fields" });

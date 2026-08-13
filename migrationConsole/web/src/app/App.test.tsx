@@ -31,6 +31,13 @@ function renderApp() {
 }
 
 
+async function enterEditMode() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit configuration" }),
+  );
+}
+
+
 test("renders real manage state with exact-node details and capabilities", async () => {
   await expect(getHealth()).resolves.toEqual({
     status: "ok",
@@ -60,7 +67,10 @@ test("renders real manage state with exact-node details and capabilities", async
   expect(screen.getAllByRole("cell", { name: "LoadBalancer" })).toHaveLength(2);
   expect(screen.getByRole("cell", { name: "ClusterIP" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Edit capture" })).toBeEnabled();
+  expect(screen.getByRole("button", {
+    name: "Edit configuration",
+  })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Edit capture" })).toBeNull();
   expect(screen.getByRole("button", { name: "Logs for capture" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reset capture" })).toBeDisabled();
 });
@@ -237,9 +247,7 @@ test("shows stale and partial-observation problems without hiding last good data
 
 test("opens a generic configuration editor and explains generated values", async () => {
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   expect(
     await screen.findByRole("heading", { name: "Edit capture" }),
@@ -307,9 +315,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   );
   renderApp();
 
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   const resources = screen.getByRole("tree", {
     name: "Workflow resources",
@@ -373,9 +379,7 @@ test("offers the owning collection add action from a scoped resource editor", as
   );
   renderApp();
 
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const config = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -383,7 +387,8 @@ test("offers the owning collection add action from a scoped resource editor", as
     name: /^Source clusters/,
   })).toBeNull();
 
-  await userEvent.click(screen.getByRole("button", {
+  await userEvent.click(screen.getByRole("button", { name: "Add resource" }));
+  await userEvent.click(screen.getByRole("menuitem", {
     name: "Add source cluster",
   }));
   await userEvent.type(
@@ -418,9 +423,7 @@ test("shows the server reason when configuration cannot be opened", async () => 
   );
   renderApp();
 
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   expect(
     await screen.findByRole("heading", {
@@ -506,9 +509,7 @@ test("changes a union inline and inserts its variant fields directly below", asy
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTable = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -547,9 +548,7 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -648,9 +647,7 @@ test("saves a focused text edit as one resource-level action", async () => {
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   const endpoint = await screen.findByRole("textbox", { name: "Endpoint" });
   await userEvent.clear(endpoint);
@@ -684,9 +681,7 @@ test("shows ConfigMap keys and selects the map plus key together", async () => {
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -733,9 +728,7 @@ test("allows an explicit ConfigMap and key when inventory is unavailable", async
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -786,9 +779,7 @@ test("promotes add commands to collection actions and keeps exact deletion", asy
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const config = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -880,9 +871,7 @@ test("keeps a deleted source selected as a tombstone and previews dependents", a
   );
   renderApp();
 
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit source" }),
-  );
+  await enterEditMode();
   await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
 
   const dialog = await screen.findByRole("dialog", {
@@ -929,9 +918,7 @@ test("opens a pending removal with a resource fallback target as a tombstone", a
   );
   renderApp();
 
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit source" }),
-  );
+  await enterEditMode();
 
   const tree = screen.getByRole("tree", { name: "Workflow resources" });
   expect(await within(tree).findByRole("treeitem", {
@@ -943,6 +930,10 @@ test("opens a pending removal with a resource fallback target as a tombstone", a
   expect(screen.queryByRole("table", {
     name: "Configuration fields",
   })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Add resource" }));
+  expect(screen.getByRole("menuitem", {
+    name: "Add source cluster",
+  })).toBeInTheDocument();
 });
 
 
@@ -982,9 +973,7 @@ test("focuses a newly added array item when command metadata requests it", async
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -1021,9 +1010,7 @@ test("views and creates descriptor-driven ConfigMaps without raw YAML", async ()
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
   const configTree = await screen.findByRole("table", {
     name: "Configuration fields",
   });
@@ -1094,9 +1081,7 @@ test("saves and discards explicit dirty drafts", async () => {
     }),
   );
   const { client } = renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   await userEvent.click(screen.getByRole("button", {
     name: "Save configuration",
@@ -1133,9 +1118,7 @@ test("exiting a dirty edit session discards the draft before leaving", async () 
   );
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   await userEvent.click(
     screen.getByRole("button", { name: "Exit editing" }),
@@ -1143,7 +1126,7 @@ test("exiting a dirty edit session discards the draft before leaving", async () 
 
   expect(discardCalls).toBe(1);
   expect(confirm).toHaveBeenCalledOnce();
-  expect(await screen.findByRole("button", { name: "Edit capture" }))
+  expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
   confirm.mockRestore();
 });
@@ -1175,9 +1158,7 @@ test("submitting saves the current draft and leaves edit mode", async () => {
     }),
   );
   renderApp();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Edit capture" }),
-  );
+  await enterEditMode();
 
   await userEvent.click(screen.getByRole("button", {
     name: "Save and submit",
@@ -1192,7 +1173,7 @@ test("submitting saves the current draft and leaves edit mode", async () => {
   await waitFor(() => expect(submitRequest).toEqual({
     expectedDraftRevision: "dirty-to-submit",
   }));
-  expect(await screen.findByRole("button", { name: "Edit capture" }))
+  expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
   expect(screen.queryByText("Editing configuration")).toBeNull();
 });

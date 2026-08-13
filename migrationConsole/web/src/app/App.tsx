@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   CircleAlert,
+  LogOut,
   LoaderCircle,
   Menu,
+  Pencil,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -63,6 +65,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const [editContext, setEditContext] = useState<EditContext | null>(null);
+  const editExitRef = useRef<(() => void) | null>(null);
   const configDraft = useQuery({
     queryKey: ["config-draft"],
     queryFn: getConfigDraft,
@@ -150,6 +153,25 @@ export function App() {
     [selectedId, state.data],
   );
 
+  const registerEditExit = useCallback((handler: (() => void) | null) => {
+    editExitRef.current = handler;
+  }, []);
+
+  const startEditing = () => {
+    if (!state.data) return;
+    const resourceId = (
+      selectedId && state.data.nodes[selectedId]
+        ? selectedId
+        : firstSelectableId(state.data)
+    );
+    const node = resourceId ? state.data.nodes[resourceId] : null;
+    const targetId = node ? editTarget(node) : null;
+    setEditContext({
+      resourceId: targetId && node ? node.id : "",
+      targetId: targetId ?? "edit:workflowConfiguration",
+    });
+  };
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -168,6 +190,28 @@ export function App() {
           </div>
         ) : null}
         <div className="header-actions">
+          <button
+            aria-label={editContext ? "Exit editing" : "Edit configuration"}
+            className={`edit-mode-button ${editContext ? "active" : ""}`}
+            disabled={!state.data}
+            onClick={() => {
+              if (editContext) {
+                if (editExitRef.current) editExitRef.current();
+                else setEditContext(null);
+              } else {
+                startEditing();
+              }
+            }}
+            title={editContext
+              ? "Discard unsaved changes and leave editing"
+              : "Edit workflow configuration"}
+            type="button"
+          >
+            {editContext
+              ? <LogOut aria-hidden="true" />
+              : <Pencil aria-hidden="true" />}
+            <span>{editContext ? "Exit editing" : "Edit configuration"}</span>
+          </button>
           <span className="revision" title="Manage state revision">
             {state.data?.revision ?? "waiting"}
           </span>
@@ -287,6 +331,7 @@ export function App() {
                 <ConfigEditor
                   initialTargetId={editContext.targetId}
                   onClose={() => setEditContext(null)}
+                  onExitReady={registerEditExit}
                   onSubmitted={() => {
                     setEditContext(null);
                     void queryClient.invalidateQueries({
@@ -304,14 +349,7 @@ export function App() {
                   }
                 />
               ) : selectedNode ? (
-                <ResourceWorkspace
-                  node={selectedNode}
-                  onEdit={(targetId) => setEditContext({
-                    resourceId: selectedNode.id,
-                    targetId,
-                  })}
-                  snapshot={state.data}
-                />
+                <ResourceWorkspace node={selectedNode} />
               ) : (
                 <section className="workspace empty-state">
                   <h2>Select a resource</h2>
