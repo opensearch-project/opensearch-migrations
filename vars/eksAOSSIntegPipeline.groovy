@@ -1,12 +1,14 @@
 def call(Map config = [:]) {
-    def collectionType = config.collectionType ?: 'SEARCH'
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
-    def testIdMap = ['SEARCH': '0021', 'TIMESERIES': '0022', 'VECTORSEARCH': '0023']
-    def envVarMap = ['SEARCH': 'AOSS_SEARCH_ENDPOINT', 'TIMESERIES': 'AOSS_TIMESERIES_ENDPOINT', 'VECTORSEARCH': 'AOSS_VECTOR_ENDPOINT']
-    def testId = testIdMap[collectionType]
-    def endpointEnvVar = envVarMap[collectionType]
+    def testId = '0021'
+    def collections = [
+        [id: 'search', type: 'SEARCH'],
+        [id: 'timeseries', type: 'TIMESERIES'],
+        [id: 'vector', type: 'VECTORSEARCH'],
+    ]
     def defaultStageId = config.defaultStageId ?: "aosss"
-    def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
+    def jobName = config.jobName ?: "pr-eks-aoss-search-integ-test"
+    def cronSchedule = config.disablePeriodic ? '' : periodicCron(jobName)
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
@@ -50,7 +52,7 @@ def call(Map config = [:]) {
                 regexpFilterExpression: "^$jobName\$",
                 regexpFilterText: "\$job_name",
             )
-            cron(periodicCron(jobName))
+            cron(cronSchedule)
         }
 
         stages {
@@ -65,12 +67,12 @@ def call(Map config = [:]) {
 
                         echo """
                             ================================================================
-                            AOSS ${collectionType} Collection Integration Test
+                            AOSS Collection Integration Test
                             ================================================================
                             Git:              ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
                             Stage:            ${maStageName}
                             Region:           ${params.REGION}
-                            Collection Type:  ${collectionType}
+                            Collection Types: SEARCH, TIMESERIES, VECTORSEARCH
                             Test ID:          ${testId}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
@@ -128,7 +130,7 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy AOSS Target') {
+            stage('Deploy AOSS Targets') {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -140,17 +142,17 @@ def call(Map config = [:]) {
                                     def context = [
                                         stage: "${maStageName}",
                                         vpcId: "${env.maVpcId}",
-                                        clusters: [
+                                        clusters: collections.collect { collection ->
                                             [
-                                                clusterId: "target",
-                                                clusterName: "${maStageName}-target",
+                                                clusterId: collection.id,
+                                                clusterName: "${maStageName}-${collection.id}",
                                                 clusterType: "OPENSEARCH_SERVERLESS",
-                                                collectionType: collectionType,
+                                                collectionType: collection.type,
                                                 standbyReplicas: "DISABLED",
                                                 domainRemovalPolicy: "DESTROY",
                                                 dataAccessPrincipals: [jenkinsRoleArn, podRoleArn]
                                             ]
-                                        ]
+                                        }
                                     ]
                                     def contextJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(context))
                                     writeFile(file: clusterContextFilePath, text: contextJson)
@@ -159,8 +161,12 @@ def call(Map config = [:]) {
                                     sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
 
                                     def clusterDetails = readJSON text: readFile("tmp/cluster-details-${maStageName}.json")
-                                    env.AOSS_COLLECTION_ENDPOINT = clusterDetails['target'].endpoint
-                                    echo "AOSS: ${env.AOSS_COLLECTION_ENDPOINT}"
+                                    env.AOSS_SEARCH_ENDPOINT = clusterDetails['search'].endpoint
+                                    env.AOSS_TIMESERIES_ENDPOINT = clusterDetails['timeseries'].endpoint
+                                    env.AOSS_VECTOR_ENDPOINT = clusterDetails['vector'].endpoint
+                                    echo "AOSS search: ${env.AOSS_SEARCH_ENDPOINT}"
+                                    echo "AOSS time-series: ${env.AOSS_TIMESERIES_ENDPOINT}"
+                                    echo "AOSS vector: ${env.AOSS_VECTOR_ENDPOINT}"
                                 }
                             }
                         }
@@ -183,7 +189,9 @@ def call(Map config = [:]) {
                                 sh """
                                     kubectl --context=${env.eksKubeContext} set env statefulset/migration-console \
                                       -n ma \
-                                      ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT} \
+                                      AOSS_SEARCH_ENDPOINT=${env.AOSS_SEARCH_ENDPOINT} \
+                                      AOSS_TIMESERIES_ENDPOINT=${env.AOSS_TIMESERIES_ENDPOINT} \
+                                      AOSS_VECTOR_ENDPOINT=${env.AOSS_VECTOR_ENDPOINT} \
                                       AOSS_SNAPSHOT_NAME=${params.SNAPSHOT_NAME} \
                                       AOSS_S3_REPO_URI=${s3RepoUri} \
                                       AOSS_S3_REGION=${params.REGION} \

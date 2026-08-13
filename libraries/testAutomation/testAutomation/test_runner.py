@@ -45,6 +45,10 @@ class TestSummary:
     source_version: str
     target_version: str
     expected: Optional[int] = None
+    # Test classes that failed to construct during collection. Non-empty means the
+    # selection was silently truncated, so a clean-looking report is not trustworthy.
+    uncollectable: List[str] = field(default_factory=list)
+    error: Optional[str] = None
 
 
 @dataclass
@@ -263,6 +267,17 @@ class TestRunner:
     def _report_failed(self, test_report: TestReport) -> bool:
         if test_report.exit_code != 0:
             logger.error(f"pytest exited with code {test_report.exit_code}")
+            return True
+
+        # Check this BEFORE the expected==0 shortcut below. A test class that fails to
+        # construct is now skipped rather than aborting collection, so pytest exits 0
+        # and the exit_code check above cannot see it. The resulting report is
+        # indistinguishable from a genuinely empty-but-healthy selection unless we look
+        # at what failed to construct.
+        if test_report.summary.uncollectable:
+            logger.error(f"Test cases failed to construct during collection and were never run: "
+                         f"{test_report.summary.uncollectable}. "
+                         f"{test_report.summary.error or ''}")
             return True
 
         expected = test_report.summary.expected

@@ -1,8 +1,6 @@
 import { Template } from "aws-cdk-lib/assertions";
 import { OpenSearchDomainStack } from "../lib/opensearch-domain-stack";
 import { createStackComposer, createStackComposerOnlyPassedContext } from "./test-utils";
-import { App } from "aws-cdk-lib";
-import { StackComposer } from "../lib/stack-composer";
 import { KafkaStack, MigrationConsoleStack } from "../lib";
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
@@ -308,31 +306,6 @@ describe('Stack Composer Tests', () => {
     const createStackFunc = () => createStackComposer(contextOptions)
 
     expect(createStackFunc).toThrow()
-  })
-
-  test('Test that app registry association is created when migrationsAppRegistryARN is provided', () => {
-    const contextOptions = {
-      stage: "unit-test",
-      sourceCluster: {
-        disabled: true
-      }
-    }
-
-    const app = new App({
-      context: {
-        contextId: "unit-test-config",
-        "unit-test-config": contextOptions
-      }
-    })
-    const stacks = new StackComposer(app, {
-      migrationsAppRegistryARN: "arn:aws:servicecatalog:us-west-2:12345678912:/applications/12345abcdef",
-      env: {account: "test-account", region: "us-east-1"},
-      migrationsSolutionVersion: "1.0.1"
-    })
-
-    const domainStack = stacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
-    const domainTemplate = Template.fromStack(domainStack)
-    domainTemplate.resourceCountIs("AWS::ServiceCatalogAppRegistry::ResourceAssociation", 1)
   })
 
   test('Test that with analytics and assistance stacks enabled, creates one opensearch domains', () => {

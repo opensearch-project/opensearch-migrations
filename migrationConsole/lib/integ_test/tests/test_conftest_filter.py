@@ -6,9 +6,12 @@ leak into the selection set. Test IDs are themselves expected to be
 unique per class — see Test0041 (CDC full E2E AOSS) vs Test0042 (CDC
 full E2E mountable transforms).
 """
+from unittest.mock import patch  # noqa: E402
+
 import pytest
 
-from integ_test.conftest import _filter_test_cases  # noqa: E402
+from integ_test.conftest import _filter_test_cases, _generate_test_cases  # noqa: E402
+from integ_test.test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported  # noqa: E402
 
 # Importing conftest re-runs the test_cases imports, so ALL_TEST_CASES is populated.
 from integ_test.conftest import ALL_TEST_CASES  # noqa: E402
@@ -103,6 +106,12 @@ def test_aoss_pipeline_id_set_resolves_expected_classes():
     assert "Test0042CdcFullE2eMountableTransforms" not in selected
 
 
+def test_aoss_collection_pipeline_uses_one_combined_test():
+    assert _names(_filter_test_cases(["0021"])) == ["Test0021AossCollectionMigrations"]
+    with pytest.raises(pytest.UsageError, match="No test classes match requested test IDs: 0022, 0023"):
+        _filter_test_cases(["0022", "0023"])
+
+
 def test_solr_pipeline_id_set_resolves_expected_classes():
     cases = _filter_test_cases(["0070", "0071"])
     selected = _names(cases)
@@ -141,3 +150,54 @@ def test_no_duplicate_test_ids():
         seen.setdefault(prefix, []).append(name)
     duplicates = {k: v for k, v in seen.items() if len(v) > 1}
     assert not duplicates, f"Duplicate test IDs detected: {duplicates}"
+
+
+def test_broken_constructor_does_not_abort_the_whole_selection():
+    """One test class that cannot be constructed must not take the rest down.
+
+    conftest instantiates every selected class during pytest collection, so an
+    exception escaping a constructor propagates out of pytest_generate_tests and
+    aborts collection for the ENTIRE session. That is what silently reduced the
+    ES7x/ES1x/ES2x/ES6x/OS1x Jenkins jobs to zero executed tests: Test0010's
+    constructor raised KeyError('BYOS_SNAPSHOT_NAME') and every unrelated test
+    selected alongside it vanished.
+    """
+    # Plain stand-ins rather than MATestBase subclasses: constructing a real
+    # MATestBase needs live cluster arguments, and this test is only about how
+    # _generate_test_cases handles a constructor that raises.
+    class Test9001Fine:
+        def __init__(self, user_args):
+            pass
+
+    class Test9002Broken:
+        def __init__(self, user_args):
+            raise KeyError("SOME_REQUIRED_ENV_VAR")
+
+    class Test9003AlsoFine:
+        def __init__(self, user_args):
+            pass
+
+    broken = []
+    with patch("integ_test.conftest._filter_test_cases",
+               return_value=[Test9001Fine, Test9002Broken, Test9003AlsoFine]):
+        cases = _generate_test_cases(user_args=None, test_ids_list=["9001", "9002", "9003"],
+                                     broken_test_cases=broken)
+
+    assert sorted(type(c).__name__ for c in cases) == ["Test9001Fine", "Test9003AlsoFine"], \
+        "healthy test cases must survive a sibling's broken constructor"
+    assert [name for name, _ in broken] == ["Test9002Broken"]
+    assert isinstance(broken[0][1], KeyError)
+
+
+def test_unsupported_version_combination_is_not_reported_as_broken():
+    """ClusterVersionCombinationUnsupported stays a normal skip, not a failure."""
+    class Test9004Unsupported:
+        def __init__(self, user_args):
+            raise ClusterVersionCombinationUnsupported("ES_1.5", "OS_3.1")
+
+    broken = []
+    with patch("integ_test.conftest._filter_test_cases", return_value=[Test9004Unsupported]):
+        cases = _generate_test_cases(user_args=None, test_ids_list=["9004"], broken_test_cases=broken)
+
+    assert cases == []
+    assert broken == [], "an unsupported version pair is a skip, not a construction failure"
