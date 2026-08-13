@@ -269,10 +269,42 @@ def clear_indices(cluster: Cluster):
 
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state*"
     try:
-        r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+        # raise_error is the Cluster.call_api default, but stated explicitly here: the
+        # module-level call_api in this file defaults the other way, and the hint below
+        # only runs if a non-2xx raises.
+        r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE,
+                             params={"ignore_unavailable": "true"}, raise_error=True)
         return r.content
     except Exception as e:
+        hint = _destructive_guard_hint(e)
+        if hint:
+            return hint
         return f"Error encountered when clearing indices: {e}"
+
+
+# Clusters with action.destructive_requires_name enabled reject wildcard and _all deletes
+# with this reason, whatever the caller passed for --acknowledge-risk.
+DESTRUCTIVE_GUARD_REASON = "wildcard expressions or all indices are not allowed"
+
+
+def _destructive_guard_hint(error: Exception) -> Optional[str]:
+    """Turns the destructive-guard rejection into an actionable message; None for any other error."""
+    response = getattr(error, "response", None)
+    if response is None or response.status_code != 400:
+        return None
+    try:
+        reason = response.json().get("error", {}).get("reason", "")
+    except ValueError:
+        reason = response.text or ""
+    if DESTRUCTIVE_GUARD_REASON not in reason.lower():
+        return None
+    return (
+        "Error encountered when clearing indices: the cluster has "
+        "action.destructive_requires_name enabled, which forbids deleting by wildcard "
+        "regardless of --acknowledge-risk. Delete the indices by name instead — list them with "
+        "'console clusters cat-indices', then "
+        "'console clusters curl <cluster> -X DELETE \"/<index1>,<index2>\"'."
+    )
 
 
 def clear_cluster(cluster: Cluster, snapshot: Snapshot = None):

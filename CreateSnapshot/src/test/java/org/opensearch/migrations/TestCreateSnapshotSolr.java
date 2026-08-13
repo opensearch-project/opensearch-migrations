@@ -230,6 +230,104 @@ public class TestCreateSnapshotSolr {
         }
     }
 
+    // --- Secured source ---
+
+    private static final String SOLR_USER = "backup_user";
+    private static final String SOLR_PASS = "backup_pass";
+
+    /**
+     * A user holding the backup permissions must be able to drive a full SolrCloud backup, proving
+     * credentials actually reach Solr's Collections API rather than only the read paths.
+     *
+     * <p>Solr's permissions are not hierarchical, so every endpoint on the backup path needs its own
+     * grant: LIST and REQUESTSTATUS are {@code collection-admin-read}, BACKUP is
+     * {@code collection-admin-edit}.
+     *
+     * <p>This class starts Solr and runs CreateSnapshot; it does not migrate documents, so the
+     * assertion is that the backup lands, not that a migration completes end to end.
+     */
+    @Test
+    public void testBackupCapableUser_securedCloud_backupSucceeds() throws Exception {
+        try (var solr = SolrClusterContainer.securedCloud(
+                SolrClusterContainer.SOLR_8, SOLR_USER, SOLR_PASS,
+                java.util.List.of("read", "schema-read", "collection-admin-read", "collection-admin-edit"))) {
+            solr.start();
+
+            var auth = "-u" + SOLR_USER + ":" + SOLR_PASS;
+            var create = solr.execInContainer("curl", "-sf", auth,
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=securedcoll&numShards=1&replicationFactor=1&wt=json");
+            Assertions.assertEquals(0, create.getExitCode(),
+                "CREATE should succeed for the backup-capable user: " + create.getStderr());
+
+            solr.execInContainer("curl", "-s", auth, "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/securedcoll/update?commit=true",
+                "-d", "[{\"id\":\"1\",\"title_s\":\"Secured doc\"}]");
+
+            var backupRoot = "/var/solr/data/secured_backups";
+            solr.execInContainer("mkdir", "-p", backupRoot + "/secured_snapshot");
+
+            var args = new CreateSnapshot.Args();
+            args.sourceArgs.host = solr.getSolrUrl();
+            args.sourceArgs.insecure = true;
+            args.sourceArgs.username = SOLR_USER;
+            args.sourceArgs.password = SOLR_PASS;
+            args.sourceType = "solr";
+            args.snapshotName = "secured_snapshot";
+            args.repoUri = backupRoot;
+            args.noWait = false;
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+            var listing = solr.execInContainer("ls", backupRoot + "/secured_snapshot");
+            log.atInfo().setMessage("Secured backup directory contents: {}")
+                .addArgument(listing.getStdout()).log();
+            Assertions.assertTrue(listing.getStdout().contains("securedcoll"),
+                "Backup driven with credentials should produce the collection subdir; saw: "
+                    + listing.getStdout());
+        }
+    }
+
+    /**
+     * Exercises the multi-user/multi-role form of the fixture: two users with different roles must
+     * get different access. Asserted at Solr's API rather than through CreateSnapshot so this covers
+     * the fixture's security.json generation without depending on topology inference.
+     */
+    @Test
+    public void testSecuredCloud_distinctRolesGetDistinctAccess() throws Exception {
+        try (var solr = SolrClusterContainer.securedCloud(
+                SolrClusterContainer.SOLR_8,
+                java.util.Map.of("reader", "readerpass", "admin", "adminpass"),
+                java.util.Map.of(
+                    "reader", java.util.List.of("reader_role"),
+                    "admin", java.util.List.of("admin_role")),
+                java.util.Map.of(
+                    "reader_role", java.util.List.of("read", "schema-read"),
+                    "admin_role", java.util.List.of(
+                        "read", "schema-read", "collection-admin-read", "collection-admin-edit")))) {
+            solr.start();
+
+            var createUrl = "http://localhost:8983/solr/admin/collections?action=CREATE"
+                + "&name=rolecheck&numShards=1&replicationFactor=1&wt=json";
+
+            Assertions.assertEquals("403", httpStatus(solr, "reader:readerpass", createUrl),
+                "reader lacks collection-admin-edit and must be refused CREATE");
+            Assertions.assertEquals("200", httpStatus(solr, "admin:adminpass", createUrl),
+                "admin holds collection-admin-edit and must be allowed CREATE");
+            Assertions.assertEquals("200", httpStatus(solr, "reader:readerpass",
+                    "http://localhost:8983/solr/rolecheck/select?q=*:*&rows=0&wt=json"),
+                "reader holds read and must be allowed to query");
+        }
+    }
+
+    /** Returns the HTTP status of an authenticated request issued from inside the container. */
+    private static String httpStatus(SolrClusterContainer solr, String userPass, String url) throws Exception {
+        var result = solr.execInContainer("curl", "-s", "-o", "/dev/null",
+            "-w", "%{http_code}", "-u", userPass, url);
+        return result.getStdout().trim();
+    }
+
     /**
      * Serves {@code <prefix>/x} by forwarding to {@code <upstream>/solr/x}, mirroring a reverse proxy
      * that rewrites Solr's context path. Anything outside the prefix 404s.
