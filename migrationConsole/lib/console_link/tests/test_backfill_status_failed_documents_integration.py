@@ -23,6 +23,7 @@ from typing import List
 import boto3
 import pytest
 import yaml
+from botocore.exceptions import ClientError
 from click.testing import CliRunner
 from moto import mock_aws
 
@@ -234,21 +235,20 @@ def test_deep_check_ignores_failures_from_another_session(
 
 
 @pytest.mark.slow
-def test_deep_check_reports_unavailable_when_stream_cannot_be_read(
+def test_deep_check_surfaces_unreadable_stream(
         runner, completed_backfill_config, failed_document_stream, mocker):
-    # Bucket doesn't exist (misconfiguration / missing permissions): S3 raises, and an
-    # unreadable stream must not be guessed either way — the status stays Completed.
+    # Bucket doesn't exist (misconfiguration / missing permissions): S3 raises and the error
+    # surfaces. A stream we cannot read must never be reported as a clean Completed.
     mocker.patch.object(cli_module.failed_document_stream_, "_list_snapshot_migrations",
                         return_value=[_snapshot_migration(bucket="no-such-bucket")])
 
     result = runner.invoke(cli, ["--config-file", completed_backfill_config,
-                                 "backfill", "status", "--deep-check"],
-                           catch_exceptions=False)
+                                 "backfill", "status", "--deep-check"])
 
-    assert result.exit_code == 0
-    assert "Backfill status: Completed" in result.output
-    assert "CompletedWithErrors" not in result.output
-    assert "Failed documents present: unavailable" in result.output
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ClientError)
+    assert result.exception.response["Error"]["Code"] == "NoSuchBucket"
+    assert "Backfill status" not in result.output
 
 
 # ---------- JSON status -----------------------------------------------------
