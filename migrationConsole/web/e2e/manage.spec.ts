@@ -198,6 +198,14 @@ async function mockManageApi(page: Page) {
       "Workflow accepted; waiting for refreshed cluster state",
     );
     operations = [accepted, ...operations];
+    snapshot.workflow = null;
+    snapshot.problems = [{
+      source: "argo",
+      message: (
+        '404: workflows.argoproj.io "migration-workflow" not found'
+      ),
+      retryable: true,
+    }];
     await route.fulfill({
       status: 202,
       contentType: "application/json",
@@ -985,6 +993,10 @@ test("submits pending config without entering edit mode", async ({ page }, testI
   await expect(page.getByText(
     "Workflow accepted; waiting for refreshed cluster state",
   )).toBeVisible();
+  await expect(page.getByText("Waiting for submitted workflow.")).toBeVisible();
+  await expect(page.getByText(
+    '404: workflows.argoproj.io "migration-workflow" not found',
+  )).toHaveCount(0);
   await expect(page.getByText("Editing configuration")).toHaveCount(0);
   await expect(page.getByRole("button", {
     name: "Review and submit",

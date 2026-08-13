@@ -40,13 +40,25 @@ export function ActivityPanel({
   operations: Operation[];
 }) {
   const steps = workflowSteps(snapshot, selectedNode);
+  const activeSubmit = operations.find((operation) => (
+    operation.kind === "submit"
+    && (
+      operation.status === "queued"
+      || operation.status === "running"
+      || operation.status === "waiting"
+    )
+  ));
   return (
     <aside className="activity-panel">
       <header>
         <Activity aria-hidden="true" />
         <div>
           <h2>Activity</h2>
-          <span>Current workflow</span>
+          <span>
+            {operations.length > 0
+              ? "Workflow and operations"
+              : "Current workflow"}
+          </span>
         </div>
       </header>
       {snapshot.workflow ? (
@@ -58,7 +70,13 @@ export function ActivityPanel({
           </div>
         </div>
       ) : (
-        <p className="activity-empty">No active Argo workflow.</p>
+        <p className="activity-empty">
+          {activeSubmit?.status === "waiting"
+            ? "Waiting for submitted workflow."
+            : activeSubmit
+              ? "Submitting workflow."
+              : "No active Argo workflow."}
+        </p>
       )}
       <div className="activity-steps">
         {operations.map((operation) => (

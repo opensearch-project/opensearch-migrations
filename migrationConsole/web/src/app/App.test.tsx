@@ -355,6 +355,56 @@ test("shows stale and partial-observation problems without hiding last good data
 });
 
 
+test("treats workflow absence during submit as tracked replacement progress", async () => {
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json({
+        ...manageSnapshot,
+        workflow: null,
+        problems: [{
+          source: "argo",
+          message: (
+            '404: workflows.argoproj.io "migration-workflow" not found'
+          ),
+          retryable: true,
+        }, {
+          source: "argo",
+          message: "Argo permission check failed",
+          retryable: true,
+        }],
+      }),
+    ),
+    http.get("*/api/v1/operations", () => HttpResponse.json({
+      operations: [{
+        id: "operation-submit-gap",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "waiting",
+        targetIds: [],
+        createdAt: "2026-08-13T13:00:00Z",
+        updatedAt: "2026-08-13T13:00:01Z",
+        message: "Workflow accepted; waiting for refreshed cluster state",
+        detail: null,
+        result: { workflowName: "migration-workflow" },
+      }],
+    })),
+  );
+
+  renderApp();
+
+  expect(await screen.findByText("Waiting for submitted workflow."))
+    .toBeInTheDocument();
+  expect(screen.getByText(
+    "Workflow accepted; waiting for refreshed cluster state",
+  )).toBeInTheDocument();
+  expect(screen.queryByText(
+    '404: workflows.argoproj.io "migration-workflow" not found',
+  )).toBeNull();
+  expect(screen.getByText("Argo permission check failed"))
+    .toBeInTheDocument();
+});
+
+
 test("opens a generic configuration editor and explains generated values", async () => {
   renderApp();
   await enterEditMode();

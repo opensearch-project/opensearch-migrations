@@ -88,6 +88,18 @@ function hasPendingConfiguration(snapshot: ManageSnapshot): boolean {
 }
 
 
+function isExpectedWorkflowReplacementProblem(
+  problem: { source: string; message: string },
+  submitActive: boolean,
+): boolean {
+  if (!submitActive || problem.source.toLocaleLowerCase() !== "argo") {
+    return false;
+  }
+  const message = problem.message.toLocaleLowerCase();
+  return message.includes("not found") || /\b404\b/.test(message);
+}
+
+
 export function App() {
   const queryClient = useQueryClient();
   const health = useQuery({
@@ -244,6 +256,12 @@ export function App() {
       || operation.status === "waiting"
     )
   )) ?? false;
+  const visibleProblems = state.data?.problems.filter(
+    (problem) => !isExpectedWorkflowReplacementProblem(
+      problem,
+      submitActive,
+    ),
+  ) ?? [];
   const submitValidation = configDraft.data?.editState.validation;
   const blockingDiagnosticCount = submitValidation?.diagnostics?.filter(
     (diagnostic) => (
@@ -560,7 +578,7 @@ export function App() {
               <span>{state.data.refreshError?.message}</span>
             </div>
           ) : null}
-          {state.data.problems.map((problem) => (
+          {visibleProblems.map((problem) => (
             <div className="state-banner problem-banner" key={`${problem.source}-${problem.message}`} role="status">
               <CircleAlert aria-hidden="true" />
               <strong>{problem.source}</strong>
