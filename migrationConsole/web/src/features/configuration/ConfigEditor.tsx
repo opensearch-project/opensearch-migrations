@@ -27,10 +27,12 @@ import {
   applyEditOperation,
   discardConfigDraft,
   getConfigDraft,
+  getConfigReview,
   getConfigRemovalImpact,
   saveConfigDraft,
   submitConfigDraft,
   type ConfigDraft,
+  type ConfigReview,
   type ConfigRemovalImpact,
   type EditNode,
   type EditOperation,
@@ -1383,6 +1385,8 @@ export function ConfigEditor({
   const [pendingRemoval, setPendingRemoval] =
     useState<PendingRemoval | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [submitReview, setSubmitReview] = useState<ConfigReview | null>(null);
+  const [submitReviewPending, setSubmitReviewPending] = useState(false);
   const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
   const configTablePanelRef = useRef<HTMLElement>(null);
   const pinUpdateFrame = useRef<number | null>(null);
@@ -2008,10 +2012,10 @@ export function ConfigEditor({
     setBusy(true);
     setProblem("");
     try {
-      const submission = await submitConfigDraft(current.draftRevision);
-      queryClient.setQueryData(["config-draft"], submission.draft);
+      await submitConfigDraft(current.draftRevision);
       setLocallyEditedIds(new Set());
       setConfirmSubmit(false);
+      setSubmitReview(null);
       onSubmitted();
     } catch (error) {
       if (error instanceof ConfigApiError && error.current) {
@@ -2019,8 +2023,30 @@ export function ConfigEditor({
       }
       setProblem(error instanceof Error ? error.message : String(error));
       setConfirmSubmit(false);
+      setSubmitReview(null);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openSubmitReview = async () => {
+    if (!await waitForPendingCommit()) return;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current) return;
+    setConfirmSubmit(true);
+    setSubmitReview(null);
+    setSubmitReviewPending(true);
+    setProblem("");
+    try {
+      setSubmitReview(await getConfigReview(current.draftRevision));
+    } catch (error) {
+      if (error instanceof ConfigApiError && error.current) {
+        queryClient.setQueryData(["config-draft"], error.current);
+      }
+      setConfirmSubmit(false);
+      setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmitReviewPending(false);
     }
   };
 
@@ -2278,7 +2304,7 @@ export function ConfigEditor({
               || (busy && !hasLocalEdits)
               || draft.editState.validation.valid === false
             }
-            onClick={() => setConfirmSubmit(true)}
+            onClick={() => void openSubmitReview()}
             title={
               draft.editState.validation.valid === false
                 ? "Resolve validation errors before submitting"
@@ -2594,14 +2620,53 @@ export function ConfigEditor({
                 <h2 id="submit-dialog-title">Submit configuration?</h2>
               </div>
             </header>
-            <p>
-              The current configuration will be saved, the workflow will be
-              replaced, and editing will close after submission succeeds.
-            </p>
+            {submitReviewPending ? (
+              <div className="submit-review-state" role="status">
+                <LoaderCircle className="spin" aria-hidden="true" />
+                Preparing change review
+              </div>
+            ) : submitReview ? (
+              <div className="submit-review">
+                <p>
+                  The current configuration will be saved and workflow
+                  replacement will continue as a tracked operation.
+                </p>
+                {submitReview.changes.length > 0 ? (
+                  <ul className="submit-change-list">
+                    {submitReview.changes.map((change) => (
+                      <li key={`${change.resourceId ?? "config"}-${change.path}`}>
+                        <strong>
+                          {change.resourceLabel ?? change.label}
+                        </strong>
+                        <span>{change.resourceLabel
+                          ? change.label
+                          : change.path}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="submit-review-empty">
+                    No field-level pending differences were reported.
+                  </p>
+                )}
+                {!submitReview.valid ? (
+                  <div className="submit-review-invalid" role="alert">
+                    <AlertTriangle aria-hidden="true" />
+                    <span>
+                      {submitReview.validationMessages.join(" ")
+                        || "Resolve validation errors before submitting."}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <footer>
               <button
                 disabled={busy}
-                onClick={() => setConfirmSubmit(false)}
+                onClick={() => {
+                  setConfirmSubmit(false);
+                  setSubmitReview(null);
+                }}
                 type="button"
               >
                 Cancel
@@ -2609,7 +2674,12 @@ export function ConfigEditor({
               <button
                 aria-label="Confirm submit"
                 className="primary-button"
-                disabled={busy}
+                disabled={
+                  busy
+                  || submitReviewPending
+                  || !submitReview
+                  || !submitReview.valid
+                }
                 onClick={() => void submit()}
                 type="button"
               >

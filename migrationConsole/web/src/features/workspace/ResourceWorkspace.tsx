@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   FileOutput,
@@ -8,6 +9,17 @@ import {
 } from "lucide-react";
 
 import type { ManageNode } from "../../api/client";
+import { OutputPanel } from "../output/OutputPanel";
+import {
+  ApprovalDialog,
+  ResetDialog,
+} from "../actions/ResourceActionDialogs";
+
+
+interface PendingAction {
+  kind: "approve" | "reset";
+  targetId: string;
+}
 
 
 function displayValue(value: { present: boolean; value?: unknown }): string {
@@ -26,7 +38,15 @@ function capabilityIcon(kind: string) {
 }
 
 
-function ResourceActions({ node }: { node: ManageNode }) {
+function ResourceActions({
+  node,
+  onOutput,
+  onAction,
+}: {
+  node: ManageNode;
+  onOutput: (targetId: string) => void;
+  onAction: (action: PendingAction) => void;
+}) {
   const capabilities = node.capabilities.filter(
     (capability) => capability.kind !== "edit",
   );
@@ -36,12 +56,38 @@ function ResourceActions({ node }: { node: ManageNode }) {
       {capabilities.map((capability) => {
         const Icon = capabilityIcon(capability.kind);
         const label = capability.label ?? capability.kind;
+        const outputTarget = (
+          capability.kind === "output"
+            ? capability.outputTargetId
+            : null
+        );
+        const approvalTarget = (
+          capability.kind === "approve"
+            ? capability.approvalTargetId
+            : null
+        );
+        const resetTarget = (
+          capability.kind === "reset"
+            ? capability.resetTargetId
+            : null
+        );
+        const actionTarget = approvalTarget ?? resetTarget;
         return (
           <button
             aria-label={label}
-            disabled
+            disabled={!outputTarget && !actionTarget}
             key={`${capability.kind}-${label}`}
-            title="This action is enabled in a later phase"
+            onClick={() => {
+              if (outputTarget) onOutput(outputTarget);
+              else if (approvalTarget) {
+                onAction({ kind: "approve", targetId: approvalTarget });
+              } else if (resetTarget) {
+                onAction({ kind: "reset", targetId: resetTarget });
+              }
+            }}
+            title={outputTarget || actionTarget
+              ? label
+              : "This action is enabled in a later phase"}
             type="button"
           >
             <Icon aria-hidden="true" />
@@ -128,6 +174,13 @@ export function ResourceWorkspace({
 }: {
   node: ManageNode;
 }) {
+  const [outputTarget, setOutputTarget] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingAction | null>(null);
+  useEffect(() => {
+    setOutputTarget(null);
+    setPendingAction(null);
+  }, [node.id]);
   return (
     <article className="workspace">
       <header className="workspace-header">
@@ -140,7 +193,29 @@ export function ResourceWorkspace({
           {node.phase ?? node.status}
         </span>
       </header>
-      <ResourceActions node={node} />
+      <ResourceActions
+        node={node}
+        onAction={setPendingAction}
+        onOutput={setOutputTarget}
+      />
+      {outputTarget ? (
+        <OutputPanel
+          onClose={() => setOutputTarget(null)}
+          targetId={outputTarget}
+        />
+      ) : null}
+      {pendingAction?.kind === "approve" ? (
+        <ApprovalDialog
+          onClose={() => setPendingAction(null)}
+          targetId={pendingAction.targetId}
+        />
+      ) : null}
+      {pendingAction?.kind === "reset" ? (
+        <ResetDialog
+          onClose={() => setPendingAction(null)}
+          targetId={pendingAction.targetId}
+        />
+      ) : null}
       <dl className="facts-grid">
         <div>
           <dt>Status</dt>

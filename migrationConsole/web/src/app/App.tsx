@@ -15,11 +15,13 @@ import {
   getConfigDraft,
   getHealth,
   getManageState,
+  getOperations,
   reconcileManageState,
   type ConfigDraft,
   type ManageSnapshot,
 } from "../api/client";
 import { useManageEvents } from "../api/useManageEvents";
+import { useOperationEvents } from "../api/useOperationEvents";
 import { ActivityPanel } from "../features/activity/ActivityPanel";
 import { ConfigEditor } from "../features/configuration/ConfigEditor";
 import {
@@ -83,6 +85,20 @@ export function App() {
       reconcileManageState(previous, incoming),
   });
   const eventConnection = useManageEvents(queryClient);
+  useOperationEvents(queryClient);
+  const operations = useQuery({
+    queryKey: ["operations"],
+    queryFn: getOperations,
+    refetchInterval: (query) => (
+      query.state.data?.some((operation) => (
+        operation.status === "queued"
+        || operation.status === "running"
+        || operation.status === "waiting"
+      ))
+        ? 2_000
+        : false
+    ),
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const [editContext, setEditContext] = useState<EditContext | null>(null);
@@ -493,6 +509,9 @@ export function App() {
                   onSubmitted={() => {
                     setEditContext(null);
                     void queryClient.invalidateQueries({
+                      queryKey: ["operations"],
+                    });
+                    void queryClient.invalidateQueries({
                       queryKey: ["manage-state"],
                     });
                   }}
@@ -515,6 +534,7 @@ export function App() {
                 </section>
               )}
               <ActivityPanel
+                operations={operations.data ?? []}
                 selectedNode={observedSelectedNode}
                 snapshot={state.data}
               />

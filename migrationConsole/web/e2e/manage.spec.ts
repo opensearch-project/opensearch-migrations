@@ -6,6 +6,19 @@ import { configDraft, manageSnapshot } from "../src/test/fixtures";
 async function mockManageApi(page: Page) {
   let snapshot = structuredClone(manageSnapshot);
   let draft = structuredClone(configDraft);
+  let operations: Array<Record<string, unknown>> = [];
+  const operation = (kind: string, label: string, message: string) => ({
+    id: `operation-${kind}-${operations.length + 1}`,
+    kind,
+    label,
+    status: kind === "reset" ? "succeeded" : "waiting",
+    targetIds: ["resource:captureproxies:capture"],
+    createdAt: "2026-08-13T13:00:00Z",
+    updatedAt: "2026-08-13T13:00:01Z",
+    message,
+    detail: null,
+    result: {},
+  });
   await page.route("**/api/v1/system/health", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -19,6 +32,19 @@ async function mockManageApi(page: Page) {
     });
   });
   await page.route("**/api/v1/manage/events", async (route) => {
+    await route.fulfill({
+      contentType: "text/event-stream",
+      headers: { "Cache-Control": "no-cache" },
+      body: "retry: 60000\nevent: heartbeat\ndata: {}\n\n",
+    });
+  });
+  await page.route("**/api/v1/operations", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ operations }),
+    });
+  });
+  await page.route("**/api/v1/operations/events", async (route) => {
     await route.fulfill({
       contentType: "text/event-stream",
       headers: { "Cache-Control": "no-cache" },
@@ -146,6 +172,185 @@ async function mockManageApi(page: Page) {
       body: JSON.stringify(draft),
     });
   });
+  await page.route("**/api/v1/config/review", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        draftRevision: draft.draftRevision,
+        baseRevision: draft.baseRevision,
+        dirty: draft.dirty,
+        valid: draft.editState.validation.valid,
+        validationMessages: draft.editState.validation.errors,
+        changes: [{
+          resourceId: "resource:captureproxies:capture",
+          resourceLabel: "capture",
+          path: "serviceType",
+          label: "Service type",
+          kind: "field",
+        }],
+      }),
+    });
+  });
+  await page.route("**/api/v1/config/submit", async (route) => {
+    const accepted = operation(
+      "submit",
+      "Submit workflow configuration",
+      "Workflow accepted; waiting for refreshed cluster state",
+    );
+    operations = [accepted, ...operations];
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(accepted),
+    });
+  });
+  await page.route("**/api/v1/outputs?*", async (route) => {
+    const targetId = new URL(route.request().url()).searchParams.get(
+      "targetId",
+    );
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        targetId,
+        resourceId: "resource:captureproxies:capture",
+        outputs: [{
+          id: "managed-output:evaluate",
+          targetId: (
+            "output:snapshotmigrations:migration-0:metadataEvaluate"
+          ),
+          resourceId: "resource:captureproxies:capture",
+          resourcePlural: "snapshotmigrations",
+          resourceName: "migration-0",
+          outputName: "metadataEvaluate",
+          stage: "Evaluate",
+          stageOrder: 0,
+          attempt: "migration-1",
+          timestamp: "2026-08-13T12:00:00Z",
+          source: "s3://outputs/evaluate.json",
+          contentType: "application/json",
+        }, {
+          id: "managed-output:migrate",
+          targetId: (
+            "output:snapshotmigrations:migration-0:metadataMigrate"
+          ),
+          resourceId: "resource:captureproxies:capture",
+          resourcePlural: "snapshotmigrations",
+          resourceName: "migration-0",
+          outputName: "metadataMigrate",
+          stage: "Migrate",
+          stageOrder: 1,
+          attempt: "migration-1",
+          timestamp: "2026-08-13T12:05:00Z",
+          source: "s3://outputs/migrate.json",
+          contentType: "application/json",
+        }],
+      }),
+    });
+  });
+  await page.route("**/api/v1/outputs/content?*", async (route) => {
+    const outputId = new URL(route.request().url()).searchParams.get(
+      "outputId",
+    );
+    const migrate = outputId?.includes("migrate");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        descriptor: {
+          id: outputId,
+          targetId: migrate
+            ? "output:snapshotmigrations:migration-0:metadataMigrate"
+            : "output:snapshotmigrations:migration-0:metadataEvaluate",
+          resourceId: "resource:captureproxies:capture",
+          resourcePlural: "snapshotmigrations",
+          resourceName: "migration-0",
+          outputName: migrate ? "metadataMigrate" : "metadataEvaluate",
+          stage: migrate ? "Migrate" : "Evaluate",
+          stageOrder: migrate ? 1 : 0,
+          attempt: "migration-1",
+          timestamp: migrate
+            ? "2026-08-13T12:05:00Z"
+            : "2026-08-13T12:00:00Z",
+          source: migrate
+            ? "s3://outputs/migrate.json"
+            : "s3://outputs/evaluate.json",
+          contentType: "application/json",
+        },
+        content: migrate
+          ? "{\"stage\":\"migrate\"}"
+          : "{\"stage\":\"evaluate\"}",
+        inline: true,
+        size: 20,
+        message: null,
+      }),
+    });
+  });
+  await page.route("**/api/v1/approvals/review?*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        targetId: "approval:approval-node",
+        nodeId: "approval-node",
+        gateName: "evaluatemetadata.source-target-snapshot-main",
+        gateRevision: "11",
+        workflowName: "migration",
+        resourceId: "resource:captureproxies:capture",
+        resourceKind: "SnapshotMigration",
+        resourceName: "migration-0",
+        stage: "Metadata evaluation",
+        effect: (
+          "Approving allows metadata evaluation to complete and advances "
+          + "to metadata migration."
+        ),
+        reason: null,
+        snapshotRevision: snapshot.revision,
+      }),
+    });
+  });
+  await page.route("**/api/v1/approvals", async (route) => {
+    const accepted = operation(
+      "approve",
+      "Approve Metadata evaluation",
+      "Approval accepted; waiting for workflow reconciliation",
+    );
+    operations = [accepted, ...operations];
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(accepted),
+    });
+  });
+  await page.route("**/api/v1/resets/plan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        token: "reset-token",
+        requestTargetId: "reset:captureproxies:capture",
+        targets: [{
+          plural: "captureproxies",
+          type: "captureproxy",
+          name: "capture",
+          path: "captureproxy.capture",
+          phase: "Ready",
+          dependsOn: [],
+        }],
+        messages: [],
+        warnings: ["The proxy endpoint will be removed."],
+      }),
+    });
+  });
+  await page.route("**/api/v1/resets", async (route) => {
+    const accepted = operation(
+      "reset",
+      "Reset captureproxy.capture",
+      "Reset completed for 1 resource",
+    );
+    operations = [accepted, ...operations];
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(accepted),
+    });
+  });
   await page.route("**/api/v1/external-resources?*", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -215,6 +420,20 @@ async function mockManageApi(page: Page) {
     });
   });
   return {
+    enableManagedActions() {
+      const capture = snapshot.nodes["resource:captureproxies:capture"];
+      capture.capabilities.push({
+        kind: "output",
+        outputTargetId: (
+          "output:snapshotmigrations:migration-0:metadataEvaluate"
+        ),
+        label: "View metadata output",
+      }, {
+        kind: "approve",
+        approvalTargetId: "approval:approval-node",
+        label: "Approve metadata",
+      });
+    },
     makeCaptureSource() {
       const capture = snapshot.nodes["resource:captureproxies:capture"];
       capture.label = "legacy";
@@ -736,6 +955,46 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   );
   await expect(inserted).toBeVisible();
   await expect(inserted).toHaveCSS("animation-name", "row-insert");
+});
+
+
+test("reviews managed output, approval, and reset actions", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop action coverage");
+  const api = await mockManageApi(page);
+  api.enableManagedActions();
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "View metadata output" }).click();
+  const output = page.getByRole("region", { name: "Managed output" });
+  await expect(output.getByRole("tab")).toHaveText([
+    /Evaluate/,
+    /Migrate/,
+  ]);
+  await expect(output.getByText(/"stage": "evaluate"/)).toBeVisible();
+  await output.getByRole("tab", { name: /Migrate/ }).click();
+  await expect(output.getByText(/"stage": "migrate"/)).toBeVisible();
+  await page.getByRole("button", { name: "Close output" }).click();
+
+  await page.getByRole("button", { name: "Approve metadata" }).click();
+  const approval = page.getByRole("dialog", {
+    name: "Approve Metadata evaluation?",
+  });
+  await expect(approval.getByText(/advances to metadata migration/))
+    .toBeVisible();
+  await approval.getByRole("button", {
+    name: "Approve exact gate",
+  }).click();
+  await expect(page.getByText(
+    "Approval accepted; waiting for workflow reconciliation",
+  )).toBeVisible();
+
+  await page.getByRole("button", { name: "Reset capture" }).click();
+  const reset = page.getByRole("dialog", { name: "Review reset plan" });
+  await expect(reset.getByText("captureproxy.capture")).toBeVisible();
+  await expect(reset.getByText("The proxy endpoint will be removed."))
+    .toBeVisible();
+  await reset.getByRole("button", { name: "Reset exact plan" }).click();
+  await expect(page.getByText("Reset completed for 1 resource")).toBeVisible();
 });
 
 

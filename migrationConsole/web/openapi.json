@@ -73,6 +73,105 @@
         "title": "ApplyEditOperationRequestV1",
         "type": "object"
       },
+      "ApprovalReviewV1": {
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "title": "Effect",
+            "type": "string"
+          },
+          "gateName": {
+            "title": "Gatename",
+            "type": "string"
+          },
+          "gateRevision": {
+            "title": "Gaterevision",
+            "type": "string"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "resourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourceid"
+          },
+          "resourceKind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourcekind"
+          },
+          "resourceName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourcename"
+          },
+          "snapshotRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshotrevision"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "workflowName": {
+            "title": "Workflowname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId",
+          "nodeId",
+          "gateName",
+          "gateRevision",
+          "workflowName",
+          "stage",
+          "effect"
+        ],
+        "title": "ApprovalReviewV1",
+        "type": "object"
+      },
       "ApproveCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -96,6 +195,25 @@
           "label"
         ],
         "title": "ApproveCapabilityV1",
+        "type": "object"
+      },
+      "ApproveRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedGateRevision": {
+            "title": "Expectedgaterevision",
+            "type": "string"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId",
+          "expectedGateRevision"
+        ],
+        "title": "ApproveRequestV1",
         "type": "object"
       },
       "ComparisonV1": {
@@ -249,27 +367,99 @@
         "title": "ConfigRemovalImpactV1",
         "type": "object"
       },
-      "ConfigSubmissionV1": {
+      "ConfigReviewChangeV1": {
         "additionalProperties": false,
         "properties": {
-          "draft": {
-            "$ref": "#/components/schemas/ConfigDraftV1"
-          },
-          "message": {
-            "title": "Message",
+          "kind": {
+            "enum": [
+              "field",
+              "resource"
+            ],
+            "title": "Kind",
             "type": "string"
           },
-          "workflowName": {
-            "title": "Workflowname",
+          "label": {
+            "title": "Label",
             "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "resourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourceid"
+          },
+          "resourceLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourcelabel"
           }
         },
         "required": [
-          "draft",
-          "workflowName",
-          "message"
+          "path",
+          "label",
+          "kind"
         ],
-        "title": "ConfigSubmissionV1",
+        "title": "ConfigReviewChangeV1",
+        "type": "object"
+      },
+      "ConfigReviewV1": {
+        "additionalProperties": false,
+        "properties": {
+          "baseRevision": {
+            "title": "Baserevision",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigReviewChangeV1"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "dirty": {
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "draftRevision": {
+            "title": "Draftrevision",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "validationMessages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Validationmessages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "draftRevision",
+          "baseRevision",
+          "dirty",
+          "valid",
+          "validationMessages",
+          "changes"
+        ],
+        "title": "ConfigReviewV1",
         "type": "object"
       },
       "DetailV1": {
@@ -878,6 +1068,20 @@
         "title": "EditVariantV1",
         "type": "object"
       },
+      "ExecuteResetRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "planToken": {
+            "title": "Plantoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planToken"
+        ],
+        "title": "ExecuteResetRequestV1",
+        "type": "object"
+      },
       "ExternalResourceDetailsV1": {
         "additionalProperties": false,
         "properties": {
@@ -1423,6 +1627,100 @@
         "title": "ManageSnapshotV1",
         "type": "object"
       },
+      "OperationListV1": {
+        "additionalProperties": false,
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationV1"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "OperationListV1",
+        "type": "object"
+      },
+      "OperationV1": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "targetIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targetids",
+            "type": "array"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "status",
+          "targetIds",
+          "createdAt",
+          "updatedAt",
+          "message"
+        ],
+        "title": "OperationV1",
+        "type": "object"
+      },
       "OutputCapabilityV1": {
         "additionalProperties": false,
         "properties": {
@@ -1453,6 +1751,160 @@
           "outputTargetId"
         ],
         "title": "OutputCapabilityV1",
+        "type": "object"
+      },
+      "OutputContentV1": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/OutputDescriptorV1"
+          },
+          "inline": {
+            "title": "Inline",
+            "type": "boolean"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "descriptor",
+          "inline",
+          "size"
+        ],
+        "title": "OutputContentV1",
+        "type": "object"
+      },
+      "OutputDescriptorV1": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "contentType": {
+            "title": "Contenttype",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "outputName": {
+            "title": "Outputname",
+            "type": "string"
+          },
+          "resourceId": {
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "resourceName": {
+            "title": "Resourcename",
+            "type": "string"
+          },
+          "resourcePlural": {
+            "title": "Resourceplural",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "stageOrder": {
+            "title": "Stageorder",
+            "type": "integer"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "targetId",
+          "resourceId",
+          "resourcePlural",
+          "resourceName",
+          "outputName",
+          "stage",
+          "stageOrder",
+          "source",
+          "contentType"
+        ],
+        "title": "OutputDescriptorV1",
+        "type": "object"
+      },
+      "OutputInventoryV1": {
+        "additionalProperties": false,
+        "properties": {
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/OutputDescriptorV1"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "resourceId": {
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId",
+          "resourceId",
+          "outputs"
+        ],
+        "title": "OutputInventoryV1",
         "type": "object"
       },
       "ProblemV1": {
@@ -1553,6 +2005,105 @@
           "label"
         ],
         "title": "ResetCapabilityV1",
+        "type": "object"
+      },
+      "ResetPlanRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId"
+        ],
+        "title": "ResetPlanRequestV1",
+        "type": "object"
+      },
+      "ResetPlanV1": {
+        "additionalProperties": false,
+        "properties": {
+          "messages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "requestTargetId": {
+            "title": "Requesttargetid",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ResetTargetV1"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "token",
+          "requestTargetId",
+          "targets",
+          "messages",
+          "warnings"
+        ],
+        "title": "ResetPlanV1",
+        "type": "object"
+      },
+      "ResetTargetV1": {
+        "additionalProperties": false,
+        "properties": {
+          "dependsOn": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependson",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "plural": {
+            "title": "Plural",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plural",
+          "type",
+          "name",
+          "path",
+          "phase",
+          "dependsOn"
+        ],
+        "title": "ResetTargetV1",
         "type": "object"
       },
       "SaveExternalResourceRequestV1": {
@@ -1829,6 +2380,90 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/approvals": {
+      "post": {
+        "operationId": "approve_api_v1_approvals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve",
+        "tags": [
+          "approvals",
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/approvals/review": {
+      "get": {
+        "operationId": "review_approval_api_v1_approvals_review_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "targetId",
+            "required": true,
+            "schema": {
+              "title": "Targetid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalReviewV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Approval",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/api/v1/config": {
       "get": {
         "operationId": "open_config_api_v1_config_get",
@@ -1973,6 +2608,47 @@
         ]
       }
     },
+    "/api/v1/config/review": {
+      "post": {
+        "operationId": "review_config_api_v1_config_review_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigReviewV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
     "/api/v1/config/save": {
       "post": {
         "operationId": "save_config_api_v1_config_save_post",
@@ -2028,11 +2704,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConfigSubmissionV1"
+                  "$ref": "#/components/schemas/OperationV1"
                 }
               }
             },
@@ -2051,7 +2727,8 @@
         },
         "summary": "Submit Config",
         "tags": [
-          "configuration"
+          "configuration",
+          "operations"
         ]
       }
     },
@@ -2314,6 +2991,284 @@
         "summary": "Manage State",
         "tags": [
           "manage"
+        ]
+      }
+    },
+    "/api/v1/operations": {
+      "get": {
+        "operationId": "list_operations_api_v1_operations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationListV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Operations",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/operations/events": {
+      "get": {
+        "operationId": "operation_events_api_v1_operations_events_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "last-event-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {}
+            },
+            "description": "Tracked operation event stream"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operation Events",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/outputs": {
+      "get": {
+        "operationId": "list_outputs_api_v1_outputs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "targetId",
+            "required": true,
+            "schema": {
+              "title": "Targetid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputInventoryV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Outputs",
+        "tags": [
+          "outputs"
+        ]
+      }
+    },
+    "/api/v1/outputs/content": {
+      "get": {
+        "operationId": "read_output_api_v1_outputs_content_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "outputId",
+            "required": true,
+            "schema": {
+              "title": "Outputid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputContentV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Output",
+        "tags": [
+          "outputs"
+        ]
+      }
+    },
+    "/api/v1/outputs/download": {
+      "get": {
+        "operationId": "download_output_api_v1_outputs_download_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "outputId",
+            "required": true,
+            "schema": {
+              "title": "Outputid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/yaml": {},
+              "text/plain": {}
+            },
+            "description": "Complete managed output download"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Output",
+        "tags": [
+          "outputs"
+        ]
+      }
+    },
+    "/api/v1/resets": {
+      "post": {
+        "operationId": "execute_reset_api_v1_resets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteResetRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Reset",
+        "tags": [
+          "resets",
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/resets/plan": {
+      "post": {
+        "operationId": "plan_reset_api_v1_resets_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPlanRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPlanV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan Reset",
+        "tags": [
+          "resets"
         ]
       }
     },

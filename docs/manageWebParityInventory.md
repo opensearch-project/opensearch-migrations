@@ -1,6 +1,6 @@
 # Workflow Manage Web Parity Inventory
 
-Status: Phase 4 configuration editing complete
+Status: Phases 0-7 complete; logs remain for Phase 8
 
 This inventory identifies how required `workflow manage` capabilities reach the native web
 application. A checked ownership item means that the implementation path and test home are
@@ -37,11 +37,11 @@ capability.
 | `WorkflowTreeApp._build_resource_sections` | Extract | `ManageStateService.build_resource_sections` |
 | `WorkflowTreeApp._workflow_has_active_rollout` | Extract | presentation-neutral active-rollout helper |
 | `WorkflowTreeApp._assign_workflow_progress` and recursive helpers | Extract | presentation-neutral workflow/resource association |
-| `WorkflowTreeApp._workflow_output_ref_map` | Extract later | `OutputService` in Phase 5 |
+| `WorkflowTreeApp._workflow_output_ref_map` | Extracted | `OutputService` in Phase 5 |
 | `WorkflowTreeApp` config draft fields and apply/save workers | Extracted | `ConfigDraftService` in Phase 4 |
-| `WorkflowTreeApp` submit worker | Extract later | review service and `OperationManager` in Phase 6 |
-| `WorkflowTreeApp` approval callback | Extract later | `ApprovalService` in Phase 7 |
-| `WorkflowTreeApp` reset command construction | Replace later | direct reset planning/execution service in Phase 7 |
+| `WorkflowTreeApp` submit worker | Extracted | `ConfigDraftService` review plus `OperationManager` in Phase 6 |
+| `WorkflowTreeApp` approval callback | Extracted | exact-target `ApprovalService` in Phase 7 |
+| `WorkflowTreeApp` reset command construction | Replaced | version-bound `ResetService` using direct reset helpers in Phase 7 |
 | `WorkflowTreeApp` log actions and `LogManager` pager behavior | Replace later | cancellable `LogStreamService` in Phase 8 |
 | Textual widgets, modals, bindings, and selection modes | Discard | React browser interactions |
 | Rich labels, badges, colors, and terminal symbols | Discard at API boundary | semantic status, diagnostics, and plain labels |

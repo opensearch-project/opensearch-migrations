@@ -72,7 +72,113 @@ test("renders real manage state with exact-node details and capabilities", async
   })).toBeEnabled();
   expect(screen.queryByRole("button", { name: "Edit capture" })).toBeNull();
   expect(screen.getByRole("button", { name: "Logs for capture" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Reset capture" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
+});
+
+
+test("opens resource-owned managed output with context and download", async () => {
+  const outputState = structuredClone(manageSnapshot);
+  outputState.nodes["resource:captureproxies:capture"].capabilities.push({
+    kind: "output",
+    outputTargetId: (
+      "output:snapshotmigrations:migration-0:metadataEvaluate"
+    ),
+    label: "View metadata evaluate",
+  });
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(outputState)),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "View metadata evaluate",
+  }));
+
+  expect(await screen.findByRole("region", { name: "Managed output" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Evaluate" }))
+    .toBeInTheDocument();
+  expect(screen.getByText("migration-0")).toBeInTheDocument();
+  expect(await screen.findByText(/"documents": 12/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Download" }))
+    .toHaveAttribute("href", expect.stringContaining(
+      "/api/v1/outputs/download?outputId=",
+    ));
+});
+
+
+test("reviews exact approval and reset targets before starting operations", async () => {
+  const actionState = structuredClone(manageSnapshot);
+  actionState.nodes["resource:captureproxies:capture"].capabilities.push({
+    kind: "approve",
+    approvalTargetId: "approval:approval-node",
+    label: "Approve metadata",
+  });
+  let approvalRequest: unknown;
+  let resetRequest: unknown;
+  const operation = (kind: string, label: string) => ({
+    id: `operation-${kind}`,
+    kind,
+    label,
+    status: "queued",
+    targetIds: ["resource:captureproxies:capture"],
+    createdAt: "2026-08-13T13:00:00Z",
+    updatedAt: "2026-08-13T13:00:00Z",
+    message: "Queued",
+    detail: null,
+    result: {},
+  });
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(actionState)),
+    http.post("*/api/v1/approvals", async ({ request }) => {
+      approvalRequest = await request.json();
+      return HttpResponse.json(
+        operation("approve", "Approve Metadata evaluation"),
+        { status: 202 },
+      );
+    }),
+    http.post("*/api/v1/resets", async ({ request }) => {
+      resetRequest = await request.json();
+      return HttpResponse.json(
+        operation("reset", "Reset captureproxy.capture"),
+        { status: 202 },
+      );
+    }),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Approve metadata",
+  }));
+  const approval = await screen.findByRole("dialog", {
+    name: "Approve Metadata evaluation?",
+  });
+  expect(within(approval).getByText("migration-0")).toBeInTheDocument();
+  expect(within(approval).getByText(/advances to metadata migration/))
+    .toBeInTheDocument();
+  await userEvent.click(within(approval).getByRole("button", {
+    name: "Approve exact gate",
+  }));
+  await waitFor(() => expect(approvalRequest).toEqual({
+    targetId: "approval:approval-node",
+    expectedGateRevision: "11",
+  }));
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Reset capture",
+  }));
+  const reset = await screen.findByRole("dialog", {
+    name: "Review reset plan",
+  });
+  expect(within(reset).getByText("captureproxy.capture"))
+    .toBeInTheDocument();
+  await userEvent.click(within(reset).getByRole("button", {
+    name: "Reset exact plan",
+  }));
+  await waitFor(() => expect(resetRequest).toEqual({
+    planToken: "reset-token",
+  }));
 });
 
 
@@ -2246,8 +2352,9 @@ test("exiting a dirty edit session discards the draft before leaving", async () 
 });
 
 
-test("submitting saves the current draft and leaves edit mode", async () => {
+test("reviews and tracks submission while leaving edit mode", async () => {
   let submitRequest: unknown;
+  let submitAccepted = false;
   const validDraft = structuredClone(configDraft);
   validDraft.dirty = true;
   validDraft.draftRevision = "dirty-to-submit";
@@ -2258,18 +2365,50 @@ test("submitting saves the current draft and leaves edit mode", async () => {
   };
   server.use(
     http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: validDraft.draftRevision,
+      baseRevision: validDraft.baseRevision,
+      dirty: true,
+      valid: true,
+      validationMessages: [],
+      changes: [{
+        resourceId: "resource:captureproxies:capture",
+        resourceLabel: "capture",
+        path: "serviceType",
+        label: "Service type",
+        kind: "field",
+      }],
+    })),
     http.post("*/api/v1/config/submit", async ({ request }) => {
       submitRequest = await request.json();
+      submitAccepted = true;
       return HttpResponse.json({
-        draft: {
-          ...validDraft,
-          dirty: false,
-          baseRevision: validDraft.draftRevision,
-        },
-        workflowName: "migration",
-        message: "Workflow submitted: migration",
-      });
+        id: "operation-submit",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "waiting",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-13T13:00:00Z",
+        updatedAt: "2026-08-13T13:00:01Z",
+        message: "Workflow accepted; waiting for refreshed cluster state",
+        detail: null,
+        result: { workflowName: "migration" },
+      }, { status: 202 });
     }),
+    http.get("*/api/v1/operations", () => HttpResponse.json({
+      operations: submitAccepted ? [{
+        id: "operation-submit",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "waiting",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-13T13:00:00Z",
+        updatedAt: "2026-08-13T13:00:01Z",
+        message: "Workflow accepted; waiting for refreshed cluster state",
+        detail: null,
+        result: { workflowName: "migration" },
+      }] : [],
+    })),
   );
   renderApp();
   await enterEditMode();
@@ -2280,6 +2419,8 @@ test("submitting saves the current draft and leaves edit mode", async () => {
   const dialog = await screen.findByRole("dialog", {
     name: "Submit configuration?",
   });
+  expect(within(dialog).getByText("capture")).toBeInTheDocument();
+  expect(within(dialog).getByText("Service type")).toBeInTheDocument();
   await userEvent.click(within(dialog).getByRole("button", {
     name: "Confirm submit",
   }));
@@ -2290,4 +2431,7 @@ test("submitting saves the current draft and leaves edit mode", async () => {
   expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
   expect(screen.queryByText("Editing configuration")).toBeNull();
+  expect(await screen.findByText(
+    "Workflow accepted; waiting for refreshed cluster state",
+  )).toBeInTheDocument();
 });

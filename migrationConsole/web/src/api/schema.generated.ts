@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/v1/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve */
+        post: operations["approve_api_v1_approvals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approvals/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Approval */
+        get: operations["review_approval_api_v1_approvals_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -66,6 +100,23 @@ export interface paths {
         put?: never;
         /** Config Removal Impact */
         post: operations["config_removal_impact_api_v1_config_removal_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Config */
+        post: operations["review_config_api_v1_config_review_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -208,6 +259,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations */
+        get: operations["list_operations_api_v1_operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operation Events */
+        get: operations["operation_events_api_v1_operations_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Outputs */
+        get: operations["list_outputs_api_v1_outputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outputs/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Output */
+        get: operations["read_output_api_v1_outputs_content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outputs/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Output */
+        get: operations["download_output_api_v1_outputs_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/resets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Reset */
+        post: operations["execute_reset_api_v1_resets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/resets/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Reset */
+        post: operations["plan_reset_api_v1_resets_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/health": {
         parameters: {
             query?: never;
@@ -248,6 +418,33 @@ export interface components {
             /** Operation */
             operation: components["schemas"]["SetEditOperationV1"] | components["schemas"]["UnsetEditOperationV1"] | components["schemas"]["RemoveConfigEditOperationV1"] | components["schemas"]["RenameConfigEditOperationV1"] | components["schemas"]["AddEditOperationV1"];
         };
+        /** ApprovalReviewV1 */
+        ApprovalReviewV1: {
+            /** Effect */
+            effect: string;
+            /** Gatename */
+            gateName: string;
+            /** Gaterevision */
+            gateRevision: string;
+            /** Nodeid */
+            nodeId: string;
+            /** Reason */
+            reason?: string | null;
+            /** Resourceid */
+            resourceId?: string | null;
+            /** Resourcekind */
+            resourceKind?: string | null;
+            /** Resourcename */
+            resourceName?: string | null;
+            /** Snapshotrevision */
+            snapshotRevision?: string | null;
+            /** Stage */
+            stage: string;
+            /** Targetid */
+            targetId: string;
+            /** Workflowname */
+            workflowName: string;
+        };
         /** ApproveCapabilityV1 */
         ApproveCapabilityV1: {
             /** Approvaltargetid */
@@ -259,6 +456,13 @@ export interface components {
             kind: "approve";
             /** Label */
             label: string;
+        };
+        /** ApproveRequestV1 */
+        ApproveRequestV1: {
+            /** Expectedgaterevision */
+            expectedGateRevision: string;
+            /** Targetid */
+            targetId: string;
         };
         /** ComparisonV1 */
         ComparisonV1: {
@@ -309,13 +513,36 @@ export interface components {
             /** Targetpath */
             targetPath: string[];
         };
-        /** ConfigSubmissionV1 */
-        ConfigSubmissionV1: {
-            draft: components["schemas"]["ConfigDraftV1"];
-            /** Message */
-            message: string;
-            /** Workflowname */
-            workflowName: string;
+        /** ConfigReviewChangeV1 */
+        ConfigReviewChangeV1: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "field" | "resource";
+            /** Label */
+            label: string;
+            /** Path */
+            path: string;
+            /** Resourceid */
+            resourceId?: string | null;
+            /** Resourcelabel */
+            resourceLabel?: string | null;
+        };
+        /** ConfigReviewV1 */
+        ConfigReviewV1: {
+            /** Baserevision */
+            baseRevision: string;
+            /** Changes */
+            changes: components["schemas"]["ConfigReviewChangeV1"][];
+            /** Dirty */
+            dirty: boolean;
+            /** Draftrevision */
+            draftRevision: string;
+            /** Valid */
+            valid: boolean;
+            /** Validationmessages */
+            validationMessages: string[];
         };
         /** DetailV1 */
         DetailV1: {
@@ -530,6 +757,11 @@ export interface components {
             label: string;
             /** Value */
             value: unknown;
+        };
+        /** ExecuteResetRequestV1 */
+        ExecuteResetRequestV1: {
+            /** Plantoken */
+            planToken: string;
         };
         /** ExternalResourceDetailsV1 */
         ExternalResourceDetailsV1: {
@@ -749,6 +981,45 @@ export interface components {
             /** Workflowname */
             workflowName: string;
         };
+        /** OperationListV1 */
+        OperationListV1: {
+            /** Operations */
+            operations: components["schemas"]["OperationV1"][];
+        };
+        /** OperationV1 */
+        OperationV1: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Detail */
+            detail?: string | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Message */
+            message: string;
+            /** Result */
+            result?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "waiting" | "succeeded" | "failed";
+            /** Targetids */
+            targetIds: string[];
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
         /** OutputCapabilityV1 */
         OutputCapabilityV1: {
             /**
@@ -763,6 +1034,54 @@ export interface components {
             label: string | null;
             /** Outputtargetid */
             outputTargetId: string;
+        };
+        /** OutputContentV1 */
+        OutputContentV1: {
+            /** Content */
+            content?: string | null;
+            descriptor: components["schemas"]["OutputDescriptorV1"];
+            /** Inline */
+            inline: boolean;
+            /** Message */
+            message?: string | null;
+            /** Size */
+            size: number;
+        };
+        /** OutputDescriptorV1 */
+        OutputDescriptorV1: {
+            /** Attempt */
+            attempt?: string | null;
+            /** Contenttype */
+            contentType: string;
+            /** Id */
+            id: string;
+            /** Outputname */
+            outputName: string;
+            /** Resourceid */
+            resourceId: string;
+            /** Resourcename */
+            resourceName: string;
+            /** Resourceplural */
+            resourcePlural: string;
+            /** Source */
+            source: string;
+            /** Stage */
+            stage: string;
+            /** Stageorder */
+            stageOrder: number;
+            /** Targetid */
+            targetId: string;
+            /** Timestamp */
+            timestamp?: string | null;
+        };
+        /** OutputInventoryV1 */
+        OutputInventoryV1: {
+            /** Outputs */
+            outputs: components["schemas"]["OutputDescriptorV1"][];
+            /** Resourceid */
+            resourceId: string;
+            /** Targetid */
+            targetId: string;
         };
         /** ProblemV1 */
         ProblemV1: {
@@ -806,6 +1125,39 @@ export interface components {
             label: string;
             /** Resettargetid */
             resetTargetId: string;
+        };
+        /** ResetPlanRequestV1 */
+        ResetPlanRequestV1: {
+            /** Targetid */
+            targetId: string;
+        };
+        /** ResetPlanV1 */
+        ResetPlanV1: {
+            /** Messages */
+            messages: string[];
+            /** Requesttargetid */
+            requestTargetId: string;
+            /** Targets */
+            targets: components["schemas"]["ResetTargetV1"][];
+            /** Token */
+            token: string;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** ResetTargetV1 */
+        ResetTargetV1: {
+            /** Dependson */
+            dependsOn: string[];
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Phase */
+            phase: string;
+            /** Plural */
+            plural: string;
+            /** Type */
+            type: string;
         };
         /** SaveExternalResourceRequestV1 */
         SaveExternalResourceRequestV1: {
@@ -930,6 +1282,70 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    approve_api_v1_approvals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_approval_api_v1_approvals_review_get: {
+        parameters: {
+            query: {
+                targetId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalReviewV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     open_config_api_v1_config_get: {
         parameters: {
             query?: never;
@@ -1049,6 +1465,39 @@ export interface operations {
             };
         };
     };
+    review_config_api_v1_config_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRevisionRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigReviewV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_config_api_v1_config_save_post: {
         parameters: {
             query?: never;
@@ -1096,12 +1545,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfigSubmissionV1"];
+                    "application/json": components["schemas"]["OperationV1"];
                 };
             };
             /** @description Validation Error */
@@ -1294,6 +1743,219 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManageSnapshotV1"];
+                };
+            };
+        };
+    };
+    list_operations_api_v1_operations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationListV1"];
+                };
+            };
+        };
+    };
+    operation_events_api_v1_operations_events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "last-event-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tracked operation event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_outputs_api_v1_outputs_get: {
+        parameters: {
+            query: {
+                targetId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputInventoryV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_output_api_v1_outputs_content_get: {
+        parameters: {
+            query: {
+                outputId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputContentV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_output_api_v1_outputs_download_get: {
+        parameters: {
+            query: {
+                outputId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete managed output download */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/yaml": unknown;
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_reset_api_v1_resets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecuteResetRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_reset_api_v1_resets_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPlanRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetPlanV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

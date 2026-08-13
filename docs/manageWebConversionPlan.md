@@ -1,6 +1,6 @@
 # Workflow Manage Native Web Conversion Plan
 
-Status: approved implementation plan; phases 0-4 implemented
+Status: approved implementation plan; phases 0-7 implemented
 
 This document is the implementation runbook for converting `workflow manage` from a
 Textual presentation into a native React application backed by FastAPI. It is intended to
@@ -800,6 +800,8 @@ Acceptance:
 
 ### Phase 5: Managed Output
 
+Implementation status: complete as of 2026-08-13.
+
 Managed output follows editing so the selected-resource workspace and typed node
 capabilities are already stable.
 
@@ -827,6 +829,8 @@ Acceptance:
 
 ### Phase 6: Review, Submit, And Operation Tracking
 
+Implementation status: complete as of 2026-08-13.
+
 Work:
 
 - implement `OperationManager` and operation SSE events;
@@ -847,6 +851,8 @@ Acceptance:
 - operation history is bounded and tested.
 
 ### Phase 7: Approval And Reset
+
+Implementation status: complete as of 2026-08-13.
 
 Work:
 

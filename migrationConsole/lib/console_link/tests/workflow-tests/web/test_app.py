@@ -19,6 +19,24 @@ from console_link.workflow.application.observations import (
     Observation,
     ObservationEvent,
 )
+from console_link.workflow.application.outputs import (
+    OutputContent,
+    OutputDescriptor,
+    OutputInventory,
+    OutputReadFailed,
+    OutputStale,
+)
+from console_link.workflow.application.operations import (
+    Operation,
+    OperationEvent,
+)
+from console_link.workflow.application.actions import ApprovalReview
+from console_link.workflow.application.resets import (
+    ResetExecutionResult,
+    ResetPlan,
+    ResetPlanStale,
+    ResetTarget,
+)
 from console_link.workflow.web.app import create_app
 
 
@@ -231,6 +249,250 @@ def test_manage_state_without_a_runtime_coordinator_is_unavailable(tmp_path):
     assert response.json()["detail"] == "Workflow observation is not configured"
 
 
+class _Outputs:
+    def __init__(self):
+        self.target_id = None
+        self.output_id = None
+        self.descriptor = OutputDescriptor(
+            id="managed-output:opaque",
+            target_id=(
+                "output:snapshotmigrations:migration-0:metadataEvaluate"
+            ),
+            resource_id="resource:snapshotmigrations:migration-0",
+            resource_plural="snapshotmigrations",
+            resource_name="migration-0",
+            output_name="metadataEvaluate",
+            stage="Evaluate",
+            stage_order=0,
+            attempt="migration",
+            timestamp="2026-08-13T12:00:00Z",
+            source="s3://outputs/evaluate.log",
+            content_type="application/json",
+        )
+
+    def list_outputs(self, target_id):
+        self.target_id = target_id
+        return OutputInventory(
+            target_id=target_id,
+            resource_id=self.descriptor.resource_id,
+            outputs=(self.descriptor,),
+        )
+
+    def read_output(self, output_id):
+        self.output_id = output_id
+        return OutputContent(
+            descriptor=self.descriptor,
+            content='{"valid":true}',
+            inline=True,
+            size=14,
+        )
+
+    def download_output(self, output_id):
+        self.output_id = output_id
+        return self.descriptor, b'{"valid":true}'
+
+
+def test_output_routes_return_context_content_and_download(tmp_path):
+    outputs = _Outputs()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        outputs=outputs,
+    )
+
+    with TestClient(app) as client:
+        inventory = client.get(
+            "/api/v1/outputs",
+            params={"targetId": outputs.descriptor.target_id},
+        )
+        content = client.get(
+            "/api/v1/outputs/content",
+            params={"outputId": outputs.descriptor.id},
+        )
+        download = client.get(
+            "/api/v1/outputs/download",
+            params={"outputId": outputs.descriptor.id},
+        )
+
+    assert inventory.status_code == 200
+    assert inventory.json()["outputs"][0]["stage"] == "Evaluate"
+    assert inventory.json()["outputs"][0]["source"] == (
+        "s3://outputs/evaluate.log"
+    )
+    assert content.status_code == 200
+    assert content.json()["content"] == '{"valid":true}'
+    assert download.status_code == 200
+    assert download.content == b'{"valid":true}'
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert outputs.target_id == outputs.descriptor.target_id
+    assert outputs.output_id == outputs.descriptor.id
+
+
+def test_output_route_distinguishes_stale_and_read_failures(tmp_path):
+    outputs = _Outputs()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        outputs=outputs,
+    )
+
+    outputs.read_output = lambda _output_id: (_ for _ in ()).throw(
+        OutputStale("The output reference changed")
+    )
+    with TestClient(app) as client:
+        stale = client.get(
+            "/api/v1/outputs/content",
+            params={"outputId": outputs.descriptor.id},
+        )
+
+    outputs.read_output = lambda _output_id: (_ for _ in ()).throw(
+        OutputReadFailed("S3 is unavailable")
+    )
+    with TestClient(app) as client:
+        failed = client.get(
+            "/api/v1/outputs/content",
+            params={"outputId": outputs.descriptor.id},
+        )
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "output_stale"
+    assert failed.status_code == 502
+    assert failed.json()["detail"]["code"] == "output_read_failed"
+
+
+class _Approvals:
+    def __init__(self):
+        self.approved = False
+        self.review_result = ApprovalReview(
+            target_id="approval:node-1",
+            node_id="node-1",
+            gate_name="evaluatemetadata.source-target-snapshot-main",
+            gate_revision="11",
+            workflow_name="migration",
+            resource_id="resource:snapshotmigrations:migration-0",
+            resource_kind="SnapshotMigration",
+            resource_name="migration-0",
+            stage="Metadata evaluation",
+            effect=(
+                "Approving allows metadata evaluation to complete and "
+                "advances to metadata migration."
+            ),
+            reason=None,
+            snapshot_revision="snapshot-revision",
+        )
+
+    def review(self, target_id, snapshot_revision=None):
+        assert target_id == self.review_result.target_id
+        return self.review_result
+
+    def validate(self, target_id, expected_gate_revision):
+        assert target_id == self.review_result.target_id
+        assert expected_gate_revision == self.review_result.gate_revision
+        return self.review_result
+
+    def approve(self, target_id, expected_gate_revision):
+        self.approved = True
+        return self.validate(target_id, expected_gate_revision)
+
+
+class _Resets:
+    def __init__(self):
+        self.executed = False
+        self.plan_result = ResetPlan(
+            token="reset-token",
+            request_target_id="reset:snapshotmigrations:migration-0",
+            targets=(
+                ResetTarget(
+                    plural="snapshotmigrations",
+                    type="snapshotmigration",
+                    name="migration-0",
+                    path="snapshotmigration.migration-0",
+                    phase="Ready",
+                    depends_on=(),
+                    uid="resource-uid",
+                    resource_version="10",
+                ),
+            ),
+            messages=(),
+            warnings=("Target indexes are retained.",),
+        )
+
+    def plan(self, target_id):
+        assert target_id == self.plan_result.request_target_id
+        return self.plan_result
+
+    def validate(self, token):
+        if token != self.plan_result.token:
+            raise ResetPlanStale("Plan changed")
+        return self.plan_result
+
+    def execute(self, token):
+        self.validate(token)
+        self.executed = True
+        return ResetExecutionResult(
+            plan=self.plan_result,
+            message="Reset completed for 1 resource",
+            detail="Deleted snapshotmigration.migration-0",
+        )
+
+
+def test_approval_and_reset_routes_review_exact_targets_then_track_work(
+    tmp_path,
+):
+    approvals = _Approvals()
+    resets = _Resets()
+    operations = _Operations()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        approvals=approvals,
+        resets=resets,
+        operations=operations,
+    )
+
+    with TestClient(app) as client:
+        approval_review = client.get(
+            "/api/v1/approvals/review",
+            params={"targetId": "approval:node-1"},
+        )
+        approval = client.post(
+            "/api/v1/approvals",
+            json={
+                "targetId": "approval:node-1",
+                "expectedGateRevision": "11",
+            },
+        )
+        approval_worker = operations.started["worker"]
+        reset_plan = client.post(
+            "/api/v1/resets/plan",
+            json={
+                "targetId": "reset:snapshotmigrations:migration-0",
+            },
+        )
+        reset = client.post(
+            "/api/v1/resets",
+            json={"planToken": "reset-token"},
+        )
+        stale = client.post(
+            "/api/v1/resets",
+            json={"planToken": "stale-token"},
+        )
+
+    assert approval_review.status_code == 200
+    assert approval_review.json()["stage"] == "Metadata evaluation"
+    assert approval.status_code == 202
+    approval_result = approval_worker()
+    assert approval_result.waiting is True
+    assert approvals.approved is True
+
+    assert reset_plan.status_code == 200
+    assert reset_plan.json()["targets"][0]["name"] == "migration-0"
+    assert "resourceVersion" not in reset_plan.text
+    assert reset.status_code == 202
+    reset_result = operations.started["worker"]()
+    assert reset_result.waiting is False
+    assert resets.executed is True
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "reset_plan_stale"
+
+
 def _edit_state():
     return {
         "formatVersion": 1,
@@ -287,6 +549,7 @@ class _Drafts:
         self.saved = False
         self.discarded = False
         self.submitted = False
+        self.prepared = False
         self.selection = None
         self.external_read = None
         self.external_save = None
@@ -317,6 +580,32 @@ class _Drafts:
             workflow_name=workflow_name,
             message=f"Workflow submitted: {workflow_name}",
         )
+
+    def review(self, expected_revision, snapshot=None):
+        self.expected_revision = expected_revision
+        return {
+            "draft_revision": self.current.draft_revision,
+            "base_revision": self.current.base_revision,
+            "dirty": self.current.dirty,
+            "valid": True,
+            "validation_messages": (),
+            "changes": ({
+                "resource_id": "resource:trafficproxies:capture",
+                "resource_label": "capture",
+                "path": "traffic.proxies.capture.serviceType",
+                "label": "Service type",
+                "kind": "field",
+            },),
+        }
+
+    def prepare_submit(self, expected_revision):
+        self.expected_revision = expected_revision
+        self.prepared = True
+        return self.current
+
+    def submit_saved(self, workflow_name):
+        self.submitted = True
+        return {"workflow_name": workflow_name}
 
     def removal_impact(self, expected_revision, path):
         self.expected_revision = expected_revision
@@ -483,26 +772,73 @@ def test_config_save_and_discard_use_expected_revision(tmp_path):
     assert drafts.discarded is True
 
 
-def test_config_submit_saves_and_submits_the_current_revision(tmp_path):
+class _Operations:
+    def __init__(self):
+        self.started = None
+        self.operation = Operation(
+            id="operation-submit",
+            kind="submit",
+            label="Submit workflow configuration",
+            status="queued",
+            target_ids=(),
+            created_at="2026-08-13T13:00:00Z",
+            updated_at="2026-08-13T13:00:00Z",
+            message="Queued",
+        )
+
+    def start(self, **request):
+        self.started = request
+        return self.operation
+
+    def list(self):
+        return (self.operation,)
+
+    def events_after(self, _cursor):
+        return (
+            OperationEvent(
+                id=1,
+                operation_id=self.operation.id,
+                operation=self.operation,
+            ),
+        )
+
+    def reconcile_submit(self, **_state):
+        return ()
+
+
+def test_config_review_and_submit_start_a_tracked_operation(tmp_path):
     drafts = _Drafts()
+    operations = _Operations()
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         config_drafts=drafts,
+        operations=operations,
         workflow_name="migration-test",
     )
 
     with TestClient(app) as client:
+        review = client.post(
+            "/api/v1/config/review",
+            json={"expectedDraftRevision": "draft-1"},
+        )
         response = client.post(
             "/api/v1/config/submit",
             json={"expectedDraftRevision": "draft-1"},
         )
 
-    assert response.status_code == 200
-    assert response.json()["workflowName"] == "migration-test"
-    assert response.json()["message"] == "Workflow submitted: migration-test"
-    assert response.json()["draft"]["draftRevision"] == "draft-1"
-    assert drafts.submitted is True
+    assert review.status_code == 200
+    assert review.json()["valid"] is True
+    assert review.json()["changes"][0]["resourceLabel"] == "capture"
+    assert response.status_code == 202
+    assert response.json()["id"] == "operation-submit"
+    assert drafts.prepared is True
+    assert drafts.submitted is False
     assert drafts.expected_revision == "draft-1"
+    assert operations.started["kind"] == "submit"
+    result = operations.started["worker"]()
+    assert result.waiting is True
+    assert result.result["workflowName"] == "migration-test"
+    assert drafts.submitted is True
 
 
 def test_config_removal_impact_returns_exact_dependent_paths(tmp_path):

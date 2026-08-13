@@ -9,6 +9,10 @@ import uvicorn
 from ..application.manage_state import ManageStateService
 from ..application.observations import ObservationCoordinator
 from ..application.config_drafts import ConfigDraftService
+from ..application.outputs import OutputService
+from ..application.operations import OperationManager
+from ..application.actions import ApprovalService
+from ..application.resets import ResetService
 from ..models.utils import load_k8s_config
 from ..services.argo_observation_service import make_argo_observation_service
 from ..services.config_edit_service import ConfigEditService
@@ -28,20 +32,34 @@ def run_server(
     refresh_interval: float = 3.0,
 ) -> None:
     load_k8s_config()
+    argo_service = make_argo_observation_service(
+        argo_server,
+        insecure,
+        token,
+    )
     state_service = ManageStateService(
         namespace=namespace,
         workflow_name=workflow_name,
-        argo_service=make_argo_observation_service(
-            argo_server,
-            insecure,
-            token,
-        ),
+        argo_service=argo_service,
         config_service_provider=lambda: ConfigEditService(namespace=namespace),
     )
     coordinator = ObservationCoordinator(
         state_service,
         refresh_interval=refresh_interval,
     )
+    operation_manager = OperationManager()
+
+    def load_workflow():
+        result, workflow = argo_service.get_workflow(
+            workflow_name,
+            namespace,
+        )
+        if not result.get("success"):
+            raise RuntimeError(
+                str(result.get("error") or "Workflow is unavailable")
+            )
+        return workflow
+
     app = create_app(
         static_dir=static_dir,
         coordinator=coordinator,
@@ -49,6 +67,14 @@ def run_server(
         config_drafts=ConfigDraftService(
             ConfigEditService(namespace=namespace),
         ),
+        outputs=OutputService(namespace=namespace),
+        operations=operation_manager,
+        approvals=ApprovalService(
+            namespace=namespace,
+            workflow_name=workflow_name,
+            workflow_loader=load_workflow,
+        ),
+        resets=ResetService(namespace=namespace),
     )
     uvicorn.run(
         app,

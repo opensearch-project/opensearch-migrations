@@ -39,6 +39,25 @@ class ConfigSubmission:
 
 
 @dataclass(frozen=True)
+class ConfigReviewChange:
+    resource_id: Optional[str]
+    resource_label: Optional[str]
+    path: str
+    label: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class ConfigReview:
+    draft_revision: str
+    base_revision: str
+    dirty: bool
+    valid: bool
+    validation_messages: tuple[str, ...]
+    changes: tuple[ConfigReviewChange, ...]
+
+
+@dataclass(frozen=True)
 class ConfigRemovalImpactEntry:
     path: tuple[str, ...]
     field_path: tuple[str, ...]
@@ -158,23 +177,8 @@ class ConfigDraftService:
         workflow_name: str,
     ) -> ConfigSubmission:
         with self._lock:
-            self._require_revision(expected_revision)
-            validation = (self._edit_state or {}).get("validation") or {}
-            if validation.get("valid") is False:
-                messages = [
-                    str(item.get("message"))
-                    for item in validation.get("diagnostics") or []
-                    if isinstance(item, Mapping) and item.get("message")
-                ]
-                messages.extend(
-                    str(message)
-                    for message in validation.get("errors") or []
-                    if message
-                )
-                detail = "; ".join(messages) or "Configuration validation failed"
-                raise ValueError(f"Configuration cannot be submitted: {detail}")
-            saved = self.save(expected_revision)
-            result = self._edit_service.submit_saved_config(workflow_name)
+            saved = self.prepare_submit(expected_revision)
+            result = self.submit_saved(workflow_name)
             submitted_name = str(
                 (result or {}).get("workflow_name") or workflow_name
             )
@@ -183,6 +187,43 @@ class ConfigDraftService:
                 workflow_name=submitted_name,
                 message=f"Workflow submitted: {submitted_name}",
             )
+
+    def review(
+        self,
+        expected_revision: str,
+        snapshot: Optional[Any] = None,
+    ) -> ConfigReview:
+        with self._lock:
+            self._require_revision(expected_revision)
+            current = self._snapshot()
+            validation = (self._edit_state or {}).get("validation") or {}
+            return ConfigReview(
+                draft_revision=current.draft_revision,
+                base_revision=current.base_revision,
+                dirty=current.dirty,
+                valid=validation.get("valid") is not False,
+                validation_messages=_validation_messages(validation),
+                changes=_review_changes(self._edit_state or {}, snapshot),
+            )
+
+    def prepare_submit(self, expected_revision: str) -> ConfigDraft:
+        """Validate and persist the exact draft before background submission."""
+        with self._lock:
+            self._require_revision(expected_revision)
+            validation = (self._edit_state or {}).get("validation") or {}
+            if validation.get("valid") is False:
+                detail = (
+                    "; ".join(_validation_messages(validation))
+                    or "Configuration validation failed"
+                )
+                raise ValueError(
+                    f"Configuration cannot be submitted: {detail}"
+                )
+            return self.save(expected_revision)
+
+    def submit_saved(self, workflow_name: str) -> Dict[str, Any]:
+        """Submit the already-validated saved config from an operation worker."""
+        return self._edit_service.submit_saved_config(workflow_name)
 
     def removal_impact(
         self,
@@ -415,6 +456,90 @@ class ConfigDraftService:
         if not node.get("externalRef"):
             raise ValueError(f"Edit node '{node_id}' is not an external reference.")
         return node
+
+
+def _validation_messages(
+    validation: Mapping[str, Any],
+) -> tuple[str, ...]:
+    messages = [
+        str(item.get("message"))
+        for item in validation.get("diagnostics") or []
+        if isinstance(item, Mapping) and item.get("message")
+    ]
+    messages.extend(
+        str(message)
+        for message in validation.get("errors") or []
+        if message
+    )
+    return tuple(dict.fromkeys(messages))
+
+
+def _review_changes(
+    edit_state: Mapping[str, Any],
+    snapshot: Optional[Any],
+) -> tuple[ConfigReviewChange, ...]:
+    changes: list[ConfigReviewChange] = []
+    seen: set[tuple[Optional[str], str]] = set()
+
+    for node in getattr(snapshot, "nodes", {}).values() if snapshot else ():
+        if getattr(node, "kind", None) != "resource":
+            continue
+        resource_id = str(getattr(node, "id", ""))
+        resource_label = str(getattr(node, "label", ""))
+        for comparison in getattr(node, "comparisons", ()):
+            if not getattr(comparison, "pending_changed", False):
+                continue
+            path = str(getattr(comparison, "path", ""))
+            key = (resource_id, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            changes.append(ConfigReviewChange(
+                resource_id=resource_id,
+                resource_label=resource_label,
+                path=path,
+                label=str(getattr(comparison, "label", path)),
+                kind="field",
+            ))
+        summary = str(getattr(node, "value_summary", "") or "")
+        if "pending submission" in summary.lower():
+            key = (resource_id, "$presence")
+            if key not in seen:
+                seen.add(key)
+                changes.append(ConfigReviewChange(
+                    resource_id=resource_id,
+                    resource_label=resource_label,
+                    path="$presence",
+                    label=summary,
+                    kind="resource",
+                ))
+
+    def visit(nodes: Iterable[Mapping[str, Any]]) -> None:
+        for node in nodes:
+            children = node.get("children") or []
+            if (
+                node.get("status") == "changed"
+                and (
+                    not children
+                    or node.get("valueKind")
+                    in {"scalar", "boolean", "union"}
+                )
+            ):
+                path = ".".join(str(part) for part in node.get("path") or [])
+                key = (None, path)
+                if path and key not in seen:
+                    seen.add(key)
+                    changes.append(ConfigReviewChange(
+                        resource_id=None,
+                        resource_label=None,
+                        path=path,
+                        label=str(node.get("label") or path),
+                        kind="field",
+                    ))
+            visit(children)
+
+    visit(edit_state.get("nodes") or [])
+    return tuple(changes)
 
 
 def _find_node(nodes: Iterable[Dict[str, Any]], node_id: str) -> Optional[Dict[str, Any]]:

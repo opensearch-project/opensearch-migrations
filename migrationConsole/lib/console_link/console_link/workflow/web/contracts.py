@@ -15,11 +15,21 @@ from ..application.models import (
 )
 from ..application.config_drafts import (
     ConfigDraft,
+    ConfigReview,
+    ConfigReviewChange,
     ConfigRemovalImpact,
     ConfigSubmission,
     ExternalResourceDetails,
     ExternalResourceInventory,
     ExternalResourceMutation,
+)
+from ..application.operations import Operation
+from ..application.actions import ApprovalReview
+from ..application.resets import ResetPlan, ResetTarget
+from ..application.outputs import (
+    OutputContent,
+    OutputDescriptor,
+    OutputInventory,
 )
 
 
@@ -364,6 +374,210 @@ class ConfigSubmissionV1(WebModel):
             draft=ConfigDraftV1.from_domain(submission.draft),
             workflow_name=submission.workflow_name,
             message=submission.message,
+        )
+
+
+class ConfigReviewChangeV1(WebModel):
+    resource_id: Optional[str] = None
+    resource_label: Optional[str] = None
+    path: str
+    label: str
+    kind: Literal["field", "resource"]
+
+    @classmethod
+    def from_domain(
+        cls,
+        change: Union[ConfigReviewChange, Mapping[str, Any]],
+    ) -> "ConfigReviewChangeV1":
+        if isinstance(change, Mapping):
+            return cls.model_validate(change)
+        return cls.model_validate(change.__dict__)
+
+
+class ConfigReviewV1(WebModel):
+    draft_revision: str
+    base_revision: str
+    dirty: bool
+    valid: bool
+    validation_messages: List[str]
+    changes: List[ConfigReviewChangeV1]
+
+    @classmethod
+    def from_domain(
+        cls,
+        review: Union[ConfigReview, Mapping[str, Any]],
+    ) -> "ConfigReviewV1":
+        source = review if isinstance(review, Mapping) else review.__dict__
+        return cls(
+            draft_revision=str(source["draft_revision"]),
+            base_revision=str(source["base_revision"]),
+            dirty=bool(source["dirty"]),
+            valid=bool(source["valid"]),
+            validation_messages=list(source["validation_messages"]),
+            changes=[
+                ConfigReviewChangeV1.from_domain(change)
+                for change in source["changes"]
+            ],
+        )
+
+
+class OperationV1(WebModel):
+    id: str
+    kind: str
+    label: str
+    status: Literal[
+        "queued",
+        "running",
+        "waiting",
+        "succeeded",
+        "failed",
+    ]
+    target_ids: List[str]
+    created_at: datetime
+    updated_at: datetime
+    message: str
+    detail: Optional[str] = None
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, operation: Operation) -> "OperationV1":
+        return cls.model_validate(operation.__dict__)
+
+
+class OperationListV1(WebModel):
+    operations: List[OperationV1]
+
+
+class ApprovalReviewV1(WebModel):
+    target_id: str
+    node_id: str
+    gate_name: str
+    gate_revision: str
+    workflow_name: str
+    resource_id: Optional[str] = None
+    resource_kind: Optional[str] = None
+    resource_name: Optional[str] = None
+    stage: str
+    effect: str
+    reason: Optional[str] = None
+    snapshot_revision: Optional[str] = None
+
+    @classmethod
+    def from_domain(cls, review: ApprovalReview) -> "ApprovalReviewV1":
+        return cls.model_validate(review.__dict__)
+
+
+class ApproveRequestV1(WebModel):
+    target_id: str
+    expected_gate_revision: str
+
+
+class ResetPlanRequestV1(WebModel):
+    target_id: str
+
+
+class ResetTargetV1(WebModel):
+    plural: str
+    type: str
+    name: str
+    path: str
+    phase: str
+    depends_on: List[str]
+
+    @classmethod
+    def from_domain(cls, target: ResetTarget) -> "ResetTargetV1":
+        return cls(
+            plural=target.plural,
+            type=target.type,
+            name=target.name,
+            path=target.path,
+            phase=target.phase,
+            depends_on=list(target.depends_on),
+        )
+
+
+class ResetPlanV1(WebModel):
+    token: str
+    request_target_id: str
+    targets: List[ResetTargetV1]
+    messages: List[str]
+    warnings: List[str]
+
+    @classmethod
+    def from_domain(cls, plan: ResetPlan) -> "ResetPlanV1":
+        return cls(
+            token=plan.token,
+            request_target_id=plan.request_target_id,
+            targets=[
+                ResetTargetV1.from_domain(target)
+                for target in plan.targets
+            ],
+            messages=list(plan.messages),
+            warnings=list(plan.warnings),
+        )
+
+
+class ExecuteResetRequestV1(WebModel):
+    plan_token: str
+
+
+class OutputDescriptorV1(WebModel):
+    id: str
+    target_id: str
+    resource_id: str
+    resource_plural: str
+    resource_name: str
+    output_name: str
+    stage: str
+    stage_order: int
+    attempt: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    source: str
+    content_type: str
+
+    @classmethod
+    def from_domain(
+        cls,
+        descriptor: OutputDescriptor,
+    ) -> "OutputDescriptorV1":
+        return cls.model_validate(descriptor.to_dict())
+
+
+class OutputInventoryV1(WebModel):
+    target_id: str
+    resource_id: str
+    outputs: List[OutputDescriptorV1]
+
+    @classmethod
+    def from_domain(
+        cls,
+        inventory: OutputInventory,
+    ) -> "OutputInventoryV1":
+        return cls(
+            target_id=inventory.target_id,
+            resource_id=inventory.resource_id,
+            outputs=[
+                OutputDescriptorV1.from_domain(item)
+                for item in inventory.outputs
+            ],
+        )
+
+
+class OutputContentV1(WebModel):
+    descriptor: OutputDescriptorV1
+    content: Optional[str] = None
+    inline: bool
+    size: int
+    message: Optional[str] = None
+
+    @classmethod
+    def from_domain(cls, content: OutputContent) -> "OutputContentV1":
+        return cls(
+            descriptor=OutputDescriptorV1.from_domain(content.descriptor),
+            content=content.content,
+            inline=content.inline,
+            size=content.size,
+            message=content.message,
         )
 
 
