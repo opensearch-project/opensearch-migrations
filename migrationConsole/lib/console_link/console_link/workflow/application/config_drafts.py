@@ -4,7 +4,9 @@ import hashlib
 import json
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+
+import yaml
 
 from ..external_resource_validation import (
     is_config_map_key,
@@ -27,6 +29,27 @@ class ConfigDraft:
     draft_revision: str
     dirty: bool
     edit_state: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ConfigSubmission:
+    draft: ConfigDraft
+    workflow_name: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ConfigRemovalImpactEntry:
+    path: tuple[str, ...]
+    field_path: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True)
+class ConfigRemovalImpact:
+    target_path: tuple[str, ...]
+    target_label: str
+    affected: tuple[ConfigRemovalImpactEntry, ...]
 
 
 @dataclass(frozen=True)
@@ -128,6 +151,58 @@ class ConfigDraftService:
             self._require_revision(expected_revision)
             self._reload()
             return self._snapshot()
+
+    def submit(
+        self,
+        expected_revision: str,
+        workflow_name: str,
+    ) -> ConfigSubmission:
+        with self._lock:
+            self._require_revision(expected_revision)
+            validation = (self._edit_state or {}).get("validation") or {}
+            if validation.get("valid") is False:
+                messages = [
+                    str(item.get("message"))
+                    for item in validation.get("diagnostics") or []
+                    if isinstance(item, Mapping) and item.get("message")
+                ]
+                messages.extend(
+                    str(message)
+                    for message in validation.get("errors") or []
+                    if message
+                )
+                detail = "; ".join(messages) or "Configuration validation failed"
+                raise ValueError(f"Configuration cannot be submitted: {detail}")
+            saved = self.save(expected_revision)
+            result = self._edit_service.submit_saved_config(workflow_name)
+            submitted_name = str(
+                (result or {}).get("workflow_name") or workflow_name
+            )
+            return ConfigSubmission(
+                draft=saved,
+                workflow_name=submitted_name,
+                message=f"Workflow submitted: {submitted_name}",
+            )
+
+    def removal_impact(
+        self,
+        expected_revision: str,
+        path: Sequence[str],
+    ) -> ConfigRemovalImpact:
+        with self._lock:
+            self._require_revision(expected_revision)
+            normalized_path = tuple(str(part) for part in path)
+            if len(normalized_path) < 2:
+                raise ValueError("Only named configuration entries can be removed")
+            config = yaml.safe_load(self._raw_yaml or "") or {}
+            if not isinstance(config, dict):
+                config = {}
+            affected = _removal_impact(config, normalized_path)
+            return ConfigRemovalImpact(
+                target_path=normalized_path,
+                target_label=normalized_path[-1],
+                affected=affected,
+            )
 
     def list_external_resources(
         self,
@@ -350,6 +425,284 @@ def _find_node(nodes: Iterable[Dict[str, Any]], node_id: str) -> Optional[Dict[s
             return node
         stack.extend(node.get("children") or [])
     return None
+
+
+@dataclass(frozen=True)
+class _ConfigReference:
+    from_path: tuple[str, ...]
+    from_field_path: tuple[str, ...]
+    to_path: tuple[str, ...]
+    reason: str
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _config_dependency_graph(config: Mapping[str, Any]) -> list[_ConfigReference]:
+    edges: list[_ConfigReference] = []
+
+    def add(
+        from_path: Sequence[str],
+        from_field_path: Sequence[str],
+        to_path: Sequence[str],
+        reason: str,
+    ) -> None:
+        edges.append(_ConfigReference(
+            from_path=tuple(str(part) for part in from_path),
+            from_field_path=tuple(str(part) for part in from_field_path),
+            to_path=tuple(str(part) for part in to_path),
+            reason=reason,
+        ))
+
+    traffic = _mapping(config.get("traffic"))
+    proxies = _mapping(traffic.get("proxies"))
+    s3_sources = _mapping(traffic.get("s3Sources"))
+    replayers = _mapping(traffic.get("replayers"))
+
+    migrations = config.get("snapshotMigrationConfigs")
+    if isinstance(migrations, list):
+        for index, migration_value in enumerate(migrations):
+            migration = _mapping(migration_value)
+            if not migration:
+                continue
+            migration_path = ("snapshotMigrationConfigs", str(index))
+            source = str(migration.get("fromSource") or "")
+            if source:
+                add(
+                    migration_path,
+                    (*migration_path, "fromSource"),
+                    ("sourceClusters", source),
+                    f"fromSource={source}",
+                )
+            target = str(migration.get("toTarget") or "")
+            if target:
+                add(
+                    migration_path,
+                    (*migration_path, "toTarget"),
+                    ("targetClusters", target),
+                    f"toTarget={target}",
+                )
+            snapshots = _mapping(migration.get("perSnapshotConfig"))
+            for snapshot_name in snapshots:
+                snapshot_path = (
+                    *migration_path,
+                    "perSnapshotConfig",
+                    str(snapshot_name),
+                )
+                if source:
+                    add(
+                        snapshot_path,
+                        snapshot_path,
+                        (
+                            "sourceClusters",
+                            source,
+                            "snapshotInfo",
+                            "snapshots",
+                            str(snapshot_name),
+                        ),
+                        f"snapshot={snapshot_name}",
+                    )
+
+    for proxy_name, proxy_value in proxies.items():
+        proxy = _mapping(proxy_value)
+        if not proxy:
+            continue
+        proxy_path = ("traffic", "proxies", str(proxy_name))
+        source = str(proxy.get("source") or "")
+        if source:
+            add(
+                proxy_path,
+                (*proxy_path, "source"),
+                ("sourceClusters", source),
+                f"source={source}",
+            )
+        kafka = str(proxy.get("kafka") or "default")
+        add(
+            proxy_path,
+            (*proxy_path, "kafka"),
+            ("traffic", "kafkaClusters", kafka),
+            f"kafka={kafka}",
+        )
+
+    for source_name, source_value in s3_sources.items():
+        source = _mapping(source_value)
+        if not source:
+            continue
+        source_path = ("traffic", "s3Sources", str(source_name))
+        kafka = str(source.get("kafka") or "default")
+        add(
+            source_path,
+            (*source_path, "kafka"),
+            ("traffic", "kafkaClusters", kafka),
+            f"kafka={kafka}",
+        )
+
+    for replay_name, replay_value in replayers.items():
+        replay = _mapping(replay_value)
+        if not replay:
+            continue
+        replay_path = ("traffic", "replayers", str(replay_name))
+        captured = str(replay.get("fromCapturedTraffic") or "")
+        if captured:
+            captured_path: Optional[tuple[str, ...]] = None
+            if captured in proxies:
+                captured_path = ("traffic", "proxies", captured)
+            elif captured in s3_sources:
+                captured_path = ("traffic", "s3Sources", captured)
+            if captured_path:
+                add(
+                    replay_path,
+                    (*replay_path, "fromCapturedTraffic"),
+                    captured_path,
+                    f"fromCapturedTraffic={captured}",
+                )
+        target = str(replay.get("toTarget") or "")
+        if target:
+            add(
+                replay_path,
+                (*replay_path, "toTarget"),
+                ("targetClusters", target),
+                f"toTarget={target}",
+            )
+        dependencies = replay.get("dependsOnSnapshotMigrations")
+        if isinstance(dependencies, list):
+            for index, dependency_value in enumerate(dependencies):
+                dependency = _mapping(dependency_value)
+                if not dependency:
+                    continue
+                dependency_path = (
+                    *replay_path,
+                    "dependsOnSnapshotMigrations",
+                    str(index),
+                )
+                source = str(dependency.get("source") or "")
+                if source:
+                    add(
+                        dependency_path,
+                        (*dependency_path, "source"),
+                        ("sourceClusters", source),
+                        f"source={source}",
+                    )
+                snapshot = str(dependency.get("snapshot") or "")
+                if source and snapshot:
+                    add(
+                        dependency_path,
+                        (*dependency_path, "snapshot"),
+                        (
+                            "sourceClusters",
+                            source,
+                            "snapshotInfo",
+                            "snapshots",
+                            snapshot,
+                        ),
+                        f"snapshot={snapshot}",
+                    )
+
+    for source_name, source_value in _mapping(
+        config.get("sourceClusters")
+    ).items():
+        source = _mapping(source_value)
+        snapshot_info = _mapping(source.get("snapshotInfo"))
+        repositories = _mapping(snapshot_info.get("repos"))
+        snapshots = _mapping(snapshot_info.get("snapshots"))
+        if not repositories or not snapshots:
+            continue
+        for snapshot_name, snapshot_value in snapshots.items():
+            snapshot = _mapping(snapshot_value)
+            repository = str(snapshot.get("repoName") or "")
+            if repository:
+                snapshot_path = (
+                    "sourceClusters",
+                    str(source_name),
+                    "snapshotInfo",
+                    "snapshots",
+                    str(snapshot_name),
+                )
+                add(
+                    snapshot_path,
+                    (*snapshot_path, "repoName"),
+                    (
+                        "sourceClusters",
+                        str(source_name),
+                        "snapshotInfo",
+                        "repos",
+                        repository,
+                    ),
+                    f"repoName={repository}",
+                )
+    return edges
+
+
+def _removed_snapshot_paths(
+    config: Mapping[str, Any],
+    path: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    if len(path) < 3 or path[0] != "sourceClusters":
+        return set()
+    snapshots = _mapping(
+        _mapping(
+            _mapping(
+                _mapping(config.get("sourceClusters")).get(path[1])
+            ).get("snapshotInfo")
+        ).get("snapshots")
+    )
+    if len(path) == 5 and path[2:4] == ("snapshotInfo", "snapshots"):
+        names = [path[4]]
+    elif len(path) == 4 and path[2:4] == ("snapshotInfo", "snapshots"):
+        names = [str(name) for name in snapshots]
+    elif len(path) == 3 and path[2] == "snapshotInfo":
+        names = [str(name) for name in snapshots]
+    else:
+        return set()
+    return {
+        (
+            "sourceClusters",
+            path[1],
+            "snapshotInfo",
+            "snapshots",
+            name,
+        )
+        for name in names
+    }
+
+
+def _removal_impact(
+    config: Mapping[str, Any],
+    path: tuple[str, ...],
+) -> tuple[ConfigRemovalImpactEntry, ...]:
+    graph = _config_dependency_graph(config)
+    targets = {path, *_removed_snapshot_paths(config, path)}
+    selected = [edge for edge in graph if edge.to_path in targets]
+
+    if len(path) == 2 and path[0] == "sourceClusters":
+        removed_traffic = {
+            edge.from_path
+            for edge in selected
+            if (
+                len(edge.from_path) == 3
+                and edge.from_path[:2] in {
+                    ("traffic", "proxies"),
+                    ("traffic", "s3Sources"),
+                }
+            )
+        }
+        selected.extend(
+            edge for edge in graph if edge.to_path in removed_traffic
+        )
+
+    result = []
+    seen = set()
+    for edge in selected:
+        if edge.from_path in seen:
+            continue
+        seen.add(edge.from_path)
+        result.append(ConfigRemovalImpactEntry(
+            path=edge.from_path,
+            field_path=edge.from_field_path,
+            reason=edge.reason,
+        ))
+    return tuple(result)
 
 
 def _safe_inventory_row(row: Dict[str, Any]) -> Dict[str, Any]:

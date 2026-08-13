@@ -87,6 +87,7 @@ class _NodeDraft:
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    config_presence: Mapping[str, bool] = field(default_factory=dict)
 
 
 def workflow_has_active_rollout(workflow_data: Mapping[str, Any]) -> bool:
@@ -361,6 +362,7 @@ class ManageStateService:
             comparisons=comparisons,
             resource_plural=resource.plural,
             resource_name=resource.name,
+            config_presence=dict(resource.config_presence or {}),
         )
         drafts[resource_id] = draft
 
@@ -595,6 +597,17 @@ def _resource_value_summary(
     resource: ResourceNode,
     comparisons: Sequence[ManageComparison],
 ) -> str:
+    presence = resource.config_presence or {}
+    deployed = presence.get("deployed", True)
+    submitted = presence.get("submitted", deployed)
+    pending_presence = presence.get("pending", submitted)
+    if "pending" in presence and pending_presence != submitted:
+        return (
+            "Addition pending submission"
+            if pending_presence else "Removal pending submission"
+        )
+    if "submitted" in presence and submitted != deployed:
+        return "Addition in progress" if submitted else "Removal in progress"
     pending = sum(1 for item in comparisons if item.pending_changed)
     submitted = sum(1 for item in comparisons if item.submitted_changed)
     if pending:
@@ -695,6 +708,7 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             comparisons=draft.comparisons,
             resource_plural=draft.resource_plural,
             resource_name=draft.resource_name,
+            config_presence=draft.config_presence,
         )
     return nodes
 
@@ -720,6 +734,7 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "comparisons": [item.to_dict() for item in draft.comparisons],
         "resourcePlural": draft.resource_plural,
         "resourceName": draft.resource_name,
+        "configPresence": dict(draft.config_presence),
     }
 
 

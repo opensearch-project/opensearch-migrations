@@ -296,7 +296,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
     capability.kind === "edit"
       ? {
         ...capability,
-        editTargetId: "edit:traffic.generated-resource.settings",
+        editTargetId: "edit:traffic.transform.configMap",
       }
       : capability
   ));
@@ -337,7 +337,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   expect(await screen.findByRole("heading", { name: "Edit replay" }))
     .toBeInTheDocument();
   expect(await within(config).findByRole("row", {
-    name: /ConfigMap/,
+    name: /^ConfigMap Authored value/,
   })).toBeInTheDocument();
   expect(within(config).queryByRole("row", {
     name: /Endpoint/,
@@ -655,9 +655,13 @@ test("saves a focused text edit as one resource-level action", async () => {
   const endpoint = await screen.findByRole("textbox", { name: "Endpoint" });
   await userEvent.clear(endpoint);
   await userEvent.type(endpoint, "https://saved.example.com:9200");
-  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(screen.getByRole("button", {
+    name: "Save configuration",
+  })).toBeEnabled();
 
-  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await userEvent.click(screen.getByRole("button", {
+    name: "Save configuration",
+  }));
 
   await waitFor(() => expect(saveRequest).toEqual({
     expectedDraftRevision: "config-draft-after-blur",
@@ -781,7 +785,6 @@ test("promotes add commands to collection actions and keeps exact deletion", asy
       });
     }),
   );
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   renderApp();
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
@@ -809,6 +812,12 @@ test("promotes add commands to collection actions and keeps exact deletion", asy
   await waitFor(() => expect(operations).toHaveLength(1));
 
   await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
+  expect(await screen.findByRole("dialog", {
+    name: "Remove legacy?",
+  })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", {
+    name: "Confirm removal",
+  }));
   await waitFor(() => expect(operations).toHaveLength(2));
 
   expect(operations).toEqual([{
@@ -819,7 +828,83 @@ test("promotes add commands to collection actions and keeps exact deletion", asy
     op: "removeConfig",
     path: ["sourceClusters", "legacy"],
   }]);
-  expect(confirm).toHaveBeenCalledWith("Remove legacy?");
+});
+
+
+test("keeps a deleted source selected as a tombstone and previews dependents", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = snapshot.nodes["resource:captureproxies:capture"];
+  source.label = "source";
+  source.resourcePlural = "sourceconfigs";
+  source.resourceName = "source";
+  source.valueSummary = "Deployed";
+  source.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:sourceClusters.legacy",
+    label: "Edit source",
+  }];
+  const removedDraft = structuredClone(configDraft);
+  const sources = removedDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  if (!sources) throw new Error("Missing source collection fixture");
+  sources.children = [];
+  removedDraft.dirty = true;
+  removedDraft.draftRevision = "draft-source-removed";
+
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.post("*/api/v1/config/removal-impact", () =>
+      HttpResponse.json({
+        targetPath: ["sourceClusters", "legacy"],
+        targetLabel: "legacy",
+        affected: [{
+          path: ["traffic", "proxies", "capture"],
+          fieldPath: ["traffic", "proxies", "capture", "source"],
+          reason: "source=legacy",
+        }, {
+          path: ["traffic", "replayers", "replay"],
+          fieldPath: [
+            "traffic",
+            "replayers",
+            "replay",
+            "fromCapturedTraffic",
+          ],
+          reason: "fromCapturedTraffic=capture",
+        }],
+      }),
+    ),
+    http.post("*/api/v1/config/operations", () =>
+      HttpResponse.json(removedDraft),
+    ),
+  );
+  renderApp();
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit source" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Remove legacy?",
+  });
+  expect(within(dialog).getByText("traffic.proxies.capture"))
+    .toBeInTheDocument();
+  expect(within(dialog).getByText("traffic.replayers.replay"))
+    .toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Confirm removal",
+  }));
+
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^source, Marked for removal$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("heading", { name: "source" })).toBeInTheDocument();
+  expect(screen.getByText(
+    "This source is marked for removal from the configuration.",
+  )).toBeInTheDocument();
+  expect(screen.queryByText("Workflow configuration")).toBeNull();
 });
 
 
@@ -970,30 +1055,30 @@ test("saves and discards explicit dirty drafts", async () => {
       return HttpResponse.json(configDraft);
     }),
   );
-  renderApp();
+  const { client } = renderApp();
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit capture" }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await userEvent.click(screen.getByRole("button", {
+    name: "Save configuration",
+  }));
   expect(saved).toBe(true);
 
-  server.use(
-    http.get("*/api/v1/config", () =>
-      HttpResponse.json({
-        ...configDraft,
-        dirty: true,
-        draftRevision: "dirty-again",
-      }),
-    ),
-  );
-  await userEvent.click(screen.getByRole("button", { name: "Reload draft" }));
-  await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  client.setQueryData(["config-draft"], {
+    ...configDraft,
+    dirty: true,
+    draftRevision: "dirty-again",
+  });
+  await userEvent.click(screen.getByRole("button", {
+    name: "Revert unsaved changes",
+  }));
   expect(discarded).toBe(true);
+  expect(screen.getByText("Editing configuration")).toBeInTheDocument();
 });
 
 
-test("closing a dirty editor discards the process-local draft before leaving", async () => {
+test("exiting a dirty edit session discards the draft before leaving", async () => {
   let discardCalls = 0;
   server.use(
     http.get("*/api/v1/config", () =>
@@ -1015,7 +1100,7 @@ test("closing a dirty editor discards the process-local draft before leaving", a
   );
 
   await userEvent.click(
-    screen.getByRole("button", { name: "Close configuration" }),
+    screen.getByRole("button", { name: "Exit editing" }),
   );
 
   expect(discardCalls).toBe(1);
@@ -1023,4 +1108,53 @@ test("closing a dirty editor discards the process-local draft before leaving", a
   expect(await screen.findByRole("button", { name: "Edit capture" }))
     .toBeInTheDocument();
   confirm.mockRestore();
+});
+
+
+test("submitting saves the current draft and leaves edit mode", async () => {
+  let submitRequest: unknown;
+  const validDraft = structuredClone(configDraft);
+  validDraft.dirty = true;
+  validDraft.draftRevision = "dirty-to-submit";
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+    http.post("*/api/v1/config/submit", async ({ request }) => {
+      submitRequest = await request.json();
+      return HttpResponse.json({
+        draft: {
+          ...validDraft,
+          dirty: false,
+          baseRevision: validDraft.draftRevision,
+        },
+        workflowName: "migration",
+        message: "Workflow submitted: migration",
+      });
+    }),
+  );
+  renderApp();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Edit capture" }),
+  );
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Save and submit",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Confirm submit",
+  }));
+
+  await waitFor(() => expect(submitRequest).toEqual({
+    expectedDraftRevision: "dirty-to-submit",
+  }));
+  expect(await screen.findByRole("button", { name: "Edit capture" }))
+    .toBeInTheDocument();
+  expect(screen.queryByText("Editing configuration")).toBeNull();
 });

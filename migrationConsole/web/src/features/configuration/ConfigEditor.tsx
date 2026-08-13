@@ -11,14 +11,14 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  LogOut,
   LoaderCircle,
   Pencil,
   Plus,
-  RefreshCw,
   Save,
+  Send,
   Trash2,
   Undo2,
-  X,
 } from "lucide-react";
 
 import {
@@ -26,8 +26,11 @@ import {
   applyEditOperation,
   discardConfigDraft,
   getConfigDraft,
+  getConfigRemovalImpact,
   saveConfigDraft,
+  submitConfigDraft,
   type ConfigDraft,
+  type ConfigRemovalImpact,
   type EditNode,
   type EditOperation,
 } from "../../api/client";
@@ -37,6 +40,8 @@ import { ExternalResourceEditor } from "./ExternalResourceEditor";
 interface ConfigEditorProps {
   initialTargetId?: string | null;
   onClose: () => void;
+  onSubmitted: () => void;
+  removalState?: string | null;
   resourceLabel: string;
 }
 
@@ -56,6 +61,14 @@ interface PinnedContext {
 interface AddContext {
   command: EditNode;
   parent: EditNode;
+}
+
+
+interface PendingRemoval {
+  node: EditNode;
+  impact: ConfigRemovalImpact | null;
+  loading: boolean;
+  error: string;
 }
 
 
@@ -708,6 +721,7 @@ function ConfigPropertyRow({
   replaceDraft,
   reportError,
   onLocalDirtyChange,
+  onRequestRemoval,
   onSelectAdded,
   onSelect,
   onRevealChildren,
@@ -727,6 +741,7 @@ function ConfigPropertyRow({
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
   onLocalDirtyChange: (nodeId: string, dirty: boolean) => void;
+  onRequestRemoval: (node: EditNode) => void;
   onSelectAdded: (nodeId: string, parentId: string | null) => void;
   onSelect: () => void;
   onRevealChildren: () => void;
@@ -942,11 +957,7 @@ function ConfigPropertyRow({
                 aria-label={`Remove ${node.path.at(-1)}`}
                 className="danger-button"
                 disabled={busy}
-                onClick={() => {
-                  if (window.confirm(`Remove ${name}?`)) {
-                    void commit({ op: "removeConfig", path: node.path });
-                  }
-                }}
+                onClick={() => onRequestRemoval(node)}
                 title={`Remove ${node.path.at(-1)}`}
                 type="button"
               >
@@ -1033,6 +1044,8 @@ function ConfigPropertyRow({
 export function ConfigEditor({
   initialTargetId,
   onClose,
+  onSubmitted,
+  removalState,
   resourceLabel,
 }: ConfigEditorProps) {
   const queryClient = useQueryClient();
@@ -1056,7 +1069,11 @@ export function ConfigEditor({
     () => new Set(),
   );
   const [busy, setBusy] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
   const [problem, setProblem] = useState("");
+  const [pendingRemoval, setPendingRemoval] =
+    useState<PendingRemoval | null>(null);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
   const configTablePanelRef = useRef<HTMLElement>(null);
   const pinUpdateFrame = useRef<number | null>(null);
@@ -1074,21 +1091,30 @@ export function ConfigEditor({
     () => draft?.editState.nodes ?? [],
     [draft?.editState.nodes],
   );
+  const globalTarget = activeTargetId === "edit:workflowConfiguration";
   const target = useMemo(
-    () => findClosestNode(nodes, activeTargetId),
-    [activeTargetId, nodes],
+    () => globalTarget ? null : findNode(nodes, activeTargetId),
+    [activeTargetId, globalTarget, nodes],
   );
   const scope = useMemo(
-    () => editScope(nodes, activeTargetId),
-    [activeTargetId, nodes],
+    () => target ? editScope(nodes, target.id) : null,
+    [nodes, target],
   );
   const scopedNodes = useMemo(
-    () => scope ? [scope] : nodes,
-    [nodes, scope],
+    () => (
+      activeTargetId && !target && !globalTarget
+        ? []
+        : scope ? [scope] : nodes
+    ),
+    [activeTargetId, globalTarget, nodes, scope, target],
   );
   const contextualAdd = useMemo(
-    () => nearestAddContext(nodes, scope?.id ?? target?.id ?? null),
-    [nodes, scope?.id, target?.id],
+    () => (
+      removalState
+        ? null
+        : nearestAddContext(nodes, scope?.id ?? target?.id ?? null)
+    ),
+    [nodes, removalState, scope?.id, target?.id],
   );
 
   useEffect(() => {
@@ -1352,25 +1378,99 @@ export function ConfigEditor({
   };
 
   const save = async () => {
-    if (!await waitForPendingCommit()) return;
-    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
-    if (!current?.dirty) return;
-    await replaceDraft(saveConfigDraft(current.draftRevision));
-    setLocallyEditedIds(new Set());
+    setActionPending(true);
+    try {
+      if (!await waitForPendingCommit()) return;
+      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      if (!current?.dirty) return;
+      if (await replaceDraft(saveConfigDraft(current.draftRevision))) {
+        setLocallyEditedIds(new Set());
+      }
+    } finally {
+      setActionPending(false);
+    }
   };
 
-  const discard = async () => {
-    if (!await waitForPendingCommit()) return false;
-    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
-    if (!current?.dirty) {
-      setLocallyEditedIds(new Set());
-      return true;
+  const revert = async () => {
+    setActionPending(true);
+    try {
+      if (!await waitForPendingCommit()) return false;
+      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      if (!current?.dirty) {
+        setLocallyEditedIds(new Set());
+        return true;
+      }
+      const discarded = await replaceDraft(discardConfigDraft(
+        current.draftRevision,
+      ));
+      if (discarded) setLocallyEditedIds(new Set());
+      return discarded;
+    } finally {
+      setActionPending(false);
     }
-    const discarded = await replaceDraft(discardConfigDraft(
-      current.draftRevision,
-    ));
-    if (discarded) setLocallyEditedIds(new Set());
-    return discarded;
+  };
+
+  const submit = async () => {
+    if (!await waitForPendingCommit()) return;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      const submission = await submitConfigDraft(current.draftRevision);
+      queryClient.setQueryData(["config-draft"], submission.draft);
+      setLocallyEditedIds(new Set());
+      setConfirmSubmit(false);
+      onSubmitted();
+    } catch (error) {
+      if (error instanceof ConfigApiError && error.current) {
+        queryClient.setQueryData(["config-draft"], error.current);
+      }
+      setProblem(error instanceof Error ? error.message : String(error));
+      setConfirmSubmit(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestRemoval = async (node: EditNode) => {
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current) return;
+    setPendingRemoval({
+      node,
+      impact: null,
+      loading: true,
+      error: "",
+    });
+    try {
+      const impact = await getConfigRemovalImpact(
+        current.draftRevision,
+        node.path,
+      );
+      setPendingRemoval({
+        node,
+        impact,
+        loading: false,
+        error: "",
+      });
+    } catch (error) {
+      setPendingRemoval({
+        node,
+        impact: null,
+        loading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const confirmRemoval = async () => {
+    if (!pendingRemoval?.impact) return;
+    const operation = {
+      op: "removeConfig" as const,
+      path: pendingRemoval.node.path,
+    };
+    const applied = await commit(operation);
+    if (applied) setPendingRemoval(null);
   };
 
   const selectAdded = (nodeId: string, parentId: string | null) => {
@@ -1390,16 +1490,21 @@ export function ConfigEditor({
   };
 
   const close = async () => {
-    if (!await waitForPendingCommit()) return;
-    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
-    if (
-      (current?.dirty || hasLocalEdits)
-      && !window.confirm("Discard this unsaved browser draft and close configuration?")
-    ) {
-      return;
+    setActionPending(true);
+    try {
+      if (!await waitForPendingCommit()) return;
+      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      if (
+        (current?.dirty || hasLocalEdits)
+        && !window.confirm("Discard this unsaved browser draft and close configuration?")
+      ) {
+        return;
+      }
+      if (current?.dirty && !await revert()) return;
+      onClose();
+    } finally {
+      setActionPending(false);
     }
-    if (current?.dirty && !await discard()) return;
-    onClose();
   };
 
   if (draftQuery.isPending) {
@@ -1433,15 +1538,15 @@ export function ConfigEditor({
     >
       <header className="config-toolbar">
         <div className="config-toolbar-title">
-          <span>Configuration</span>
+          <span>Editing configuration</span>
           <h2>Edit {resourceLabel}</h2>
           <span>
-            {draft.dirty || hasLocalEdits
+            {removalState ?? (draft.dirty || hasLocalEdits
               ? "Unsaved changes"
-              : "Saved configuration"}
+              : "Saved configuration")}
           </span>
         </div>
-        <div className="config-toolbar-filters">
+        {!removalState ? <div className="config-toolbar-filters">
           <label>
             <input
               checked={showOptional}
@@ -1458,7 +1563,7 @@ export function ConfigEditor({
             />
             Show expert fields
           </label>
-        </div>
+        </div> : null}
         <div className="config-toolbar-actions">
           {contextualAdd ? (
             <button
@@ -1490,43 +1595,60 @@ export function ConfigEditor({
             </button>
           ) : null}
           <button
-            aria-label="Reload draft"
-            disabled={busy || draftQuery.isFetching}
-            onClick={() => void draftQuery.refetch()}
-            title="Reload draft"
-            type="button"
-          >
-            <RefreshCw className={draftQuery.isFetching ? "spin" : ""} />
-            <span>Reload draft</span>
-          </button>
-          <button
-            aria-label="Discard changes"
-            disabled={!hasLocalEdits && (busy || !draft.dirty)}
-            onClick={() => void discard()}
-            title="Discard changes"
+            aria-label="Revert unsaved changes"
+            disabled={
+              actionPending
+              || (!hasLocalEdits && (busy || !draft.dirty))
+            }
+            onClick={() => void revert()}
+            title="Reread the saved configuration and discard unsaved changes"
             type="button"
           >
             <Undo2 />
-            <span>Discard changes</span>
+            <span>Revert</span>
           </button>
           <button
-            aria-label="Save changes"
+            aria-label="Save configuration"
             className="primary-button"
-            disabled={!hasLocalEdits && (busy || !draft.dirty)}
+            disabled={
+              actionPending
+              || (!hasLocalEdits && (busy || !draft.dirty))
+            }
             onClick={() => void save()}
-            title="Save changes"
+            title="Save configuration and continue editing"
             type="button"
           >
             <Save />
-            <span>Save changes</span>
+            <span>Save</span>
           </button>
           <button
-            aria-label="Close configuration"
-            className="icon-button"
-            onClick={() => void close()}
+            aria-label="Save and submit"
+            className="submit-button"
+            disabled={
+              actionPending
+              || (busy && !hasLocalEdits)
+              || draft.editState.validation.valid === false
+            }
+            onClick={() => setConfirmSubmit(true)}
+            title={
+              draft.editState.validation.valid === false
+                ? "Resolve validation errors before submitting"
+                : "Save configuration, submit the workflow, and leave editing"
+            }
             type="button"
           >
-            <X />
+            <Send />
+            <span>Save and submit</span>
+          </button>
+          <button
+            aria-label="Exit editing"
+            disabled={actionPending || (busy && !hasLocalEdits)}
+            onClick={() => void close()}
+            title="Discard unsaved changes and leave editing"
+            type="button"
+          >
+            <LogOut />
+            <span>Exit editing</span>
           </button>
         </div>
       </header>
@@ -1537,7 +1659,7 @@ export function ConfigEditor({
           <button onClick={() => setProblem("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {contextAdding && contextualAdd ? (
+      {!removalState && contextAdding && contextualAdd ? (
         <section
           aria-label={`Add ${fieldName(contextualAdd.command)}`}
           className="config-context-add"
@@ -1557,7 +1679,32 @@ export function ConfigEditor({
           />
         </section>
       ) : null}
-      <div className="config-layout">
+      {removalState ? (
+        <section className="config-removal-workspace" role="status">
+          <div className="config-removal-icon" aria-hidden="true">
+            <Trash2 />
+          </div>
+          <span className="config-removal-state">{removalState}</span>
+          <h2>{resourceLabel}</h2>
+          <p>
+            This {resourceLabel} is marked for removal from the configuration.
+          </p>
+          <p>
+            It can remain deployed until the saved configuration is submitted
+            and the cluster finishes processing the change.
+          </p>
+          {draft.dirty ? (
+            <button
+              disabled={busy}
+              onClick={() => void revert()}
+              type="button"
+            >
+              <Undo2 aria-hidden="true" />
+              Revert unsaved changes
+            </button>
+          ) : null}
+        </section>
+      ) : <div className="config-layout">
         <section
           className="config-table-panel"
           onScroll={schedulePinnedContextUpdate}
@@ -1638,6 +1785,9 @@ export function ConfigEditor({
                     key={node.id}
                     node={node}
                     onLocalDirtyChange={markLocalEdit}
+                    onRequestRemoval={(removalNode) => {
+                      void requestRemoval(removalNode);
+                    }}
                     onRevealChildren={() => {
                       revealChildrenFor.current = {
                         parentId: node.id,
@@ -1714,7 +1864,134 @@ export function ConfigEditor({
             </div>
           ) : null}
         </aside>
-      </div>
+      </div>}
+      {pendingRemoval ? (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="removal-dialog-title"
+            aria-modal="true"
+            className="confirmation-dialog"
+            role="dialog"
+          >
+            <header>
+              <Trash2 aria-hidden="true" />
+              <div>
+                <span>Configuration removal</span>
+                <h2 id="removal-dialog-title">
+                  Remove {fieldName(pendingRemoval.node)}?
+                </h2>
+              </div>
+            </header>
+            {pendingRemoval.loading ? (
+              <div className="dialog-loading">
+                <LoaderCircle className="spin" aria-hidden="true" />
+                Checking dependent configuration
+              </div>
+            ) : pendingRemoval.error ? (
+              <p className="dialog-error">{pendingRemoval.error}</p>
+            ) : (
+              <>
+                {(pendingRemoval.impact?.affected.length ?? 0) > 0 ? (
+                  <>
+                    <p>
+                      This removal also affects the following configuration
+                      entries:
+                    </p>
+                    <ul className="removal-impact-list">
+                      {pendingRemoval.impact?.affected.map((entry) => (
+                        <li key={entry.path.join(".")}>
+                          <button
+                            onClick={() => {
+                              const targetId = `edit:${entry.path.join(".")}`;
+                              setActiveTargetId(targetId);
+                              setSelectedId(targetId);
+                              setPendingRemoval(null);
+                            }}
+                            type="button"
+                          >
+                            {entry.path.join(".")}
+                          </button>
+                          <span>{entry.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p>
+                    This entry will be removed from the working configuration.
+                  </p>
+                )}
+              </>
+            )}
+            <footer>
+              <button
+                disabled={busy}
+                onClick={() => setPendingRemoval(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                aria-label="Confirm removal"
+                className="danger-confirm"
+                disabled={
+                  busy
+                  || pendingRemoval.loading
+                  || !pendingRemoval.impact
+                }
+                onClick={() => void confirmRemoval()}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" />
+                Remove
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {confirmSubmit ? (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="submit-dialog-title"
+            aria-modal="true"
+            className="confirmation-dialog"
+            role="dialog"
+          >
+            <header>
+              <Send aria-hidden="true" />
+              <div>
+                <span>Workflow submission</span>
+                <h2 id="submit-dialog-title">Submit configuration?</h2>
+              </div>
+            </header>
+            <p>
+              The current configuration will be saved, the workflow will be
+              replaced, and editing will close after submission succeeds.
+            </p>
+            <footer>
+              <button
+                disabled={busy}
+                onClick={() => setConfirmSubmit(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                aria-label="Confirm submit"
+                className="primary-button"
+                disabled={busy}
+                onClick={() => void submit()}
+                type="button"
+              >
+                {busy
+                  ? <LoaderCircle className="spin" aria-hidden="true" />
+                  : <Send aria-hidden="true" />}
+                Save and submit
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

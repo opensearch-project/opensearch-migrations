@@ -6,6 +6,9 @@ import type { components, paths } from "./schema.generated";
 export type ManageSnapshot = components["schemas"]["ManageSnapshotV1"];
 export type ManageNode = components["schemas"]["ManageNodeV1"];
 export type ConfigDraft = components["schemas"]["ConfigDraftV1"];
+export type ConfigRemovalImpact =
+  components["schemas"]["ConfigRemovalImpactV1"];
+export type ConfigSubmission = components["schemas"]["ConfigSubmissionV1"];
 export type EditNode = components["schemas"]["EditNodeV1"];
 export type EditOperation =
   components["schemas"]["ApplyEditOperationRequestV1"]["operation"];
@@ -146,6 +149,48 @@ export async function discardConfigDraft(
     throw new ConfigApiError(
       response.status,
       "The configuration draft could not be discarded",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function getConfigRemovalImpact(
+  draftRevision: string,
+  path: string[],
+): Promise<ConfigRemovalImpact> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/config/removal-impact",
+    {
+      body: {
+        expectedDraftRevision: draftRevision,
+        path,
+      },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "The effects of this removal could not be determined",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function submitConfigDraft(
+  draftRevision: string,
+): Promise<ConfigSubmission> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/config/submit",
+    { body: { expectedDraftRevision: draftRevision } },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "The workflow configuration could not be submitted",
       error,
     );
   }

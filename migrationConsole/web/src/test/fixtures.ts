@@ -80,7 +80,7 @@ export const manageSnapshot: ManageSnapshot = {
       capabilities: [
         {
           kind: "edit",
-          editTargetId: "edit:captureproxies:capture",
+          editTargetId: "edit:workflowConfiguration",
           label: "Edit capture",
         },
         {

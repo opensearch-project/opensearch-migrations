@@ -45,6 +45,7 @@ def run_server(
     app = create_app(
         static_dir=static_dir,
         coordinator=coordinator,
+        workflow_name=workflow_name,
         config_drafts=ConfigDraftService(
             ConfigEditService(namespace=namespace),
         ),

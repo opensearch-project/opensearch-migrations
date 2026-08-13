@@ -80,6 +80,7 @@ class _FakeEditService:
     def __post_init__(self):
         self.operations = []
         self.saved = []
+        self.submitted = []
         self.saved_external = []
         self.edit_state_override = None
         self.external_payload = {
@@ -133,6 +134,10 @@ class _FakeEditService:
         self.saved_yaml = raw_yaml
         self.saved.append(raw_yaml)
         return "saved"
+
+    def submit_saved_config(self, workflow_name):
+        self.submitted.append(workflow_name)
+        return {"workflow_name": workflow_name}
 
     def list_external_resources(self, external_ref, current_value=None):
         return deepcopy(self.rows)
@@ -252,6 +257,86 @@ def test_save_and_discard_advance_the_base_from_persisted_configuration():
     assert discarded.dirty is False
     assert discarded.base_revision == saved.base_revision
     assert discarded.edit_state["nodes"][0]["children"][0]["value"] == "operation-1"
+
+
+def test_submit_validates_saves_dirty_draft_and_submits_the_saved_config():
+    edit_service = _FakeEditService()
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+    edited = drafts.apply(
+        opened.draft_revision,
+        {"op": "set", "path": ["value"], "value": "draft"},
+    )
+
+    submitted = drafts.submit(edited.draft_revision, "migration")
+
+    assert submitted.draft.dirty is False
+    assert submitted.workflow_name == "migration"
+    assert submitted.message == "Workflow submitted: migration"
+    assert edit_service.saved == ["value: operation-1\n"]
+    assert edit_service.submitted == ["migration"]
+
+
+def test_submit_rejects_invalid_draft_without_saving_or_submitting():
+    edit_service = _FakeEditService()
+    invalid_state = _edit_state()
+    invalid_state["validation"] = {
+        "valid": False,
+        "errors": ["sourceClusters.source.endpoint is required"],
+        "diagnostics": [],
+    }
+    edit_service.edit_state_override = invalid_state
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+
+    with pytest.raises(ValueError, match="endpoint is required"):
+        drafts.submit(opened.draft_revision, "migration")
+
+    assert edit_service.saved == []
+    assert edit_service.submitted == []
+
+
+def test_removal_impact_lists_direct_and_transitive_config_entries():
+    edit_service = _FakeEditService(saved_yaml="""
+sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+traffic:
+  proxies:
+    capture:
+      source: source
+  replayers:
+    replay:
+      fromCapturedTraffic: capture
+      toTarget: target
+""")
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+
+    impact = drafts.removal_impact(
+        opened.draft_revision,
+        ["sourceClusters", "source"],
+    )
+
+    assert impact.target_path == ("sourceClusters", "source")
+    assert [
+        (entry.path, entry.field_path, entry.reason)
+        for entry in impact.affected
+    ] == [
+        (
+            ("traffic", "proxies", "capture"),
+            ("traffic", "proxies", "capture", "source"),
+            "source=source",
+        ),
+        (
+            ("traffic", "replayers", "replay"),
+            ("traffic", "replayers", "replay", "fromCapturedTraffic"),
+            "fromCapturedTraffic=capture",
+        ),
+    ]
 
 
 def test_external_inventory_is_resolved_from_the_exact_server_side_node():

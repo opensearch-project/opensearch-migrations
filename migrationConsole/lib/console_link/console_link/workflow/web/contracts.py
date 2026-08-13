@@ -15,6 +15,8 @@ from ..application.models import (
 )
 from ..application.config_drafts import (
     ConfigDraft,
+    ConfigRemovalImpact,
+    ConfigSubmission,
     ExternalResourceDetails,
     ExternalResourceInventory,
     ExternalResourceMutation,
@@ -125,6 +127,7 @@ class ManageNodeV1(WebModel):
     comparisons: List[ComparisonV1] = Field(default_factory=list)
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    config_presence: Dict[str, bool] = Field(default_factory=dict)
 
 
 class WorkflowV1(WebModel):
@@ -314,6 +317,54 @@ class ApplyEditOperationRequestV1(WebModel):
 
 class DraftRevisionRequestV1(WebModel):
     expected_draft_revision: str
+
+
+class ConfigRemovalImpactRequestV1(DraftRevisionRequestV1):
+    path: List[str]
+
+
+class ConfigRemovalImpactEntryV1(WebModel):
+    path: List[str]
+    field_path: List[str]
+    reason: str
+
+
+class ConfigRemovalImpactV1(WebModel):
+    target_path: List[str]
+    target_label: str
+    affected: List[ConfigRemovalImpactEntryV1]
+
+    @classmethod
+    def from_domain(
+        cls,
+        impact: ConfigRemovalImpact,
+    ) -> "ConfigRemovalImpactV1":
+        return cls.model_validate({
+            "targetPath": list(impact.target_path),
+            "targetLabel": impact.target_label,
+            "affected": [
+                {
+                    "path": list(entry.path),
+                    "fieldPath": list(entry.field_path),
+                    "reason": entry.reason,
+                }
+                for entry in impact.affected
+            ],
+        })
+
+
+class ConfigSubmissionV1(WebModel):
+    draft: ConfigDraftV1
+    workflow_name: str
+    message: str
+
+    @classmethod
+    def from_domain(cls, submission: ConfigSubmission) -> "ConfigSubmissionV1":
+        return cls(
+            draft=ConfigDraftV1.from_domain(submission.draft),
+            workflow_name=submission.workflow_name,
+            message=submission.message,
+        )
 
 
 class ExternalResourceRowV1(WebModel):

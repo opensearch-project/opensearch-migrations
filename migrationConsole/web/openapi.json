@@ -167,6 +167,111 @@
         "title": "ConfigDraftV1",
         "type": "object"
       },
+      "ConfigRemovalImpactEntryV1": {
+        "additionalProperties": false,
+        "properties": {
+          "fieldPath": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fieldpath",
+            "type": "array"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "fieldPath",
+          "reason"
+        ],
+        "title": "ConfigRemovalImpactEntryV1",
+        "type": "object"
+      },
+      "ConfigRemovalImpactRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedDraftRevision": {
+            "title": "Expecteddraftrevision",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedDraftRevision",
+          "path"
+        ],
+        "title": "ConfigRemovalImpactRequestV1",
+        "type": "object"
+      },
+      "ConfigRemovalImpactV1": {
+        "additionalProperties": false,
+        "properties": {
+          "affected": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigRemovalImpactEntryV1"
+            },
+            "title": "Affected",
+            "type": "array"
+          },
+          "targetLabel": {
+            "title": "Targetlabel",
+            "type": "string"
+          },
+          "targetPath": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targetpath",
+            "type": "array"
+          }
+        },
+        "required": [
+          "targetPath",
+          "targetLabel",
+          "affected"
+        ],
+        "title": "ConfigRemovalImpactV1",
+        "type": "object"
+      },
+      "ConfigSubmissionV1": {
+        "additionalProperties": false,
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/ConfigDraftV1"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "workflowName": {
+            "title": "Workflowname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft",
+          "workflowName",
+          "message"
+        ],
+        "title": "ConfigSubmissionV1",
+        "type": "object"
+      },
       "DetailV1": {
         "additionalProperties": false,
         "properties": {
@@ -1108,6 +1213,13 @@
             "title": "Comparisons",
             "type": "array"
           },
+          "configPresence": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Configpresence",
+            "type": "object"
+          },
           "description": {
             "anyOf": [
               {
@@ -1820,6 +1932,47 @@
         ]
       }
     },
+    "/api/v1/config/removal-impact": {
+      "post": {
+        "operationId": "config_removal_impact_api_v1_config_removal_impact_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigRemovalImpactRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigRemovalImpactV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Config Removal Impact",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
     "/api/v1/config/save": {
       "post": {
         "operationId": "save_config_api_v1_config_save_post",
@@ -1856,6 +2009,47 @@
           }
         },
         "summary": "Save Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/config/submit": {
+      "post": {
+        "operationId": "submit_config_api_v1_config_submit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSubmissionV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Config",
         "tags": [
           "configuration"
         ]

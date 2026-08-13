@@ -304,6 +304,37 @@ def test_config_comparison_preserves_deployed_submitted_and_pending_values():
     assert comparison.pending.value == 9203
     assert comparison.submitted_changed is True
     assert comparison.pending_changed is True
+    assert resource.config_presence == {
+        "deployed": True,
+        "submitted": True,
+        "pending": True,
+    }
+
+
+def test_saved_resource_removal_has_an_explicit_navigation_summary():
+    snapshots = {
+        "submitted_console": {
+            "sources": [{
+                "refName": "source",
+                "clientConfig": {"endpoint": "https://source.example.com"},
+            }],
+        },
+        "pending_console": {"sources": []},
+    }
+    workflow = {
+        "metadata": {"name": "migration"},
+        "status": {"phase": "Running"},
+    }
+
+    snapshot = _service({}, workflow=workflow, snapshots=snapshots).observe()
+
+    source = _node(snapshot, "sourceconfigs:source")
+    assert source.config_presence == {
+        "deployed": False,
+        "submitted": True,
+        "pending": False,
+    }
+    assert source.value_summary == "Removal pending submission"
 
 
 def test_approval_and_output_capabilities_name_exact_targets():

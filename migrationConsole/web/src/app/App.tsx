@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import {
+  getConfigDraft,
   getHealth,
   getManageState,
   reconcileManageState,
@@ -18,6 +19,10 @@ import {
 import { useManageEvents } from "../api/useManageEvents";
 import { ActivityPanel } from "../features/activity/ActivityPanel";
 import { ConfigEditor } from "../features/configuration/ConfigEditor";
+import {
+  editTarget,
+  projectEditSnapshot,
+} from "../features/configuration/editProjection";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
 
@@ -58,6 +63,12 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const [editContext, setEditContext] = useState<EditContext | null>(null);
+  const configDraft = useQuery({
+    queryKey: ["config-draft"],
+    queryFn: getConfigDraft,
+    enabled: editContext !== null,
+    staleTime: Infinity,
+  });
 
   useEffect(() => {
     const currentState = (
@@ -104,16 +115,33 @@ export function App() {
     );
   }, []);
 
+  const displayedState = useMemo(
+    () => (
+      state.data && editContext
+        ? projectEditSnapshot(state.data, configDraft.data)
+        : state.data
+    ),
+    [configDraft.data, editContext, state.data],
+  );
+
   useEffect(() => {
-    if (!state.data) return;
+    if (!displayedState) return;
     setSelectedId((current) => (
-      current && state.data.nodes[current]
+      current && displayedState.nodes[current]
         ? current
-        : firstSelectableId(state.data)
+        : firstSelectableId(displayedState)
     ));
-  }, [state.data]);
+  }, [displayedState]);
 
   const selectedNode = useMemo(
+    () => (
+      selectedId && displayedState
+        ? displayedState.nodes[selectedId] ?? null
+        : null
+    ),
+    [displayedState, selectedId],
+  );
+  const observedSelectedNode = useMemo(
     () => (
       selectedId && state.data
         ? state.data.nodes[selectedId] ?? null
@@ -219,7 +247,7 @@ export function App() {
               <span>{problem.message}</span>
             </div>
           ))}
-          {state.data.rootIds.length === 0 ? (
+          {displayedState.rootIds.length === 0 ? (
             <main className="empty-state">
               <Activity aria-hidden="true" />
               <h2>No migration resources found</h2>
@@ -229,36 +257,49 @@ export function App() {
               <section className={`tree-panel ${treeOpen ? "open" : ""}`}>
                 <header className="panel-header">
                   <div>
-                    <h2>Resources</h2>
-                    <span>{Object.keys(state.data.nodes).length} observed</span>
+                    <h2>{editContext ? "Configuration" : "Resources"}</h2>
+                    <span>
+                      {editContext
+                        ? "Editing intended state"
+                        : `${Object.keys(state.data.nodes).length} observed`}
+                    </span>
                   </div>
                 </header>
                 <ResourceTree
                   onSelect={(nodeId) => {
-                    const node = state.data.nodes[nodeId];
+                    const node = displayedState.nodes[nodeId];
                     if (editContext) {
-                      const edit = node?.capabilities.find(
-                        (capability) => capability.kind === "edit",
-                      );
-                      if (!edit || edit.kind !== "edit") return;
+                      const targetId = node ? editTarget(node) : null;
+                      if (!targetId) return;
                       setEditContext({
                         resourceId: nodeId,
-                        targetId: edit.editTargetId,
+                        targetId,
                       });
                     }
                     setSelectedId(nodeId);
                     setTreeOpen(false);
                   }}
                   selectedId={selectedId}
-                  snapshot={state.data}
+                  snapshot={displayedState}
                 />
               </section>
               {editContext ? (
                 <ConfigEditor
                   initialTargetId={editContext.targetId}
                   onClose={() => setEditContext(null)}
+                  onSubmitted={() => {
+                    setEditContext(null);
+                    void queryClient.invalidateQueries({
+                      queryKey: ["manage-state"],
+                    });
+                  }}
+                  removalState={
+                    selectedNode?.status === "removed"
+                      ? selectedNode.valueSummary ?? "Marked for removal"
+                      : null
+                  }
                   resourceLabel={
-                    state.data.nodes[editContext.resourceId]?.label
+                    displayedState.nodes[editContext.resourceId]?.label
                     ?? "resource"
                   }
                 />
@@ -277,7 +318,7 @@ export function App() {
                 </section>
               )}
               <ActivityPanel
-                selectedNode={selectedNode}
+                selectedNode={observedSelectedNode}
                 snapshot={state.data}
               />
             </main>

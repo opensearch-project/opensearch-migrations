@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/removal-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Config Removal Impact */
+        post: operations["config_removal_impact_api_v1_config_removal_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config/save": {
         parameters: {
             query?: never;
@@ -66,6 +83,23 @@ export interface paths {
         put?: never;
         /** Save Config */
         post: operations["save_config_api_v1_config_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Config */
+        post: operations["submit_config_api_v1_config_submit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -249,6 +283,39 @@ export interface components {
             /** Draftrevision */
             draftRevision: string;
             editState: components["schemas"]["EditStateV1"];
+        };
+        /** ConfigRemovalImpactEntryV1 */
+        ConfigRemovalImpactEntryV1: {
+            /** Fieldpath */
+            fieldPath: string[];
+            /** Path */
+            path: string[];
+            /** Reason */
+            reason: string;
+        };
+        /** ConfigRemovalImpactRequestV1 */
+        ConfigRemovalImpactRequestV1: {
+            /** Expecteddraftrevision */
+            expectedDraftRevision: string;
+            /** Path */
+            path: string[];
+        };
+        /** ConfigRemovalImpactV1 */
+        ConfigRemovalImpactV1: {
+            /** Affected */
+            affected: components["schemas"]["ConfigRemovalImpactEntryV1"][];
+            /** Targetlabel */
+            targetLabel: string;
+            /** Targetpath */
+            targetPath: string[];
+        };
+        /** ConfigSubmissionV1 */
+        ConfigSubmissionV1: {
+            draft: components["schemas"]["ConfigDraftV1"];
+            /** Message */
+            message: string;
+            /** Workflowname */
+            workflowName: string;
         };
         /** DetailV1 */
         DetailV1: {
@@ -598,6 +665,10 @@ export interface components {
             childIds?: string[];
             /** Comparisons */
             comparisons?: components["schemas"]["ComparisonV1"][];
+            /** Configpresence */
+            configPresence?: {
+                [key: string]: boolean;
+            };
             /**
              * Description
              * @default null
@@ -945,6 +1016,39 @@ export interface operations {
             };
         };
     };
+    config_removal_impact_api_v1_config_removal_impact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigRemovalImpactRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigRemovalImpactV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_config_api_v1_config_save_post: {
         parameters: {
             query?: never;
@@ -965,6 +1069,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigDraftV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_config_api_v1_config_submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRevisionRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSubmissionV1"];
                 };
             };
             /** @description Validation Error */

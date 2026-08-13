@@ -16,6 +16,16 @@ export const server = setupServer(
   http.get("*/api/v1/config", () =>
     HttpResponse.json(configDraft),
   ),
+  http.post("*/api/v1/config/removal-impact", async ({ request }) => {
+    const body = await request.json() as {
+      path: string[];
+    };
+    return HttpResponse.json({
+      targetPath: body.path,
+      targetLabel: body.path.at(-1) ?? "configuration",
+      affected: [],
+    });
+  }),
   http.get("*/api/v1/external-resources", () =>
     HttpResponse.json({
       nodeId: "edit:traffic.transform.configMap",

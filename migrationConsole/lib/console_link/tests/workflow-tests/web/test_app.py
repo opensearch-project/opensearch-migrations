@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 from console_link.workflow.application.config_drafts import (
     ConfigDraft,
     ConfigDraftConflict,
+    ConfigRemovalImpact,
+    ConfigRemovalImpactEntry,
+    ConfigSubmission,
     ExternalResourceDetails,
     ExternalResourceInventory,
     ExternalResourceMutation,
@@ -283,6 +286,7 @@ class _Drafts:
         self.expected_revision = None
         self.saved = False
         self.discarded = False
+        self.submitted = False
         self.selection = None
         self.external_read = None
         self.external_save = None
@@ -304,6 +308,29 @@ class _Drafts:
         self.expected_revision = expected_revision
         self.discarded = True
         return self.current
+
+    def submit(self, expected_revision, workflow_name):
+        self.expected_revision = expected_revision
+        self.submitted = True
+        return ConfigSubmission(
+            draft=self.current,
+            workflow_name=workflow_name,
+            message=f"Workflow submitted: {workflow_name}",
+        )
+
+    def removal_impact(self, expected_revision, path):
+        self.expected_revision = expected_revision
+        return ConfigRemovalImpact(
+            target_path=tuple(path),
+            target_label=str(path[-1]),
+            affected=(
+                ConfigRemovalImpactEntry(
+                    path=("traffic", "proxies", "capture"),
+                    field_path=("traffic", "proxies", "capture", "source"),
+                    reason="source=source",
+                ),
+            ),
+        )
 
     def list_external_resources(self, expected_revision, node_id):
         self.expected_revision = expected_revision
@@ -454,6 +481,57 @@ def test_config_save_and_discard_use_expected_revision(tmp_path):
     assert discarded.status_code == 200
     assert drafts.saved is True
     assert drafts.discarded is True
+
+
+def test_config_submit_saves_and_submits_the_current_revision(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+        workflow_name="migration-test",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/submit",
+            json={"expectedDraftRevision": "draft-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["workflowName"] == "migration-test"
+    assert response.json()["message"] == "Workflow submitted: migration-test"
+    assert response.json()["draft"]["draftRevision"] == "draft-1"
+    assert drafts.submitted is True
+    assert drafts.expected_revision == "draft-1"
+
+
+def test_config_removal_impact_returns_exact_dependent_paths(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/removal-impact",
+            json={
+                "expectedDraftRevision": "draft-1",
+                "path": ["sourceClusters", "source"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "targetPath": ["sourceClusters", "source"],
+        "targetLabel": "source",
+        "affected": [{
+            "path": ["traffic", "proxies", "capture"],
+            "fieldPath": ["traffic", "proxies", "capture", "source"],
+            "reason": "source=source",
+        }],
+    }
+    assert drafts.expected_revision == "draft-1"
 
 
 def test_config_revision_conflict_returns_current_recoverable_draft(tmp_path):

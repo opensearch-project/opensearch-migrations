@@ -87,9 +87,45 @@ async function mockManageApi(page: Page) {
         }];
       }
     }
+    if (
+      request.operation?.op === "removeConfig"
+      && request.operation.path?.join(".") === "sourceClusters.legacy"
+    ) {
+      const sourceClusters = draft.editState.nodes.find(
+        (node) => node.id === "edit:sourceClusters",
+      );
+      if (sourceClusters) {
+        sourceClusters.children = sourceClusters.children.filter(
+          (node) => node.id !== "edit:sourceClusters.legacy",
+        );
+      }
+    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
+    });
+  });
+  await page.route("**/api/v1/config/removal-impact", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        targetPath: ["sourceClusters", "legacy"],
+        targetLabel: "legacy",
+        affected: [{
+          path: ["traffic", "proxies", "capture"],
+          fieldPath: ["traffic", "proxies", "capture", "source"],
+          reason: "source=legacy",
+        }, {
+          path: ["traffic", "replayers", "replay"],
+          fieldPath: [
+            "traffic",
+            "replayers",
+            "replay",
+            "fromCapturedTraffic",
+          ],
+          reason: "fromCapturedTraffic=capture",
+        }],
+      }),
     });
   });
   await page.route("**/api/v1/config/save", async (route) => {
@@ -179,6 +215,23 @@ async function mockManageApi(page: Page) {
     });
   });
   return {
+    makeCaptureSource() {
+      const capture = snapshot.nodes["resource:captureproxies:capture"];
+      capture.label = "legacy";
+      capture.description = "sourceconfigs/legacy";
+      capture.valueSummary = "Deployed";
+      capture.resourcePlural = "sourceconfigs";
+      capture.resourceName = "legacy";
+      capture.capabilities = capture.capabilities.map((capability) => (
+        capability.kind === "edit"
+          ? {
+            ...capability,
+            editTargetId: "edit:sourceClusters.legacy",
+            label: "Edit legacy",
+          }
+          : capability
+      ));
+    },
     setCaptureEditTarget(targetId: string) {
       const capture = snapshot.nodes["resource:captureproxies:capture"];
       capture.capabilities = capture.capabilities.map((capability) => (
@@ -229,7 +282,7 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
   await expect(
     configTree.getByRole("button", { name: "Apply" }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText("Saved configuration")).toBeVisible();
 
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
@@ -253,7 +306,7 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
     name: "Use transform-code and key main.js",
   }).click();
   await expect(page.getByText("Unsaved changes")).toBeVisible();
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText("Saved configuration")).toBeVisible();
 });
 
@@ -364,6 +417,52 @@ test("keeps the resource overview visible during scoped editing", async ({ page 
   await expect(
     page.getByRole("table", { name: "Configuration fields" }),
   ).toBeVisible();
+});
+
+
+test("keeps a removed resource in context for the edit session", async ({ page }, testInfo) => {
+  const api = await mockManageApi(page);
+  api.makeCaptureSource();
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit legacy" }).click();
+  await expect(page.getByRole("button", { name: "Revert unsaved changes" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Save configuration" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Save and submit" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Exit editing" }))
+    .toBeVisible();
+
+  await page.getByRole("button", { name: "Remove legacy" }).click();
+  const dialog = page.getByRole("dialog", { name: "Remove legacy?" });
+  await expect(dialog.getByText("traffic.proxies.capture")).toBeVisible();
+  await expect(dialog.getByText("traffic.replayers.replay")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("removal-impact.png"),
+    fullPage: true,
+  });
+  await dialog.getByRole("button", { name: "Confirm removal" }).click();
+
+  if (testInfo.project.name === "narrow") {
+    await page.getByRole("button", { name: "Open resources" }).click();
+  }
+  const removed = page.getByRole("treeitem", {
+    name: /^legacy, Marked for removal$/,
+  });
+  await expect(removed).toBeVisible();
+  await expect(removed).toHaveAttribute("aria-selected", "true");
+  if (testInfo.project.name === "narrow") {
+    await page.getByRole("button", { name: "Close resources" }).click();
+  }
+  await expect(page.getByText(
+    "This legacy is marked for removal from the configuration.",
+  )).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("removed-resource.png"),
+    fullPage: true,
+  });
 });
 
 

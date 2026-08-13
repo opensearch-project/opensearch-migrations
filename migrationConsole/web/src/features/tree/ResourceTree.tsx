@@ -112,10 +112,13 @@ const TreeRow = memo(function TreeRow({
 }: TreeRowProps) {
   const { node, depth } = row;
   const expandable = node.childIds.length > 0;
+  const spokenState = node.status === "removed"
+    ? node.valueSummary ?? "Marked for removal"
+    : node.phase ?? node.status;
   return (
     <div
       aria-expanded={expandable ? expanded : undefined}
-      aria-label={`${node.label}, ${node.phase ?? node.status}`}
+      aria-label={`${node.label}, ${spokenState}`}
       aria-level={depth}
       aria-selected={selected}
       className={[

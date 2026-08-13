@@ -121,6 +121,7 @@ class ManageNode:
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    config_presence: Mapping[str, bool] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -147,6 +148,8 @@ class ManageNode:
             result["resourcePlural"] = self.resource_plural
         if self.resource_name:
             result["resourceName"] = self.resource_name
+        if self.config_presence:
+            result["configPresence"] = dict(self.config_presence)
         return result
 
 

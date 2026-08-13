@@ -19,6 +19,9 @@ from ..application.config_drafts import (
 from .contracts import (
     ApplyEditOperationRequestV1,
     ConfigDraftV1,
+    ConfigRemovalImpactRequestV1,
+    ConfigRemovalImpactV1,
+    ConfigSubmissionV1,
     DraftRevisionRequestV1,
     ExternalResourceDetailsV1,
     ExternalResourceInventoryV1,
@@ -38,6 +41,7 @@ def create_app(
     static_dir: Optional[Path] = None,
     coordinator: Optional[ObservationCoordinator] = None,
     config_drafts: Optional[Any] = None,
+    workflow_name: str = "migration",
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -181,6 +185,75 @@ def create_app(
         except ConfigDraftConflict as error:
             raise _draft_conflict(error) from error
         return ConfigDraftV1.from_domain(draft)
+
+    @app.post(
+        "/api/v1/config/removal-impact",
+        response_model=ConfigRemovalImpactV1,
+        response_model_exclude_none=True,
+        tags=["configuration"],
+    )
+    def config_removal_impact(
+        request_body: ConfigRemovalImpactRequestV1,
+    ) -> ConfigRemovalImpactV1:
+        try:
+            impact = draft_service().removal_impact(
+                request_body.expected_draft_revision,
+                request_body.path,
+            )
+        except ConfigDraftConflict as error:
+            raise _draft_conflict(error) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return ConfigRemovalImpactV1.from_domain(impact)
+
+    @app.post(
+        "/api/v1/config/submit",
+        response_model=ConfigSubmissionV1,
+        response_model_exclude_none=True,
+        tags=["configuration"],
+    )
+    def submit_config(
+        request_body: DraftRevisionRequestV1,
+    ) -> ConfigSubmissionV1:
+        try:
+            submission = draft_service().submit(
+                request_body.expected_draft_revision,
+                workflow_name,
+            )
+        except ConfigDraftConflict as error:
+            raise _draft_conflict(error) from error
+        except SavedConfigConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "saved_config_conflict",
+                    "message": str(error),
+                    "persistedRevision": error.persisted_revision,
+                    "current": ConfigDraftV1.from_domain(error.current).model_dump(
+                        by_alias=True,
+                        exclude_none=True,
+                        mode="json",
+                    ),
+                },
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception as error:
+            logger.exception("Failed to submit workflow configuration")
+            current = draft_service().open()
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "workflow_submit_failed",
+                    "message": str(error) or type(error).__name__,
+                    "current": ConfigDraftV1.from_domain(current).model_dump(
+                        by_alias=True,
+                        exclude_none=True,
+                        mode="json",
+                    ),
+                },
+            ) from error
+        return ConfigSubmissionV1.from_domain(submission)
 
     @app.get(
         "/api/v1/external-resources",
