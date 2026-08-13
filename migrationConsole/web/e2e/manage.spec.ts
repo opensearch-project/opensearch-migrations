@@ -435,6 +435,41 @@ test("pins ancestor rows while scrolling nested configuration", async ({ page },
 });
 
 
+test("animates collapsed rows without clamping the editor scroll position", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop scrolling coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Edit configuration" }).click();
+  await page.getByRole("checkbox", { name: "Show optional fields" }).check();
+  const config = page.getByRole("table", { name: "Configuration fields" });
+  const legacy = config.getByRole("row", { name: /Collapse legacy/ });
+  const panel = page.locator(".config-table-panel");
+  await page.addStyleTag({
+    content: ".config-table-panel { height: 260px; max-height: 260px; }",
+  });
+  await panel.evaluate((element: unknown) => {
+    (element as { scrollTop: number }).scrollTop = 180;
+  });
+  const scrollTopBefore = await panel.evaluate((element: unknown) =>
+    (element as { scrollTop: number }).scrollTop);
+  expect(scrollTopBefore).toBeGreaterThan(100);
+
+  await config.getByRole("button", {
+    name: "Collapse Source clusters",
+  }).dispatchEvent("click");
+
+  await expect(legacy).toHaveClass(/removing/);
+  await expect(legacy).toHaveCSS("animation-name", "row-remove");
+  await expect(legacy).toHaveCount(0);
+
+  const scrollTopAfter = await panel.evaluate((element: unknown) =>
+    (element as { scrollTop: number }).scrollTop);
+  expect(Math.abs(scrollTopAfter - scrollTopBefore)).toBeLessThanOrEqual(1);
+  await expect(page.locator(".config-scroll-space")).toBeAttached();
+});
+
+
 test("transitions scoped parents before their full row scrolls away", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop scrolling coverage");
   const api = await mockManageApi(page);

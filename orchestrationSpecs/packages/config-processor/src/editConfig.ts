@@ -828,6 +828,7 @@ function addSnapshotMigrationPassBranch(path: string[], key: "metadataMigrationC
 
 function essentialSnapshotPassBranch(node: EditNode): EditNode {
     node.essential = true;
+    node.removable = true;
     return node;
 }
 

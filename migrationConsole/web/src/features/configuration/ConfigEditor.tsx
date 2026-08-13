@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,6 +12,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
   LoaderCircle,
   Pencil,
   Plus,
@@ -99,6 +101,7 @@ interface PendingRemoval {
 
 const PINNED_CONTEXT_HEIGHT = 32;
 const PINNED_CONTEXT_TRANSITION = 28;
+const ROW_TRANSITION_MS = 220;
 function nodeChildren(node: EditNode): EditNode[] {
   return node.children ?? [];
 }
@@ -261,6 +264,12 @@ function nodeTreeHasValidationError(node: EditNode): boolean {
 }
 
 
+function nodeTreeHasAuthoredValue(node: EditNode): boolean {
+  return Boolean(node.valueAuthored)
+    || propertyChildren(node).some(nodeTreeHasAuthoredValue);
+}
+
+
 function validationErrorEmphasis(
   node: EditNode,
 ): ValidationErrorEmphasis {
@@ -283,7 +292,14 @@ function visibleNode(
   showOptional: boolean,
   showExpert: boolean,
 ): boolean {
-  if (node.expert && !showExpert && !nodeHasIssue(node)) return false;
+  if (
+    node.expert
+    && !showExpert
+    && !nodeTreeHasAuthoredValue(node)
+    && !nodeHasIssue(node)
+  ) {
+    return false;
+  }
   if (
     node.presence === "optional"
     && !showOptional
@@ -369,7 +385,10 @@ function editScope(nodes: EditNode[], nodeId: string | null): EditNode | null {
 function initialExpanded(nodes: EditNode[]): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
-    if (propertyChildren(node).length > 0 && node.collapsed !== true) {
+    if (
+      propertyChildren(node).length > 0
+      && (node.collapsed !== true || nodeTreeHasAuthoredValue(node))
+    ) {
       result.add(node.id);
     }
     propertyChildren(node).forEach(visit);
@@ -378,6 +397,23 @@ function initialExpanded(nodes: EditNode[]): Set<string> {
     if (propertyChildren(node).length > 0) result.add(node.id);
     propertyChildren(node).forEach(visit);
   });
+  return result;
+}
+
+
+function visibleExpandableIds(
+  nodes: EditNode[],
+  showOptional: boolean,
+  showExpert: boolean,
+): Set<string> {
+  const result = new Set<string>();
+  const visit = (node: EditNode) => {
+    if (!visibleNode(node, showOptional, showExpert)) return;
+    const children = propertyChildren(node);
+    if (children.length > 0) result.add(node.id);
+    children.forEach(visit);
+  };
+  nodes.forEach(visit);
   return result;
 }
 
@@ -864,6 +900,7 @@ function ConfigPropertyRow({
   expanded,
   selected,
   inserted,
+  removing,
   busy,
   commit,
   replaceDraft,
@@ -884,6 +921,7 @@ function ConfigPropertyRow({
   expanded: boolean;
   selected: boolean;
   inserted: boolean;
+  removing: boolean;
   busy: boolean;
   commit: (operation: EditOperation) => Promise<boolean>;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
@@ -913,6 +951,7 @@ function ConfigPropertyRow({
   const canUnset = (
     node.presence === "optional"
     && node.required !== true
+    && !node.removable
     && node.valueKind !== "command"
   );
   const structured = (
@@ -977,6 +1016,7 @@ function ConfigPropertyRow({
           errorEmphasis ? `validation-error-${errorEmphasis}` : "",
           selected ? "selected" : "",
           inserted ? "inserted" : "",
+          removing ? "removing" : "",
           contextProgress > 0 ? "context-transition" : "",
         ].join(" ")}
         onClick={(event) => {
@@ -1152,11 +1192,11 @@ function ConfigPropertyRow({
             ) : null}
             {node.removable ? (
               <button
-                aria-label={`Remove ${node.path.at(-1)}`}
+                aria-label={`Remove ${name}`}
                 className="danger-button"
                 disabled={busy}
                 onClick={() => onRequestRemoval(node)}
-                title={`Remove ${node.path.at(-1)}`}
+                title={`Remove ${name}`}
                 type="button"
               >
                 <Trash2 aria-hidden="true" />
@@ -1166,7 +1206,10 @@ function ConfigPropertyRow({
         </td>
       </tr>
       {renaming || showDetails ? (
-        <tr className="config-property-detail">
+        <tr className={[
+          "config-property-detail",
+          removing ? "removing" : "",
+        ].join(" ")}>
           <td colSpan={3}>
             <div
               className="property-detail-content"
@@ -1277,8 +1320,17 @@ export function ConfigEditor({
   );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
+  const [renderOptional, setRenderOptional] = useState(false);
+  const [renderExpert, setRenderExpert] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
+  const [removingIds, setRemovingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [collapsingIds, setCollapsingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [scrollRetention, setScrollRetention] = useState(0);
   const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -1293,7 +1345,25 @@ export function ConfigEditor({
   const pinUpdateFrame = useRef<number | null>(null);
   const rowElements = useRef(new Map<string, HTMLTableRowElement>());
   const knownRowIds = useRef<Set<string> | null>(null);
+  const knownExpansionIds = useRef<Set<string> | null>(null);
+  const expansionScope = useRef<string | null>(null);
+  const manuallyCollapsedIds = useRef(new Set<string>());
   const skipNextRowTracking = useRef(false);
+  const transitionTimers = useRef(new Set<number>());
+  const removingClaims = useRef(new Map<string, number>());
+  const collapseTransitions = useRef(new Map<
+    string,
+    { timer: number; rowIds: Set<string> }
+  >());
+  const optionalTransition = useRef<{
+    timer: number;
+    rowIds: Set<string>;
+  } | null>(null);
+  const expertTransition = useRef<{
+    timer: number;
+    rowIds: Set<string>;
+  } | null>(null);
+  const pendingScrollTop = useRef<number | null>(null);
   const pendingCommit = useRef<Promise<boolean> | null>(null);
   const revealChildrenFor = useRef<{
     parentId: string;
@@ -1320,6 +1390,8 @@ export function ConfigEditor({
     () => target ? editScope(nodes, target.id) : null,
     [nodes, target],
   );
+  const expansionScopeId = scope?.id
+    ?? (globalTarget ? "edit:workflowConfiguration" : "edit:root");
   const scopedNodes = useMemo(
     () => (
       activeTargetId && !target && !globalTarget
@@ -1369,21 +1441,72 @@ export function ConfigEditor({
 
   useEffect(() => {
     if (!draft) return;
+    const currentIds = allNodeIds(scopedNodes);
+    const scopeChanged = expansionScope.current !== expansionScopeId;
+    const previousIds = knownExpansionIds.current;
+    expansionScope.current = expansionScopeId;
+    knownExpansionIds.current = currentIds;
     setExpanded((current) => {
+      if (scopeChanged || previousIds === null) {
+        manuallyCollapsedIds.current.clear();
+        const initiallyExpanded = initialExpanded(scopedNodes);
+        knownRowIds.current = new Set(
+          treeRows(
+            scopedNodes,
+            initiallyExpanded,
+            renderOptional,
+            renderExpert,
+          ).map(({ node }) => node.id),
+        );
+        skipNextRowTracking.current = true;
+        return initiallyExpanded;
+      }
       const retained = new Set(
         [...current].filter((id) => findNode(scopedNodes, id)),
       );
-      if (retained.size > 0) return retained;
-      knownRowIds.current = allNodeIds(scopedNodes);
-      skipNextRowTracking.current = true;
-      return initialExpanded(scopedNodes);
+      const visit = (node: EditNode) => {
+        const children = propertyChildren(node);
+        const newlyAdded = !previousIds.has(node.id);
+        const receivedNewChildren = children.some(
+          (child) => !previousIds.has(child.id),
+        );
+        const authoredPath = nodeTreeHasAuthoredValue(node);
+        if (
+          children.length > 0
+          && !manuallyCollapsedIds.current.has(node.id)
+          && (
+            (
+              (newlyAdded || receivedNewChildren)
+              && (!node.expert || authoredPath)
+            )
+            || (node.expert && authoredPath)
+          )
+        ) {
+          retained.add(node.id);
+        }
+        children.forEach(visit);
+      };
+      scopedNodes.forEach(visit);
+      return retained;
     });
     setSelectedId((current) => (
       findNode(scopedNodes, current)
         ? current
         : target?.id ?? scopedNodes[0]?.id ?? null
     ));
-  }, [draft, scopedNodes, target]);
+  }, [
+    draft,
+    expansionScopeId,
+    renderExpert,
+    renderOptional,
+    scopedNodes,
+    target,
+  ]);
+
+  useEffect(() => {
+    setScrollRetention(0);
+    pendingScrollTop.current = null;
+  }, [expansionScopeId]);
 
   const hasLocalEdits = locallyEditedIds.size > 0;
 
@@ -1398,9 +1521,205 @@ export function ConfigEditor({
   }, [draft?.dirty, hasLocalEdits]);
 
   const rows = useMemo(
-    () => treeRows(scopedNodes, expanded, showOptional, showExpert),
-    [expanded, scopedNodes, showExpert, showOptional],
+    () => treeRows(scopedNodes, expanded, renderOptional, renderExpert),
+    [expanded, renderExpert, renderOptional, scopedNodes],
   );
+  const retainScrollPosition = useCallback(() => {
+    const panel = configTablePanelRef.current;
+    if (!panel) return;
+    pendingScrollTop.current = panel.scrollTop;
+    setScrollRetention((current) => Math.max(current, panel.scrollTop));
+  }, []);
+  const clearRemovingRows = useCallback((rowIds: ReadonlySet<string>) => {
+    const released = new Set<string>();
+    rowIds.forEach((id) => {
+      const remaining = (removingClaims.current.get(id) ?? 1) - 1;
+      if (remaining > 0) {
+        removingClaims.current.set(id, remaining);
+      } else {
+        removingClaims.current.delete(id);
+        released.add(id);
+      }
+    });
+    setRemovingIds((current) => {
+      const next = new Set(current);
+      released.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, []);
+  const beginRowExit = useCallback((
+    rowIds: Set<string>,
+    complete: () => void,
+  ) => {
+    if (rowIds.size === 0) {
+      complete();
+      return null;
+    }
+    retainScrollPosition();
+    rowIds.forEach((id) => {
+      removingClaims.current.set(
+        id,
+        (removingClaims.current.get(id) ?? 0) + 1,
+      );
+    });
+    setRemovingIds((current) => new Set([...current, ...rowIds]));
+    const timer = window.setTimeout(() => {
+      transitionTimers.current.delete(timer);
+      complete();
+      clearRemovingRows(rowIds);
+    }, ROW_TRANSITION_MS);
+    transitionTimers.current.add(timer);
+    return { timer, rowIds };
+  }, [clearRemovingRows, retainScrollPosition]);
+  const cancelRowExit = useCallback((
+    transition: { timer: number; rowIds: Set<string> } | null,
+  ) => {
+    if (!transition) return;
+    window.clearTimeout(transition.timer);
+    transitionTimers.current.delete(transition.timer);
+    clearRemovingRows(transition.rowIds);
+  }, [clearRemovingRows]);
+  const changeOptionalVisibility = (next: boolean) => {
+    setShowOptional(next);
+    cancelRowExit(optionalTransition.current);
+    optionalTransition.current = null;
+    if (next) {
+      setRenderOptional(true);
+      const newlyVisible = visibleExpandableIds(
+        scopedNodes,
+        true,
+        renderExpert,
+      );
+      setExpanded((current) => {
+        const nextExpanded = new Set(current);
+        newlyVisible.forEach((id) => {
+          const node = findNode(scopedNodes, id);
+          if (
+            node
+            && (!node.expert || nodeTreeHasAuthoredValue(node))
+            && !manuallyCollapsedIds.current.has(id)
+          ) {
+            nextExpanded.add(id);
+          }
+        });
+        return nextExpanded;
+      });
+      return;
+    }
+    const nextIds = new Set(
+      treeRows(scopedNodes, expanded, false, renderExpert)
+        .map(({ node }) => node.id),
+    );
+    const exiting = new Set(
+      rows
+        .map(({ node }) => node.id)
+        .filter((id) => !nextIds.has(id)),
+    );
+    optionalTransition.current = beginRowExit(exiting, () => {
+      optionalTransition.current = null;
+      setRenderOptional(false);
+    });
+  };
+  const changeExpertVisibility = (next: boolean) => {
+    setShowExpert(next);
+    cancelRowExit(expertTransition.current);
+    expertTransition.current = null;
+    if (next) {
+      setRenderExpert(true);
+      return;
+    }
+    const nextIds = new Set(
+      treeRows(scopedNodes, expanded, renderOptional, false)
+        .map(({ node }) => node.id),
+    );
+    const exiting = new Set(
+      rows
+        .map(({ node }) => node.id)
+        .filter((id) => !nextIds.has(id)),
+    );
+    expertTransition.current = beginRowExit(exiting, () => {
+      expertTransition.current = null;
+      setRenderExpert(false);
+    });
+  };
+  const toggleExpanded = (node: EditNode) => {
+    const pendingCollapse = collapseTransitions.current.get(node.id);
+    if (pendingCollapse) {
+      cancelRowExit(pendingCollapse);
+      collapseTransitions.current.delete(node.id);
+      setCollapsingIds((current) => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+      manuallyCollapsedIds.current.delete(node.id);
+      return;
+    }
+    if (!expanded.has(node.id)) {
+      manuallyCollapsedIds.current.delete(node.id);
+      setExpanded((current) => new Set(current).add(node.id));
+      return;
+    }
+    const parentIndex = rows.findIndex(({ node: rowNode }) =>
+      rowNode.id === node.id);
+    const parentDepth = rows[parentIndex]?.depth;
+    const exiting = new Set<string>();
+    if (parentIndex >= 0 && parentDepth !== undefined) {
+      for (let index = parentIndex + 1; index < rows.length; index += 1) {
+        if (rows[index].depth <= parentDepth) break;
+        exiting.add(rows[index].node.id);
+      }
+    }
+    manuallyCollapsedIds.current.add(node.id);
+    setCollapsingIds((current) => new Set(current).add(node.id));
+    const transition = beginRowExit(exiting, () => {
+      collapseTransitions.current.delete(node.id);
+      setExpanded((current) => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+      setCollapsingIds((current) => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+    });
+    if (transition) {
+      collapseTransitions.current.set(node.id, transition);
+    } else {
+      setCollapsingIds((current) => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+    }
+  };
+  const expandAll = () => {
+    collapseTransitions.current.forEach((transition) => {
+      cancelRowExit(transition);
+    });
+    collapseTransitions.current.clear();
+    setCollapsingIds(new Set());
+    const expandable = visibleExpandableIds(
+      scopedNodes,
+      renderOptional,
+      renderExpert,
+    );
+    expandable.forEach((id) => manuallyCollapsedIds.current.delete(id));
+    setExpanded((current) => new Set([...current, ...expandable]));
+  };
+  useLayoutEffect(() => {
+    if (removingIds.size > 0 || pendingScrollTop.current === null) return;
+    const panel = configTablePanelRef.current;
+    if (panel) panel.scrollTop = pendingScrollTop.current;
+    pendingScrollTop.current = null;
+  }, [removingIds, rows]);
+  useEffect(() => () => {
+    transitionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    transitionTimers.current.clear();
+    removingClaims.current.clear();
+  }, []);
   const rowAncestors = useMemo(() => {
     const stack: EditRow[] = [];
     return rows.map((row) => {
@@ -1858,7 +2177,8 @@ export function ConfigEditor({
           <label>
             <input
               checked={showOptional}
-              onChange={(event) => setShowOptional(event.target.checked)}
+              onChange={(event) =>
+                changeOptionalVisibility(event.target.checked)}
               type="checkbox"
             />
             Show optional fields
@@ -1866,7 +2186,8 @@ export function ConfigEditor({
           <label>
             <input
               checked={showExpert}
-              onChange={(event) => setShowExpert(event.target.checked)}
+              onChange={(event) =>
+                changeExpertVisibility(event.target.checked)}
               type="checkbox"
             />
             Show expert fields
@@ -1966,7 +2287,12 @@ export function ConfigEditor({
         <div className="config-layout">
         <section
           className="config-table-panel"
-          onScroll={schedulePinnedContextUpdate}
+          onScroll={() => {
+            if (removingIds.size > 0 && configTablePanelRef.current) {
+              pendingScrollTop.current = configTablePanelRef.current.scrollTop;
+            }
+            schedulePinnedContextUpdate();
+          }}
           ref={configTablePanelRef}
         >
           <header className="config-outline-header">
@@ -1974,18 +2300,28 @@ export function ConfigEditor({
               <strong>{scope?.label ?? "Workflow configuration"}</strong>
               <span>{rows.length} visible settings</span>
             </div>
-            {scope?.removable ? (
+            <div className="config-outline-actions">
               <button
-                aria-label={`Remove ${scope.path.at(-1)}`}
-                className="config-scope-remove danger-button"
-                disabled={busy}
-                onClick={() => void requestRemoval(scope)}
-                title={`Remove ${scope.path.at(-1)}`}
+                className="secondary-button"
+                onClick={expandAll}
                 type="button"
               >
-                <Trash2 aria-hidden="true" />
+                <ChevronsDown aria-hidden="true" />
+                Expand all
               </button>
-            ) : null}
+              {scope?.removable ? (
+                <button
+                  aria-label={`Remove ${scope.path.at(-1)}`}
+                  className="config-scope-remove danger-button"
+                  disabled={busy}
+                  onClick={() => void requestRemoval(scope)}
+                  title={`Remove ${scope.path.at(-1)}`}
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           </header>
           {pinnedRows.length > 0 ? (
             <nav
@@ -2050,7 +2386,9 @@ export function ConfigEditor({
             </thead>
             <tbody>
               {rows.map(({ node, depth }) => {
-                const isExpanded = expanded.has(node.id);
+                const isExpanded = (
+                  expanded.has(node.id) && !collapsingIds.has(node.id)
+                );
                 return (
                   <ConfigPropertyRow
                     busy={busy}
@@ -2065,11 +2403,13 @@ export function ConfigEditor({
                     inserted={insertedIds.has(node.id)}
                     key={node.id}
                     node={node}
+                    removing={removingIds.has(node.id)}
                     onLocalDirtyChange={markLocalEdit}
                     onRequestRemoval={(removalNode) => {
                       void requestRemoval(removalNode);
                     }}
                     onRevealChildren={() => {
+                      manuallyCollapsedIds.current.delete(node.id);
                       revealChildrenFor.current = {
                         parentId: node.id,
                         previousChildIds: new Set(
@@ -2080,14 +2420,7 @@ export function ConfigEditor({
                     }}
                     onSelect={() => setSelectedId(node.id)}
                     onSelectAdded={selectAdded}
-                    onToggle={() => {
-                      setExpanded((current) => {
-                        const next = new Set(current);
-                        if (next.has(node.id)) next.delete(node.id);
-                        else next.add(node.id);
-                        return next;
-                      });
-                    }}
+                    onToggle={() => toggleExpanded(node)}
                     parent={findParent(nodes, node.id)}
                     replaceDraft={replaceDraft}
                     reportError={setProblem}
@@ -2101,6 +2434,13 @@ export function ConfigEditor({
               })}
             </tbody>
           </table>
+          <div
+            aria-hidden="true"
+            className="config-scroll-space"
+            style={{
+              "--config-scroll-retention": `${scrollRetention}px`,
+            } as React.CSSProperties}
+          />
         </section>
       </div>)}
       {pendingRemoval ? (

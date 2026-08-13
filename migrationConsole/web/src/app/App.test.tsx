@@ -262,9 +262,9 @@ test("opens a generic configuration editor and explains generated values", async
   await userEvent.click(
     screen.getByRole("checkbox", { name: "Show optional fields" }),
   );
-  await userEvent.click(
-    within(configTree).getByRole("row", { name: /Timeout/ }),
-  );
+  const timeout = within(configTree).getByRole("row", { name: /Timeout/ });
+  expect(timeout).toHaveClass("inserted");
+  await userEvent.click(timeout);
 
   expect(screen.getByText("Generated value")).toBeInTheDocument();
   expect(screen.getByText("runtime timeout")).toBeInTheDocument();
@@ -273,18 +273,121 @@ test("opens a generic configuration editor and explains generated values", async
   ).toBeInTheDocument();
 
   expect(
-    within(configTree).queryByRole("row", {
-      name: /Advanced setting/,
-    }),
-  ).toBeNull();
-  await userEvent.click(
-    screen.getByRole("checkbox", { name: "Show expert fields" }),
-  );
-  expect(
     within(configTree).getByRole("row", {
       name: /Advanced setting/,
     }),
   ).toBeInTheDocument();
+
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Show optional fields" }),
+  );
+  expect(within(configTree).getByRole("row", { name: /Timeout/ }))
+    .toHaveClass("removing");
+  await waitFor(() => expect(
+    within(configTree).queryByRole("row", { name: /Timeout/ }),
+  ).toBeNull());
+});
+
+
+test("expands authored expert sections and supports animated collapse and expand all", async () => {
+  const expertDraft = structuredClone(configDraft);
+  const sources = expertDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const legacy = sources?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  const advanced = legacy?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy.advanced",
+  );
+  if (!advanced) throw new Error("Missing expert fixture");
+  advanced.valueKind = "object";
+  advanced.collapsed = true;
+  advanced.children = [{
+    id: "edit:sourceClusters.legacy.advanced.mode",
+    path: ["sourceClusters", "legacy", "advanced", "mode"],
+    label: "Expert mode: quiet",
+    value: "quiet",
+    valueAuthored: true,
+    valueKind: "scalar",
+    valueType: "string",
+    presence: "optional",
+    expert: true,
+    status: "ok",
+    diagnostics: [],
+    children: [],
+  }];
+  legacy.children.push({
+    id: "edit:sourceClusters.legacy.optionalGroup",
+    path: ["sourceClusters", "legacy", "optionalGroup"],
+    label: "Optional group",
+    valueKind: "object",
+    presence: "optional",
+    collapsed: true,
+    status: "ok",
+    diagnostics: [],
+    children: [{
+      id: "edit:sourceClusters.legacy.optionalGroup.name",
+      path: ["sourceClusters", "legacy", "optionalGroup", "name"],
+      label: "Optional child: visible",
+      value: "visible",
+      valueKind: "scalar",
+      valueType: "string",
+      presence: "required",
+      status: "ok",
+      diagnostics: [],
+      children: [],
+    }],
+  });
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(expertDraft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const config = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(screen.getByRole("checkbox", { name: "Show expert fields" }))
+    .not.toBeChecked();
+  expect(within(config).getByRole("row", { name: /Advanced setting/ }))
+    .toBeInTheDocument();
+  expect(within(config).getByRole("row", { name: /Expert mode/ }))
+    .toBeInTheDocument();
+  expect(document.querySelector(".config-scroll-space")).toBeInTheDocument();
+  expect(within(config).getByRole("button", { name: "Expand Optional group" }))
+    .toBeInTheDocument();
+  expect(within(config).queryByRole("row", { name: /Optional child/ }))
+    .toBeNull();
+
+  await userEvent.click(screen.getByRole("checkbox", {
+    name: "Show optional fields",
+  }));
+  expect(within(config).getByRole("row", { name: /Optional group/ }))
+    .toBeInTheDocument();
+  expect(within(config).getByRole("button", { name: "Collapse Optional group" }))
+    .toBeInTheDocument();
+  expect(within(config).getByRole("row", { name: /Optional child/ }))
+    .toBeInTheDocument();
+
+  const sourceClusters = within(config).getByRole("row", {
+    name: /^Source clusters/,
+  });
+  await userEvent.click(within(sourceClusters).getByRole("button", {
+    name: "Collapse Source clusters",
+  }));
+
+  expect(within(config).getByRole("row", { name: /^legacy/ }))
+    .toHaveClass("removing");
+  await waitFor(() => expect(
+    within(config).queryByRole("row", { name: /^legacy/ }),
+  ).toBeNull());
+
+  await userEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  expect(await within(config).findByRole("row", { name: /^legacy/ }))
+    .toHaveClass("inserted");
+  expect(within(config).getByRole("row", { name: /Expert mode/ }))
+    .toBeInTheDocument();
 });
 
 
@@ -889,15 +992,71 @@ test("adds a snapshot migration from its section without naming it first", async
   updatedDraft.dirty = true;
   updatedDraft.draftRevision = "config-draft-snapshot-added";
 
+  const configuredDraft = structuredClone(updatedDraft);
+  const configuredPass = configuredDraft.editState.nodes.at(-1)
+    ?.children[0]
+    ?.children[0]
+    ?.children[2]
+    ?.children[0]
+    ?.children[0];
+  if (!configuredPass) throw new Error("Missing configured migration pass");
+  const passPath = [
+    "snapshotMigrationConfigs",
+    "0",
+    "perSnapshotConfig",
+    "snap1",
+    "0",
+  ];
+  configuredPass.children = [{
+    id: `edit:${[...passPath, "metadataMigrationConfig"].join(".")}`,
+    path: [...passPath, "metadataMigrationConfig"],
+    label: "Metadata migration config: 0 settings",
+    value: {},
+    valueAuthored: true,
+    valueKind: "object",
+    presence: "optional",
+    essential: true,
+    removable: true,
+    status: "ok",
+    statusCounts: counts,
+    diagnostics: [],
+    children: [],
+  }, {
+    id: `edit:${[...passPath, "documentBackfillConfig"].join(".")}`,
+    path: [...passPath, "documentBackfillConfig"],
+    label: "Document backfill config: 0 settings",
+    value: {},
+    valueAuthored: true,
+    valueKind: "object",
+    presence: "optional",
+    essential: true,
+    removable: true,
+    status: "ok",
+    statusCounts: counts,
+    diagnostics: [],
+    children: [],
+  }];
+  configuredDraft.draftRevision = "config-draft-snapshot-configured";
+
   const operations: unknown[] = [];
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
     http.get("*/api/v1/config", () => HttpResponse.json(initialDraft)),
+    http.post("*/api/v1/config/removal-impact", async ({ request }) => {
+      const body = await request.json() as { path: string[] };
+      return HttpResponse.json({
+        targetPath: body.path,
+        targetLabel: body.path.at(-1) ?? "",
+        affected: [],
+      });
+    }),
     http.post("*/api/v1/config/operations", async ({ request }) => {
       operations.push(
         (await request.json() as { operation: unknown }).operation,
       );
-      return HttpResponse.json(updatedDraft);
+      return HttpResponse.json(
+        operations.length >= 3 ? configuredDraft : updatedDraft,
+      );
     }),
   );
   renderApp();
@@ -971,6 +1130,28 @@ test("adds a snapshot migration from its section without naming it first", async
       "documentBackfillConfig",
     ],
     value: {},
+  }));
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Remove Metadata migration config",
+  }));
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Confirm removal",
+  }));
+  await waitFor(() => expect(operations.at(-1)).toEqual({
+    op: "removeConfig",
+    path: [...passPath, "metadataMigrationConfig"],
+  }));
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Remove Document backfill config",
+  }));
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Confirm removal",
+  }));
+  await waitFor(() => expect(operations.at(-1)).toEqual({
+    op: "removeConfig",
+    path: [...passPath, "documentBackfillConfig"],
   }));
 });
 

@@ -1351,6 +1351,7 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig")).toMatchObject({
             valueKind: "object",
             presence: "optional",
+            removable: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig.metadataTransforms")).toMatchObject({
             expert: false,
@@ -1376,6 +1377,7 @@ describe("editConfig state", () => {
             valueKind: "object",
             presence: "optional",
             essential: true,
+            removable: true,
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.documentTransforms")).toMatchObject({
             expert: false,

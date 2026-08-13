@@ -1520,6 +1520,24 @@ button {
   min-width: 0;
 }
 
+.config-outline-header > .config-outline-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.config-outline-actions .secondary-button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.config-outline-actions .secondary-button svg {
+  width: 13px;
+  height: 13px;
+}
+
 .config-outline-header strong {
   overflow: hidden;
   font-size: 12px;
@@ -1747,6 +1765,23 @@ button {
   animation: row-insert 380ms ease-out;
 }
 
+.config-property-row.removing,
+.config-property-detail.removing {
+  animation: row-remove 220ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes row-remove {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
 .config-property-row.context-transition > th > *,
 .config-property-row.context-transition > .property-state-cell > * {
   opacity: var(--context-content-opacity);
@@ -1755,6 +1790,15 @@ button {
 .config-property-row.context-transition
   > td:not(.property-state-cell) > * {
   opacity: var(--context-detail-opacity);
+  pointer-events: none;
+}
+
+.config-scroll-space {
+  width: 100%;
+  min-height: max(
+    240px,
+    calc(100% - 84px + var(--config-scroll-retention, 0px))
+  );
   pointer-events: none;
 }
 
@@ -2811,7 +2855,9 @@ button {
 
   .spin,
   .tree-row.inserted,
-  .config-property-row.inserted {
+  .config-property-row.inserted,
+  .config-property-row.removing,
+  .config-property-detail.removing {
     animation: none;
   }
 }
