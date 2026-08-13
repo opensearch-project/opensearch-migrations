@@ -3,9 +3,10 @@ import json
 import subprocess
 import time
 import uuid
+from kubernetes import client
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
-from .cdc_base import wait_for_proxy_ready
+from .cdc_base import load_k8s_config, wait_for_proxy_ready
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,10 @@ logger = logging.getLogger(__name__)
 # console_link.workflow.commands.autocomplete_workflows. Fixed, not generated, so only
 # one can exist at a time and each extra run must delete it before the next submits.
 INNER_WORKFLOW_NAME = "migration-workflow"
+
+# Helm-managed ConfigMap holding the deployment-provisioned bucket the workflow also takes its
+# snapshot repo URI from (LocalStack locally, real S3 in AWS).
+DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
 
 
 # This test case is subject to removal, as its value looks limited
@@ -84,8 +89,25 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
         # Base default minus metadataMigrationConfig, which would replace the incompatible target
         # mapping. Backfill sizing and resources are kept as-is so EKS scheduling is unchanged.
         super().prepare_workflow_snapshot_and_migration_config()
+        bucket = self._deployment_default_s3_bucket()
         for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
             migration.pop("metadataMigrationConfig", None)
+            # The bucket is the failed document stream's on/off switch — there is no default, so
+            # without it nothing records the failing document. Region and endpoint are inherited
+            # from the snapshot repo config.
+            migration["documentBackfillConfig"]["failedDocumentStreamS3Bucket"] = bucket
+
+    def _deployment_default_s3_bucket(self) -> str:
+        load_k8s_config()
+        config_map = client.CoreV1Api().read_namespaced_config_map(
+            name=DEFAULT_S3_CONFIG_MAP, namespace=self.argo_service.namespace)
+        bucket = ((config_map.data or {}).get("BUCKET_NAME") or "").strip()
+        if not bucket:
+            raise AssertionError(
+                f"ConfigMap {DEFAULT_S3_CONFIG_MAP} has no BUCKET_NAME; cannot enable the "
+                f"failed document stream. Data: {config_map.data}"
+            )
+        return bucket
 
     def prepare_clusters(self):
         # Failing document first: dynamic mapping pins the field to the version's string type from
