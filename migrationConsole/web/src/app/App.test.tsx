@@ -333,6 +333,11 @@ test("keeps resource context while scoping edit mode to the selected resource", 
     name: /Endpoint/,
   })).toBeInTheDocument();
   expect(within(config).queryByRole("row", {
+    name: /^legacy/,
+  })).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove legacy" }))
+    .toBeInTheDocument();
+  expect(within(config).queryByRole("row", {
     name: /ConfigMap/,
   })).toBeNull();
 
@@ -348,6 +353,243 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   expect(within(config).queryByRole("row", {
     name: /Endpoint/,
   })).toBeNull();
+});
+
+
+test("shows compact resource validation in navigation and hides valid detail", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = snapshot.nodes["resource:captureproxies:capture"];
+  source.label = "legacy";
+  source.resourcePlural = "sourceconfigs";
+  source.resourceName = "legacy";
+  source.diagnostics = [];
+  source.parentId = "group:Sources:Sources";
+  source.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:sourceClusters.legacy",
+    label: "Edit legacy",
+  }];
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  snapshot.nodes["group:Live Traffic Migration:Capture"].childIds = [];
+  const validDraft = structuredClone(configDraft);
+  const sourceCollection = validDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const sourceEdit = sourceCollection?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  if (!sourceEdit) throw new Error("Missing source fixture");
+  sourceEdit.status = "ok";
+  sourceEdit.statusCounts = {
+    errors: 0,
+    warnings: 0,
+    required: 0,
+    changed: 0,
+    gated: 0,
+    blocked: 0,
+  };
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+  );
+  renderApp();
+
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const sourceRow = within(tree).getByRole("treeitem", {
+    name: /^legacy, Ready$/,
+  });
+  expect(within(sourceRow).getByLabelText("Configuration valid"))
+    .toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Validation" })).toBeNull();
+  expect(screen.queryByText("This configuration is valid")).toBeNull();
+});
+
+
+test("keeps warning detail inline without error taint or a validation section", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const replay = snapshot.nodes["resource:trafficreplays:replay"];
+  replay.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:traffic.transform.configMap",
+    label: "Edit replay",
+  }];
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+  );
+  renderApp();
+
+  await enterEditMode();
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const replayRow = within(tree).getByRole("treeitem", {
+    name: /^replay, Running$/,
+  });
+  await userEvent.click(replayRow);
+
+  expect(await within(replayRow).findByLabelText("1 validation warning"))
+    .toBeInTheDocument();
+  expect(replayRow).not.toHaveClass("validation-error-item");
+  expect(replayRow).not.toHaveClass("validation-error-ancestor");
+  expect(screen.queryByRole("heading", { name: "Validation" })).toBeNull();
+  expect(screen.getByText("Selected key is not present.")).toBeInTheDocument();
+});
+
+
+test("taints validation errors and their configuration and navigation parents", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = snapshot.nodes["resource:captureproxies:capture"];
+  source.label = "legacy";
+  source.resourcePlural = "sourceconfigs";
+  source.resourceName = "legacy";
+  source.diagnostics = [];
+  source.parentId = "group:Sources:Sources";
+  source.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:sourceClusters.legacy",
+    label: "Edit legacy",
+  }];
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  snapshot.nodes["group:Live Traffic Migration:Capture"].childIds = [];
+  const invalidDraft = structuredClone(configDraft);
+  const sourceCollection = invalidDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const sourceEdit = sourceCollection?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  const authentication = sourceEdit?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy.authConfig",
+  );
+  const secret = authentication?.children.find(
+    (node) => (
+      node.id
+      === "edit:sourceClusters.legacy.authConfig.basic.secretName"
+    ),
+  );
+  if (!sourceCollection || !sourceEdit || !authentication || !secret) {
+    throw new Error("Missing nested source fixture");
+  }
+  [sourceCollection, sourceEdit, authentication].forEach((node) => {
+    node.status = "ok";
+    node.statusCounts = {
+      errors: 0,
+      warnings: 0,
+      required: 0,
+      changed: 0,
+      gated: 0,
+      blocked: 0,
+    };
+  });
+  secret.status = "required";
+  secret.statusCounts = {
+    errors: 0,
+    warnings: 0,
+    required: 1,
+    changed: 0,
+    gated: 0,
+    blocked: 0,
+  };
+  secret.diagnostics = [{
+    severity: "required",
+    message: "Credentials secret is required.",
+    path: secret.path,
+  }];
+  secret.label = "Credentials secret";
+  secret.value = "";
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(invalidDraft)),
+  );
+  renderApp();
+
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const sourceSection = within(tree).getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "1");
+  const sourceGroup = within(tree).getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "2");
+  const sourceRow = within(tree).getByRole("treeitem", {
+    name: /^legacy, Ready$/,
+  });
+  expect(sourceSection).toHaveClass("validation-error-ancestor");
+  expect(sourceGroup).toHaveClass("validation-error-ancestor");
+  expect(sourceRow).toHaveClass("validation-error-item");
+  expect(within(sourceRow).getByLabelText("1 validation issue"))
+    .toBeInTheDocument();
+
+  const config = screen.getByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(config).getByRole("row", { name: /^Authentication/ }))
+    .toHaveClass("validation-error-ancestor");
+  expect(within(config).getByRole("row", { name: /^Credentials secret/ }))
+    .toHaveClass("validation-error-item");
+  expect(within(config).getByRole("row", { name: /^Endpoint/ }))
+    .not.toHaveClass("validation-error-item", "validation-error-ancestor");
+  expect(screen.queryByRole("heading", { name: "Validation" })).toBeNull();
+});
+
+
+test("identifies resources within a mixed-type navigation group", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const section = snapshot.nodes["section:Live Traffic Migration"];
+  const captureGroup = snapshot.nodes["group:Live Traffic Migration:Capture"];
+  const capture = snapshot.nodes["resource:captureproxies:capture"];
+  const bufferGroupId = "group:Live Traffic Migration:Buffer";
+  const kafkaId = "resource:kafkaclusters:default";
+  const s3Id = "resource:capturedtraffics:proxy-topic";
+  section.childIds = [bufferGroupId, ...section.childIds];
+  snapshot.nodes[bufferGroupId] = {
+    ...captureGroup,
+    id: bufferGroupId,
+    revision: "buffer-group-1",
+    childIds: [kafkaId, s3Id],
+    label: "Buffer",
+  };
+  snapshot.nodes[kafkaId] = {
+    ...capture,
+    id: kafkaId,
+    revision: "kafka-1",
+    parentId: bufferGroupId,
+    label: "default",
+    valueSummary: "Configured",
+    diagnostics: [],
+    capabilities: [],
+    resourcePlural: "kafkaclusters",
+    resourceName: "default",
+  };
+  snapshot.nodes[s3Id] = {
+    ...capture,
+    id: s3Id,
+    revision: "s3-1",
+    parentId: bufferGroupId,
+    label: "proxy-topic",
+    valueSummary: "Configured",
+    diagnostics: [],
+    capabilities: [],
+    resourcePlural: "capturedtraffics",
+    resourceName: "proxy-topic",
+  };
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+  );
+  renderApp();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const kafka = within(tree).getByRole("treeitem", {
+    name: /^default, Kafka cluster, Ready$/,
+  });
+  const s3 = within(tree).getByRole("treeitem", {
+    name: /^proxy-topic, S3 source, Ready$/,
+  });
+  expect(within(kafka).getByText("Kafka cluster - Configured"))
+    .toBeInTheDocument();
+  expect(within(s3).getByText("S3 source - Configured"))
+    .toBeInTheDocument();
 });
 
 
@@ -410,6 +652,187 @@ test("offers top-level add actions in navigation during scoped editing", async (
     path: ["sourceClusters"],
     value: { name: "next-source" },
   }]));
+});
+
+
+test("adds a snapshot migration from its section without naming it first", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const sectionId = "section:Snapshot Migration";
+  const snapshotGroupId = "group:Snapshot Migration:Snapshot";
+  const backfillGroupId = "group:Snapshot Migration:Backfill";
+  snapshot.rootIds.splice(1, 0, sectionId);
+  snapshot.nodes[sectionId] = {
+    ...snapshot.nodes["section:Live Traffic Migration"],
+    id: sectionId,
+    revision: "snapshot-migration-section-1",
+    parentId: null,
+    childIds: [snapshotGroupId, backfillGroupId],
+    label: "Snapshot Migration",
+    status: "warning",
+  };
+  snapshot.nodes[snapshotGroupId] = {
+    ...snapshot.nodes["group:Live Traffic Migration:Capture"],
+    id: snapshotGroupId,
+    revision: "snapshot-group-1",
+    parentId: sectionId,
+    childIds: [],
+    label: "Snapshot",
+    status: "warning",
+  };
+  snapshot.nodes[backfillGroupId] = {
+    ...snapshot.nodes["group:Live Traffic Migration:Capture"],
+    id: backfillGroupId,
+    revision: "backfill-group-1",
+    parentId: sectionId,
+    childIds: [],
+    label: "Backfill",
+    status: "warning",
+  };
+
+  const initialDraft = structuredClone(configDraft);
+  const counts = {
+    errors: 0,
+    warnings: 0,
+    required: 0,
+    changed: 0,
+    gated: 0,
+    blocked: 0,
+  };
+  const addCommand = {
+    id: "edit:snapshotMigrationConfigs:add",
+    path: ["snapshotMigrationConfigs"],
+    label: "+ Add snapshot migration",
+    valueKind: "command" as const,
+    status: "ok",
+    statusCounts: counts,
+    command: {
+      requiresName: false,
+      editAdded: false,
+      autoEditAdded: true,
+    },
+    diagnostics: [],
+    children: [],
+  };
+  const collection = {
+    id: "edit:snapshotMigrationConfigs",
+    path: ["snapshotMigrationConfigs"],
+    label: "Backfill",
+    valueKind: "array" as const,
+    status: "warning",
+    statusCounts: { ...counts, warnings: 1 },
+    inputHint: {
+      kind: "array" as const,
+      addLabel: "snapshot migration",
+    },
+    diagnostics: [{
+      severity: "warning" as const,
+      message: "Define a source snapshot before configuring migration passes.",
+      path: ["snapshotMigrationConfigs"],
+    }],
+    children: [addCommand],
+  };
+  initialDraft.editState.nodes.push({
+    id: "edit:snapshotMigration",
+    path: ["snapshotMigration"],
+    label: "Snapshot Migration",
+    valueKind: "object",
+    status: "warning",
+    statusCounts: { ...counts, warnings: 1 },
+    diagnostics: [],
+    children: [collection],
+  });
+
+  const updatedDraft = structuredClone(initialDraft);
+  const updatedCollection = updatedDraft.editState.nodes.at(-1)?.children[0];
+  if (!updatedCollection) throw new Error("Missing snapshot collection");
+  updatedCollection.children = [{
+    id: "edit:snapshotMigrationConfigs.0",
+    path: ["snapshotMigrationConfigs", "0"],
+    label: "snapshot migration: <source> -> <target>",
+    valueKind: "object",
+    removable: true,
+    status: "required",
+    statusCounts: { ...counts, required: 2 },
+    diagnostics: [],
+    children: [{
+      id: "edit:snapshotMigrationConfigs.0.fromSource",
+      path: ["snapshotMigrationConfigs", "0", "fromSource"],
+      label: "From source",
+      value: "",
+      valueKind: "scalar",
+      valueType: "string",
+      required: true,
+      status: "required",
+      statusCounts: { ...counts, required: 1 },
+      diagnostics: [{
+        severity: "required",
+        message: "fromSource is required.",
+        path: ["snapshotMigrationConfigs", "0", "fromSource"],
+      }],
+      children: [],
+    }, {
+      id: "edit:snapshotMigrationConfigs.0.toTarget",
+      path: ["snapshotMigrationConfigs", "0", "toTarget"],
+      label: "To target",
+      value: "",
+      valueKind: "scalar",
+      valueType: "string",
+      required: true,
+      status: "required",
+      statusCounts: { ...counts, required: 1 },
+      diagnostics: [{
+        severity: "required",
+        message: "toTarget is required.",
+        path: ["snapshotMigrationConfigs", "0", "toTarget"],
+      }],
+      children: [],
+    }],
+  }, addCommand];
+  updatedDraft.dirty = true;
+  updatedDraft.draftRevision = "config-draft-snapshot-added";
+
+  let operation: unknown;
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(initialDraft)),
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      operation = (await request.json() as { operation: unknown }).operation;
+      return HttpResponse.json(updatedDraft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const section = within(tree).getByRole("treeitem", {
+    name: /^Snapshot Migration,/,
+  });
+  expect(within(section).getByRole("button", {
+    name: "Add snapshot migration",
+  })).toBeInTheDocument();
+  expect(within(tree).queryByRole("textbox", {
+    name: "snapshot migration name",
+  })).toBeNull();
+
+  await userEvent.click(within(section).getByRole("button", {
+    name: "Add snapshot migration",
+  }));
+
+  await waitFor(() => expect(operation).toEqual({
+    op: "add",
+    path: ["snapshotMigrationConfigs"],
+    value: {},
+  }));
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^migration-1, Addition pending submission$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("heading", {
+    name: "Edit migration-1",
+  })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "From source" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "To target" }))
+    .toBeInTheDocument();
 });
 
 
@@ -577,10 +1000,11 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
     }),
   );
 
-  await userEvent.click(
-    within(configTree).getByRole("row", { name: /^legacy/ }),
-  );
-  await userEvent.click(screen.getByRole("button", { name: "Rename legacy" }));
+  const legacyRow = within(configTree).getByRole("row", { name: /^legacy/ });
+  await userEvent.click(legacyRow);
+  await userEvent.click(within(legacyRow).getByRole("button", {
+    name: "Rename legacy",
+  }));
   const nameInput = screen.getByRole("textbox", { name: "Configuration name" });
   expect(nameInput).toHaveAttribute("pattern", "^[a-z0-9-]+$");
   await userEvent.clear(nameInput);
@@ -976,7 +1400,30 @@ test("shows a newly added resource while the server operation is pending", async
         blocked: 0,
       },
       diagnostics: [],
-      children: [],
+      children: [{
+        id: "edit:sourceClusters.immediate.endpoint",
+        path: ["sourceClusters", "immediate", "endpoint"],
+        label: "Endpoint",
+        valueKind: "scalar",
+        valueType: "string",
+        presence: "required",
+        required: true,
+        status: "required",
+        statusCounts: {
+          required: 1,
+          errors: 0,
+          warnings: 0,
+          changed: 0,
+          gated: 0,
+          blocked: 0,
+        },
+        diagnostics: [{
+          severity: "required",
+          message: "endpoint is required.",
+          path: ["sourceClusters", "immediate", "endpoint"],
+        }],
+        children: [],
+      }],
     },
     addCommand,
   ];
@@ -992,30 +1439,252 @@ test("shows a newly added resource while the server operation is pending", async
   renderApp();
   await enterEditMode();
 
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
   const sourceGroup = screen.getAllByRole("treeitem", {
     name: /^Sources,/,
   }).find((item) => item.getAttribute("aria-level") === "2");
   expect(sourceGroup).toBeDefined();
+  const previousSelection = screen.getByRole("treeitem", {
+    name: /^capture, Ready$/,
+  });
   await userEvent.click(await within(sourceGroup!).findByRole("button", {
     name: "Add source cluster",
   }));
+  const nameInput = within(tree).getByRole("textbox", {
+    name: "source cluster name",
+  });
+  expect(nameInput).toHaveFocus();
+  expect(previousSelection).toHaveAttribute("aria-selected", "false");
   await userEvent.type(
-    screen.getByRole("textbox", { name: "source cluster name" }),
+    nameInput,
     "immediate",
   );
-  await userEvent.click(screen.getByRole("button", {
-    name: "Create source cluster",
-  }));
+  await userEvent.keyboard("{Enter}");
 
-  const tree = screen.getByRole("tree", { name: "Workflow resources" });
   expect(await within(tree).findByRole("treeitem", {
     name: /^immediate, Syncing configuration$/,
   })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("Preparing immediate configuration")).toBeVisible();
+  expect(screen.queryByRole("textbox", {
+    name: "source cluster name",
+  })).toBeNull();
 
   releaseOperation?.();
   expect(await within(tree).findByRole("treeitem", {
     name: /^immediate, Addition pending submission$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("heading", {
+    name: "Edit immediate",
   })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Endpoint" }))
+    .toBeInTheDocument();
+});
+
+
+test("cancels inline resource naming and restores tree selection and focus", async () => {
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const capture = within(tree).getByRole("treeitem", {
+    name: /^capture, Ready$/,
+  });
+  capture.focus();
+  const sourceGroup = screen.getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "2");
+  expect(sourceGroup).toBeDefined();
+
+  await userEvent.click(within(sourceGroup!).getByRole("button", {
+    name: "Add source cluster",
+  }));
+  const nameInput = within(tree).getByRole("textbox", {
+    name: "source cluster name",
+  });
+  expect(nameInput).toHaveFocus();
+  const existingSource = within(tree).getByRole("treeitem", {
+    name: /^legacy, Addition pending submission$/,
+  });
+  expect(existingSource.compareDocumentPosition(
+    nameInput.closest('[role="treeitem"]'),
+  )).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(capture).toHaveAttribute("aria-selected", "false");
+
+  await userEvent.keyboard("{Escape}");
+
+  expect(within(tree).queryByRole("textbox", {
+    name: "source cluster name",
+  })).toBeNull();
+  expect(capture).toHaveAttribute("aria-selected", "true");
+  expect(capture).toHaveFocus();
+  expect(screen.getByRole("heading", { name: "Edit capture" }))
+    .toBeInTheDocument();
+});
+
+
+test("abandons inline resource naming when focus moves elsewhere", async () => {
+  const operations: unknown[] = [];
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  server.use(
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      return HttpResponse.json(configDraft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const sourceGroup = screen.getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "2");
+  expect(sourceGroup).toBeDefined();
+
+  await userEvent.click(within(sourceGroup!).getByRole("button", {
+    name: "Add source cluster",
+  }));
+  await userEvent.type(within(tree).getByRole("textbox", {
+    name: "source cluster name",
+  }), "abandoned");
+  const optional = screen.getByRole("checkbox", {
+    name: "Show optional fields",
+  });
+  await userEvent.click(optional);
+
+  expect(optional).toBeChecked();
+  expect(within(tree).queryByRole("textbox", {
+    name: "source cluster name",
+  })).toBeNull();
+  expect(operations).toEqual([]);
+
+  await userEvent.click(within(sourceGroup!).getByRole("button", {
+    name: "Add source cluster",
+  }));
+  await userEvent.type(within(tree).getByRole("textbox", {
+    name: "source cluster name",
+  }), "also-abandoned");
+  await userEvent.click(screen.getByRole("button", {
+    name: "Exit editing",
+  }));
+
+  expect(confirm).not.toHaveBeenCalled();
+  expect(operations).toEqual([]);
+  expect(screen.getByRole("button", { name: "Edit configuration" }))
+    .toBeInTheDocument();
+  confirm.mockRestore();
+});
+
+
+test("renames a named resource from the tree and follows its new identity", async () => {
+  let operation: unknown;
+  const renamedDraft = structuredClone(configDraft);
+  const sourceCollection = renamedDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const source = sourceCollection?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  if (!source) throw new Error("Missing source fixture");
+  const rewritePath = (node: typeof source) => {
+    node.id = node.id.replace(
+      "edit:sourceClusters.legacy",
+      "edit:sourceClusters.modern",
+    );
+    node.path = node.path.map((part, index) => (
+      index === 1 && part === "legacy" ? "modern" : part
+    ));
+    node.children?.forEach(rewritePath);
+  };
+  rewritePath(source);
+  source.label = "modern";
+  renamedDraft.dirty = true;
+  renamedDraft.draftRevision = "config-draft-modern";
+
+  server.use(
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operation = body.operation;
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      return HttpResponse.json(renamedDraft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const legacy = within(tree).getByRole("treeitem", {
+    name: /^legacy, Addition pending submission$/,
+  });
+  await userEvent.click(within(legacy).getByRole("button", {
+    name: "Rename legacy",
+  }));
+  const name = within(tree).getByRole("textbox", {
+    name: "New name for legacy",
+  });
+  expect(name).toHaveValue("legacy");
+  expect(name).toHaveAttribute("pattern", "^[a-z0-9-]+$");
+  expect(name).toHaveFocus();
+  await userEvent.clear(name);
+  await userEvent.type(name, "modern{Enter}");
+
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^modern, Syncing configuration$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("Preparing modern configuration")).toBeVisible();
+  expect(operation).toEqual({
+    op: "renameConfig",
+    path: ["sourceClusters", "legacy"],
+    newName: "modern",
+  });
+
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^modern, Rename pending submission$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(within(tree).queryByRole("treeitem", {
+    name: /^legacy,/,
+  })).toBeNull();
+  expect(await screen.findByRole("heading", {
+    name: "Edit modern",
+  })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Endpoint" }))
+    .toHaveValue("https://legacy.example.com:9200");
+});
+
+
+test("restores a resource after a tree rename is rejected", async () => {
+  server.use(
+    http.post("*/api/v1/config/operations", () =>
+      HttpResponse.json(
+        { detail: "Config entry already exists at sourceClusters.modern" },
+        { status: 409 },
+      ),
+    ),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const legacy = within(tree).getByRole("treeitem", {
+    name: /^legacy, Addition pending submission$/,
+  });
+  await userEvent.click(within(legacy).getByRole("button", {
+    name: "Rename legacy",
+  }));
+  const name = within(tree).getByRole("textbox", {
+    name: "New name for legacy",
+  });
+  await userEvent.clear(name);
+  await userEvent.type(name, "modern{Enter}");
+
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^legacy, Addition pending submission$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Config entry already exists at sourceClusters.modern",
+  );
+  expect(screen.getByRole("heading", { name: "Edit legacy" }))
+    .toBeInTheDocument();
 });
 
 

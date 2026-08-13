@@ -25,9 +25,11 @@ import { ConfigEditor } from "../features/configuration/ConfigEditor";
 import {
   editTarget,
   projectEditSnapshot,
+  resourceValidationStates,
 } from "../features/configuration/editProjection";
 import type {
   PendingResourceAddition,
+  PendingResourceRename,
   ResourceAddController,
 } from "../features/configuration/resourceAdds";
 import { ResourceTree } from "../features/tree/ResourceTree";
@@ -88,6 +90,8 @@ export function App() {
     useState<ResourceAddController | null>(null);
   const [pendingResourceAdditions, setPendingResourceAdditions] =
     useState<PendingResourceAddition[]>([]);
+  const [pendingResourceRenames, setPendingResourceRenames] =
+    useState<PendingResourceRename[]>([]);
   const editExitRef = useRef<(() => void) | null>(null);
   const configDraft = useQuery({
     queryKey: ["config-draft"],
@@ -148,6 +152,7 @@ export function App() {
           state.data,
           configDraft.data,
           pendingResourceAdditions,
+          pendingResourceRenames,
         )
         : state.data
     ),
@@ -155,6 +160,7 @@ export function App() {
       configDraft.data,
       editContext,
       pendingResourceAdditions,
+      pendingResourceRenames,
       state.data,
     ],
   );
@@ -175,6 +181,14 @@ export function App() {
         : null
     ),
     [displayedState, selectedId],
+  );
+  const resourceValidations = useMemo(
+    () => (
+      displayedState && editContext
+        ? resourceValidationStates(displayedState, configDraft.data)
+        : {}
+    ),
+    [configDraft.data, displayedState, editContext],
   );
   const observedSelectedNode = useMemo(
     () => (
@@ -201,6 +215,10 @@ export function App() {
       addition,
     ]);
     setSelectedId(addition.id);
+    setEditContext({
+      resourceId: addition.id,
+      targetId: addition.editTargetId,
+    });
   }, []);
   const resourceAddSettled = useCallback((
     addition: PendingResourceAddition,
@@ -230,6 +248,45 @@ export function App() {
       targetId: addition.editTargetId,
     });
   }, [queryClient]);
+  const resourceRenameStarted = useCallback((
+    rename: PendingResourceRename,
+  ) => {
+    setPendingResourceRenames((current) => [
+      ...current.filter((candidate) => candidate.oldId !== rename.oldId),
+      rename,
+    ]);
+    setSelectedId(rename.id);
+    setEditContext({
+      resourceId: rename.id,
+      targetId: rename.editTargetId,
+    });
+  }, []);
+  const resourceRenameSettled = useCallback((
+    rename: PendingResourceRename,
+    applied: boolean,
+  ) => {
+    if (!applied) {
+      setPendingResourceRenames((current) => current.filter(
+        (candidate) => candidate.oldId !== rename.oldId,
+      ));
+      setSelectedId(rename.oldId);
+      setEditContext({
+        resourceId: rename.oldId,
+        targetId: rename.oldEditTargetId,
+      });
+      return;
+    }
+    setPendingResourceRenames((current) => current.map((candidate) => (
+      candidate.oldId === rename.oldId
+        ? { ...candidate, status: "applied" }
+        : candidate
+    )));
+    setSelectedId(rename.id);
+    setEditContext({
+      resourceId: rename.id,
+      targetId: rename.editTargetId,
+    });
+  }, []);
 
   useEffect(() => {
     if (!configDraft.data) return;
@@ -241,6 +298,12 @@ export function App() {
       return next.length === current.length ? current : next;
     });
   }, [configDraft.data]);
+
+  useEffect(() => {
+    if (editContext) return;
+    setPendingResourceAdditions([]);
+    setPendingResourceRenames([]);
+  }, [editContext]);
 
   const startEditing = () => {
     if (!state.data) return;
@@ -414,6 +477,7 @@ export function App() {
                   resourceAdds={editContext ? resourceAdds : null}
                   selectedId={selectedId}
                   snapshot={displayedState}
+                  validationStates={resourceValidations}
                 />
               </section>
               {editContext ? (
@@ -423,6 +487,8 @@ export function App() {
                   onExitReady={registerEditExit}
                   onResourceAddSettled={resourceAddSettled}
                   onResourceAddStarted={resourceAddStarted}
+                  onResourceRenameSettled={resourceRenameSettled}
+                  onResourceRenameStarted={resourceRenameStarted}
                   onResourceAddsReady={registerResourceAdds}
                   onSubmitted={() => {
                     setEditContext(null);
@@ -439,6 +505,7 @@ export function App() {
                     displayedState.nodes[editContext.resourceId]?.label
                     ?? "resource"
                   }
+                  resourceSyncing={selectedNode?.status === "syncing"}
                 />
               ) : selectedNode ? (
                 <ResourceWorkspace node={selectedNode} />

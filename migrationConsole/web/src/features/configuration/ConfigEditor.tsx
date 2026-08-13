@@ -36,9 +36,13 @@ import {
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
 import {
   pendingResourceAddition,
+  pendingResourceRename,
+  resourceAdditionIdentity,
   resourceAddPlacement,
   type PendingResourceAddition,
+  type PendingResourceRename,
   type ResourceAddController,
+  type ResourceRenameOption,
 } from "./resourceAdds";
 
 
@@ -51,10 +55,16 @@ interface ConfigEditorProps {
     addition: PendingResourceAddition,
     applied: boolean,
   ) => void;
+  onResourceRenameStarted: (rename: PendingResourceRename) => void;
+  onResourceRenameSettled: (
+    rename: PendingResourceRename,
+    applied: boolean,
+  ) => void;
   onResourceAddsReady: (controller: ResourceAddController | null) => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceLabel: string;
+  resourceSyncing?: boolean;
 }
 
 
@@ -68,6 +78,9 @@ interface PinnedContext {
   id: string;
   progress: number;
 }
+
+
+type ValidationErrorEmphasis = "item" | "ancestor" | null;
 
 
 interface AddContext {
@@ -117,6 +130,91 @@ function topLevelAddContexts(nodes: EditNode[]): AddContext[] {
 }
 
 
+function renameableConfigPath(path: readonly string[]): boolean {
+  if (
+    path.length === 2
+    && ["sourceClusters", "targetClusters"].includes(path[0])
+  ) {
+    return true;
+  }
+  if (
+    path.length === 3
+    && path[0] === "traffic"
+    && ["kafkaClusters", "proxies", "s3Sources", "replayers"]
+      .includes(path[1])
+  ) {
+    return true;
+  }
+  return (
+    path.length === 5
+    && path[0] === "sourceClusters"
+    && path[2] === "snapshotInfo"
+    && ["repos", "snapshots"].includes(path[3])
+  );
+}
+
+
+const KUBERNETES_NAME_PATTERN =
+  "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$";
+const KUBERNETES_NAME_MESSAGE =
+  "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.";
+
+
+function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
+  const result: ResourceRenameOption[] = [];
+  const visit = (node: EditNode) => {
+    const placement = resourceAddPlacement(node.path);
+    if (placement) {
+      const collectionDepth = node.path.length;
+      propertyChildren(node).forEach((child, index) => {
+        if (
+          child.path.length !== collectionDepth + 1
+          || !renameableConfigPath(child.path)
+        ) {
+          return;
+        }
+        const currentName = child.path.at(-1) ?? "";
+        const parentHint = hintRecord(node.inputHint);
+        const childValidation = hintRecord(child.validation);
+        const kubernetesBacked = (
+          child.path.length === 3 && child.path[0] === "traffic"
+        );
+        const identity = resourceAdditionIdentity(
+          placement,
+          currentName,
+          index,
+        );
+        result.push({
+          currentName,
+          editTargetId: child.id,
+          label: identity.label,
+          path: child.path,
+          pattern: kubernetesBacked
+            ? KUBERNETES_NAME_PATTERN
+            : typeof parentHint.keyPattern === "string"
+              ? parentHint.keyPattern
+              : typeof childValidation.pattern === "string"
+                ? childValidation.pattern
+                : undefined,
+          placement,
+          resourceId: identity.id,
+          validationMessage: kubernetesBacked
+            ? KUBERNETES_NAME_MESSAGE
+            : typeof parentHint.message === "string"
+              ? parentHint.message
+              : typeof childValidation.message === "string"
+                ? childValidation.message
+                : undefined,
+        });
+      });
+    }
+    propertyChildren(node).forEach(visit);
+  };
+  nodes.forEach(visit);
+  return result;
+}
+
+
 function allNodeIds(nodes: EditNode[]): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
@@ -137,6 +235,41 @@ function fieldName(node: EditNode): string {
 function nodeHasIssue(node: EditNode): boolean {
   return ["required", "error", "warning", "gated", "blocked"]
     .includes(node.status ?? "");
+}
+
+
+function nodeHasValidationError(node: EditNode): boolean {
+  const counts = node.statusCounts;
+  return (
+    (counts?.errors ?? 0)
+    + (counts?.required ?? 0)
+    + (counts?.gated ?? 0)
+    + (counts?.blocked ?? 0)
+  ) > 0 || ["required", "error", "gated", "blocked"]
+    .includes(node.status ?? "");
+}
+
+
+function nodeTreeHasValidationError(node: EditNode): boolean {
+  return nodeHasValidationError(node)
+    || propertyChildren(node).some(nodeTreeHasValidationError);
+}
+
+
+function validationErrorEmphasis(
+  node: EditNode,
+): ValidationErrorEmphasis {
+  const selfHasError = nodeHasValidationError(node);
+  const childHasError = propertyChildren(node).some(
+    nodeTreeHasValidationError,
+  );
+  if (!selfHasError && !childHasError) return null;
+  const hasOwnDiagnostic = (node.diagnostics ?? []).some((diagnostic) =>
+    ["required", "error", "gated", "blocked"]
+      .includes(diagnostic.severity));
+  return selfHasError && (hasOwnDiagnostic || !childHasError)
+    ? "item"
+    : "ancestor";
 }
 
 
@@ -225,11 +358,6 @@ function editScope(nodes: EditNode[], nodeId: string | null): EditNode | null {
   const target = findClosestNode(nodes, nodeId);
   if (!target || nodeChildren(target).length > 0) return target;
   return findParent(nodes, target.id) ?? target;
-}
-
-
-function pathWithin(path: string[], scopePath: string[]): boolean {
-  return scopePath.every((part, index) => path[index] === part);
 }
 
 
@@ -769,7 +897,7 @@ function ConfigPropertyRow({
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
   const children = propertyChildren(node);
   const command = addCommand(node);
-  const canRename = node.removable === true && parent?.valueKind === "record";
+  const canRename = renameableConfigPath(node.path);
   const canUnset = (
     node.presence === "optional"
     && node.required !== true
@@ -784,6 +912,7 @@ function ConfigPropertyRow({
   const showDetails = adding
     || (selected && (Boolean(node.externalRef) || structured));
   const name = fieldName(node);
+  const errorEmphasis = validationErrorEmphasis(node);
 
   const valueEditor = node.externalRef ? (
     <button
@@ -833,6 +962,7 @@ function ConfigPropertyRow({
         className={[
           "config-property-row",
           `status-${node.status ?? "ok"}`,
+          errorEmphasis ? `validation-error-${errorEmphasis}` : "",
           selected ? "selected" : "",
           inserted ? "inserted" : "",
           contextProgress > 0 ? "context-transition" : "",
@@ -1012,10 +1142,20 @@ function ConfigPropertyRow({
                       aria-label="Configuration name"
                       autoFocus
                       onChange={(event) => setNewName(event.target.value)}
-                      pattern={typeof hintRecord(parent?.inputHint).keyPattern === "string"
-                        ? String(hintRecord(parent?.inputHint).keyPattern)
-                        : undefined}
+                      pattern={
+                        node.path.length === 3 && node.path[0] === "traffic"
+                          ? KUBERNETES_NAME_PATTERN
+                          : typeof hintRecord(parent?.inputHint).keyPattern
+                            === "string"
+                            ? String(hintRecord(parent?.inputHint).keyPattern)
+                            : undefined
+                      }
                       required
+                      title={
+                        node.path.length === 3 && node.path[0] === "traffic"
+                          ? `${KUBERNETES_NAME_MESSAGE} Dependent workflow references will be updated.`
+                          : "Dependent workflow references will be updated."
+                      }
                       value={newName}
                     />
                   </label>
@@ -1062,10 +1202,13 @@ export function ConfigEditor({
   onExitReady,
   onResourceAddStarted,
   onResourceAddSettled,
+  onResourceRenameStarted,
+  onResourceRenameSettled,
   onResourceAddsReady,
   onSubmitted,
   removalState,
   resourceLabel,
+  resourceSyncing = false,
 }: ConfigEditorProps) {
   const queryClient = useQueryClient();
   const draftQuery = useQuery({
@@ -1081,7 +1224,6 @@ export function ConfigEditor({
   );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
-  const [addingContext, setAddingContext] = useState<AddContext | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
@@ -1104,7 +1246,12 @@ export function ConfigEditor({
     parentId: string;
     previousChildIds: Set<string>;
   } | null>(null);
-  const resourceAddRequest = useRef<(optionId: string) => void>(() => {});
+  const resourceAddRequest = useRef<ResourceAddController["add"]>(
+    () => Promise.resolve(false),
+  );
+  const resourceRenameRequest = useRef<ResourceAddController["rename"]>(
+    () => Promise.resolve(false),
+  );
 
   const draft = draftQuery.data;
   const nodes = useMemo(
@@ -1124,7 +1271,7 @@ export function ConfigEditor({
     () => (
       activeTargetId && !target && !globalTarget
         ? []
-        : scope ? [scope] : nodes
+        : scope ? propertyChildren(scope) : nodes
     ),
     [activeTargetId, globalTarget, nodes, scope, target],
   );
@@ -1135,20 +1282,36 @@ export function ConfigEditor({
   const resourceAddOptions = useMemo(
     () => topLevelAdds.flatMap((context) => {
       const placement = resourceAddPlacement(context.parent.path);
+      const validation = hintRecord(context.command.validation);
+      const inputHint = hintRecord(context.command.inputHint);
       return placement ? [{
         id: context.command.id,
         label: fieldName(context.command),
         disabled: Boolean(context.command.command?.blockedMessage),
         disabledReason: context.command.command?.blockedMessage,
         placement,
+        requiresName: context.command.command?.requiresName !== false,
+        pattern: typeof validation.pattern === "string"
+          ? validation.pattern
+          : typeof inputHint.pattern === "string"
+            ? inputHint.pattern
+            : undefined,
+        validationMessage: typeof validation.message === "string"
+          ? validation.message
+          : typeof inputHint.message === "string"
+            ? inputHint.message
+            : undefined,
       }] : [];
     }),
     [topLevelAdds],
   );
+  const resourceRenames = useMemo(
+    () => resourceRenameOptions(nodes),
+    [nodes],
+  );
 
   useEffect(() => {
     setActiveTargetId(initialTargetId ?? null);
-    setAddingContext(null);
   }, [initialTargetId]);
 
   useEffect(() => {
@@ -1341,19 +1504,6 @@ export function ConfigEditor({
       childElement?.scrollIntoView?.({ block: "nearest" });
     }
   }, [rows]);
-  const scopedDiagnostics = useMemo(
-    () => (draft?.editState.validation.diagnostics ?? []).filter(
-      (diagnostic) => (
-        !scope
-        || (diagnostic.path ?? []).length === 0
-        || pathWithin(diagnostic.path ?? [], scope.path)
-      ),
-    ),
-    [draft?.editState.validation.diagnostics, scope],
-  );
-  const scopeNeedsAttention = rows.some(({ node }) => nodeHasIssue(node))
-    || scopedDiagnostics.length > 0;
-
   const replaceDraft = async (promise: Promise<ConfigDraft>) => {
     setBusy(true);
     setProblem("");
@@ -1540,18 +1690,34 @@ export function ConfigEditor({
     });
   };
 
-  const requestAdd = (context: AddContext) => {
-    if (context.command.command?.requiresName !== false) {
-      setAddingContext(context);
-      return;
-    }
-    void runTopLevelAdd(context, "");
-  };
-  resourceAddRequest.current = (optionId) => {
+  resourceAddRequest.current = (optionId, name) => {
     const context = topLevelAdds.find(
       ({ command }) => command.id === optionId,
     );
-    if (context) requestAdd(context);
+    return context ? runTopLevelAdd(context, name) : Promise.resolve(false);
+  };
+
+  resourceRenameRequest.current = (editTargetId, resourceId, newName) => {
+    const option = resourceRenames.find(
+      (candidate) => candidate.editTargetId === editTargetId,
+    );
+    if (!option || !newName.trim() || newName.trim() === option.currentName) {
+      return Promise.resolve(false);
+    }
+    const rename = pendingResourceRename(option, resourceId, newName.trim());
+    onResourceRenameStarted(rename);
+    return commit({
+      op: "renameConfig",
+      path: option.path,
+      newName: newName.trim(),
+    }).then((applied) => {
+      if (applied) {
+        setActiveTargetId(rename.editTargetId);
+        setSelectedId(rename.editTargetId);
+      }
+      onResourceRenameSettled(rename, applied);
+      return applied;
+    });
   };
 
   const close = async () => {
@@ -1582,14 +1748,18 @@ export function ConfigEditor({
   useEffect(() => {
     onResourceAddsReady({
       options: resourceAddOptions,
+      renames: resourceRenames,
       busy,
-      add: (optionId) => resourceAddRequest.current(optionId),
+      add: (optionId, name) => resourceAddRequest.current(optionId, name),
+      rename: (editTargetId, resourceId, newName) =>
+        resourceRenameRequest.current(editTargetId, resourceId, newName),
     });
     return () => onResourceAddsReady(null);
   }, [
     busy,
     onResourceAddsReady,
     resourceAddOptions,
+    resourceRenames,
   ]);
 
   if (draftQuery.isPending) {
@@ -1705,27 +1875,6 @@ export function ConfigEditor({
           <button onClick={() => setProblem("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {addingContext ? (
-        <section
-          aria-label={`Add ${fieldName(addingContext.command)}`}
-          className="config-context-add"
-        >
-          <header>
-            <strong>Add {fieldName(addingContext.command)}</strong>
-            <span>{fieldName(addingContext.parent)}</span>
-          </header>
-          <CommandEditor
-            busy={busy}
-            commit={commit}
-            execute={(name) => runTopLevelAdd(addingContext, name)}
-            node={addingContext.command}
-            onAdded={selectContextAdded}
-            onCancel={() => setAddingContext(null)}
-            onComplete={() => setAddingContext(null)}
-            parent={addingContext.parent}
-          />
-        </section>
-      ) : null}
       {removalState ? (
         <section className="config-removal-workspace" role="status">
           <div className="config-removal-icon" aria-hidden="true">
@@ -1751,24 +1900,55 @@ export function ConfigEditor({
             </button>
           ) : null}
         </section>
-      ) : <div className="config-layout">
+      ) : resourceSyncing ? (
+        <section className="config-syncing-workspace" role="status">
+          <LoaderCircle className="spin" aria-hidden="true" />
+          <h2>Preparing {resourceLabel} configuration</h2>
+          <p>
+            The configuration service is applying the change and generating
+            the editable fields.
+          </p>
+        </section>
+      ) : (
+        <div className="config-layout">
         <section
           className="config-table-panel"
           onScroll={schedulePinnedContextUpdate}
           ref={configTablePanelRef}
         >
           <header className="config-outline-header">
-            <strong>{scope?.label ?? "Workflow configuration"}</strong>
-            <span>{rows.length} visible settings</span>
+            <div>
+              <strong>{scope?.label ?? "Workflow configuration"}</strong>
+              <span>{rows.length} visible settings</span>
+            </div>
+            {scope?.removable ? (
+              <button
+                aria-label={`Remove ${scope.path.at(-1)}`}
+                className="config-scope-remove danger-button"
+                disabled={busy}
+                onClick={() => void requestRemoval(scope)}
+                title={`Remove ${scope.path.at(-1)}`}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            ) : null}
           </header>
           {pinnedRows.length > 0 ? (
             <nav
               aria-label="Current configuration path"
               className="pinned-config-context"
             >
-              {pinnedRows.map(({ node, depth, progress }) => (
+              {pinnedRows.map(({ node, depth, progress }) => {
+                const errorEmphasis = validationErrorEmphasis(node);
+                return (
                 <button
-                  className="pinned-context-row"
+                  className={[
+                    "pinned-context-row",
+                    errorEmphasis
+                      ? `validation-error-${errorEmphasis}`
+                      : "",
+                  ].join(" ")}
                   key={node.id}
                   onClick={() => {
                     setSelectedId(node.id);
@@ -1798,7 +1978,8 @@ export function ConfigEditor({
                     {node.status ?? "ok"}
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </nav>
           ) : null}
           <table aria-label="Configuration fields" className="config-table">
@@ -1868,50 +2049,7 @@ export function ConfigEditor({
             </tbody>
           </table>
         </section>
-        <aside className="config-diagnostics">
-          <header>
-            <AlertTriangle aria-hidden="true" />
-            <h3>Validation</h3>
-          </header>
-          <strong>
-            {scopeNeedsAttention
-              ? "This configuration needs attention"
-              : "This configuration is valid"}
-          </strong>
-          {!scope ? (draft.editState.validation.errors ?? []).map((error) => (
-            <p key={error}>{error}</p>
-          )) : null}
-          {scopedDiagnostics.map(
-            (diagnostic, index) => (
-              <button
-                key={`${diagnostic.message}-${index}`}
-                onClick={() => {
-                  const diagnosticTarget = scopedNodes
-                    .flatMap(function flatten(node): EditNode[] {
-                      return [node, ...nodeChildren(node).flatMap(flatten)];
-                    })
-                    .find((node) => (
-                      node.path.join(".") === (diagnostic.path ?? []).join(".")
-                    ));
-                  if (diagnosticTarget) setSelectedId(diagnosticTarget.id);
-                }}
-                type="button"
-              >
-                <span>{diagnostic.severity}</span>
-                {diagnostic.message}
-              </button>
-            ),
-          )}
-          {draft.editState.provenance.lossy ? (
-            <div className="provenance-warning">
-              <strong>Projection warnings</strong>
-              {(draft.editState.provenance.warnings ?? []).map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          ) : null}
-        </aside>
-      </div>}
+      </div>)}
       {pendingRemoval ? (
         <div className="modal-backdrop">
           <section

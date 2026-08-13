@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -8,18 +9,29 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   LoaderCircle,
+  Pencil,
   Plus,
   Search,
+  TriangleAlert,
+  X,
 } from "lucide-react";
 
 import type { ManageNode, ManageSnapshot } from "../../api/client";
+import { resourceAddPlacements } from "../configuration/resourceAdds";
 import type {
   ResourceAddController,
   ResourceAddOption,
+  ResourceAddPlacement,
+  ResourceRenameOption,
 } from "../configuration/resourceAdds";
+import type {
+  ResourceValidationState,
+} from "../configuration/editProjection";
 
 
 interface VisibleRow {
@@ -33,6 +45,7 @@ interface ResourceTreeProps {
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
   resourceAdds: ResourceAddController | null;
+  validationStates: Record<string, ResourceValidationState>;
 }
 
 
@@ -104,13 +117,42 @@ interface TreeRowProps {
   addMenuOpen: boolean;
   addOptions: ResourceAddOption[];
   addPending: boolean;
+  renameOption?: ResourceRenameOption;
+  resourceType?: string;
+  validation?: ResourceValidationState;
+  validationErrorAncestor: boolean;
+  validationErrorItem: boolean;
+  renaming: boolean;
+  renameValue: string;
   onAddResource: (optionId: string) => void;
+  onCancelRename: () => void;
+  onChangeRename: (value: string) => void;
   onExpand: (nodeId: string) => void;
   onFocus: (nodeId: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>, nodeId: string) => void;
   onSelect: (nodeId: string) => void;
+  onStartRename: (nodeId: string) => void;
+  onSubmitRename: () => void;
   onToggleAddMenu: (nodeId: string) => void;
   rowRef: (nodeId: string, element: HTMLDivElement | null) => void;
+}
+
+
+interface InlineCreate {
+  groupId: string;
+  name: string;
+  option: ResourceAddOption;
+  previousFocusedId: string | null;
+  previousSelectedId: string | null;
+}
+
+
+interface InlineRename {
+  name: string;
+  nodeId: string;
+  option: ResourceRenameOption;
+  previousFocusedId: string | null;
+  previousSelectedId: string | null;
 }
 
 
@@ -123,11 +165,22 @@ const TreeRow = memo(function TreeRow({
   addMenuOpen,
   addOptions,
   addPending,
+  renameOption,
+  resourceType,
+  validation,
+  validationErrorAncestor,
+  validationErrorItem,
+  renaming,
+  renameValue,
   onAddResource,
+  onCancelRename,
+  onChangeRename,
   onExpand,
   onFocus,
   onKeyDown,
   onSelect,
+  onStartRename,
+  onSubmitRename,
   onToggleAddMenu,
   rowRef,
 }: TreeRowProps) {
@@ -137,24 +190,39 @@ const TreeRow = memo(function TreeRow({
     ? node.valueSummary ?? "Marked for removal"
     : node.status === "syncing"
       ? node.valueSummary ?? "Syncing"
-      : node.valueSummary === "Addition pending submission"
+      : (
+        node.valueSummary === "Addition pending submission"
+        || node.valueSummary === "Rename pending submission"
+      )
         ? node.valueSummary
         : node.phase ?? node.status;
+  const summary = node.valueSummary ?? node.phase ?? node.kind;
+  const visibleSummary = resourceType
+    ? `${resourceType} - ${summary}`
+    : summary;
   return (
     <div
       aria-expanded={expandable ? expanded : undefined}
-      aria-label={`${node.label}, ${spokenState}`}
+      aria-label={[
+        node.label,
+        resourceType,
+        spokenState,
+      ].filter(Boolean).join(", ")}
       aria-level={depth}
       aria-selected={selected}
       className={[
         "tree-row",
         `status-${node.status}`,
+        validationErrorItem ? "validation-error-item" : "",
+        validationErrorAncestor ? "validation-error-ancestor" : "",
         selected ? "selected" : "",
         inserted ? "inserted" : "",
       ].join(" ")}
       data-node-id={node.id}
       onClick={() => onSelect(node.id)}
-      onFocus={() => onFocus(node.id)}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) onFocus(node.id);
+      }}
       onKeyDown={(event) => onKeyDown(event, node.id)}
       ref={(element) => rowRef(node.id, element)}
       role="treeitem"
@@ -183,14 +251,79 @@ const TreeRow = memo(function TreeRow({
           className="tree-syncing-indicator spin"
         />
       ) : <span className="status-dot" aria-hidden="true" />}
-      <span className="tree-row-copy">
-        <strong>{node.label}</strong>
-        <span>{node.valueSummary ?? node.phase ?? node.kind}</span>
-      </span>
-      <span
-        className="tree-row-tools"
-        onClick={(event) => event.stopPropagation()}
-      >
+      {renaming && renameOption ? (
+        <form
+          className="tree-inline-name"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCancelRename();
+            }
+          }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmitRename();
+          }}
+        >
+          <input
+            aria-label={`New name for ${renameOption.currentName}`}
+            autoFocus
+            onChange={(event) => {
+              event.currentTarget.setCustomValidity("");
+              onChangeRename(event.target.value);
+            }}
+            onInvalid={(event) => {
+              if (
+                event.currentTarget.validity.patternMismatch
+                && renameOption.validationMessage
+              ) {
+                event.currentTarget.setCustomValidity(
+                  renameOption.validationMessage,
+                );
+              }
+            }}
+            pattern={renameOption.pattern}
+            required
+            title={[
+              renameOption.validationMessage,
+              "Dependent workflow references will be updated.",
+            ].filter(Boolean).join(" ")}
+            value={renameValue}
+          />
+          <button
+            aria-label="Apply rename"
+            disabled={
+              addPending
+              || !renameValue.trim()
+              || renameValue.trim() === renameOption.currentName
+            }
+            title="Apply rename"
+            type="submit"
+          >
+            <Check aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Cancel rename"
+            disabled={addPending}
+            onClick={onCancelRename}
+            title="Cancel rename"
+            type="button"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </form>
+      ) : (
+        <>
+          <span className="tree-row-copy">
+            <strong>{node.label}</strong>
+            <span>{visibleSummary}</span>
+          </span>
+          <span
+            className="tree-row-tools"
+            onClick={(event) => event.stopPropagation()}
+          >
         {addOptions.length === 1 ? (
           <button
             aria-label={`Add ${addOptions[0].label}`}
@@ -245,7 +378,35 @@ const TreeRow = memo(function TreeRow({
             ) : null}
           </>
         ) : null}
-        {node.diagnostics.length > 0 ? (
+        {renameOption ? (
+          <button
+            aria-label={`Rename ${node.label}`}
+            className="tree-resource-rename"
+            disabled={addPending}
+            onClick={() => onStartRename(node.id)}
+            title={`Rename ${node.label} and update dependent workflow references`}
+            type="button"
+          >
+            <Pencil aria-hidden="true" />
+          </button>
+        ) : null}
+        {validation ? (
+          <span
+            aria-label={validation.label}
+            className={[
+              "tree-validation-indicator",
+              `validation-${validation.level}`,
+            ].join(" ")}
+            title={validation.label}
+          >
+            {validation.level === "valid"
+              ? <CircleCheck aria-hidden="true" />
+              : <TriangleAlert aria-hidden="true" />}
+            {validation.issueCount > 1 ? (
+              <span>{validation.issueCount}</span>
+            ) : null}
+          </span>
+        ) : node.diagnostics.length > 0 ? (
           <span
             aria-label={`${node.diagnostics.length} diagnostics`}
             className="diagnostic-count"
@@ -253,10 +414,104 @@ const TreeRow = memo(function TreeRow({
             {node.diagnostics.length}
           </span>
         ) : null}
-      </span>
+          </span>
+        </>
+      )}
     </div>
   );
 });
+
+
+function InlineCreateRow({
+  create,
+  depth,
+  pending,
+  onCancel,
+  onChange,
+  onFormRef,
+  onLeave,
+  onSubmit,
+}: {
+  create: InlineCreate;
+  depth: number;
+  pending: boolean;
+  onCancel: () => void;
+  onChange: (name: string) => void;
+  onFormRef: (element: HTMLFormElement | null) => void;
+  onLeave: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <form
+      aria-label={`New ${create.option.label}`}
+      aria-level={depth}
+      aria-selected="true"
+      className="tree-row tree-inline-create selected inserted"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onLeave();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+      role="treeitem"
+      ref={onFormRef}
+      style={{ "--tree-depth": depth } as React.CSSProperties}
+    >
+      <span className="tree-expander-spacer" />
+      <span className="status-dot" aria-hidden="true" />
+      <div className="tree-inline-name">
+        <input
+          aria-label={`${create.option.label} name`}
+          autoFocus
+          onChange={(event) => {
+            event.currentTarget.setCustomValidity("");
+            onChange(event.target.value);
+          }}
+          onInvalid={(event) => {
+            if (
+              event.currentTarget.validity.patternMismatch
+              && create.option.validationMessage
+            ) {
+              event.currentTarget.setCustomValidity(
+                create.option.validationMessage,
+              );
+            }
+          }}
+          pattern={create.option.pattern}
+          placeholder={`New ${create.option.label}`}
+          required
+          title={create.option.validationMessage}
+          value={create.name}
+        />
+        <button
+          aria-label={`Create ${create.option.label}`}
+          disabled={pending || !create.name.trim()}
+          title={`Create ${create.option.label}`}
+          type="submit"
+        >
+          <Check aria-hidden="true" />
+        </button>
+        <button
+          aria-label={`Cancel adding ${create.option.label}`}
+          disabled={pending}
+          onClick={onCancel}
+          title="Cancel"
+          type="button"
+        >
+          <X aria-hidden="true" />
+        </button>
+      </div>
+    </form>
+  );
+}
 
 
 export function ResourceTree({
@@ -264,6 +519,7 @@ export function ResourceTree({
   selectedId,
   onSelect,
   resourceAdds,
+  validationStates,
 }: ResourceTreeProps) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -272,8 +528,12 @@ export function ResourceTree({
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [addMenuGroupId, setAddMenuGroupId] = useState<string | null>(null);
+  const [inlineCreate, setInlineCreate] = useState<InlineCreate | null>(null);
+  const [inlineRename, setInlineRename] = useState<InlineRename | null>(null);
   const knownIds = useRef<Set<string> | null>(null);
   const rowElements = useRef(new Map<string, HTMLDivElement>());
+  const inlineCreateElement = useRef<HTMLFormElement>(null);
+  const focusAfterMutation = useRef(false);
 
   useEffect(() => {
     setExpanded((current) => {
@@ -312,12 +572,67 @@ export function ResourceTree({
     () => visibleRows(snapshot, expanded, filter),
     [snapshot, expanded, filter],
   );
+  const validationErrorPaths = useMemo(() => {
+    const items = new Set<string>();
+    const ancestors = new Set<string>();
+    Object.entries(validationStates).forEach(([nodeId, validation]) => {
+      if (validation.level !== "error" || !snapshot.nodes[nodeId]) return;
+      items.add(nodeId);
+      let parentId = snapshot.nodes[nodeId].parentId;
+      while (parentId) {
+        ancestors.add(parentId);
+        parentId = snapshot.nodes[parentId]?.parentId ?? null;
+      }
+    });
+    return { ancestors, items };
+  }, [snapshot.nodes, validationStates]);
+  const inlineCreatePosition = (() => {
+    if (!inlineCreate) return null;
+    const groupIndex = rows.findIndex(
+      ({ node }) => node.id === inlineCreate.groupId,
+    );
+    const groupRow = rows[groupIndex];
+    if (!groupRow) return null;
+    let afterId = groupRow.node.id;
+    for (let index = groupIndex + 1; index < rows.length; index += 1) {
+      if (rows[index].depth <= groupRow.depth) break;
+      afterId = rows[index].node.id;
+    }
+    return {
+      afterId,
+      depth: groupRow.depth + 1,
+    };
+  })();
+  const resourceTypesByNode = useMemo(() => {
+    const placements = resourceAddPlacements();
+    const placementsByGroup = new Map<string, ResourceAddPlacement[]>();
+    placements.forEach((placement) => {
+      const current = placementsByGroup.get(placement.groupId) ?? [];
+      current.push(placement);
+      placementsByGroup.set(placement.groupId, current);
+    });
+    const result = new Map<string, string>();
+    Object.values(snapshot.nodes).forEach((node) => {
+      if (node.kind !== "resource" || !node.parentId) return;
+      const groupPlacements = placementsByGroup.get(node.parentId) ?? [];
+      if (groupPlacements.length < 2) return;
+      const placement = groupPlacements.find(
+        (candidate) => candidate.resourcePlural === node.resourcePlural,
+      );
+      if (placement) result.set(node.id, placement.resourceType);
+    });
+    return result;
+  }, [snapshot.nodes]);
   const addOptionsByGroup = useMemo(() => {
     const result = new Map<string, ResourceAddOption[]>();
     (resourceAdds?.options ?? []).forEach((option) => {
-      const exactGroup = snapshot.nodes[option.placement.groupId];
-      const matchingGroup = exactGroup?.kind === "group"
-        ? exactGroup
+      const exactAnchor = snapshot.nodes[
+        option.placement.addControlId ?? option.placement.groupId
+      ];
+      const matchingAnchor = (
+        exactAnchor?.kind === "group" || exactAnchor?.kind === "section"
+      )
+        ? exactAnchor
         : Object.values(snapshot.nodes).find((node) => (
           node.kind === "group"
           && node.childIds.some(
@@ -327,13 +642,41 @@ export function ResourceTree({
             ),
           )
         ));
-      if (!matchingGroup) return;
-      const current = result.get(matchingGroup.id) ?? [];
+      if (!matchingAnchor) return;
+      const current = result.get(matchingAnchor.id) ?? [];
       current.push(option);
-      result.set(matchingGroup.id, current);
+      result.set(matchingAnchor.id, current);
     });
     return result;
   }, [resourceAdds?.options, snapshot]);
+  const renameOptionsByResource = useMemo(() => {
+    const result = new Map<string, ResourceRenameOption>();
+    (resourceAdds?.renames ?? []).forEach((option) => {
+      const exactResource = snapshot.nodes[option.resourceId];
+      if (exactResource?.kind === "resource") {
+        result.set(exactResource.id, option);
+        return;
+      }
+      const matchingResource = Object.values(snapshot.nodes).find((node) => (
+        node.kind === "resource"
+        && (
+          node.capabilities.some((capability) => (
+            capability.kind === "edit"
+            && capability.editTargetId === option.editTargetId
+          ))
+          || (
+            node.resourcePlural === option.placement.resourcePlural
+            && (
+              node.resourceName === option.currentName
+              || node.label === option.label
+            )
+          )
+        )
+      ));
+      if (matchingResource) result.set(matchingResource.id, option);
+    });
+    return result;
+  }, [resourceAdds?.renames, snapshot]);
 
   useEffect(() => {
     if (focusedId && snapshot.nodes[focusedId]) return;
@@ -344,6 +687,166 @@ export function ResourceTree({
     setFocusedId(nodeId);
     rowElements.current.get(nodeId)?.focus();
   }, []);
+
+  useEffect(() => {
+    if (
+      !focusAfterMutation.current
+      || !selectedId
+      || !snapshot.nodes[selectedId]
+    ) {
+      return;
+    }
+    focusAfterMutation.current = false;
+    focusRow(selectedId);
+  }, [focusRow, selectedId, snapshot.nodes]);
+
+  const restoreTreeContext = useCallback((
+    previousSelectedId: string | null,
+    previousFocusedId: string | null,
+  ) => {
+    if (previousSelectedId && snapshot.nodes[previousSelectedId]) {
+      onSelect(previousSelectedId);
+    }
+    const targetId = (
+      previousFocusedId && snapshot.nodes[previousFocusedId]
+        ? previousFocusedId
+        : previousSelectedId
+    );
+    if (targetId) queueMicrotask(() => focusRow(targetId));
+  }, [focusRow, onSelect, snapshot.nodes]);
+
+  const cancelCreate = useCallback(() => {
+    if (!inlineCreate) return;
+    setInlineCreate(null);
+    restoreTreeContext(
+      inlineCreate.previousSelectedId,
+      inlineCreate.previousFocusedId,
+    );
+  }, [inlineCreate, restoreTreeContext]);
+
+  const inlineCreateActive = inlineCreate !== null;
+  useEffect(() => {
+    if (!inlineCreateActive) return;
+    const abandonOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node
+        && !inlineCreateElement.current?.contains(event.target)
+      ) {
+        setInlineCreate(null);
+      }
+    };
+    document.addEventListener("pointerdown", abandonOnOutsidePointer, true);
+    return () => document.removeEventListener(
+      "pointerdown",
+      abandonOnOutsidePointer,
+      true,
+    );
+  }, [inlineCreateActive]);
+
+  const submitCreate = useCallback(async () => {
+    if (!inlineCreate || !resourceAdds) return;
+    const name = inlineCreate.name.trim();
+    if (inlineCreate.option.requiresName && !name) return;
+    const previousSelectedId = inlineCreate.previousSelectedId;
+    const previousFocusedId = inlineCreate.previousFocusedId;
+    const optionId = inlineCreate.option.id;
+    setInlineCreate(null);
+    focusAfterMutation.current = true;
+    const applied = await resourceAdds.add(optionId, name);
+    if (!applied) {
+      focusAfterMutation.current = false;
+      restoreTreeContext(previousSelectedId, previousFocusedId);
+    }
+  }, [inlineCreate, resourceAdds, restoreTreeContext]);
+
+  const beginAdd = useCallback((optionId: string, groupId: string) => {
+    const option = resourceAdds?.options.find(
+      (candidate) => candidate.id === optionId,
+    );
+    if (!option || option.disabled || resourceAdds?.busy) return;
+    setAddMenuGroupId(null);
+    setInlineRename(null);
+    setExpanded((current) => new Set(current).add(groupId));
+    const context = {
+      previousFocusedId: focusedId,
+      previousSelectedId: selectedId,
+    };
+    if (option.requiresName) {
+      setInlineCreate({
+        ...context,
+        groupId,
+        name: "",
+        option,
+      });
+      return;
+    }
+    focusAfterMutation.current = true;
+    void resourceAdds.add(option.id, "").then((applied) => {
+      if (!applied) {
+        focusAfterMutation.current = false;
+        restoreTreeContext(
+          context.previousSelectedId,
+          context.previousFocusedId,
+        );
+      }
+    });
+  }, [
+    focusedId,
+    resourceAdds,
+    restoreTreeContext,
+    selectedId,
+  ]);
+
+  const beginRename = useCallback((nodeId: string) => {
+    const option = renameOptionsByResource.get(nodeId);
+    if (!option || resourceAdds?.busy) return;
+    const context = {
+      previousFocusedId: focusedId,
+      previousSelectedId: selectedId,
+    };
+    setInlineCreate(null);
+    setInlineRename({
+      ...context,
+      name: option.currentName,
+      nodeId,
+      option,
+    });
+    onSelect(nodeId);
+    setFocusedId(nodeId);
+  }, [
+    focusedId,
+    onSelect,
+    renameOptionsByResource,
+    resourceAdds?.busy,
+    selectedId,
+  ]);
+
+  const cancelRename = useCallback(() => {
+    if (!inlineRename) return;
+    setInlineRename(null);
+    restoreTreeContext(
+      inlineRename.previousSelectedId,
+      inlineRename.previousFocusedId,
+    );
+  }, [inlineRename, restoreTreeContext]);
+
+  const submitRename = useCallback(async () => {
+    if (!inlineRename || !resourceAdds) return;
+    const newName = inlineRename.name.trim();
+    if (!newName || newName === inlineRename.option.currentName) return;
+    const { nodeId, option } = inlineRename;
+    setInlineRename(null);
+    focusAfterMutation.current = true;
+    const applied = await resourceAdds.rename(
+      option.editTargetId,
+      nodeId,
+      newName,
+    );
+    if (!applied) {
+      focusAfterMutation.current = false;
+      queueMicrotask(() => focusRow(nodeId));
+    }
+  }, [focusRow, inlineRename, resourceAdds]);
 
   const handleKeyDown = useCallback((
     event: KeyboardEvent<HTMLDivElement>,
@@ -425,29 +928,71 @@ export function ResourceTree({
       <div className="tree-scroll" data-testid="tree-scroller">
         <div aria-label="Workflow resources" className="resource-tree" role="tree">
           {rows.map((row) => (
-            <TreeRow
-              expanded={expanded.has(row.node.id) || filter.length > 0}
-              focused={focusedId === row.node.id}
-              inserted={insertedIds.has(row.node.id)}
-              addMenuOpen={addMenuGroupId === row.node.id}
-              addOptions={addOptionsByGroup.get(row.node.id) ?? []}
-              addPending={resourceAdds?.busy ?? false}
-              key={row.node.id}
-              onAddResource={(optionId) => {
-                setAddMenuGroupId(null);
-                resourceAdds?.add(optionId);
-              }}
-              onExpand={toggleExpanded}
-              onFocus={setFocusedId}
-              onKeyDown={handleKeyDown}
-              onSelect={onSelect}
-              onToggleAddMenu={(nodeId) => setAddMenuGroupId((current) => (
-                current === nodeId ? null : nodeId
-              ))}
-              row={row}
-              rowRef={rowRef}
-              selected={selectedId === row.node.id}
-            />
+            <Fragment key={row.node.id}>
+              <TreeRow
+                expanded={expanded.has(row.node.id) || filter.length > 0}
+                focused={focusedId === row.node.id}
+                inserted={insertedIds.has(row.node.id)}
+                addMenuOpen={addMenuGroupId === row.node.id}
+                addOptions={addOptionsByGroup.get(row.node.id) ?? []}
+                addPending={resourceAdds?.busy ?? false}
+                renameOption={renameOptionsByResource.get(row.node.id)}
+                resourceType={resourceTypesByNode.get(row.node.id)}
+                validation={validationStates[row.node.id]}
+                validationErrorAncestor={
+                  validationErrorPaths.ancestors.has(row.node.id)
+                }
+                validationErrorItem={
+                  validationErrorPaths.items.has(row.node.id)
+                }
+                renameValue={
+                  inlineRename?.nodeId === row.node.id
+                    ? inlineRename.name
+                    : ""
+                }
+                renaming={inlineRename?.nodeId === row.node.id}
+                onAddResource={(optionId) => beginAdd(optionId, row.node.id)}
+                onCancelRename={cancelRename}
+                onChangeRename={(name) => setInlineRename((current) => (
+                  current?.nodeId === row.node.id
+                    ? { ...current, name }
+                    : current
+                ))}
+                onExpand={toggleExpanded}
+                onFocus={setFocusedId}
+                onKeyDown={handleKeyDown}
+                onSelect={onSelect}
+                onStartRename={beginRename}
+                onSubmitRename={() => void submitRename()}
+                onToggleAddMenu={(nodeId) => setAddMenuGroupId((current) => (
+                  current === nodeId ? null : nodeId
+                ))}
+                row={row}
+                rowRef={rowRef}
+                selected={
+                  inlineCreate
+                    ? false
+                    : selectedId === row.node.id
+                      || inlineRename?.nodeId === row.node.id
+                }
+              />
+              {inlineCreate && inlineCreatePosition?.afterId === row.node.id ? (
+                <InlineCreateRow
+                  create={inlineCreate}
+                  depth={inlineCreatePosition.depth}
+                  onCancel={cancelCreate}
+                  onChange={(name) => setInlineCreate((current) => (
+                    current ? { ...current, name } : current
+                  ))}
+                  onFormRef={(element) => {
+                    inlineCreateElement.current = element;
+                  }}
+                  onLeave={() => setInlineCreate(null)}
+                  onSubmit={() => void submitCreate()}
+                  pending={resourceAdds?.busy ?? false}
+                />
+              ) : null}
+            </Fragment>
           ))}
           {rows.length === 0 ? (
             <p className="tree-empty">No resources match this filter.</p>

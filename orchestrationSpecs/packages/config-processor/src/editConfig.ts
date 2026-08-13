@@ -834,14 +834,12 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
     const path = ["snapshotMigrationConfigs"];
     const children = (Array.isArray(configs) ? configs : []).map((value, index) => snapshotMigrationNode(index, value, ctx));
     const hasSourceSnapshots = ctx.snapshotSourceOptions.length > 0;
-    if (hasSourceSnapshots) {
-        children.push(addRow(
-            path,
-            "snapshot migration",
-            "Create a snapshot migration configuration in pending workflow YAML.",
-            false,
-        ));
-    }
+    children.push(addRow(
+        path,
+        "snapshot migration",
+        "Create a snapshot migration configuration in pending workflow YAML.",
+        false,
+    ));
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,

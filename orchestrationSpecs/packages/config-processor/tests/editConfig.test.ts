@@ -157,7 +157,13 @@ describe("editConfig state", () => {
             expert: true,
             label: "+ Add optional S3 archive source (no capture proxy)",
         });
-        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toBeUndefined();
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toMatchObject({
+            label: "+ Add snapshot migration",
+            command: {
+                requiresName: false,
+                autoEditAdded: true,
+            },
+        });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs")).toMatchObject({
             status: "required",
         });

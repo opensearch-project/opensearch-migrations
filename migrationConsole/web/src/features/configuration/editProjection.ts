@@ -8,6 +8,7 @@ import {
   resourceAdditionIdentity,
   resourceAddPlacements,
   type PendingResourceAddition,
+  type PendingResourceRename,
   type ResourceAddPlacement,
 } from "./resourceAdds";
 
@@ -20,6 +21,70 @@ export function editTarget(node: ManageNode): string | null {
 }
 
 
+export interface ResourceValidationState {
+  issueCount: number;
+  label: string;
+  level: "valid" | "warning" | "error";
+}
+
+
+function validationState(node: EditNode): ResourceValidationState {
+  const counts = node.statusCounts;
+  let errors = (
+    (counts?.errors ?? 0)
+    + (counts?.required ?? 0)
+    + (counts?.gated ?? 0)
+    + (counts?.blocked ?? 0)
+  );
+  let warnings = counts?.warnings ?? 0;
+  if (errors === 0 && warnings === 0) {
+    if (["required", "error", "gated", "blocked"].includes(node.status ?? "")) {
+      errors = 1;
+    } else if (node.status === "warning") {
+      warnings = 1;
+    }
+  }
+  const childStates = (node.children ?? [])
+    .filter((child) => child.valueKind !== "command")
+    .map(validationState);
+  errors = Math.max(
+    errors,
+    childStates
+      .filter((state) => state.level === "error")
+      .reduce((total, state) => total + state.issueCount, 0),
+  );
+  warnings = Math.max(
+    warnings,
+    childStates
+      .filter((state) => state.level === "warning")
+      .reduce((total, state) => total + state.issueCount, 0),
+  );
+  if (errors > 0) {
+    return {
+      issueCount: errors + warnings,
+      label: `${errors + warnings} validation ${
+        errors + warnings === 1 ? "issue" : "issues"
+      }`,
+      level: "error",
+    };
+  }
+  if (warnings > 0) {
+    return {
+      issueCount: warnings,
+      label: `${warnings} validation ${
+        warnings === 1 ? "warning" : "warnings"
+      }`,
+      level: "warning",
+    };
+  }
+  return {
+    issueCount: 0,
+    label: "Configuration valid",
+    level: "valid",
+  };
+}
+
+
 function flattenEditNodes(nodes: EditNode[]): Map<string, EditNode> {
   const result = new Map<string, EditNode>();
   const visit = (node: EditNode) => {
@@ -27,6 +92,37 @@ function flattenEditNodes(nodes: EditNode[]): Map<string, EditNode> {
     (node.children ?? []).forEach(visit);
   };
   nodes.forEach(visit);
+  return result;
+}
+
+
+export function resourceValidationStates(
+  snapshot: ManageSnapshot,
+  draft: ConfigDraft | undefined,
+): Record<string, ResourceValidationState> {
+  if (!draft) return {};
+  const editNodes = flattenEditNodes(draft.editState.nodes);
+  const result: Record<string, ResourceValidationState> = {};
+  Object.values(snapshot.nodes).forEach((node) => {
+    if (node.kind !== "resource") return;
+    const targetId = editTarget(node);
+    const target = targetId ? editNodes.get(targetId) : undefined;
+    if (target) result[node.id] = validationState(target);
+  });
+  resourceAddPlacements().forEach((placement) => {
+    const collection = collectionNode(editNodes, placement);
+    if (!collection) return;
+    const pathLength = placement.collectionPath.split(".").length;
+    (collection.children ?? [])
+      .filter((child) => child.valueKind !== "command")
+      .forEach((child, index) => {
+        const name = child.path[pathLength] ?? "";
+        const identity = resourceAdditionIdentity(placement, name, index);
+        if (snapshot.nodes[identity.id] && !result[identity.id]) {
+          result[identity.id] = validationState(child);
+        }
+      });
+  });
   return result;
 }
 
@@ -156,12 +252,70 @@ function projectDraftAdditions(
 }
 
 
+function projectPendingRename(
+  nodes: Record<string, ManageNode>,
+  rename: PendingResourceRename,
+) {
+  const previous = nodes[rename.oldId];
+  const groupId = previous?.parentId ?? rename.groupId;
+  delete nodes[rename.oldId];
+
+  if (!nodes[rename.id]) {
+    appendAddition(
+      nodes,
+      rename,
+      `rename:${rename.oldId}:${rename.id}`,
+      rename.status === "syncing" ? "syncing" : "changed",
+      rename.status === "syncing"
+        ? "Syncing configuration"
+        : "Rename pending submission",
+    );
+  }
+
+  const renamed = nodes[rename.id];
+  if (renamed) {
+    nodes[rename.id] = rename.status === "syncing"
+      ? {
+        ...renamed,
+        revision: `rename:${rename.oldId}:${rename.id}:syncing`,
+        status: "syncing",
+        phase: "Syncing",
+        valueSummary: "Syncing configuration",
+        capabilities: [],
+      }
+      : {
+        ...renamed,
+        valueSummary: "Rename pending submission",
+      };
+  }
+
+  const group = nodes[groupId];
+  if (!group) return;
+  const childIds = group.childIds.map(
+    (childId) => childId === rename.oldId ? rename.id : childId,
+  );
+  if (!childIds.includes(rename.id)) childIds.push(rename.id);
+  nodes[groupId] = {
+    ...group,
+    revision: `${group.revision}:rename:${rename.oldId}:${rename.id}`,
+    childIds: [...new Set(childIds)],
+  };
+}
+
+
 export function projectEditSnapshot(
   snapshot: ManageSnapshot,
   draft: ConfigDraft | undefined,
   pendingAdditions: PendingResourceAddition[] = [],
+  pendingRenames: PendingResourceRename[] = [],
 ): ManageSnapshot {
-  if (!draft && pendingAdditions.length === 0) return snapshot;
+  if (
+    !draft
+    && pendingAdditions.length === 0
+    && pendingRenames.length === 0
+  ) {
+    return snapshot;
+  }
   const editNodes = flattenEditNodes(draft?.editState.nodes ?? []);
   const nodes: Record<string, ManageNode> = draft
     ? Object.fromEntries(Object.entries(snapshot.nodes).map(([nodeId, node]) => {
@@ -204,6 +358,7 @@ export function projectEditSnapshot(
     "syncing",
     "Syncing configuration",
   ));
+  pendingRenames.forEach((rename) => projectPendingRename(nodes, rename));
   return {
     ...snapshot,
     revision: `${snapshot.revision}:${draft?.draftRevision ?? "loading"}:editing`,
