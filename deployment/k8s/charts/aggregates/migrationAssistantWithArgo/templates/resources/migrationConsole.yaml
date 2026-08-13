@@ -277,13 +277,20 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             {{- end }}
-            {{- if .Values.defaultBucketConfiguration.useLocalStack }}
-            # LocalStack takes any credentials, but botocore won't sign without some.
+            # Present only under LocalStack; on real AWS the Secret is absent and the pod's
+            # own credentials apply.
             - name: AWS_ACCESS_KEY_ID
-              value: "test"
+              valueFrom:
+                secretKeyRef:
+                  name: migrations-default-s3-creds
+                  key: accessKey
+                  optional: true
             - name: AWS_SECRET_ACCESS_KEY
-              value: "test"
-            {{- end }}
+              valueFrom:
+                secretKeyRef:
+                  name: migrations-default-s3-creds
+                  key: secretKey
+                  optional: true
             {{- else if eq .Values.cloudProvider "gcp" }}
             {{- if .Values.gcsBucketConfiguration.create }}
             {{- $useLocalGcs := .Values.gcsBucketConfiguration.useLocalGcs }}
