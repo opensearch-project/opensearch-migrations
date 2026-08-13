@@ -277,6 +277,13 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             {{- end }}
+            {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+            # LocalStack takes any credentials, but botocore won't sign without some.
+            - name: AWS_ACCESS_KEY_ID
+              value: "test"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "test"
+            {{- end }}
             {{- else if eq .Values.cloudProvider "gcp" }}
             {{- if .Values.gcsBucketConfiguration.create }}
             {{- $useLocalGcs := .Values.gcsBucketConfiguration.useLocalGcs }}
