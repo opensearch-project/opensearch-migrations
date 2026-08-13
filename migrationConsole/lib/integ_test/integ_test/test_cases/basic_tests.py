@@ -21,7 +21,26 @@ INNER_WORKFLOW_NAME = "migration-workflow"
 DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
 
 
-# This test case is subject to removal, as its value looks limited
+def run_console(args: list, timeout: int = 180) -> subprocess.CompletedProcess:
+    """Run the console CLI. The caller decides whether a non-zero exit is a failure."""
+    return subprocess.run(["console"] + args, capture_output=True, text=True, timeout=timeout)
+
+
+def run_console_json(args: list, timeout: int = 180) -> dict | list:
+    """Run `console --json <args>`, requiring success, and parse its stdout."""
+    result = run_console(["--json"] + args, timeout=timeout)
+    printable = " ".join(["console", "--json"] + args)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"`{printable}` failed (rc={result.returncode}). "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise AssertionError(f"`{printable}` emitted non-JSON: {e}. stdout={result.stdout!r}") from e
+
+
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
@@ -62,6 +81,29 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # Validate single document exists on target
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self._verify_failed_document_stream_disabled()
+
+    def _verify_failed_document_stream_disabled(self):
+        """The mirror of Test0002: this backfill names no bucket, so the stream must stay off.
+
+        The deployment does provide a default S3 bucket (Test0002 reads it from
+        DEFAULT_S3_CONFIG_MAP), so this is where a reintroduced fallback would show up — the
+        config-processor test that guards the same rule only sees a synthetic default.
+
+        Asserted through the stream commands rather than `backfill status`: the latter needs
+        `env.backfill`, which Environment.from_k8s_resource_catalog never populates, so it only
+        works when pointed at a services.yaml with --config-file.
+        """
+        result = run_console(["failed-document-stream", "list", "--limit", "1"])
+        if result.returncode == 0:
+            raise AssertionError(
+                f"`console failed-document-stream list` succeeded with no stream configured: "
+                f"stdout={result.stdout!r}"
+            )
+        if "bucket" not in result.stderr:
+            raise AssertionError(
+                f"Expected the failure to name the missing bucket, got stderr={result.stderr!r}"
+            )
 
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
@@ -181,24 +223,11 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                 f"Failed document stream location {location!r} does not belong to session {workflow_uid!r}"
             )
 
-    def _run_console_json(self, args: list, timeout: int = 180) -> dict | list:
-        cmd = ["console", "--json"] + args
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode != 0:
-            raise AssertionError(
-                f"`{' '.join(cmd)}` failed (rc={result.returncode}). "
-                f"stdout={result.stdout!r} stderr={result.stderr!r}"
-            )
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            raise AssertionError(f"`{' '.join(cmd)}` emitted non-JSON: {e}. stdout={result.stdout!r}") from e
-
     def _await_failed_document_record(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
         """Poll: the workflow can report finished before the S3 object is listable."""
         records = []
         for _ in range(max_attempts):
-            records = self._run_console_json(["failed-document-stream", "list", "--limit", "100"])
+            records = run_console_json(["failed-document-stream", "list", "--limit", "100"])
             for record in records:
                 if record.get("documentId") == self.failing_doc_id:
                     return record
@@ -211,7 +240,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
     def _await_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
         status = {}
         for _ in range(max_attempts):
-            status = self._run_console_json(["backfill", "status", "--deep-check"])
+            status = run_console_json(["backfill", "status", "--deep-check"])
             if status.get("status") == "CompletedWithErrors":
                 return status
             time.sleep(delay)
