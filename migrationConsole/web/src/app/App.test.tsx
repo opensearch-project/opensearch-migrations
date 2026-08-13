@@ -70,6 +70,10 @@ test("renders real manage state with exact-node details and capabilities", async
   expect(screen.getByRole("button", {
     name: "Edit configuration",
   })).toBeEnabled();
+  expect(screen.getByRole("button", {
+    name: "Review and submit",
+  })).toBeDisabled();
+  expect(screen.getByText("1 configuration error")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Edit capture" })).toBeNull();
   expect(screen.getByRole("button", { name: "Logs for capture" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
@@ -2434,4 +2438,148 @@ test("reviews and tracks submission while leaving edit mode", async () => {
   expect(await screen.findByText(
     "Workflow accepted; waiting for refreshed cluster state",
   )).toBeInTheDocument();
+});
+
+
+test("reviews and submits saved pending changes without entering edit mode", async () => {
+  let submitRequest: unknown;
+  let submitAccepted = false;
+  const savedDraft = structuredClone(configDraft);
+  savedDraft.dirty = false;
+  savedDraft.draftRevision = "saved-pending-revision";
+  savedDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(savedDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: savedDraft.draftRevision,
+      baseRevision: savedDraft.baseRevision,
+      dirty: false,
+      valid: true,
+      validationMessages: [],
+      changes: [{
+        resourceId: "resource:captureproxies:capture",
+        resourceLabel: "capture",
+        path: "serviceType",
+        label: "Service type",
+        kind: "field",
+      }],
+    })),
+    http.post("*/api/v1/config/submit", async ({ request }) => {
+      submitRequest = await request.json();
+      submitAccepted = true;
+      return HttpResponse.json({
+        id: "operation-submit-read-only",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "waiting",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-13T14:00:00Z",
+        updatedAt: "2026-08-13T14:00:01Z",
+        message: "Workflow accepted; waiting for refreshed cluster state",
+        detail: null,
+        result: { workflowName: "migration" },
+      }, { status: 202 });
+    }),
+    http.get("*/api/v1/operations", () => HttpResponse.json({
+      operations: submitAccepted ? [{
+        id: "operation-submit-read-only",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "waiting",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-13T14:00:00Z",
+        updatedAt: "2026-08-13T14:00:01Z",
+        message: "Workflow accepted; waiting for refreshed cluster state",
+        detail: null,
+        result: { workflowName: "migration" },
+      }] : [],
+    })),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Review and submit",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  expect(within(dialog).getByText("capture")).toBeInTheDocument();
+  expect(within(dialog).getByText("Service type")).toBeInTheDocument();
+  expect(screen.queryByText("Editing configuration")).toBeNull();
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Confirm submit",
+  }));
+
+  await waitFor(() => expect(submitRequest).toEqual({
+    expectedDraftRevision: "saved-pending-revision",
+  }));
+  expect(screen.queryByText("Editing configuration")).toBeNull();
+  expect(await screen.findByText(
+    "Workflow accepted; waiting for refreshed cluster state",
+  )).toBeInTheDocument();
+});
+
+
+test("does not offer submission when the snapshot has no pending config", async () => {
+  const currentState = structuredClone(manageSnapshot);
+  const capture = currentState.nodes["resource:captureproxies:capture"];
+  capture.valueSummary = "Deployed";
+  capture.comparisons = capture.comparisons.map((comparison) => ({
+    ...comparison,
+    pending: comparison.submitted,
+    pendingChanged: false,
+  }));
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(currentState)),
+  );
+  renderApp();
+
+  expect(await screen.findByRole("button", {
+    name: "Edit configuration",
+  })).toBeInTheDocument();
+  expect(screen.queryByRole("button", {
+    name: "Review and submit",
+  })).toBeNull();
+});
+
+
+test("offers submission for a pending resource addition without field diffs", async () => {
+  const pendingState = structuredClone(manageSnapshot);
+  const capture = pendingState.nodes["resource:captureproxies:capture"];
+  capture.valueSummary = "Addition pending submission";
+  capture.comparisons = [];
+  const validDraft = structuredClone(configDraft);
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(pendingState)),
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+  );
+  renderApp();
+
+  await waitFor(() => expect(screen.getByRole("button", {
+    name: "Review and submit",
+  })).toBeEnabled());
+});
+
+
+test("blocks pending config submission with a visible validation reason", async () => {
+  renderApp();
+
+  const submit = await screen.findByRole("button", {
+    name: "Review and submit",
+  });
+  await waitFor(() => expect(submit).toBeDisabled());
+  expect(screen.getByText("1 configuration error")).toBeInTheDocument();
+  expect(submit).toHaveAttribute(
+    "title",
+    "Resolve 1 configuration error before submitting",
+  );
 });

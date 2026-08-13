@@ -209,6 +209,40 @@ def test_edit_capability_targets_the_config_processor_branch_from_provenance():
     )
 
 
+def test_incomplete_capture_proxy_uses_its_config_collection_as_edit_fallback():
+    snapshots = {
+        "pending": {
+            "resources": [{
+                "kind": "CaptureProxy",
+                "name": "p2",
+                "parameters": {
+                    "source": "legacy",
+                    "proxyConfig": {},
+                },
+                "diagnostics": [{
+                    "severity": "required",
+                    "path": [
+                        "traffic",
+                        "proxies",
+                        "p2",
+                        "proxyConfig",
+                        "listenPort",
+                    ],
+                    "message": "Listen port is required.",
+                }],
+            }],
+        },
+        "pending_console": {},
+    }
+
+    snapshot = _service({}, snapshots=snapshots).observe()
+
+    resource = _node(snapshot, "captureproxies:p2")
+    assert _capabilities(resource)["edit"].target_id == (
+        "edit:traffic.proxies.p2"
+    )
+
+
 def test_edit_capability_ignores_inherited_provenance_outside_the_owner_branch():
     snapshots = {
         "pending": {

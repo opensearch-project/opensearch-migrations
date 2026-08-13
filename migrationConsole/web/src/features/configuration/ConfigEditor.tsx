@@ -27,16 +27,14 @@ import {
   applyEditOperation,
   discardConfigDraft,
   getConfigDraft,
-  getConfigReview,
   getConfigRemovalImpact,
   saveConfigDraft,
-  submitConfigDraft,
   type ConfigDraft,
-  type ConfigReview,
   type ConfigRemovalImpact,
   type EditNode,
   type EditOperation,
 } from "../../api/client";
+import { SubmitConfigDialog } from "../submission/SubmitConfigDialog";
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
 import {
   pendingResourceAddition,
@@ -1385,8 +1383,6 @@ export function ConfigEditor({
   const [pendingRemoval, setPendingRemoval] =
     useState<PendingRemoval | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
-  const [submitReview, setSubmitReview] = useState<ConfigReview | null>(null);
-  const [submitReviewPending, setSubmitReviewPending] = useState(false);
   const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
   const configTablePanelRef = useRef<HTMLElement>(null);
   const pinUpdateFrame = useRef<number | null>(null);
@@ -2005,49 +2001,11 @@ export function ConfigEditor({
     }
   };
 
-  const submit = async () => {
-    if (!await waitForPendingCommit()) return;
-    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
-    if (!current) return;
-    setBusy(true);
-    setProblem("");
-    try {
-      await submitConfigDraft(current.draftRevision);
-      setLocallyEditedIds(new Set());
-      setConfirmSubmit(false);
-      setSubmitReview(null);
-      onSubmitted();
-    } catch (error) {
-      if (error instanceof ConfigApiError && error.current) {
-        queryClient.setQueryData(["config-draft"], error.current);
-      }
-      setProblem(error instanceof Error ? error.message : String(error));
-      setConfirmSubmit(false);
-      setSubmitReview(null);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const openSubmitReview = async () => {
     if (!await waitForPendingCommit()) return;
     const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
     if (!current) return;
     setConfirmSubmit(true);
-    setSubmitReview(null);
-    setSubmitReviewPending(true);
-    setProblem("");
-    try {
-      setSubmitReview(await getConfigReview(current.draftRevision));
-    } catch (error) {
-      if (error instanceof ConfigApiError && error.current) {
-        queryClient.setQueryData(["config-draft"], error.current);
-      }
-      setConfirmSubmit(false);
-      setProblem(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSubmitReviewPending(false);
-    }
   };
 
   const requestRemoval = async (node: EditNode) => {
@@ -2605,92 +2563,16 @@ export function ConfigEditor({
           </section>
         </div>
       ) : null}
-      {confirmSubmit ? (
-        <div className="modal-backdrop">
-          <section
-            aria-labelledby="submit-dialog-title"
-            aria-modal="true"
-            className="confirmation-dialog"
-            role="dialog"
-          >
-            <header>
-              <Send aria-hidden="true" />
-              <div>
-                <span>Workflow submission</span>
-                <h2 id="submit-dialog-title">Submit configuration?</h2>
-              </div>
-            </header>
-            {submitReviewPending ? (
-              <div className="submit-review-state" role="status">
-                <LoaderCircle className="spin" aria-hidden="true" />
-                Preparing change review
-              </div>
-            ) : submitReview ? (
-              <div className="submit-review">
-                <p>
-                  The current configuration will be saved and workflow
-                  replacement will continue as a tracked operation.
-                </p>
-                {submitReview.changes.length > 0 ? (
-                  <ul className="submit-change-list">
-                    {submitReview.changes.map((change) => (
-                      <li key={`${change.resourceId ?? "config"}-${change.path}`}>
-                        <strong>
-                          {change.resourceLabel ?? change.label}
-                        </strong>
-                        <span>{change.resourceLabel
-                          ? change.label
-                          : change.path}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="submit-review-empty">
-                    No field-level pending differences were reported.
-                  </p>
-                )}
-                {!submitReview.valid ? (
-                  <div className="submit-review-invalid" role="alert">
-                    <AlertTriangle aria-hidden="true" />
-                    <span>
-                      {submitReview.validationMessages.join(" ")
-                        || "Resolve validation errors before submitting."}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            <footer>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setConfirmSubmit(false);
-                  setSubmitReview(null);
-                }}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                aria-label="Confirm submit"
-                className="primary-button"
-                disabled={
-                  busy
-                  || submitReviewPending
-                  || !submitReview
-                  || !submitReview.valid
-                }
-                onClick={() => void submit()}
-                type="button"
-              >
-                {busy
-                  ? <LoaderCircle className="spin" aria-hidden="true" />
-                  : <Send aria-hidden="true" />}
-                Save and submit
-              </button>
-            </footer>
-          </section>
-        </div>
+      {confirmSubmit && draft ? (
+        <SubmitConfigDialog
+          draftRevision={draft.draftRevision}
+          onClose={() => setConfirmSubmit(false)}
+          onSubmitted={() => {
+            setLocallyEditedIds(new Set());
+            setConfirmSubmit(false);
+            onSubmitted();
+          }}
+        />
       ) : null}
     </section>
   );

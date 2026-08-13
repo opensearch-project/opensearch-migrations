@@ -211,6 +211,8 @@ def apply_config_overlays(
 
     for key, node in deployed.items():
         node.config_edit_target_id = _config_edit_target_id(
+            node.plural,
+            node.name,
             pending.get(key),
             submitted.get(key),
             deployed_config.get(key),
@@ -252,6 +254,8 @@ def apply_config_overlays(
                 pending=key in pending if pending_available else None,
             ),
             config_edit_target_id=_config_edit_target_id(
+                plural,
+                name,
                 pending.get(key),
                 submitted.get(key),
                 deployed_config.get(key),
@@ -306,7 +310,24 @@ def _build_config_presence(
     return presence
 
 
-def _config_edit_target_id(*resources: Optional[Dict[str, Any]]) -> Optional[str]:
+def _resource_config_path(plural: str, resource_name: str) -> Optional[List[str]]:
+    prefixes = {
+        'sourceconfigs': ['sourceClusters', resource_name],
+        'targetconfigs': ['targetClusters', resource_name],
+        'kafkaconfigs': ['traffic', 'kafkaClusters', resource_name],
+        'kafkaclusters': ['traffic', 'kafkaClusters', resource_name],
+        'captureproxies': ['traffic', 'proxies', resource_name],
+        'capturedtraffics': ['traffic', 's3Sources', resource_name],
+        'trafficreplays': ['traffic', 'replayers', resource_name],
+    }
+    return prefixes.get(plural)
+
+
+def _config_edit_target_id(
+    plural: str,
+    resource_name: str,
+    *resources: Optional[Dict[str, Any]],
+) -> Optional[str]:
     """Find the owning edit branch from config-processor parameter provenance."""
     for resource in resources:
         provenance = (resource or {}).get("parameterProvenance") or {}
@@ -331,7 +352,8 @@ def _config_edit_target_id(*resources: Optional[Dict[str, Any]]) -> Optional[str
             prefix = _common_path_prefix(ranked[0])
         if prefix:
             return f"edit:{'.'.join(prefix)}"
-    return None
+    fallback = _resource_config_path(plural, resource_name)
+    return f"edit:{'.'.join(fallback)}" if fallback else None
 
 
 def _common_path_prefix(paths: List[List[str]]) -> List[str]:
@@ -840,15 +862,7 @@ def _diagnostic_parameter_path(
     resource_name: str,
     path: List[str],
 ) -> Optional[List[str]]:
-    prefixes = {
-        'sourceconfigs': ['sourceClusters', resource_name],
-        'targetconfigs': ['targetClusters', resource_name],
-        'kafkaconfigs': ['traffic', 'kafkaClusters', resource_name],
-        'captureproxies': ['traffic', 'proxies', resource_name],
-        'capturedtraffics': ['traffic', 's3Sources', resource_name],
-        'trafficreplays': ['traffic', 'replayers', resource_name],
-    }
-    prefix = prefixes.get(plural)
+    prefix = _resource_config_path(plural, resource_name)
     if not prefix or path[:len(prefix)] != prefix:
         return None
     parameter_path = path[len(prefix):]

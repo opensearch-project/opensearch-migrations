@@ -389,6 +389,32 @@ button {
   background: #f4f7f8;
 }
 
+.submit-mode-button {
+  width: 164px;
+  border-color: #2f6f87;
+  color: #16465a;
+  background: #f2fafc;
+}
+
+.submit-mode-button:hover:not(:disabled) {
+  border-color: #16465a;
+  background: #e7f5f8;
+}
+
+.submit-mode-control {
+  display: grid;
+  justify-items: stretch;
+  gap: 2px;
+}
+
+.submit-blocked-reason {
+  color: #a33d36;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
 .health-state {
   margin-left: 12px;
 }
@@ -1572,22 +1598,29 @@ button {
 }
 
 .status-removed .status-dot {
-  border-color: #a33d36;
+  border-color: #778187;
   background: #fff;
-  box-shadow: inset 0 0 0 2px #a33d36;
+  box-shadow: inset 0 0 0 2px #778187;
 }
 
-.tree-row.status-removed {
-  background: #fff6f5;
+.tree-row.status-removed,
+.tree-row.status-removed:hover,
+.tree-row.status-removed.selected,
+.tree-row.status-removed.validation-error-item,
+.tree-row.status-removed.validation-error-ancestor {
+  border-color: #c9ced1;
+  background: #f2f4f5;
+  box-shadow: none;
 }
 
 .tree-row.status-removed .tree-row-copy strong {
+  color: #596268;
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
 
 .tree-row.status-removed .tree-row-copy span {
-  color: #8b312d;
+  color: #687278;
   font-weight: 600;
 }
 

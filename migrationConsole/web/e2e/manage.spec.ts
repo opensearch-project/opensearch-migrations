@@ -478,6 +478,13 @@ async function mockManageApi(page: Page) {
         blocked: 0,
       };
     },
+    makeConfigValid() {
+      draft.editState.validation = {
+        valid: true,
+        errors: [],
+        diagnostics: [],
+      };
+    },
     makeSourceInvalid() {
       const sourceClusters = draft.editState.nodes.find(
         (node) => node.id === "edit:sourceClusters",
@@ -891,6 +898,8 @@ test("keeps a removed resource in context for the edit session", async ({ page }
   });
   await expect(removed).toBeVisible();
   await expect(removed).toHaveAttribute("aria-selected", "true");
+  await expect(removed).toHaveCSS("background-color", "rgb(242, 244, 245)");
+  await expect(removed).toHaveCSS("border-color", "rgb(201, 206, 209)");
   if (testInfo.project.name === "narrow") {
     await page.getByRole("button", { name: "Close resources" }).click();
   }
@@ -955,6 +964,46 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   );
   await expect(inserted).toBeVisible();
   await expect(inserted).toHaveCSS("animation-name", "row-insert");
+});
+
+
+test("submits pending config without entering edit mode", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop submission coverage");
+  const api = await mockManageApi(page);
+  api.makeConfigValid();
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Review and submit" }).click();
+  const review = page.getByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  await expect(review.getByText("capture")).toBeVisible();
+  await expect(review.getByText("Service type")).toBeVisible();
+  await expect(page.getByText("Editing configuration")).toHaveCount(0);
+  await review.getByRole("button", { name: "Confirm submit" }).click();
+
+  await expect(page.getByText(
+    "Workflow accepted; waiting for refreshed cluster state",
+  )).toBeVisible();
+  await expect(page.getByText("Editing configuration")).toHaveCount(0);
+  await expect(page.getByRole("button", {
+    name: "Review and submit",
+  })).toBeDisabled();
+});
+
+
+test("blocks invalid pending config before review", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop submission coverage");
+  await mockManageApi(page);
+  await page.goto("/");
+
+  const submit = page.getByRole("button", { name: "Review and submit" });
+  await expect(submit).toBeDisabled();
+  await expect(page.getByText("1 configuration error")).toBeVisible();
+  await expect(submit).toHaveAttribute(
+    "title",
+    "Resolve 1 configuration error before submitting",
+  );
 });
 
 
