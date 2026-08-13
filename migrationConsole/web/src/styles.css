@@ -1106,6 +1106,7 @@ button {
 .config-toolbar-filters {
   order: 3;
   width: 100%;
+  flex-wrap: wrap;
   gap: 14px;
   color: var(--text-muted);
   font-size: 11px;
@@ -1592,7 +1593,7 @@ button {
 }
 
 .config-state-column {
-  width: 90px;
+  width: 104px;
 }
 
 .config-table thead {
@@ -1624,7 +1625,7 @@ button {
   display: grid;
   width: 100%;
   min-height: 32px;
-  grid-template-columns: 42% minmax(0, 1fr) 90px;
+  grid-template-columns: 42% minmax(0, 1fr) 104px;
   align-items: center;
   padding: 0;
   border: 0;
@@ -1698,9 +1699,9 @@ button {
 .config-table tbody th,
 .config-table tbody td {
   min-width: 0;
-  padding: 9px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid #e7ebee;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .config-table tbody th {
@@ -1804,9 +1805,9 @@ button {
 
 .property-heading {
   display: grid;
-  grid-template-columns: 22px 9px minmax(0, 1fr);
-  align-items: start;
-  gap: 7px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
   min-width: 0;
   padding-left: calc((var(--config-depth) - 1) * 12px);
 }
@@ -1830,28 +1831,27 @@ button {
   width: 14px;
 }
 
-.property-heading .status-dot {
-  margin-top: 8px;
-}
-
-.property-heading > span:last-child {
+.property-heading-content {
   min-width: 0;
 }
 
-.property-heading strong,
-.property-heading small {
-  display: block;
-  overflow-wrap: anywhere;
+.property-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 5px;
 }
 
 .property-heading strong {
-  padding-top: 4px;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: 12px;
   font-weight: 650;
 }
 
 .property-heading small {
+  display: block;
   margin-top: 4px;
   color: var(--text-muted);
   font-size: 10px;
@@ -1860,11 +1860,11 @@ button {
 }
 
 .property-flags {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 6px 0 0;
-  padding-left: calc(38px + (var(--config-depth) - 1) * 12px);
+  gap: 3px;
+  margin: 0;
+  padding: 0;
 }
 
 .property-flags:empty {
@@ -1872,13 +1872,14 @@ button {
 }
 
 .property-flags span {
-  padding: 2px 4px;
+  padding: 0 3px;
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text-muted);
   background: var(--surface-subtle);
   font-size: 8px;
   font-weight: 600;
+  line-height: 13px;
   text-transform: uppercase;
 }
 
@@ -1887,7 +1888,7 @@ button {
   align-items: flex-start;
   gap: 5px;
   margin-top: 6px;
-  padding-left: calc(38px + (var(--config-depth) - 1) * 12px);
+  padding-left: calc(27px + (var(--config-depth) - 1) * 12px);
   color: #724309;
   font-size: 10px;
   font-weight: 400;
@@ -1945,7 +1946,7 @@ button {
 
 .property-summary {
   display: block;
-  padding-top: 7px;
+  padding-top: 5px;
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -1981,7 +1982,7 @@ button {
 
 .inline-text-editor input {
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   padding: 5px 7px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
@@ -2009,7 +2010,7 @@ button {
 
 .inline-choice-editor select {
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   padding: 5px 7px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
@@ -2033,7 +2034,7 @@ button {
 
 .inline-boolean-editor {
   display: flex;
-  min-height: 34px;
+  min-height: 30px;
   align-items: center;
   gap: 7px;
 }
@@ -2060,7 +2061,7 @@ button {
 
 .inline-resource-button {
   display: grid;
-  min-height: 34px;
+  min-height: 30px;
   grid-template-columns: minmax(0, 1fr) 14px auto;
   align-items: center;
   gap: 6px;
@@ -2089,17 +2090,27 @@ button {
   text-align: right;
 }
 
+.property-state-content {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
 .property-state-cell .field-status {
-  display: inline-block;
+  display: inline-flex;
+  flex: 0 0 auto;
   margin: 0;
 }
 
 .property-actions {
-  display: flex;
-  min-height: 30px;
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 3px;
-  margin-top: 5px;
+  margin: 0;
 }
 
 .property-actions:empty {
@@ -2108,8 +2119,8 @@ button {
 
 .property-actions button {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   place-items: center;
   border: 1px solid transparent;
@@ -2629,9 +2640,6 @@ button {
     display: none;
   }
 
-  .config-toolbar-filters {
-    display: none;
-  }
 }
 
 @media (max-width: 760px) {
@@ -2810,7 +2818,6 @@ button {
     padding-left: calc((var(--config-depth) - 1) * 7px);
   }
 
-  .property-flags,
   .property-diagnostic {
     padding-left: calc(35px + (var(--config-depth) - 1) * 7px);
   }

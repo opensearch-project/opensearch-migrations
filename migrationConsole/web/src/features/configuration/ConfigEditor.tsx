@@ -480,11 +480,13 @@ function ScalarEditor({
   commit,
   busy,
   onLocalDirtyChange,
+  showDocumentation,
 }: {
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
   onLocalDirtyChange: (dirty: boolean) => void;
+  showDocumentation: boolean;
 }) {
   const name = fieldName(node);
   const authoredValue = scalarString(node.value);
@@ -537,7 +539,7 @@ function ScalarEditor({
           </select>
         </label>
         {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
-        {selectedOption?.description
+        {showDocumentation && selectedOption?.description
           ? <span className="inline-field-help">{selectedOption.description}</span>
           : null}
       </div>
@@ -611,7 +613,7 @@ function ScalarEditor({
         ) : null}
       </label>
       {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
-      {selectedOption?.description
+      {showDocumentation && selectedOption?.description
         ? <p className="field-help">{selectedOption.description}</p>
         : null}
       {noReferenceChoices ? (
@@ -652,11 +654,13 @@ function UnionEditor({
   commit,
   busy,
   onRevealChildren,
+  showDocumentation,
 }: {
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
   onRevealChildren: () => void;
+  showDocumentation: boolean;
 }) {
   const name = fieldName(node);
   const variants = node.variants ?? [];
@@ -697,7 +701,7 @@ function UnionEditor({
         </select>
       </label>
       {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
-      {selected?.description
+      {showDocumentation && selected?.description
         ? <span className="inline-field-help">{selected.description}</span>
         : null}
     </div>
@@ -901,6 +905,7 @@ function ConfigPropertyRow({
   selected,
   inserted,
   removing,
+  showDocumentation,
   busy,
   commit,
   replaceDraft,
@@ -922,6 +927,7 @@ function ConfigPropertyRow({
   selected: boolean;
   inserted: boolean;
   removing: boolean;
+  showDocumentation: boolean;
   busy: boolean;
   commit: (operation: EditOperation) => Promise<boolean>;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
@@ -964,6 +970,31 @@ function ConfigPropertyRow({
     || (selected && (Boolean(node.externalRef) || structured));
   const name = fieldName(node);
   const errorEmphasis = validationErrorEmphasis(node);
+  const effectiveDefaultLabel = typeof node.effectiveDefault?.label === "string"
+    ? node.effectiveDefault.label
+    : "";
+  const effectiveDefaultDescription = (
+    typeof node.effectiveDefault?.description === "string"
+      ? node.effectiveDefault.description
+      : ""
+  );
+  const selectedDescription = (
+    node.valueKind === "union"
+      ? node.variants?.find(
+        (variant) => String(variant.value) === scalarString(node.value),
+      )?.description
+      : hintOptions(node).find(
+        (option) => String(option.value) === scalarString(node.value),
+      )?.description
+  );
+  const fieldDescription = node.description ?? selectedDescription;
+  const generatedTitle = [
+    "Generated from defaults or related configuration, not explicitly set here.",
+    effectiveDefaultLabel
+      ? `Effective default: ${effectiveDefaultLabel}.`
+      : "",
+    effectiveDefaultDescription,
+  ].filter(Boolean).join(" ");
 
   const valueEditor = node.externalRef ? (
     <button
@@ -981,6 +1012,7 @@ function ConfigPropertyRow({
       commit={commit}
       node={node}
       onLocalDirtyChange={(dirty) => onLocalDirtyChange(node.id, dirty)}
+      showDocumentation={showDocumentation}
     />
   ) : node.valueKind === "boolean" ? (
     <BooleanEditor busy={busy} commit={commit} node={node} />
@@ -990,6 +1022,7 @@ function ConfigPropertyRow({
       commit={commit}
       node={node}
       onRevealChildren={onRevealChildren}
+      showDocumentation={showDocumentation}
     />
   ) : structured ? (
     <button
@@ -1048,20 +1081,29 @@ function ConfigPropertyRow({
                 {expanded ? <ChevronDown /> : <ChevronRight />}
               </button>
             ) : <span className="config-tree-spacer" />}
-            <span className="status-dot" aria-hidden="true" />
-            <span>
-              <strong>{name}</strong>
-              {node.description ? <small>{node.description}</small> : null}
-            </span>
-          </div>
-          <div
-            className="property-flags"
-            style={{ "--config-depth": depth } as React.CSSProperties}
-          >
-            {node.valueAuthored ? <span>Authored value</span> : null}
-            {node.valueDefaulted ? <span>Generated value</span> : null}
-            {node.presence ? <span>{node.presence}</span> : null}
-            {node.expert ? <span>Expert</span> : null}
+            <div className="property-heading-content">
+              <span
+                className="property-label"
+                title={!showDocumentation ? fieldDescription : undefined}
+              >
+                <strong>{name}</strong>
+                <span className="property-flags">
+                  {node.valueAuthored ? (
+                    <span title="Explicitly set in the pending configuration.">
+                      Authored
+                    </span>
+                  ) : null}
+                  {node.valueDefaulted ? (
+                    <span title={generatedTitle}>Generated</span>
+                  ) : null}
+                  {node.presence ? <span>{node.presence}</span> : null}
+                  {node.expert ? <span>Expert</span> : null}
+                </span>
+              </span>
+              {showDocumentation && node.description
+                ? <small>{node.description}</small>
+                : null}
+            </div>
           </div>
           {(node.diagnostics ?? []).map((diagnostic, index) => (
             <div
@@ -1116,25 +1158,24 @@ function ConfigPropertyRow({
                 })}
               </div>
             ) : null}
-            {node.effectiveDefault ? (
+            {showDocumentation && node.effectiveDefault ? (
               <div className="inline-effective-default">
                 <strong>
-                  {typeof node.effectiveDefault.label === "string"
-                    ? node.effectiveDefault.label
-                    : "Effective default"}
+                  {effectiveDefaultLabel || "Effective default"}
                 </strong>
-                {typeof node.effectiveDefault.description === "string"
-                  ? <span>{node.effectiveDefault.description}</span>
+                {effectiveDefaultDescription
+                  ? <span>{effectiveDefaultDescription}</span>
                   : null}
               </div>
             ) : null}
           </div>
         </td>
         <td className="property-state-cell">
-          <span className={`field-status status-${node.status ?? "ok"}`}>
-            {node.status ?? "ok"}
-          </span>
-          <div className="property-actions">
+          <div className="property-state-content">
+            <span className={`field-status status-${node.status ?? "ok"}`}>
+              {node.status ?? "ok"}
+            </span>
+            <div className="property-actions">
             {topLevelResourceCommand ? (
               <button
                 aria-label={`Add ${fieldName(topLevelResourceCommand)}`}
@@ -1181,10 +1222,10 @@ function ConfigPropertyRow({
             ) : null}
             {canUnset ? (
               <button
-                aria-label={`Use default for ${name}`}
+                aria-label={`Revert ${name} to default`}
                 disabled={busy}
                 onClick={() => void commit({ op: "unset", path: node.path })}
-                title="Use default"
+                title="Revert to default"
                 type="button"
               >
                 <Undo2 aria-hidden="true" />
@@ -1202,6 +1243,7 @@ function ConfigPropertyRow({
                 <Trash2 aria-hidden="true" />
               </button>
             ) : null}
+            </div>
           </div>
         </td>
       </tr>
@@ -1320,6 +1362,7 @@ export function ConfigEditor({
   );
   const [showOptional, setShowOptional] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
+  const [showDocumentation, setShowDocumentation] = useState(false);
   const [renderOptional, setRenderOptional] = useState(false);
   const [renderExpert, setRenderExpert] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -1349,6 +1392,7 @@ export function ConfigEditor({
   const expansionScope = useRef<string | null>(null);
   const manuallyCollapsedIds = useRef(new Set<string>());
   const skipNextRowTracking = useRef(false);
+  const insertedTimer = useRef<number | null>(null);
   const transitionTimers = useRef(new Set<number>());
   const removingClaims = useRef(new Map<string, number>());
   const collapseTransitions = useRef(new Map<
@@ -1365,9 +1409,10 @@ export function ConfigEditor({
   } | null>(null);
   const pendingScrollTop = useRef<number | null>(null);
   const pendingCommit = useRef<Promise<boolean> | null>(null);
-  const revealChildrenFor = useRef<{
-    parentId: string;
-    previousChildIds: Set<string>;
+  const pendingRowAnchor = useRef<{
+    nodeId: string;
+    top: number;
+    draftRevision: string;
   } | null>(null);
   const resourceAddRequest = useRef<ResourceAddController["add"]>(
     () => Promise.resolve(false),
@@ -1506,6 +1551,7 @@ export function ConfigEditor({
   useEffect(() => {
     setScrollRetention(0);
     pendingScrollTop.current = null;
+    pendingRowAnchor.current = null;
   }, [expansionScopeId]);
 
   const hasLocalEdits = locallyEditedIds.size > 0;
@@ -1716,6 +1762,9 @@ export function ConfigEditor({
     pendingScrollTop.current = null;
   }, [removingIds, rows]);
   useEffect(() => () => {
+    if (insertedTimer.current !== null) {
+      window.clearTimeout(insertedTimer.current);
+    }
     transitionTimers.current.forEach((timer) => window.clearTimeout(timer));
     transitionTimers.current.clear();
     removingClaims.current.clear();
@@ -1848,34 +1897,25 @@ export function ConfigEditor({
     knownRowIds.current = currentIds;
     if (inserted.size === 0) return;
     setInsertedIds(inserted);
-    const timer = window.setTimeout(() => setInsertedIds(new Set()), 420);
-    return () => window.clearTimeout(timer);
-  }, [rows]);
-  useEffect(() => {
-    const pendingReveal = revealChildrenFor.current;
-    if (!pendingReveal) return;
-    const parentIndex = rows.findIndex(
-      ({ node }) => node.id === pendingReveal.parentId,
-    );
-    const parentRow = rows[parentIndex];
-    const childRow = rows[parentIndex + 1];
-    if (!parentRow || childRow?.depth !== parentRow.depth + 1) return;
-    if (pendingReveal.previousChildIds.has(childRow.node.id)) return;
-    revealChildrenFor.current = null;
-    const parentElement = rowElements.current.get(parentRow.node.id);
-    const childElement = rowElements.current.get(childRow.node.id);
-    const scroller = childElement?.closest<HTMLElement>(".config-table-panel");
-    if (scroller?.scrollTo && parentElement) {
-      const scrollerTop = scroller.getBoundingClientRect().top;
-      const parentTop = parentElement.getBoundingClientRect().top;
-      scroller.scrollTo({
-        behavior: "smooth",
-        top: Math.max(0, scroller.scrollTop + parentTop - scrollerTop - 84),
-      });
-    } else {
-      childElement?.scrollIntoView?.({ block: "nearest" });
+    if (insertedTimer.current !== null) {
+      window.clearTimeout(insertedTimer.current);
     }
+    insertedTimer.current = window.setTimeout(() => {
+      insertedTimer.current = null;
+      setInsertedIds(new Set());
+    }, 420);
   }, [rows]);
+  useLayoutEffect(() => {
+    const anchor = pendingRowAnchor.current;
+    if (!draft || !anchor || draft.draftRevision === anchor.draftRevision) {
+      return;
+    }
+    pendingRowAnchor.current = null;
+    const element = rowElements.current.get(anchor.nodeId);
+    const panel = configTablePanelRef.current;
+    if (!element || !panel) return;
+    panel.scrollTop += element.getBoundingClientRect().top - anchor.top;
+  }, [draft, rows]);
   const replaceDraft = async (promise: Promise<ConfigDraft>) => {
     setBusy(true);
     setProblem("");
@@ -2192,6 +2232,15 @@ export function ConfigEditor({
             />
             Show expert fields
           </label>
+          <label>
+            <input
+              checked={showDocumentation}
+              onChange={(event) =>
+                setShowDocumentation(event.target.checked)}
+              type="checkbox"
+            />
+            Show field documentation
+          </label>
         </div> : null}
         <div className="config-toolbar-actions">
           <button
@@ -2404,18 +2453,21 @@ export function ConfigEditor({
                     key={node.id}
                     node={node}
                     removing={removingIds.has(node.id)}
+                    showDocumentation={showDocumentation}
                     onLocalDirtyChange={markLocalEdit}
                     onRequestRemoval={(removalNode) => {
                       void requestRemoval(removalNode);
                     }}
                     onRevealChildren={() => {
                       manuallyCollapsedIds.current.delete(node.id);
-                      revealChildrenFor.current = {
-                        parentId: node.id,
-                        previousChildIds: new Set(
-                          propertyChildren(node).map((child) => child.id),
-                        ),
-                      };
+                      const element = rowElements.current.get(node.id);
+                      if (element) {
+                        pendingRowAnchor.current = {
+                          nodeId: node.id,
+                          top: element.getBoundingClientRect().top,
+                          draftRevision: draft.draftRevision,
+                        };
+                      }
                       setExpanded((current) => new Set(current).add(node.id));
                     }}
                     onSelect={() => setSelectedId(node.id)}

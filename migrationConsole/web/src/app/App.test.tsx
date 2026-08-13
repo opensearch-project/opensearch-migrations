@@ -255,6 +255,25 @@ test("opens a generic configuration editor and explains generated values", async
   const configTree = screen.getByRole("table", {
     name: "Configuration fields",
   });
+  expect(screen.getByRole("checkbox", {
+    name: "Show field documentation",
+  })).not.toBeChecked();
+  const credentials = within(configTree).getByRole("row", {
+    name: /Credentials secret/,
+  });
+  const credentialsLabel = within(credentials)
+    .getByText("Credentials secret", { selector: "strong" })
+    .closest(".property-label");
+  expect(credentialsLabel).toHaveAttribute(
+    "title",
+    "Kubernetes Secret containing the HTTP credentials.",
+  );
+  expect(within(credentials).queryByText(
+    "Kubernetes Secret containing the HTTP credentials.",
+  )).toBeNull();
+  expect(within(credentials).getByText("Authored"))
+    .toBe(credentialsLabel?.querySelector(".property-flags span"));
+  expect(configTree.querySelector(".status-dot")).toBeNull();
   expect(
     within(configTree).queryByRole("row", { name: /Timeout/ }),
   ).toBeNull();
@@ -266,11 +285,29 @@ test("opens a generic configuration editor and explains generated values", async
   expect(timeout).toHaveClass("inserted");
   await userEvent.click(timeout);
 
-  expect(screen.getByText("Generated value")).toBeInTheDocument();
+  expect(within(timeout).getByText("Generated")).toBeInTheDocument();
+  expect(screen.queryByText("runtime timeout")).toBeNull();
+  expect(screen.queryByText(
+    "Generated from the standard runtime profile.",
+  )).toBeNull();
+  const state = timeout.querySelector(".property-state-cell");
+  expect(state?.querySelector(".property-state-content")).toBeInTheDocument();
+  expect(within(state as HTMLElement).getByText("ok")).toBeInTheDocument();
+  expect(within(state as HTMLElement).getByRole("button", {
+    name: "Revert Timeout to default",
+  })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("checkbox", {
+    name: "Show field documentation",
+  }));
   expect(screen.getByText("runtime timeout")).toBeInTheDocument();
-  expect(
-    screen.getByText("Generated from the standard runtime profile."),
-  ).toBeInTheDocument();
+  expect(screen.getByText(
+    "Generated from the standard runtime profile.",
+  )).toBeInTheDocument();
+  expect(within(credentials).getByText(
+    "Kubernetes Secret containing the HTTP credentials.",
+  )).toBeInTheDocument();
+  expect(credentialsLabel).not.toHaveAttribute("title");
 
   expect(
     within(configTree).getByRole("row", {
@@ -451,7 +488,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   expect(await screen.findByRole("heading", { name: "Edit replay" }))
     .toBeInTheDocument();
   expect(await within(config).findByRole("row", {
-    name: /^ConfigMap Authored value/,
+    name: /^ConfigMap Authored/,
   })).toBeInTheDocument();
   expect(within(config).queryByRole("row", {
     name: /Endpoint/,
@@ -1341,6 +1378,12 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
     within(snapshotChoice).getByRole("option", { name: "weekly" }),
   ).toBeInTheDocument();
   await userEvent.selectOptions(snapshotChoice, "weekly");
+  expect(screen.queryByText(
+    "Generated from the source snapshot definitions.",
+  )).toBeNull();
+  await userEvent.click(screen.getByRole("checkbox", {
+    name: "Show field documentation",
+  }));
   expect(
     screen.getByText("Generated from the source snapshot definitions."),
   ).toBeInTheDocument();
@@ -2057,7 +2100,7 @@ test("focuses a newly added array item when command metadata requests it", async
 
   expect(
     await within(configTree).findByRole("row", {
-      name: /^transform 1 Authored value/,
+      name: /^transform 1 Authored/,
     }),
   ).toHaveAttribute("aria-selected", "true");
 });

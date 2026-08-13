@@ -361,7 +361,11 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
 
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   await configTree.getByRole("row", { name: /Timeout/ }).click();
-  await expect(page.getByText("Generated value")).toBeVisible();
+  await expect(page.getByText("Generated")).toBeVisible();
+  await expect(page.getByText("runtime timeout")).toHaveCount(0);
+  await page.getByRole("checkbox", {
+    name: "Show field documentation",
+  }).check();
   await expect(page.getByText("runtime timeout")).toBeVisible();
 
   await configTree.getByRole("row", {
@@ -397,6 +401,9 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
   ).toBeVisible();
   const config = page.getByRole("table", { name: "Configuration fields" });
   const auth = config.getByRole("row", { name: /Authentication/ });
+  await auth.scrollIntoViewIfNeeded();
+  const authBefore = await auth.boundingBox();
+  expect(authBefore).not.toBeNull();
   await auth.getByRole("combobox", { name: "Authentication" })
     .selectOption("sigv4");
 
@@ -406,6 +413,10 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
     auth.locator("xpath=following-sibling::tr[1]"),
   ).toContainText("Signing region");
   await expect(region).toBeInViewport();
+  await page.waitForTimeout(450);
+  const authAfter = await auth.boundingBox();
+  expect(authAfter).not.toBeNull();
+  expect(Math.abs(authAfter!.y - authBefore!.y)).toBeLessThanOrEqual(1);
 });
 
 
@@ -553,9 +564,46 @@ test("keeps valid status compact in navigation without an editor footer", async 
   expect(validBox!.width).toBeLessThanOrEqual(24);
   await expect(page.getByRole("heading", { name: "Validation" }))
     .toHaveCount(0);
+  await page.waitForTimeout(450);
+  await expect(page.locator(".config-property-row.inserted")).toHaveCount(0);
+  await expect(page.locator(".config-property-row.context-transition"))
+    .toHaveCount(0);
+  const config = page.getByRole("table", { name: "Configuration fields" });
+  const allowInsecure = config.getByRole("row", { name: /Allow insecure/ });
+  const compactBox = await allowInsecure.boundingBox();
+  const statusBox = await allowInsecure.locator(".field-status").boundingBox();
+  const revertBox = await allowInsecure.getByRole("button", {
+    name: "Revert Allow insecure to default",
+  }).boundingBox();
+  expect(compactBox).not.toBeNull();
+  expect(statusBox).not.toBeNull();
+  expect(revertBox).not.toBeNull();
+  expect(compactBox!.height).toBeLessThanOrEqual(42);
+  expect(Math.abs(
+    statusBox!.y + statusBox!.height / 2
+    - revertBox!.y - revertBox!.height / 2,
+  )).toBeLessThanOrEqual(1);
+  const documentation = page.getByRole("checkbox", {
+    name: "Show field documentation",
+  });
+  await documentation.check();
+  await expect(page.getByText(
+    "Kubernetes Secret containing the HTTP credentials.",
+  )).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("field-documentation.png"),
+  });
+  await documentation.uncheck();
+  await expect(page.getByText(
+    "Kubernetes Secret containing the HTTP credentials.",
+  )).toHaveCount(0);
+  await expect(page.locator(".config-property-row.inserted")).toHaveCount(0);
+  await expect(page.locator(".config-property-row.context-transition"))
+    .toHaveCount(0);
+  await page.waitForTimeout(50);
   await page.screenshot({
     path: testInfo.outputPath("compact-valid-status.png"),
-    fullPage: true,
   });
 });
 
@@ -734,6 +782,11 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
   await page.getByRole("checkbox", { name: "Show optional fields" }).check();
   const configTree = page.getByRole("table", { name: "Configuration fields" });
   await configTree.getByRole("row", { name: /Timeout/ }).click();
+  await expect(page.getByText("Generated")).toBeVisible();
+  await expect(page.getByText("runtime timeout")).toHaveCount(0);
+  await page.getByRole("checkbox", {
+    name: "Show field documentation",
+  }).check();
   await expect(page.getByText("runtime timeout")).toBeVisible();
 
   const scrollWidth = await page.evaluate<number>(
@@ -743,6 +796,11 @@ test("keeps configuration editing usable at narrow width", async ({ page }, test
     "document.documentElement.clientWidth",
   );
   expect(scrollWidth > clientWidth).toBe(false);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("narrow-configuration.png"),
+    fullPage: true,
+  });
 });
 
 
