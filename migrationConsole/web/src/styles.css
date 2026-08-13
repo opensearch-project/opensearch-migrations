@@ -1861,6 +1861,44 @@ button {
   gap: 6px;
 }
 
+.inline-add-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inline-add-actions button {
+  display: inline-flex;
+  min-height: 28px;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: left;
+}
+
+.inline-add-actions button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.inline-add-actions button:disabled {
+  opacity: 0.5;
+}
+
+.inline-add-actions button svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
 .property-summary {
   display: block;
   padding-top: 7px;

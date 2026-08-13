@@ -226,12 +226,13 @@ function buildEditContext(config: any): EditContext {
     const snapshotOptions = sourceSnapshotOptions(config?.sourceClusters);
     return {
         snapshotSourceOptions: Object.entries(snapshotOptions)
-            .filter(([, snapshots]) => snapshots.length > 0)
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([sourceName, snapshots]) => ({
                 label: sourceName,
                 value: sourceName,
-                description: `${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} defined`,
+                description: snapshots.length === 0
+                    ? "No snapshots defined"
+                    : `${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} defined`,
             })),
         sourceSnapshotOptions: snapshotOptions,
         schemaContext: {rootConfig: config},
@@ -833,7 +834,6 @@ function essentialSnapshotPassBranch(node: EditNode): EditNode {
 function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext): EditNode {
     const path = ["snapshotMigrationConfigs"];
     const children = (Array.isArray(configs) ? configs : []).map((value, index) => snapshotMigrationNode(index, value, ctx));
-    const hasSourceSnapshots = ctx.snapshotSourceOptions.length > 0;
     children.push(addRow(
         path,
         "snapshot migration",
@@ -851,14 +851,8 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
             "List of snapshot-based migration configurations.",
         ),
         inputHint: SNAPSHOT_MIGRATION_ARRAY_HINT,
-        status: hasSourceSnapshots || children.length > 0 ? "ok" : "warning",
-        diagnostics: hasSourceSnapshots || children.length > 0
-            ? []
-            : [{
-                severity: "warning",
-                message: "Define at least one source snapshot under sourceClusters.<source>.snapshotInfo.snapshots before adding a snapshot migration.",
-                path,
-            }],
+        status: "ok",
+        diagnostics: [],
         children,
     });
 }

@@ -764,6 +764,14 @@ test("adds a snapshot migration from its section without naming it first", async
       required: true,
       status: "required",
       statusCounts: { ...counts, required: 1 },
+      inputHint: {
+        kind: "reference",
+        options: [{
+          label: "foo",
+          value: "foo",
+          description: "No snapshots defined",
+        }],
+      },
       diagnostics: [{
         severity: "required",
         message: "fromSource is required.",
@@ -786,17 +794,109 @@ test("adds a snapshot migration from its section without naming it first", async
         path: ["snapshotMigrationConfigs", "0", "toTarget"],
       }],
       children: [],
+    }, {
+      id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig",
+      path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig"],
+      label: "perSnapshotConfig: 1 configured, 0 unconfigured",
+      valueKind: "record",
+      status: "required",
+      statusCounts: { ...counts, required: 1 },
+      diagnostics: [],
+      children: [{
+        id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1",
+        path: [
+          "snapshotMigrationConfigs",
+          "0",
+          "perSnapshotConfig",
+          "snap1",
+        ],
+        label: "snap1: 1 item",
+        valueKind: "array",
+        status: "required",
+        statusCounts: { ...counts, required: 1 },
+        diagnostics: [],
+        children: [{
+          id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0",
+          path: [
+            "snapshotMigrationConfigs",
+            "0",
+            "perSnapshotConfig",
+            "snap1",
+            "0",
+          ],
+          label: "migration pass 1: choose metadata and/or document backfill",
+          valueKind: "object",
+          status: "required",
+          statusCounts: { ...counts, required: 1 },
+          diagnostics: [{
+            severity: "required",
+            message: "Add metadata migration, document backfill, or both.",
+            path: [
+              "snapshotMigrationConfigs",
+              "0",
+              "perSnapshotConfig",
+              "snap1",
+              "0",
+            ],
+          }],
+          children: [{
+            id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.metadataMigrationConfig:add",
+            path: [
+              "snapshotMigrationConfigs",
+              "0",
+              "perSnapshotConfig",
+              "snap1",
+              "0",
+              "metadataMigrationConfig",
+            ],
+            label: "+ Add metadata migration",
+            valueKind: "command",
+            status: "ok",
+            statusCounts: counts,
+            command: {
+              requiresName: false,
+              editAdded: false,
+              autoEditAdded: false,
+            },
+            diagnostics: [],
+            children: [],
+          }, {
+            id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig:add",
+            path: [
+              "snapshotMigrationConfigs",
+              "0",
+              "perSnapshotConfig",
+              "snap1",
+              "0",
+              "documentBackfillConfig",
+            ],
+            label: "+ Add document backfill",
+            valueKind: "command",
+            status: "ok",
+            statusCounts: counts,
+            command: {
+              requiresName: false,
+              editAdded: false,
+              autoEditAdded: false,
+            },
+            diagnostics: [],
+            children: [],
+          }],
+        }],
+      }],
     }],
   }, addCommand];
   updatedDraft.dirty = true;
   updatedDraft.draftRevision = "config-draft-snapshot-added";
 
-  let operation: unknown;
+  const operations: unknown[] = [];
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
     http.get("*/api/v1/config", () => HttpResponse.json(initialDraft)),
     http.post("*/api/v1/config/operations", async ({ request }) => {
-      operation = (await request.json() as { operation: unknown }).operation;
+      operations.push(
+        (await request.json() as { operation: unknown }).operation,
+      );
       return HttpResponse.json(updatedDraft);
     }),
   );
@@ -818,21 +918,60 @@ test("adds a snapshot migration from its section without naming it first", async
     name: "Add snapshot migration",
   }));
 
-  await waitFor(() => expect(operation).toEqual({
+  await waitFor(() => expect(operations).toEqual([{
     op: "add",
     path: ["snapshotMigrationConfigs"],
     value: {},
-  }));
+  }]));
   expect(await within(tree).findByRole("treeitem", {
     name: /^migration-1, Addition pending submission$/,
   })).toHaveAttribute("aria-selected", "true");
   expect(await screen.findByRole("heading", {
     name: "Edit migration-1",
   })).toBeInTheDocument();
-  expect(screen.getByRole("textbox", { name: "From source" }))
-    .toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "From source" }))
+    .not.toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "From source" }))
+    .toHaveDisplayValue("Select a value");
+  expect(screen.getByRole("option", { name: "foo" })).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "To target" }))
     .toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add metadata migration" }))
+    .toBeVisible();
+  expect(screen.getByRole("button", { name: "Add document backfill" }))
+    .toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Add metadata migration",
+  }));
+  await waitFor(() => expect(operations.at(-1)).toEqual({
+    op: "add",
+    path: [
+      "snapshotMigrationConfigs",
+      "0",
+      "perSnapshotConfig",
+      "snap1",
+      "0",
+      "metadataMigrationConfig",
+    ],
+    value: {},
+  }));
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Add document backfill",
+  }));
+  await waitFor(() => expect(operations.at(-1)).toEqual({
+    op: "add",
+    path: [
+      "snapshotMigrationConfigs",
+      "0",
+      "perSnapshotConfig",
+      "snap1",
+      "0",
+      "documentBackfillConfig",
+    ],
+    value: {},
+  }));
 });
 
 

@@ -109,10 +109,15 @@ function propertyChildren(node: EditNode): EditNode[] {
 }
 
 
-function addCommand(node: EditNode): EditNode | null {
-  return nodeChildren(node).find(
+function addCommands(node: EditNode): EditNode[] {
+  return nodeChildren(node).filter(
     (child) => child.valueKind === "command",
-  ) ?? null;
+  );
+}
+
+
+function addCommand(node: EditNode): EditNode | null {
+  return addCommands(node)[0] ?? null;
 }
 
 
@@ -893,10 +898,17 @@ function ConfigPropertyRow({
   contextProgress: number;
 }) {
   const [renaming, setRenaming] = useState(false);
-  const [adding, setAdding] = useState(false);
+  const [addingCommandId, setAddingCommandId] = useState<string | null>(null);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
   const children = propertyChildren(node);
-  const command = addCommand(node);
+  const commands = addCommands(node);
+  const topLevelResourceCommand = resourceAddPlacement(node.path)
+    ? commands[0] ?? null
+    : null;
+  const inlineCommands = topLevelResourceCommand ? [] : commands;
+  const addingCommand = commands.find(
+    (candidate) => candidate.id === addingCommandId,
+  ) ?? null;
   const canRename = renameableConfigPath(node.path);
   const canUnset = (
     node.presence === "optional"
@@ -905,11 +917,11 @@ function ConfigPropertyRow({
   );
   const structured = (
     !node.externalRef
-    && !command
+    && commands.length === 0
     && children.length === 0
     && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
   );
-  const showDetails = adding
+  const showDetails = Boolean(addingCommand)
     || (selected && (Boolean(node.externalRef) || structured));
   const name = fieldName(node);
   const errorEmphasis = validationErrorEmphasis(node);
@@ -1028,6 +1040,42 @@ function ConfigPropertyRow({
             key={`${node.id}-${draft.draftRevision}`}
           >
             {valueEditor}
+            {inlineCommands.length > 0 ? (
+              <div className="inline-add-actions">
+                {inlineCommands.map((command) => {
+                  const commandName = fieldName(command);
+                  return (
+                    <button
+                      aria-label={`Add ${commandName}`}
+                      disabled={
+                        busy || Boolean(command.command?.blockedMessage)
+                      }
+                      key={command.id}
+                      onClick={() => {
+                        onSelect();
+                        if (command.command?.requiresName !== false) {
+                          setAddingCommandId(command.id);
+                        } else {
+                          void runAddCommand(
+                            command,
+                            node,
+                            "",
+                            commit,
+                            onSelectAdded,
+                          );
+                        }
+                      }}
+                      title={command.command?.blockedMessage
+                        ?? `Add ${commandName}`}
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" />
+                      Add {commandName}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             {node.effectiveDefault ? (
               <div className="inline-effective-default">
                 <strong>
@@ -1047,17 +1095,22 @@ function ConfigPropertyRow({
             {node.status ?? "ok"}
           </span>
           <div className="property-actions">
-            {command ? (
+            {topLevelResourceCommand ? (
               <button
-                aria-label={`Add ${fieldName(command)}`}
-                disabled={busy || Boolean(command.command?.blockedMessage)}
+                aria-label={`Add ${fieldName(topLevelResourceCommand)}`}
+                disabled={
+                  busy
+                  || Boolean(topLevelResourceCommand.command?.blockedMessage)
+                }
                 onClick={() => {
                   onSelect();
-                  if (command.command?.requiresName !== false) {
-                    setAdding(true);
+                  if (
+                    topLevelResourceCommand.command?.requiresName !== false
+                  ) {
+                    setAddingCommandId(topLevelResourceCommand.id);
                   } else {
                     void runAddCommand(
-                      command,
+                      topLevelResourceCommand,
                       node,
                       "",
                       commit,
@@ -1065,8 +1118,8 @@ function ConfigPropertyRow({
                     );
                   }
                 }}
-                title={command.command?.blockedMessage
-                  ?? `Add ${fieldName(command)}`}
+                title={topLevelResourceCommand.command?.blockedMessage
+                  ?? `Add ${fieldName(topLevelResourceCommand)}`}
                 type="button"
               >
                 <Plus aria-hidden="true" />
@@ -1166,14 +1219,14 @@ function ConfigPropertyRow({
                     Cancel
                   </button>
                 </form>
-              ) : adding && command ? (
+              ) : addingCommand ? (
                 <CommandEditor
                   busy={busy}
                   commit={commit}
-                  node={command}
+                  node={addingCommand}
                   onAdded={onSelectAdded}
-                  onCancel={() => setAdding(false)}
-                  onComplete={() => setAdding(false)}
+                  onCancel={() => setAddingCommandId(null)}
+                  onComplete={() => setAddingCommandId(null)}
                   parent={node}
                 />
               ) : node.externalRef ? (

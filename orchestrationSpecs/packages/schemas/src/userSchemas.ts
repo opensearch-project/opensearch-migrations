@@ -2415,6 +2415,13 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
         .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill).")
         .essential(),
 }).describe("A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings.").superRefine((data, ctx) => {
+    if (Object.keys(data.perSnapshotConfig).length === 0) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "At least one metadata migration or document backfill configuration is required.",
+            path: ["perSnapshotConfig"],
+        });
+    }
     if (!data.perSnapshotConfig) return;
     for (const [snapName, migrations] of Object.entries(data.perSnapshotConfig)) {
         const labels = migrations.map(m => m.label).filter(Boolean);

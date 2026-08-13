@@ -176,6 +176,89 @@ describe("editConfig state", () => {
         });
     });
 
+    it("offers every source for snapshot migration before snapshots are configured", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                foo: {
+                    endpoint: "https://foo.example.com:9200",
+                    version: "ES 7.10.2",
+                },
+                ready: {
+                    endpoint: "https://ready.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        snapshots: {
+                            snap1: {
+                                repoName: "",
+                                config: {externallyManagedSnapshotName: "snap1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [{
+                fromSource: "",
+                toTarget: "target",
+                perSnapshotConfig: {},
+            }],
+        });
+
+        expect(findNode(
+            state.nodes,
+            "edit:snapshotMigrationConfigs.0.fromSource",
+        )?.inputHint).toMatchObject({
+            kind: "reference",
+            options: [
+                {
+                    label: "foo",
+                    value: "foo",
+                    description: "No snapshots defined",
+                },
+                {
+                    label: "ready",
+                    value: "ready",
+                    description: "1 snapshot defined",
+                },
+            ],
+        });
+    });
+
+    it("requires a snapshot migration to contain metadata or document backfill work", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                foo: {
+                    endpoint: "https://foo.example.com:9200",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [{
+                fromSource: "foo",
+                toTarget: "target",
+                perSnapshotConfig: {},
+            }],
+        });
+
+        expect(state.validation.valid).toBe(false);
+        expect(findNode(
+            state.nodes,
+            "edit:snapshotMigrationConfigs.0.perSnapshotConfig",
+        )).toMatchObject({
+            status: "required",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    severity: "required",
+                    message: "At least one metadata migration or document backfill configuration is required.",
+                }),
+            ]),
+        });
+    });
+
     it("shows missing basic auth children as required on the branch and parent", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {
@@ -1070,7 +1153,7 @@ describe("editConfig state", () => {
             valueKind: "record",
             presence: "optional",
             essential: true,
-            status: "ok",
+            status: "required",
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig:add")).toBeUndefined();
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toMatchObject({
