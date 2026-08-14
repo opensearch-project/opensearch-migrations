@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -52,6 +53,7 @@ public class SolrBackupSource implements DocumentSource {
 
     private static final String INDEX_DIR_NAME = "index";
     private static final String SEGMENTS_FILE_PREFIX = "segments_";
+    private static final String SEGMENT_DATA_FILE_PREFIX = "_";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Cursor is the Lucene doc index to resume at, tagged with the source that minted it. */
@@ -292,6 +294,9 @@ public class SolrBackupSource implements DocumentSource {
             var reader = new IndexReader9(indexDir, false, null);
             var directoryReader = reader.getReader(mappedDir, segmentsFile);
 
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+                () -> mappedSegmentDataFiles(fileNameMapping));
+
             log.atInfo().setMessage("Reading Solr backup (mapped): {} docs in {} segments from {}")
                 .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
 
@@ -309,6 +314,9 @@ public class SolrBackupSource implements DocumentSource {
             var reader = newLuceneReader(indexDir);
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
+
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+                () -> listSegmentDataFiles(indexDir));
 
             log.atInfo().setMessage("Reading Solr backup: {} docs in {} segments from {}")
                 .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
@@ -337,6 +345,50 @@ public class SolrBackupSource implements DocumentSource {
                 toDocument(change),
                 CURSOR_PREFIX + (change.getLuceneDocNumber() + 1L)))
             .doFinally(s -> scheduler.dispose());
+    }
+
+    /**
+     * Segment data unreferenced by the commit point reads as zero documents and no error.
+     * An empty collection has no segment data, so both conditions are required to throw.
+     *
+     * @throws SolrBackupReadException if the backup has segment data but no documents
+     */
+    private static void assertNoOrphanedSegmentData(Path indexDir, int maxDoc, String segmentsFile,
+                                                    Supplier<List<String>> segmentDataFiles) {
+        if (maxDoc > 0) {
+            return;
+        }
+        var dataFiles = segmentDataFiles.get();
+        if (dataFiles.isEmpty()) {
+            return;
+        }
+        throw new SolrBackupReadException(
+            "Backup at " + indexDir + " holds segment data (" + dataFiles.size() + " files, e.g. "
+                + dataFiles.get(0) + ") but its commit point " + segmentsFile + " enumerates no"
+                + " segments, so this shard would migrate zero documents. The backup is"
+                + " inconsistent: segment data was copied without a matching commit point."
+                + " A common cause is the Solr 6/7 SolrCloud BACKUP defect SOLR-9091 — if the"
+                + " source is Solr 6 or 7, re-take the backup against a named commit created with"
+                + " snapshotscli.sh and pass commitName to the BACKUP command.");
+    }
+
+    private static List<String> listSegmentDataFiles(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.map(p -> p.getFileName().toString())
+                .filter(name -> name.startsWith(SEGMENT_DATA_FILE_PREFIX))
+                .sorted()
+                .toList();
+        } catch (IOException e) {
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
+        }
+    }
+
+    /** Mapped backups hold UUID filenames on disk, so the Lucene names come from the mapping keys. */
+    private static List<String> mappedSegmentDataFiles(Map<String, String> fileNameMapping) {
+        return fileNameMapping.keySet().stream()
+            .filter(name -> name.startsWith(SEGMENT_DATA_FILE_PREFIX))
+            .sorted()
+            .toList();
     }
 
     private static String findSegmentsFile(Path dir) {
