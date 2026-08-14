@@ -2,7 +2,7 @@
 
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay pipeline.
 The scenarios run on Kubernetes as **k6-operator `TestRun`** CRs, driven from the migration console
-(`workflow k6 …`), a thin shell helper, or plain `kubectl`.
+(`workflow loadtest …`), a thin shell helper, or plain `kubectl`.
 
 The load test itself — the scenario scripts, their libs, the document schemas and the load-profile
 presets — lives **in this directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
@@ -16,7 +16,7 @@ specified by two names — a scenario (a script path under `/scripts`) and a pre
 
 > **Deliberately separate from the migration.** The chart is **not** a dependency of any migration
 > aggregate, so a normal migration deployment contains no operator, no example runs, no RBAC, and
-> the `workflow k6` commands are hidden/inert. Load testing only becomes possible after you
+> the `workflow loadtest` commands are hidden/inert. Load testing only becomes possible after you
 > explicitly install this chart — nothing (and no agent) can trigger a load test by accident.
 
 > **Assumption:** k6 does **not** stand up Kafka / a source cluster / the Capture Proxy. It targets
@@ -59,7 +59,7 @@ INSTALL  (opt-in, separate from the migration)
 
 USAGE  (console optional — the example is the definition)
 ──────────────────────────────────────────────────────────────
-  kubectl create (from example) │ ./k6-run.sh [7] │ workflow k6 run [8] │ TUI: k [9]
+  kubectl create (from example) │ ./k6-run.sh [7] │ workflow loadtest run [8] │ TUI [9]
         └──────────────────┬───────────────┴──────────────────┘
                            ▼  load k6-testrun-examples.<scenario>, patch env/preset/parallelism
    TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
@@ -76,7 +76,7 @@ USAGE  (console optional — the example is the definition)
         ▼
   Kafka ─► replayer ─► target      (migration capture-and-replay pipeline)
 
-  observe / manage:   kubectl get/delete testrun -l app=k6-load-test   (or workflow k6 list/stop)
+  observe / manage:   kubectl get/delete testrun -l app=k6-load-test   (or workflow loadtest list/stop)
 ```
 
 | # | Piece | Source |
@@ -88,8 +88,8 @@ USAGE  (console optional — the example is the definition)
 | 5 | Example TestRuns (the run definition) | `templates/k6-testrun-examples.yaml` |
 | 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
 | 7 | `k6-run.sh` (console-independent submit) | `scripts/k6-run.sh` |
-| 8 | `workflow k6` CLI (optional) | `migrationConsole/lib/console_link/console_link/workflow/commands/k6.py` |
-| 9 | TUI k6 panel (`k`) | `.../workflow/tui/k6_panel_modal.py` + `.../tui/workflow_manage_app.py` |
+| 8 | `workflow loadtest` CLI (optional) | `migrationConsole/lib/console_link/console_link/workflow/commands/loadtest.py` |
+| 9 | Load-test TUI (`workflow loadtest`) | `.../workflow/tui/loadtest_app.py` + `.../tui/loadtest_launch_modal.py` |
 | 10 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
 
 A run is specified by a `scenario` (a script under `/scripts`) and a `config` (a `k6-config/*.env`
@@ -156,7 +156,7 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 
 | Route | Command | Use when |
 |---|---|---|
-| **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow k6` command. |
+| **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow loadtest` command. |
 | **Local CDC pipeline** | `./deployment/k8s/deployCdcWorkflow.sh up` | Local kind/minikube dev — submits a capture-and-replay workflow and installs k6 alongside it. |
 | **Integration tests** | `pipenv run app … --with-load-test` (the test runner) | Only to run the `Test0050` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
 
@@ -220,7 +220,7 @@ Notes:
 - **Adding a preset** means adding the `.env` file *and* registering it in `lib/config.js` — presets
   are opened by literal path so `k6 archive` bundles all of them (see
   [Design decisions](#design-decisions) §3). Also add the name to `CONFIG_PRESETS` in
-  `console_link/workflow/commands/k6.py`; a unit test fails if those two drift apart.
+  `console_link/workflow/commands/loadtest.py`; a unit test fails if those two drift apart.
 - **Re-supply the image values** on a `helm upgrade` (as shown). Do **not** use `--reuse-values` on
   this release — it predates the `testRun` block and errors with a nil-pointer; pass the `--set
   image.*` overrides explicitly instead.
@@ -263,7 +263,7 @@ testClusters chart, which serves HTTPS with basic auth (`admin:admin`).
 Pass HTTP Basic credentials with `AUTH_USERNAME` / `AUTH_PASSWORD`, like any other run input:
 
 ```bash
-workflow k6 run --scenario ingest --config ingest-steady --target "$PROXY" \
+workflow loadtest run --scenario ingest --config ingest-steady --target "$PROXY" \
   -e AUTH_USERNAME=admin -e AUTH_PASSWORD=admin
 ```
 
@@ -332,13 +332,13 @@ Both fields are baked into every example from chart values (`templates/k6-testru
 **Overriding per run — behavior differs by submission path:**
 - **kubectl** / **`k6-run.sh`**: inherit the example's `parallelism`, `separate`, and `cleanup` unless
   you pass `--parallelism` (patch `.spec.separate` / `.spec.cleanup` by hand).
-- **`workflow k6`**: **always** sets `spec.parallelism` (its own default is `1`), so it overrides the
+- **`workflow loadtest`**: **always** sets `spec.parallelism` (its own default is `1`), so it overrides the
   example unless you pass `--parallelism`. Neither CLI exposes `--separate` or `--cleanup`; those
   always come from the baked-in example value.
 
 > **`cleanup: post` conflicts with waiting for a run.** The operator deletes the TestRun CR the
 > instant it reaches `finished`, so any flow that polls for completion — `run_test.sh --run`,
-> `workflow k6 run --wait`, the `Test0050` integ test — will see the CR vanish mid-poll and time out.
+> `workflow loadtest run --wait`, the `Test0050` integ test — will see the CR vanish mid-poll and time out.
 > Only enable it for fire-and-forget submissions you don't wait on.
 
 ### 1. kubectl (no console, no extra tooling)
@@ -365,19 +365,21 @@ Use `kubectl create` (not `apply`).
 Fetches the example, applies `--config` / `--parallelism` / `--target` / `-e KEY=VAL`, creates it,
 prints the run name. `CONTEXT` / `NAMESPACE` env-overridable.
 
-### 3. `workflow k6` (console convenience, when it's up)
+### 3. `workflow loadtest` (console convenience, when it's up)
 
 Nicer flags + `list`/`stop`/`logs` + the TUI. **Hidden/inert unless the TestRun CRD is present.**
 ```bash
-workflow k6 run --scenario ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
-workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m --wait
-workflow k6 list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
-workflow k6 logs <run-name> -f
-workflow k6 stop <run-name>   |  --scenario mixed  |  --all
+workflow loadtest                 # TUI: run table + launch / stop / logs
+workflow loadtest run --scenario ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
+workflow loadtest run --scenario search --config search-deep-paging --rate 100 --duration 10m --wait
+workflow loadtest list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
+workflow loadtest logs <run-name> -f
+workflow loadtest stop <run-name>   |  --scenario mixed  |  --all
 ```
 `--config` sets `K6_PRESET`; `--rate`/`--vus` fan out to the ingest+search vars; `-e KEY=VAL` and
-`--target` add `runner.env` overrides. TUI: `workflow manage` → **`k`** (launch + list
-+ stop). k6 runs are standalone TestRuns, so one never affects a migration workflow.
+`--target` add `runner.env` overrides. Bare **`workflow loadtest`** opens the TUI: a live table of
+runs, with `n` launch, `s`/`S` stop, `l`/`f` logs. k6 runs are standalone TestRuns, so one never
+affects a migration workflow — and the TUI is separate from `workflow manage` for the same reason.
 
 > **`--parallelism` splits the load.** `--rate`/`--vus` are **global totals** k6 divides across the
 > runner pods via execution segments — `--rate 100 --parallelism 4` ≈ 25 req/s per pod.
@@ -402,14 +404,14 @@ time by `lib/config.js`, which merges the selected preset under the real environ
 
 ## CLI / run-input reference
 
-Flags accepted by `k6-run.sh` / `workflow k6 run` (the `-e KEY=VALUE` overrides map to the env vars
+Flags accepted by `k6-run.sh` / `workflow loadtest run` (the `-e KEY=VALUE` overrides map to the env vars
 in the [Configuration reference](#configuration-reference)):
 
 | Input | Default | Meaning |
 |---|---|---|
 | `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
 | `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`), passed as `K6_PRESET` |
-| `--parallelism` | `1` (`workflow k6`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.separate`, default off) |
+| `--parallelism` | `1` (`workflow loadtest`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.separate`, default off) |
 | `--target` | preset's `CAPTURE_PROXY_URL` | Capture Proxy endpoint |
 | `--rate` | keep preset | request rate (sets `INGEST_RATE`+`SEARCH_RATE`) |
 | `--duration` | keep preset | `DURATION` (e.g. `30s`, `10m`) |
@@ -598,7 +600,7 @@ pipenv run app --skip-install --with-load-test --test-ids 0050 \
 
 For any run **outside** this test harness, install the chart yourself first (see
 [Install the load-test chart](#install-the-load-test-chart-opt-in)) — there is no `--with-load-test`
-equivalent on `aws-bootstrap.sh` or the `workflow k6` / `k6-run.sh` commands.
+equivalent on `aws-bootstrap.sh` or the `workflow loadtest` / `k6-run.sh` commands.
 
 ---
 
@@ -624,7 +626,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
 
 1. **Separate, opt-in chart — not part of the migration.** The load-test chart is *not* a
    dependency of any migration aggregate, so a normal migration deployment contains no operator,
-   no example runs, no RBAC, and the `workflow k6` commands are hidden/inert. This is deliberate
+   no example runs, no RBAC, and the `workflow loadtest` commands are hidden/inert. This is deliberate
    safety: a user or an agent cannot accidentally fire a load test while running a migration.
    *Defense in depth:* four independent things are missing by default (the `testruns.k6.io` CRD,
    the console RBAC, the example TestRuns, and the visible CLI) — any one blocks a run.
@@ -662,7 +664,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
    `k6-testrun-examples` (runner image, the scripts image mounted at `/scripts`, the script path
    under it, `K6_OUT`, default `K6_PRESET`, labels, `generateName`). A run is `kubectl create` from that example (optionally patched), so it
    works with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it,
-   and `workflow k6` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`,
+   and `workflow loadtest` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`,
    TUI), guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no
    spec-builder to keep in sync. *Rejected:* the console CLI as the *only* submission path (couples
    every run to a current console image). *Note:* `kubectl create` (not `apply`), because the

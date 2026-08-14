@@ -375,9 +375,10 @@ cmd_up() {
   Capture proxy is up at:  ${endpoint}
 
   Run k6 against it (from the migration console pod, or anywhere with cluster context):
-    kubectl -n ${NAMESPACE} exec ${CONSOLE_POD} -- workflow k6 run \\
+    kubectl -n ${NAMESPACE} exec ${CONSOLE_POD} -- workflow loadtest run \\
       --scenario ingest --config ingest-steady --target ${endpoint}${K6_AUTH_ARGS}
-    kubectl -n ${NAMESPACE} exec ${CONSOLE_POD} -- workflow k6 list
+    kubectl -n ${NAMESPACE} exec ${CONSOLE_POD} -- workflow loadtest list
+    kubectl -n ${NAMESPACE} exec -it ${CONSOLE_POD} -- workflow loadtest   # TUI
 
   Traffic: k6 → ${proxy} → source, and ${proxy} → Kafka → replayer → target
   Tear down with:  $0 down

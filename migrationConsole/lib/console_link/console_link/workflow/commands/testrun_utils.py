@@ -3,7 +3,7 @@
 Load tests run as TestRun CRs (k6.io/v1alpha1) managed by the k6-operator that ships in the
 standalone k6LoadTest chart — NOT as Argo workflows. This module is a thin CustomObjectsApi
 wrapper plus helpers to read that chart's example ConfigMap and detect whether the load-test infra
-is installed at all (so the `workflow k6` commands stay inert in a normal migration deployment).
+is installed at all (so the `workflow loadtest` commands stay inert in a normal migration deployment).
 
 The scenarios and load-profile presets themselves are not in the cluster to be read: they are baked
 into a data image (migrations/k6_scripts, built from TrafficCapture/trafficLoadTest) that the
@@ -102,7 +102,7 @@ def loadtest_installed(namespace):
 
     A namespaced testruns list returns 200 when the CRD exists (RBAC ships with the same chart),
     404 when the CRD is absent. Any error is treated as "not installed", so a normal migration
-    deployment (no operator) leaves the `workflow k6` commands inert.
+    deployment (no operator) leaves the `workflow loadtest` commands inert.
     """
     try:
         client.CustomObjectsApi().list_namespaced_custom_object(

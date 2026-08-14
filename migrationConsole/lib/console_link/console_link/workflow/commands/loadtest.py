@@ -1,4 +1,7 @@
-"""`workflow k6` — submit and manage k6 load-test runs.
+"""`workflow loadtest` — submit and manage k6 load-test runs.
+
+Bare `workflow loadtest` opens the load-test TUI (tui/loadtest_app.py); the subcommands below are
+the non-interactive equivalents. Both go through the same helpers, so neither can drift.
 
 Each run is a k6-operator **TestRun** CR (k6.io/v1alpha1), NOT an Argo workflow. The operator, the
 example TestRuns, and this command's RBAC ship in the standalone k6LoadTest chart
@@ -11,7 +14,7 @@ preset from the same mount, selected with the K6_PRESET env var); every preset v
 per run via named options or the repeatable `-e KEY=VALUE` bag, since real environment variables win
 over the preset file. Load is spread across `--parallelism` runner pods by k6 execution segments.
 
-Because the infra is a separate opt-in, these commands are inert (and hidden from `--help`) unless
+Because the infra is a separate opt-in, this command is inert (and hidden from `--help`) unless
 the TestRun CRD is present in the namespace — so a normal migration deployment cannot trigger a
 load test. See TrafficCapture/trafficLoadTest/README.md for the deployment side.
 """
@@ -95,10 +98,10 @@ def k6_available(namespace, force=False):
     `K6_LOADTEST_ENABLED` (true/false) is an explicit override — used by tests and as a kill
     switch. Otherwise we probe (cached) whether the TestRun CRD is usable in the namespace.
 
-    `force=True` bypasses the cache and re-probes the cluster, refreshing the cached value. The
-    long-running `workflow manage` TUI uses this to notice the k6LoadTest chart being installed
-    *after* the console started — a plain cached probe would pin the startup result for the life of
-    the process. The env override still wins over any probe.
+    `force=True` bypasses the cache and re-probes the cluster, refreshing the cached value, for a
+    long-running process that has to notice the k6LoadTest chart being installed *after* it started
+    — a plain cached probe would pin the startup result for the life of the process. The env
+    override still wins over any probe.
     """
     override = os.environ.get("K6_LOADTEST_ENABLED")
     if override is not None:
@@ -120,7 +123,7 @@ def _require_k6(ctx, namespace):
         ctx.exit(ExitCode.FAILURE.value)
 
 
-class _K6Group(click.Group):
+class _LoadTestGroup(click.Group):
     """A group hidden from `--help` unless the k6 load-test infra (TestRun CRD) is installed."""
 
     @property
@@ -290,22 +293,42 @@ def _warn_if_unknown_preset(config_name):
                    f"({', '.join(CONFIG_PRESETS)}); running anyway.", err=True)
 
 
-def list_active_k6_runs(namespace):
-    """Active (non-terminal) k6 runs as UI-friendly dicts: name/scenario/phase/age."""
+def list_runs(namespace, scenario=None, active_only=False):
+    """k6 runs as UI-friendly dicts, sorted by name — the one place a TestRun is flattened for
+    display, shared by `loadtest list`, the TUI's run table, and the launch panel.
+
+    `active_only=True` drops runs that reached a terminal stage.
+    """
     out = []
-    for tr in _k6_testruns(namespace):
+    for tr in _k6_testruns(namespace, scenario):
         stage = tr.get("status", {}).get("stage", "")
-        if stage in DONE_STAGES:
+        if active_only and stage in DONE_STAGES:
             continue
         meta = tr.get("metadata", {})
         out.append({
             "name": meta.get("name", ""),
             "scenario": meta.get("labels", {}).get("k6-scenario", "?"),
             "phase": stage or "unknown",
+            "parallelism": str(tr.get("spec", {}).get("parallelism", "-")),
             "age": _age(meta.get("creationTimestamp")),
         })
     out.sort(key=lambda r: r["name"])
     return out
+
+
+def list_active_k6_runs(namespace):
+    """Active (non-terminal) k6 runs as UI-friendly dicts: name/scenario/phase/age."""
+    return list_runs(namespace, active_only=True)
+
+
+def logs_command(namespace, name, follow=False):
+    """The `kubectl logs` argv for a run's k6 containers. Shared by the `logs` subcommand and the
+    TUI, so both show the same stream."""
+    cmd = ["kubectl", "logs", "-n", namespace,
+           "-l", f"k6_cr={name},runner=true", "-c", "k6", "--tail=-1", "--prefix"]
+    if follow:
+        cmd.append("-f")
+    return cmd
 
 
 def _wait_for_testrun(namespace, name, timeout, interval):
@@ -323,12 +346,31 @@ def _wait_for_testrun(namespace, name, timeout, interval):
 # ---------------------------------------------------------------------------
 # CLI.
 # ---------------------------------------------------------------------------
-@click.group(name="k6", cls=_K6Group)
-def k6_group():
-    """Submit and manage k6 load-test runs (k6-operator TestRuns)."""
+@click.group(name="loadtest", cls=_LoadTestGroup, invoke_without_command=True)
+@click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
+@click.option('--refresh-interval', default=5.0, type=float, hidden=True,
+              help="Seconds between run-table refreshes in the TUI.")
+@click.pass_context
+def loadtest_group(ctx, namespace, refresh_interval):
+    """Submit and manage k6 load-test runs (k6-operator TestRuns).
+
+    With no subcommand this opens the load-test TUI: a live table of runs, plus launch, stop and
+    log viewing.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _require_k6(ctx, namespace)
+    # Imported here so the subcommands (and shell completion) never pay for Textual.
+    from ..tui.loadtest_app import LoadTestApp
+    try:
+        load_k8s_config()
+        LoadTestApp(namespace, refresh_interval=refresh_interval).run()
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
 
 
-@k6_group.command(name="run")
+@loadtest_group.command(name="run")
 @click.option('--scenario', default="ingest", show_default=True, shell_complete=_complete_scenarios,
               help="Scenario to run — any scenario present in the cluster, including custom ones.")
 @click.option('--config', 'config_name', default=None, shell_complete=_complete_presets,
@@ -359,9 +401,9 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
 
     \b
     Examples:
-      workflow k6 run --scenario ingest --target https://my-proxy:9200
-      workflow k6 run --scenario search --config search-deep-paging --rate 100 --duration 10m
-      workflow k6 run --scenario mixed --parallelism 4 --registry-enabled -e INGEST_RATE=80
+      workflow loadtest run --scenario ingest --target https://my-proxy:9200
+      workflow loadtest run --scenario search --config search-deep-paging --rate 100 --duration 10m
+      workflow loadtest run --scenario mixed --parallelism 4 --registry-enabled -e INGEST_RATE=80
     """
     _require_k6(ctx, namespace)
     # Every remaining option names a build_k6_parameters keyword (that's why the click options
@@ -396,7 +438,7 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
     click.echo(f"Submitted k6 run: {name}")
     target_note = f" target={target_url}" if target_url else ""
     click.echo(f"  scenario={scenario} config={config_name} parallelism={params['parallelism']}{target_note}")
-    click.echo(f"\nWatch:  workflow k6 list\n        workflow k6 logs {name} -f")
+    click.echo(f"\nWatch:  workflow loadtest list\n        workflow loadtest logs {name} -f")
 
     if wait:
         click.echo(f"\nWaiting for completion (timeout {timeout}s)...")
@@ -409,7 +451,7 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
             ctx.exit(ExitCode.FAILURE.value)
 
 
-@k6_group.command(name="list")
+@loadtest_group.command(name="list")
 @click.option('--scenario', default=None, shell_complete=_complete_scenarios,
               help="Filter by scenario.")
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
@@ -419,27 +461,17 @@ def k6_list(ctx, scenario, namespace):
     _require_k6(ctx, namespace)
     try:
         load_k8s_config()
-        items = _k6_testruns(namespace, scenario)
+        runs = list_runs(namespace, scenario)
     except Exception as e:
         click.echo(f"Error listing k6 runs: {e}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
         return
 
-    if not items:
+    if not runs:
         click.echo("No k6 runs found.")
         return
 
-    rows = []
-    for tr in items:
-        meta = tr.get("metadata", {})
-        rows.append((
-            meta.get("name", "?"),
-            meta.get("labels", {}).get("k6-scenario", "?"),
-            tr.get("status", {}).get("stage", "unknown"),
-            str(tr.get("spec", {}).get("parallelism", "-")),
-            _age(meta.get("creationTimestamp")),
-        ))
-    rows.sort(key=lambda r: r[0])
+    rows = [(r["name"], r["scenario"], r["phase"], r["parallelism"], r["age"]) for r in runs]
 
     header = ("NAME", "SCENARIO", "STAGE", "PARALLEL", "AGE")
     widths = [max(len(str(r[i])) for r in (header, *rows)) for i in range(len(header))]
@@ -448,7 +480,7 @@ def k6_list(ctx, scenario, namespace):
         click.echo("  ".join(str(c).ljust(widths[i]) for i, c in enumerate(r)))
 
 
-@k6_group.command(name="stop")
+@loadtest_group.command(name="stop")
 @click.argument('name', required=False)
 @click.option('--all', 'stop_all', is_flag=True, default=False, help="Stop all k6 runs.")
 @click.option('--scenario', default=None, shell_complete=_complete_scenarios,
@@ -463,9 +495,9 @@ def k6_stop(ctx, name, stop_all, scenario, namespace):
 
     \b
     Examples:
-      workflow k6 stop k6-run-abc12
-      workflow k6 stop --scenario mixed
-      workflow k6 stop --all
+      workflow loadtest stop k6-run-abc12
+      workflow loadtest stop --scenario mixed
+      workflow loadtest stop --all
     """
     _require_k6(ctx, namespace)
     if sum(bool(x) for x in (name, stop_all, scenario)) != 1:
@@ -494,7 +526,7 @@ def k6_stop(ctx, name, stop_all, scenario, namespace):
         click.echo(f"{n}: {'stopped' if deleted else 'stop failed'}")
 
 
-@k6_group.command(name="logs")
+@loadtest_group.command(name="logs")
 @click.argument('name')
 @click.option('-f', '--follow', is_flag=True, default=False, help="Stream live logs.")
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
@@ -504,12 +536,8 @@ def k6_logs(ctx, name, follow, namespace):
 
     \b
     Examples:
-      workflow k6 logs k6-run-abc12
-      workflow k6 logs k6-run-abc12 -f
+      workflow loadtest logs k6-run-abc12
+      workflow loadtest logs k6-run-abc12 -f
     """
     _require_k6(ctx, namespace)
-    cmd = ["kubectl", "logs", "-n", namespace,
-           "-l", f"k6_cr={name},runner=true", "-c", "k6", "--tail=-1", "--prefix"]
-    if follow:
-        cmd.append("-f")
-    subprocess.run(cmd)
+    subprocess.run(logs_command(namespace, name, follow))

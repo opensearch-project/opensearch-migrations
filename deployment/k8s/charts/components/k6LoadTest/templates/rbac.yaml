@@ -17,7 +17,7 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get"]
-  # Read runner pod status/logs for `workflow k6 list` / `logs`.
+  # Read runner pod status/logs for `workflow loadtest list` / `logs`.
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

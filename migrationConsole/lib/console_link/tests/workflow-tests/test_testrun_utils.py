@@ -1,8 +1,8 @@
 """Tests for testrun_utils helpers (k6 TestRun / ConfigMap plumbing).
 
-These exercise the wrappers directly. The `workflow k6` command tests patch these names on the k6
-module (k6mod.create_testrun, k6mod.read_configmap, ...), so the real implementations — and the
-404-vs-other-error handling they encode — are only reached from here.
+These exercise the wrappers directly. The `workflow loadtest` command tests patch these names on
+the loadtest module (ltmod.create_testrun, ltmod.read_configmap, ...), so the real implementations
+— and the 404-vs-other-error handling they encode — are only reached from here.
 """
 import pytest
 from unittest.mock import MagicMock, patch
@@ -187,7 +187,7 @@ class TestLoadtestInstalled:
 
     def test_false_on_any_other_failure(self):
         # Deliberately broad: no kubeconfig, RBAC denial, connection refused — a normal migration
-        # deployment must leave the `workflow k6` commands inert rather than surfacing an error.
+        # deployment must leave the `workflow loadtest` commands inert rather than surfacing an error.
         patcher, _ = _custom_api(list_namespaced_custom_object=RuntimeError("no kubeconfig"))
         with patcher:
             assert loadtest_installed("ma") is False

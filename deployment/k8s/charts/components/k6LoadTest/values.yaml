@@ -59,7 +59,7 @@ k6-operator:
 # initializer/starter pods AND the TestRun CR itself (it logs "Cleaning up all resources" and deletes
 # the object; metrics already shipped to Grafana persist). Left EMPTY by default: the CR is deleted
 # near-instantly on completion, which races the `stage=finished` polling that `run_test.sh`,
-# `workflow k6 run --wait`, and the Test0050 integ test rely on — they'd see the CR vanish and time
+# `workflow loadtest run --wait`, and the Test0050 integ test rely on — they'd see the CR vanish and time
 # out. Set to "post" only for fire-and-forget runs you never wait on. Only "post" is valid non-empty.
 testRun:
   parallelism: 1
@@ -77,6 +77,6 @@ dashboard:
   enabled: true
 
 # ServiceAccount of the migration-console pod that submits TestRuns. This chart grants it RBAC on
-# testruns.k6.io, so the `workflow k6` CLI is only functional once this chart is installed.
+# testruns.k6.io, so the `workflow loadtest` CLI is only functional once this chart is installed.
 console:
   serviceAccountName: migration-console-access-role
