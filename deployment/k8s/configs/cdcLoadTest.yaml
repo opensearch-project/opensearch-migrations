@@ -1,49 +1,42 @@
 # CDC (capture-and-replay) migration config — the default input to deployCdcWorkflow.sh.
 #
-# This is an ordinary migration config: the same thing you would write by hand and feed to
-# `workflow configure edit`, nothing script-specific about its shape. The script renders the
-# ${...} placeholders below and submits it; everything else here is literal.
+# An ordinary migration config: the same thing you would write by hand and feed to
+# `workflow configure edit`. Endpoints, versions, ports and names are all literal here — edit them,
+# or pass your own file with -f. The script reads the resource names back out of whatever config it
+# is given, so any CDC topology works without changing the script.
 #
-# NOTE: this file is a TEMPLATE and does not parse as YAML until rendered — the two AUTH_BLOCK
-# placeholders occupy whole lines, because "no auth" has to mean the authConfig key is absent
-# entirely (see below), and a text placeholder cannot conditionally omit a key while still leaving
-# valid YAML behind. The script validates the RENDERED result before submitting it. A config you
-# pass with -f needs no placeholders and should be ordinary, directly-valid YAML.
+# Only three placeholders are substituted, and only these are ever touched:
 #
-# Comments are substituted too, so placeholders are named WITHOUT the ${...} syntax throughout this
-# header — spelling one out here would expand it into the comment and corrupt the rendered file.
-#
-# Placeholders (and ONLY these) are substituted, so a config with no placeholders passes through
-# untouched — which is what `deployCdcWorkflow.sh up -f my-config.yaml` relies on:
-#
-#   SOURCE_ENDPOINT / TARGET_ENDPOINT   discovered from the deployed clusters, or set explicitly
-#   SOURCE_VERSION                      source engine version
 #   SOURCE_AUTH_BLOCK / TARGET_AUTH_BLOCK
-#                                       an `authConfig:` stanza when the cluster wants auth, or
-#                                       empty when it does not. `authConfig` is an optional union
-#                                       in the schema, so "no auth" means the key is ABSENT — an
-#                                       empty `authConfig: {}` fails validation.
-#   PROXY_NAME / PROXY_PORT / PROXY_SERVICE_TYPE / PROXY_REPLICAS
-#   REPLAYER_NAME / SPEEDUP_FACTOR
+#       An `authConfig:` stanza, or nothing at all. The script probes each cluster and fills these
+#       in, because whether the test clusters want credentials depends on which values file they
+#       were deployed with. "No auth" has to mean the authConfig key is ABSENT — it is an optional
+#       union in the schema, so an empty `authConfig: {}` fails validation.
+#   PROXY_SERVICE_TYPE
+#       ClusterIP or LoadBalancer — a property of the cluster you are on, not of the migration.
 #
-# To express a different CDC topology — more proxies, more replayers, an S3 traffic source, an
-# external Kafka, cert-manager TLS — edit this file (or pass your own with -f). The script reads
-# the resource names back out of the config to decide what to wait on, so it needs no changes.
+# A config with no placeholders passes through untouched, which is what -f relies on.
+#
+# NOTE: because those two auth stanzas occupy whole lines, this file does not parse as YAML until
+# rendered. The script validates the RENDERED result before submitting it. Placeholders are named
+# WITHOUT the ${...} syntax in this header on purpose — comments are substituted too, so spelling
+# one out here would expand it into the comment and corrupt the output.
 
 # Capture-and-replay only: no snapshot, no metadata migration, no backfill.
 skipApprovals: true
 snapshotMigrationConfigs: []
 
+# Endpoints match the testClusters chart (deployment/k8s/charts/aggregates/testClusters).
 sourceClusters:
   source1:
-    endpoint: "${SOURCE_ENDPOINT}"
-    version: "${SOURCE_VERSION}"
+    endpoint: "https://elasticsearch-master-headless:9200"
+    version: "ES 7.10.2"
     allowInsecure: true
 ${SOURCE_AUTH_BLOCK}
 
 targetClusters:
   target1:
-    endpoint: "${TARGET_ENDPOINT}"
+    endpoint: "https://opensearch-cluster-master-headless:9200"
     allowInsecure: true
 ${TARGET_AUTH_BLOCK}
 
@@ -54,21 +47,20 @@ kafkaClusterConfiguration:
 
 traffic:
   proxies:
-    ${PROXY_NAME}:
+    capture-proxy:
       source: source1
       proxyConfig:
-        listenPort: ${PROXY_PORT}
+        listenPort: 9201
         noCapture: false
-        podReplicas: ${PROXY_REPLICAS}
-        # ClusterIP, not the LoadBalancer default: kind has no load-balancer controller, and the
-        # workflow's readiness gate blocks until a LoadBalancer reports ingress, so LoadBalancer
-        # would hang here until it times out. Use LoadBalancer on a cloud cluster.
+        podReplicas: 1
+        # kind has no load-balancer controller, and the workflow's readiness gate waits for a
+        # LoadBalancer to report ingress — so LoadBalancer would hang there until it times out.
         serviceType: ${PROXY_SERVICE_TYPE}
 
   replayers:
-    ${REPLAYER_NAME}:
-      fromCapturedTraffic: ${PROXY_NAME}
+    replay1:
+      fromCapturedTraffic: capture-proxy
       toTarget: target1
       replayerConfig:
-        speedupFactor: ${SPEEDUP_FACTOR}
+        speedupFactor: 2
         observedPacketConnectionTimeout: 30
