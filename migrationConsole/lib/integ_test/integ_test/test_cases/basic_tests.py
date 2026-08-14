@@ -3,9 +3,11 @@ import json
 import subprocess
 import time
 import uuid
+from kubernetes import client
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
-from .cdc_base import wait_for_proxy_ready
+from .cdc_base import load_k8s_config, wait_for_proxy_ready
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -15,8 +17,33 @@ logger = logging.getLogger(__name__)
 # one can exist at a time and each extra run must delete it before the next submits.
 INNER_WORKFLOW_NAME = "migration-workflow"
 
+# Helm-managed ConfigMap holding the deployment-provisioned bucket the workflow also takes its
+# snapshot repo URI from (LocalStack locally, real S3 in AWS).
+DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
 
-# This test case is subject to removal, as its value looks limited
+SNAPSHOT_MIGRATION_PLURAL = "snapshotmigrations"
+
+
+def run_console(args: list, timeout: int = 180) -> subprocess.CompletedProcess:
+    """Run the console CLI. The caller decides whether a non-zero exit is a failure."""
+    return subprocess.run(["console"] + args, capture_output=True, text=True, timeout=timeout)
+
+
+def run_console_json(args: list, timeout: int = 180) -> dict | list:
+    """Run `console --json <args>`, requiring success, and parse its stdout."""
+    result = run_console(["--json"] + args, timeout=timeout)
+    printable = " ".join(["console", "--json"] + args)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"`{printable}` failed (rc={result.returncode}). "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise AssertionError(f"`{printable}` emitted non-JSON: {e}. stdout={result.stdout!r}") from e
+
+
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
@@ -57,33 +84,201 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # Validate single document exists on target
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self._verify_failed_document_stream_disabled()
+
+    def _verify_failed_document_stream_disabled(self):
+        """The mirror of Test0002: this backfill names no bucket, so the stream must stay off.
+
+        The deployment does provide a default S3 bucket (Test0002 reads it from
+        DEFAULT_S3_CONFIG_MAP), so this is where a reintroduced fallback would show up — the
+        config-processor test that guards the same rule only sees a synthetic default.
+
+        Asserted through the stream commands rather than `backfill status`: the latter needs
+        `env.backfill`, which Environment.from_k8s_resource_catalog never populates, so it only
+        works when pointed at a services.yaml with --config-file.
+        """
+        result = run_console(["failed-document-stream", "list", "--limit", "1"])
+        if result.returncode == 0:
+            raise AssertionError(
+                f"`console failed-document-stream list` succeeded with no stream configured: "
+                f"stdout={result.stdout!r}"
+            )
+        if "bucket" not in result.stderr:
+            raise AssertionError(
+                f"Expected the failure to name the missing bucket, got stderr={result.stderr!r}"
+            )
 
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
+    """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document."""
+
+    # Mapped `long` on the target so a non-numeric value fails to parse.
+    FAILING_FIELD = "quantity"
+
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
-        description = "Performs backfill migration for a single document (default coordinator)."
+        description = ("Performs backfill migration for one valid and one terminally failing document "
+                       "(default coordinator).")
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
                          allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0002_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0002_doc"
+        self.failing_doc_id = "test_0002_failing_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
         self.target_cluster = None
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        # Base default minus metadataMigrationConfig, which would replace the incompatible target
+        # mapping. Backfill sizing and resources are kept as-is so EKS scheduling is unchanged.
+        super().prepare_workflow_snapshot_and_migration_config()
+        bucket = self._deployment_default_s3_bucket()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration.pop("metadataMigrationConfig", None)
+            # The bucket is the failed document stream's on/off switch — there is no default, so
+            # without it nothing records the failing document. Region and endpoint are inherited
+            # from the snapshot repo config.
+            migration["documentBackfillConfig"]["failedDocumentStreamS3Bucket"] = bucket
+
+    def _deployment_default_s3_bucket(self) -> str:
+        load_k8s_config()
+        config_map = client.CoreV1Api().read_namespaced_config_map(
+            name=DEFAULT_S3_CONFIG_MAP, namespace=self.argo_service.namespace)
+        bucket = ((config_map.data or {}).get("BUCKET_NAME") or "").strip()
+        if not bucket:
+            raise AssertionError(
+                f"ConfigMap {DEFAULT_S3_CONFIG_MAP} has no BUCKET_NAME; cannot enable the "
+                f"failed document stream. Data: {config_map.data}"
+            )
+        return bucket
+
     def prepare_clusters(self):
-        # Create single document
+        # Failing document first: dynamic mapping pins the field to the version's string type from
+        # the first doc. Numeric-looking first would pin it to `long` and the source would reject this.
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
-                                               doc_id=self.doc_id, doc_type=self.doc_type)
+                                               doc_id=self.failing_doc_id, doc_type=self.doc_type,
+                                               data={"title": "Fails to parse on the target",
+                                                     self.FAILING_FIELD: "not-a-number"})
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id, doc_type=self.doc_type,
+                                               data={"title": "Migrates cleanly",
+                                                     self.FAILING_FIELD: "123"})
         self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id,
                                             doc_type=self.doc_type)
+        self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, doc_type=self.doc_type)
+
+        # Seed only this index; auto-creation stays enabled globally.
+        properties = {self.FAILING_FIELD: {"type": "long"}}
+        doc_type = self.target_operations.resolve_doc_type(self.doc_type)
+        mappings = {doc_type: {"properties": properties}} if self.target_operations.uses_typed_mappings() \
+            else {"properties": properties}
+        self.target_operations.create_index(index_name=self.index_name, cluster=self.target_cluster,
+                                            data=json.dumps({"mappings": mappings}))
 
     def verify_clusters(self):
-        # Validate single document exists on target
+        # The valid document migrates; the failing one must never land on the target.
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, expected_status_code=404,
+                                            max_attempts=3, delay=2.0)
+
+        # The stream's session is the owning SnapshotMigration's UID, not the workflow's.
+        session_uid = self._snapshot_migration_uid()
+
+        record = self._await_failed_document_record()
+        self._assert_field(record, "documentId", self.failing_doc_id)
+        self._assert_field(record, "failureType", "mapper_parsing_exception")
+        self._assert_field(record, "failureClass", "NON_RETRYABLE")
+        self._assert_field(record, "targetIndex", self.index_name)
+        self._assert_field(record, "sessionId", session_uid)
+
+        self._assert_session_location(session_uid)
+        self._assert_backfill_completed_with_errors()
+        logger.info("Failed document observed through the console: %s", record)
+
+    def _snapshot_migration_uid(self) -> str:
+        """UID of this run's SnapshotMigration, which is what RFS stamps as the stream session."""
+        migration = self._snapshot_migration()
+        uid = (migration.get("metadata", {}) or {}).get("uid")
+        if not uid:
+            raise AssertionError(f"SnapshotMigration has no metadata.uid: {migration}")
+        return uid
+
+    def _snapshot_migration(self) -> dict:
+        """The single SnapshotMigration this test's workflow created. Several would make the
+        console ambiguous too — it requires --migration to choose."""
+        load_k8s_config()
+        items = client.CustomObjectsApi().list_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION, namespace=self.argo_service.namespace,
+            plural=SNAPSHOT_MIGRATION_PLURAL).get("items", []) or []
+        if len(items) != 1:
+            names = sorted((it.get("metadata", {}) or {}).get("name", "?") for it in items)
+            raise AssertionError(f"Expected exactly one SnapshotMigration, found {len(items)}: {names}")
+        return items[0]
+
+    @staticmethod
+    def _assert_field(payload: dict, field: str, expected):
+        actual = payload.get(field)
+        if actual != expected:
+            raise AssertionError(f"Expected {field}={expected!r}, got {actual!r}: {payload}")
+
+    @staticmethod
+    def _assert_session_location(session_uid: str):
+        """The location the console reports must belong to this run's session."""
+        location = run_console(["failed-document-stream", "location"])
+        if location.returncode != 0:
+            raise AssertionError(
+                f"`console failed-document-stream location` failed (rc={location.returncode}). "
+                f"stdout={location.stdout!r} stderr={location.stderr!r}"
+            )
+        if f"session={session_uid}" not in location.stdout:
+            raise AssertionError(
+                f"Failed document stream location {location.stdout!r} does not belong to "
+                f"session {session_uid!r}"
+            )
+
+    def _await_failed_document_record(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
+        """Poll: the workflow can report finished before the S3 object is listable."""
+        records = []
+        for _ in range(max_attempts):
+            records = run_console_json(["failed-document-stream", "list", "--limit", "100"])
+            for record in records:
+                if record.get("documentId") == self.failing_doc_id:
+                    return record
+            time.sleep(delay)
+        raise AssertionError(
+            f"Document {self.failing_doc_id!r} never appeared in the failed document stream. "
+            f"Last read {len(records)} record(s): {records}"
+        )
+
+    def _assert_backfill_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0):
+        """Read the backfill outcome from SnapshotMigration.status, which the RFS monitor patches
+        from `console backfill status --deep-check`.
+
+        Not run here directly: that command needs env.backfill, which Environment.from_k8s_resource_catalog
+        never populates, so it only works against a services.yaml (--config-file) like the monitor uses.
+        """
+        backfill = {}
+        for _ in range(max_attempts):
+            backfill = (self._snapshot_migration().get("status", {}) or {}).get("documentBackfill", {}) or {}
+            if backfill.get("phase") == "CompletedWithErrors":
+                break
+            time.sleep(delay)
+        else:
+            raise AssertionError(f"Backfill never reported CompletedWithErrors. Last status: {backfill}")
+
+        summary = backfill.get("summary", {}) or {}
+        self._assert_field(summary, "percentageCompleted", 100)
+        migrated, total = summary.get("shardsMigrated"), summary.get("shardsTotal")
+        if migrated != total:
+            raise AssertionError(
+                f"Backfill reported CompletedWithErrors with shardsMigrated={migrated} != "
+                f"shardsTotal={total}: {summary}"
+            )
 
 
 class Test0008OptionalSnapshotStages(MATestBase):
