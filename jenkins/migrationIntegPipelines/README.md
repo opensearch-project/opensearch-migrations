@@ -86,6 +86,7 @@ functionName(jobName: jobNameOverride ?: null)
 | eksBYOSIntegTestCover.groovy | eksBYOSIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcAossFullE2eIntegTestCover.groovy | eksCdcAossIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcFullE2eIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcK6LoadTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
@@ -117,7 +118,9 @@ Jobs triggered:
 - `k8s-local-solr8x-test` (PR and main)
 - `k8s-local-solr-other-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
-- `eks-cdc-*` (PR with `run-eks-tests` label, and main)
+- `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
+  runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
+  the standalone k6LoadTest chart for any `008x` ID, so the job needs no extra flag
 - `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)

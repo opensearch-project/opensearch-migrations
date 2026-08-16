@@ -263,8 +263,14 @@ def call(Map config = [:]) {
                                 if (traceTestIds != "") {
                                     traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
                                 }
+                                // The k6 scripts image (migrations/k6_scripts) is handed over as a
+                                // complete reference, the same way the transform images above are.
+                                // aws-bootstrap.sh --build pushes it to this run's private ECR
+                                // registry with the other images, under ECR's flattened tag layout.
+                                // Only load-test cases (008x) consume it; it is inert otherwise.
+                                def k6ScriptsImage = "${env.registryEndpoint}:migrations_k6_scripts_latest"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-scripts-image='${k6ScriptsImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
                                 }
                             }
                         }

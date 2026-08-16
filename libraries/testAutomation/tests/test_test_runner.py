@@ -240,7 +240,101 @@ class TestPytestCommand:
             assert mock_run.call_args.kwargs.get("skip_workflow_reset", False) is False
 
 
-from test_runner import get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS, VALID_TARGET_VERSIONS
+class TestLoadTestChartSelection:
+    """The k6LoadTest chart follows the selected test IDs — a load-test case cannot submit
+    TestRuns without it, and every other run must stay free of the k6 operator."""
+
+    def _runner_with_ids(self, test_ids):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.test_ids = test_ids
+        return runner
+
+    def test_load_test_id_requests_the_chart(self):
+        assert self._runner_with_ids(["0080"])._load_test_requested() is True
+
+    def test_load_test_id_among_others_requests_the_chart(self):
+        assert self._runner_with_ids(["0031", "0080"])._load_test_requested() is True
+
+    def test_ordinary_ids_do_not_request_the_chart(self):
+        assert self._runner_with_ids(["0031", "0042"])._load_test_requested() is False
+
+    def test_no_ids_do_not_request_the_chart(self):
+        assert self._runner_with_ids([])._load_test_requested() is False
+
+    def test_chart_is_installed_for_a_load_test_id(self):
+        runner = self._runner_with_ids(["0080"])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)), \
+                patch.object(runner, "_install_load_test_chart") as mock_install:
+            runner.run(skip_delete=True)
+            mock_install.assert_called_once()
+
+    def test_chart_is_not_installed_for_an_ordinary_run(self):
+        runner = self._runner_with_ids(["0031"])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)), \
+                patch.object(runner, "_install_load_test_chart") as mock_install:
+            runner.run(skip_delete=True)
+            mock_install.assert_not_called()
+
+
+class TestScriptsImageResolution:
+    """The k6 scripts image is a data-only image, handed over as a complete reference the way the
+    mountable transform images are. Deriving it from a registry prefix stays as the fallback."""
+
+    def _runner(self, **kwargs):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        for key, value in kwargs.items():
+            setattr(runner, key, value)
+        return runner
+
+    def test_explicit_tagged_reference_wins_over_registry_prefix(self):
+        runner = self._runner(k6_scripts_image="1234.dkr.ecr.us-east-1.amazonaws.com/repo:"
+                                               "migrations_k6_scripts_latest",
+                              registry_prefix="docker-registry:5001/")
+        assert runner._resolve_scripts_image() == {
+            "scriptsImage.repository": "1234.dkr.ecr.us-east-1.amazonaws.com/repo",
+            "scriptsImage.tag": "migrations_k6_scripts_latest",
+            "scriptsImage.pullPolicy": "Always",
+        }
+
+    def test_digest_reference_sets_digest_and_no_tag(self):
+        digest = "sha256:" + "a" * 64
+        runner = self._runner(k6_scripts_image=f"1234.dkr.ecr.us-east-1.amazonaws.com/repo@{digest}")
+        values = runner._resolve_scripts_image()
+        assert values["scriptsImage.digest"] == digest
+        assert "scriptsImage.tag" not in values
+
+    def test_ecr_registry_prefix_uses_the_flattened_tag(self):
+        runner = self._runner(registry_prefix="1234.dkr.ecr.us-east-1.amazonaws.com/repo/")
+        values = runner._resolve_scripts_image()
+        assert values["scriptsImage.repository"] == "1234.dkr.ecr.us-east-1.amazonaws.com/repo"
+        assert values["scriptsImage.tag"] == "migrations_k6_scripts_latest"
+
+    def test_other_registry_prefix_keeps_the_path_layout(self):
+        runner = self._runner(registry_prefix="docker-registry:5001/")
+        values = runner._resolve_scripts_image()
+        assert values["scriptsImage.repository"] == "docker-registry:5001/migrations/k6_scripts"
+        assert values["scriptsImage.tag"] == "latest"
+
+
+class TestSplitImageRef:
+    def test_tagged_reference(self):
+        assert _split_image_ref("repo/image:1.2") == ("repo/image", "1.2", "")
+
+    def test_digest_reference(self):
+        digest = "sha256:" + "b" * 64
+        assert _split_image_ref(f"repo/image@{digest}") == ("repo/image", "", digest)
+
+    def test_registry_port_is_not_mistaken_for_a_tag(self):
+        assert _split_image_ref("docker-registry:5001/migrations/k6_scripts") == (
+            "docker-registry:5001/migrations/k6_scripts", "latest", "")
+
+    def test_registry_port_with_a_tag(self):
+        assert _split_image_ref("docker-registry:5001/migrations/k6_scripts:latest") == (
+            "docker-registry:5001/migrations/k6_scripts", "latest", "")
+
+
+from test_runner import (get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS,
+                         VALID_TARGET_VERSIONS, _split_image_ref)
 
 
 class TestVersionCombinations:

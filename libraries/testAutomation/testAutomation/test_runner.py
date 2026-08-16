@@ -12,7 +12,7 @@ import re
 import string
 import sys
 from tabulate import tabulate
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +25,26 @@ MA_RELEASE_NAME = "ma"
 # into one repo (tag "migrations_<image>_latest"), while any other registry keeps the
 # "<prefix>migrations/<image>" layout — both image lookups below branch on this.
 ECR_REGISTRY_PATTERN = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
+# Test IDs reserved for load tests (see the ID convention in integ_test/conftest.py). Selecting one
+# of these is the sole trigger for installing the standalone k6LoadTest chart — the cases cannot
+# submit TestRuns without it. Every other run stays free of k6, which is why this is a range check
+# and not an unconditional install.
+LOAD_TEST_ID_PREFIX = "008"
+
+
+def _split_image_ref(ref: str) -> Tuple[str, str, str]:
+    """Split a fully-qualified image reference into (repository, tag, digest).
+
+    Only one of tag/digest is ever set. Aware of a registry port (host:5001/repo carries no tag)
+    and of digest pins (repo@sha256:...), which is the form the transforms packaging script emits.
+    """
+    repo, at, digest = ref.partition("@")
+    if at:
+        return repo, "", digest
+    colon = ref.rfind(":")
+    if colon > ref.rfind("/"):
+        return ref[:colon], ref[colon + 1:], ""
+    return ref, "latest", ""
 
 
 class TargetType(str, Enum):
@@ -77,7 +97,7 @@ class TestRunner:
                  capture_proxy_service_type: str = "LoadBalancer",
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
                  trace_backend: str = "",
-                 with_load_test: bool = False, k6_chart_path: str = "",
+                 k6_chart_path: str = "", k6_scripts_image: str = "",
                  load_test_image: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
@@ -96,8 +116,8 @@ class TestRunner:
         self.trace_test_ids = trace_test_ids or []
         self.trace_values_file = trace_values_file
         self.trace_backend = trace_backend
-        self.with_load_test = with_load_test
         self.k6_chart_path = k6_chart_path
+        self.k6_scripts_image = k6_scripts_image
         self.load_test_image = load_test_image
 
     def _print_test_stats(self, report: TestReport) -> None:
@@ -443,20 +463,35 @@ class TestRunner:
             return repo, tag
         return "mirror.gcr.io/grafana/k6", "latest"
 
-    def _resolve_scripts_image(self) -> Tuple[str, str]:
-        """(repository, tag) of the k6 scripts image, the data image mounted at /scripts that
-        carries the scenarios and presets. Built from TrafficCapture/trafficLoadTest alongside the
-        other migrations/* images, so it follows the same registry convention as the migration
-        chart's images."""
-        if self.registry_prefix:
-            if re.match(ECR_REGISTRY_PATTERN, self.registry_prefix):
-                return self.registry_prefix.rstrip("/"), "migrations_k6_scripts_latest"
-            return f"{self.registry_prefix}migrations/k6_scripts", "latest"
-        return "migrations/k6_scripts", "latest"
+    def _resolve_scripts_image(self) -> Dict[str, str]:
+        """Helm values for the k6 scripts image — the data image mounted at /scripts that carries
+        the scenarios and presets.
+
+        An explicit k6_scripts_image is a complete reference and wins, the same way the mountable
+        transforms images are handed over fully resolved (--transform-image-*). Otherwise the
+        reference is derived from the registry prefix, which needs the registry's own layout: ECR
+        flattens every image into one repo, any other registry keeps <prefix>migrations/<image>.
+        """
+        if self.k6_scripts_image:
+            repo, tag, digest = _split_image_ref(self.k6_scripts_image)
+        elif self.registry_prefix and re.match(ECR_REGISTRY_PATTERN, self.registry_prefix):
+            repo, tag, digest = self.registry_prefix.rstrip("/"), "migrations_k6_scripts_latest", ""
+        elif self.registry_prefix:
+            repo, tag, digest = f"{self.registry_prefix}migrations/k6_scripts", "latest", ""
+        else:
+            repo, tag, digest = "migrations/k6_scripts", "latest", ""
+        # A digest pins exact content and wins over the tag in the chart, so send only one of them.
+        values = {"scriptsImage.repository": repo, "scriptsImage.pullPolicy": "Always"}
+        values["scriptsImage.digest" if digest else "scriptsImage.tag"] = digest or tag
+        return values
+
+    def _load_test_requested(self) -> bool:
+        """True when this run selects a load-test case (008x) and therefore needs the k6LoadTest
+        chart. The selected IDs are the only trigger — there is no separate opt-in flag."""
+        return any(tid.startswith(LOAD_TEST_ID_PREFIX) for tid in self.test_ids)
 
     def _install_load_test_chart(self) -> None:
-        """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC) for
-        --with-load-test.
+        """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC).
 
         The chart depends on the k6-operator subchart, so vendor it first (offline from Chart.lock
         when already present, else fetch from the grafana repo).
@@ -469,13 +504,12 @@ class TestRunner:
                           capture_output=True, text=True).returncode != 0:
             subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
         repo, tag = self._resolve_load_test_image()
-        scripts_repo, scripts_tag = self._resolve_scripts_image()
-        logger.info("k6 runner image: %s:%s (scripts: %s:%s)", repo, tag, scripts_repo, scripts_tag)
+        scripts_values = self._resolve_scripts_image()
+        logger.info("k6 runner image: %s:%s (scripts: %s)", repo, tag, scripts_values)
+        values = {"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent"}
+        values.update(scripts_values)
         if not self.k8s_service.helm_install(
-                chart_path=self.k6_chart_path, release_name="k6-load-test",
-                values={"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent",
-                        "scriptsImage.repository": scripts_repo, "scriptsImage.tag": scripts_tag,
-                        "scriptsImage.pullPolicy": "Always"}):
+                chart_path=self.k6_chart_path, release_name="k6-load-test", values=values):
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
@@ -544,10 +578,11 @@ class TestRunner:
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
-                # Opt-in: install the standalone k6 load-test chart so load-test cases (Test0050*)
-                # can submit TestRuns. Kept separate from the migration chart, so a normal run has
-                # no operator/scenarios/RBAC and cannot trigger a load test.
-                if self.with_load_test:
+                # Install the standalone k6 load-test chart so load-test cases (Test008*) can submit
+                # TestRuns. Kept separate from the migration chart and installed only for runs that
+                # ask for it, so a normal run has no operator/scenarios/RBAC, cannot trigger a load
+                # test, and does not pay for the k6-operator install.
+                if self._load_test_requested():
                     self._install_load_test_chart()
 
                 test_report = self.run_tests(source_version=source_version,
@@ -708,12 +743,6 @@ def parse_args(argv=None) -> argparse.Namespace:
              "testing [--skip-delete, --reuse-clusters, --keep-workflows]"
     )
     parser.add_argument(
-        "--with-load-test",
-        action="store_true",
-        help="Install the standalone k6LoadTest chart so load-test cases (e.g. Test0050*) can "
-             "submit k6-operator TestRuns. Off by default so normal runs contain no k6."
-    )
-    parser.add_argument(
         "--test-reports-dir",
         default=None,
         help="If provided, will output generated test reports to this directory path"
@@ -810,6 +839,16 @@ def parse_args(argv=None) -> argparse.Namespace:
         default="LoadBalancer",
         help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind tests."
     )
+    parser.add_argument(
+        "--k6-scripts-image",
+        type=str,
+        default="",
+        help="Complete reference to the k6 scripts image (migrations/k6_scripts), the data image "
+             "mounted at /scripts that carries the load-test scenarios and presets. Accepts a tag "
+             "or a digest pin, e.g. '<ecr-repo>:migrations_k6_scripts_latest' or "
+             "'<repo>@sha256:...'. Only used by load-test cases (008x). Without it the reference is "
+             "derived from --registry-prefix."
+    )
     args = parser.parse_args(argv)
     if args.trace_test_ids:
         if not args.trace_values_file:
@@ -871,8 +910,8 @@ def main() -> None:
                              trace_test_ids=args.trace_test_ids,
                              trace_values_file=args.trace_values_file,
                              trace_backend=args.trace_backend or "",
-                             with_load_test=args.with_load_test,
-                             k6_chart_path=k6_chart_path)
+                             k6_chart_path=k6_chart_path,
+                             k6_scripts_image=args.k6_scripts_image)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()

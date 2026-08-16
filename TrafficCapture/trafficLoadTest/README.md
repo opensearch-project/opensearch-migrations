@@ -123,8 +123,10 @@ other `migrations/*` images):
 >   --set scriptsImage.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
 >   --set scriptsImage.tag=migrations_k6_scripts_latest
 > ```
-> The test runner does exactly this for you when given `--registry-prefix` (see
-> [Integration test](#integration-test)).
+> The test runner does exactly this for you when given `--k6-scripts-image` (or, as a fallback,
+> `--registry-prefix`) — see [Integration test](#integration-test). The EKS bootstrap `--build` path
+> already pushes `migrations/k6_scripts` to the private ECR registry along with the other images — it
+> is a normal build target, not a test-only one, so `--skip-test-images` keeps it.
 
 The chart depends on the `k6-operator` subchart, so vendor that once, then install into the
 migration namespace (`ma`), pointing `scriptsImage.repository` at wherever the image landed and
@@ -158,7 +160,7 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 |---|---|---|
 | **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow loadtest` command. |
 | **Local CDC pipeline** | `./deployment/k8s/deployCdcWorkflow.sh up` | Local kind/minikube dev — submits a capture-and-replay workflow and installs k6 alongside it. |
-| **Integration tests** | `pipenv run app … --with-load-test` (the test runner) | Only to run the `Test0050` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
+| **Integration tests** | `pipenv run app --test-ids 0080 …` (the test runner) | Only to run a `008x` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
 
 All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
 general one and the reference for the others.
@@ -338,7 +340,7 @@ Both fields are baked into every example from chart values (`templates/k6-testru
 
 > **`cleanup: post` conflicts with waiting for a run.** The operator deletes the TestRun CR the
 > instant it reaches `finished`, so any flow that polls for completion — `run_test.sh --run`,
-> `workflow loadtest run --wait`, the `Test0050` integ test — will see the CR vanish mid-poll and time out.
+> `workflow loadtest run --wait`, the `Test0080` integ test — will see the CR vanish mid-poll and time out.
 > Only enable it for fire-and-forget submissions you don't wait on.
 
 ### 1. kubectl (no console, no extra tooling)
@@ -582,25 +584,41 @@ helm uninstall k6-load-test -n ma        # removes operator + example TestRuns +
 
 ## Integration test
 
-`Test0050CdcK6LoadTest` (`migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py`)
+`Test0080CdcK6LoadTest` (`migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py`)
 layers a short k6 run on a live CDC migration and asserts the traffic is captured and replayed to
-the target **under load**. It's explicit-selection only; the test runner installs this chart when
-invoked with `--with-load-test`.
+the target **under load**. It's explicit-selection only, and IDs `0080-0089` are the reserved
+load-test range.
 
 The **only** command that installs the chart for you is the test-automation runner
-(`libraries/testAutomation`, `pipenv run app … --with-load-test`) — it runs `helm upgrade --install
-k6-load-test` once the migration stack is healthy, so you don't install separately for the test. On a
-cloud cluster whose migration stack is already up (e.g. from `aws-bootstrap.sh`), add `--skip-install`
-so only the k6 chart is added:
+(`libraries/testAutomation`) — it runs `helm upgrade --install k6-load-test` once the migration stack
+is healthy, so you don't install separately for the test. Selecting a `008x` ID is the sole trigger
+and there is no opt-in flag; the runner installs the chart for that run only, which keeps every other
+test run free of the k6 operator. To bring the chart up without running a case, use the manual
+`helm upgrade --install` above. On a cloud cluster whose migration stack is already up (e.g. from
+`aws-bootstrap.sh`), add `--skip-install` so only the k6 chart is added:
 
 ```bash
-pipenv run app --skip-install --with-load-test --test-ids 0050 \
-  --source-version ES_7.10 --target-version OS_2.19 --registry-prefix <ecr-repo>/
+pipenv run app --skip-install --test-ids 0080 \
+  --source-version ES_7.10 --target-version OS_2.19 \
+  --k6-scripts-image <ecr-repo>:migrations_k6_scripts_latest
 ```
 
+`--k6-scripts-image` takes a complete reference — the same way the mountable transform fixtures are
+handed to the runner as `--transform-image-*`, rather than inferring a layout from a registry.
+A digest pin (`<repo>@sha256:…`) works too and reaches the chart as `scriptsImage.digest`, which wins
+over the tag. Without the argument the reference is derived from `--registry-prefix`, which is what
+the local kind jobs use (`docker-registry:5001/` → `docker-registry:5001/migrations/k6_scripts`).
+
+CI runs this on EKS as the `eks-cdc-k6-load-test` job
+(`jenkins/migrationIntegPipelines/eksCdcK6LoadTestCover.groovy`): post-merge on `main`, on a 6-hour
+cadence, and on a PR labelled `run-eks-tests`. It reuses `eksCdcIntegPipeline`, which passes
+`--k6-scripts-image=<registryEndpoint>:migrations_k6_scripts_latest`. The `_latest` tag matches how
+every other MA image is referenced on EKS, and the ECR registry is created per run
+(`migration-ecr-<stage>-<region>`), so there is no second writer to race with.
+
 For any run **outside** this test harness, install the chart yourself first (see
-[Install the load-test chart](#install-the-load-test-chart-opt-in)) — there is no `--with-load-test`
-equivalent on `aws-bootstrap.sh` or the `workflow loadtest` / `k6-run.sh` commands.
+[Install the load-test chart](#install-the-load-test-chart-opt-in)) — there is no equivalent
+auto-install on `aws-bootstrap.sh` or the `workflow loadtest` / `k6-run.sh` commands.
 
 ---
 
