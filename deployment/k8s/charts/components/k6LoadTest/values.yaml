@@ -49,22 +49,19 @@ k6-operator:
   namespace:
     create: false
 
-# TestRun distribution defaults baked into the k6-testrun-examples ConfigMap. `parallelism` splits
-# each scenario's load across that many runner pods (the operator shards the script's executors).
-# `separate: true` is the operator's shorthand for REQUIRED node anti-affinity — it forces the runner
-# pods onto distinct nodes. Only meaningful when parallelism > 1, and it needs at least `parallelism`
-# schedulable nodes or the surplus pods stay Pending forever — so keep it false on single-node
-# clusters (e.g. local minikube).
-# `cleanup: post` makes the operator tear down the WHOLE run once it finishes — the runner/
-# initializer/starter pods AND the TestRun CR itself (it logs "Cleaning up all resources" and deletes
-# the object; metrics already shipped to Grafana persist). Left EMPTY by default: the CR is deleted
-# near-instantly on completion, which races the `stage=finished` polling that `run_test.sh`,
-# `workflow loadtest run --wait`, and the Test0080 integ test rely on — they'd see the CR vanish and time
-# out. Set to "post" only for fire-and-forget runs you never wait on. Only "post" is valid non-empty.
+# TestRun distribution defaults, rendered as parameter defaults on every k6-<scenario>
+# WorkflowTemplate. `parallelism` splits each scenario's load across that many runner pods (the
+# operator shards the script's executors). `separate: true` is the operator's shorthand for REQUIRED
+# node anti-affinity — it forces the runner pods onto distinct nodes. Only meaningful when
+# parallelism > 1, and it needs at least `parallelism` schedulable nodes or the surplus pods stay
+# Pending forever — so keep it false on single-node clusters (e.g. local minikube).
+#
+# There is no `cleanup` knob: the workflow owns its TestRun, so deleting the workflow takes the CR
+# and its pods with it. The operator's own `cleanup: post` is deliberately not used — it deletes the
+# CR the instant it finishes, which would race the workflow's own wait on that same status.
 testRun:
   parallelism: 1
   separate: false
-  cleanup: ""
 
 # Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
 # Off by default; those scenarios degrade gracefully to flat searches when absent.
@@ -80,3 +77,16 @@ dashboard:
 # testruns.k6.io, so the `workflow loadtest` CLI is only functional once this chart is installed.
 console:
   serviceAccountName: migration-console-access-role
+
+# A run is an Argo Workflow that creates a TestRun and waits for the k6-operator to finish it, so the
+# workflow's ServiceAccount needs the same RBAC on testruns.k6.io that the console has. Argo comes
+# from the migrationAssistant chart, which creates these accounts; `extra` lists any further ones to
+# bind (for example a per-environment executor).
+workflow:
+  serviceAccountName: argo-workflow-executor
+  extraServiceAccountNames:
+    - argo-test-workflow-executor
+  # Upper bound on a single run, counted from TestRun creation. It only fires when the run never
+  # reaches a terminal stage — for example runner pods stuck on an image pull — so keep it well above
+  # the longest load test you expect.
+  activeDeadlineSeconds: 7200

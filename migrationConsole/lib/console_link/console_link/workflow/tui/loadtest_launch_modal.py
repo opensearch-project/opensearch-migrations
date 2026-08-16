@@ -11,7 +11,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static, Button, Input, Select, Checkbox, TextArea
 
-# Scenarios are discovered from the cluster (the k6-testrun-examples ConfigMap keys) and passed
+# Scenarios are discovered from the cluster (the chart's k6-<scenario> WorkflowTemplates) and passed
 # into the modal. This literal is only a fallback for when that lookup returns nothing.
 _FALLBACK_SCENARIOS = ["ingest", "search", "mixed"]
 # Presets live in the scripts image, so the caller passes in the CLI's list (loadtest.CONFIG_PRESETS).

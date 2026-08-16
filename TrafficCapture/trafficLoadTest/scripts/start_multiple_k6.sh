@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch several concurrent k6 runs (as independent TestRuns) against the running data plane, to
+# Launch several concurrent k6 runs (as independent Workflows) against the running data plane, to
 # exercise multiple simultaneous load tests. Unlike the old docker-compose version, the runs live
 # in the cluster — no background processes to babysit; list/stop them with the console CLI.
 #
@@ -42,12 +42,12 @@ k6_list || true
 if $WAIT; then
   trap cleanup EXIT INT
   echo ""
-  echo "All runs submitted. Ctrl+C to stop all (or: kubectl delete testrun -l app=k6-load-test)."
+  echo "All runs submitted. Ctrl+C to stop all (or: kubectl delete wf -l app=k6-load-test)."
   # Wait until no active runs remain.
   while true; do
     sleep 15
     [[ "$(k6_active_count)" -eq 0 ]] && { echo "All runs finished."; trap - EXIT INT; break; }
   done
 else
-  echo "Submitted (--no-wait). Manage with: kubectl get/delete testrun -l app=k6-load-test"
+  echo "Submitted (--no-wait). Manage with: kubectl get/delete wf -l app=k6-load-test"
 fi

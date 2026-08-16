@@ -1,13 +1,14 @@
 """Load-test integration case (Shape A): a k6 load test layered on a live CDC migration.
 
-Instead of `generate-data`, this drives real load through the capture proxy with a short k6 run
-(k6-operator TestRun), then asserts the capture-and-replay pipeline moved that traffic to the
-target — i.e. the pipeline works *under load*, not just for a handful of hand-written docs.
+Instead of `generate-data`, this drives real load through the capture proxy with a short k6 run (an
+Argo Workflow that creates a k6-operator TestRun and waits for it), then asserts the
+capture-and-replay pipeline moved that traffic to the target — i.e. the pipeline works *under load*,
+not just for a handful of hand-written docs.
 
-Requires the standalone k6LoadTest chart to be installed (operator + example TestRuns + RBAC) and
-the migrations/k6_scripts image, the data image mounted at /scripts that carries the scenarios and
-presets. The test runner installs the chart on its own when a load-test ID (0080-0089) is selected;
-the case is explicit-selection only so it never runs in a normal migration suite.
+Requires the standalone k6LoadTest chart to be installed (operator + per-scenario WorkflowTemplates
++ RBAC) and the migrations/k6_scripts image, the data image mounted at /scripts that carries the
+scenarios and presets. The test runner installs the chart on its own when a load-test ID (0080-0089)
+is selected; the case is explicit-selection only so it never runs in a normal migration suite.
 """
 
 import logging
@@ -61,11 +62,11 @@ class Test0080CdcK6LoadTest(MATestBase):
         pass
 
     def _run_k6(self, namespace, target_url):
-        """Fire a short k6 ingest run at the proxy and wait for it to finish."""
+        """Fire a short k6 ingest run at the proxy and wait for the workflow to finish."""
         # Imported inside the method so the case only depends on the k6 module when actually run.
         from console_link.workflow.models.utils import load_k8s_config
         from console_link.workflow.commands.loadtest import (
-            build_k6_parameters, submit_k6_run, _wait_for_testrun,
+            build_k6_parameters, submit_k6_run, wait_for_run, SUCCESS_PHASE,
         )
         load_k8s_config()
         params = build_k6_parameters(
@@ -76,9 +77,10 @@ class Test0080CdcK6LoadTest(MATestBase):
         )
         name = submit_k6_run(namespace, params)
         logger.info("Submitted k6 run %s against %s", name, target_url)
-        stage = _wait_for_testrun(namespace, name, timeout=300, interval=5)
-        if stage != "finished":
-            raise AssertionError(f"k6 run {name} ended in stage '{stage}' (expected 'finished')")
+        phase = wait_for_run(namespace, name, timeout=300, interval=5)
+        if phase != SUCCESS_PHASE:
+            raise AssertionError(f"k6 run {name} ended in phase '{phase}' "
+                                 f"(expected '{SUCCESS_PHASE}')")
         logger.info("k6 run %s finished", name)
 
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):

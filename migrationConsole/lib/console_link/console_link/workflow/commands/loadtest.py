@@ -3,20 +3,22 @@
 Bare `workflow loadtest` opens the load-test TUI (tui/loadtest_app.py); the subcommands below are
 the non-interactive equivalents. Both go through the same helpers, so neither can drift.
 
-Each run is a k6-operator **TestRun** CR (k6.io/v1alpha1), NOT an Argo workflow. The operator, the
-example TestRuns, and this command's RBAC ship in the standalone k6LoadTest chart
-(deployment/k8s/charts/components/k6LoadTest), which is installed separately from any migration;
-the scenarios and presets themselves ride in a data image (migrations/k6_scripts, built from
-TrafficCapture/trafficLoadTest) that the examples mount at /scripts on stock grafana/k6 pods.
+Each run is an **Argo Workflow** that creates a k6-operator **TestRun** and waits for it. The
+operator, the per-scenario WorkflowTemplates, and this command's RBAC ship in the standalone
+k6LoadTest chart (deployment/k8s/charts/components/k6LoadTest), which is installed separately from
+any migration; the scenarios and presets themselves ride in a data image (migrations/k6_scripts,
+built from TrafficCapture/trafficLoadTest) that the templates mount at /scripts on stock grafana/k6
+pods.
 
-A run is specified by a `scenario` (a script path under /scripts) and a `config` (a k6-config/*.env
-preset from the same mount, selected with the K6_PRESET env var); every preset value is overridable
-per run via named options or the repeatable `-e KEY=VALUE` bag, since real environment variables win
-over the preset file. Load is spread across `--parallelism` runner pods by k6 execution segments.
+A run is specified by a `scenario` (which names a WorkflowTemplate, and a script path under /scripts)
+and a `config` (a k6-config/*.env preset from the same mount, selected with the K6_PRESET env var);
+every preset value is overridable per run via named options or the repeatable `-e KEY=VALUE` bag,
+since real environment variables win over the preset file. Load is spread across `--parallelism`
+runner pods by k6 execution segments, which is the operator's job, not Argo's.
 
-Because the infra is a separate opt-in, this command is inert (and hidden from `--help`) unless
-the TestRun CRD is present in the namespace — so a normal migration deployment cannot trigger a
-load test. See TrafficCapture/trafficLoadTest/README.md for the deployment side.
+Because the infra is a separate opt-in, this command is inert (and hidden from `--help`) unless the
+chart's WorkflowTemplates are present in the namespace — so a normal migration deployment cannot
+trigger a load test. See TrafficCapture/trafficLoadTest/README.md for the deployment side.
 """
 
 import calendar
@@ -30,26 +32,25 @@ import click
 
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from .testrun_utils import (
-    EXAMPLES_CONFIGMAP,
-    create_testrun,
-    list_testruns,
-    get_testrun,
-    delete_testrun,
-    read_configmap,
+    K6_APP_LABEL,
+    create_workflow,
+    list_workflows,
+    get_workflow,
+    delete_workflow,
+    get_workflow_template,
+    workflow_template_name,
     list_scenarios,
     loadtest_installed,
 )
 
 logger = logging.getLogger(__name__)
 
-K6_APP_LABEL = "k6-load-test"
-
 # Env var the scenarios read to pick a load-profile preset from the ones in the mounted scripts
 # image (see TrafficCapture/trafficLoadTest/lib/config.js).
 PRESET_ENV = "K6_PRESET"
 
-# Launchable scenarios are discovered from the cluster (list_scenarios, from the chart's example
-# TestRuns); SCENARIOS is only the completion fallback used when the cluster is unreachable.
+# Launchable scenarios are discovered from the cluster (list_scenarios, from the chart's
+# WorkflowTemplates); SCENARIOS is only the completion fallback used when the cluster is unreachable.
 SCENARIOS = ["ingest", "search", "mixed"]
 # Presets live in the scripts image, so there is nothing in the cluster to enumerate: this list
 # mirrors TrafficCapture/trafficLoadTest/k6-config/*.env (kept honest by a unit test). Neither
@@ -61,8 +62,11 @@ CONFIG_PRESETS = [
     "mixed-steady", "mixed-ramp", "mixed-burst",
 ]
 
-# Stages of a TestRun that mean it is no longer active.
-DONE_STAGES = {"finished", "error", "stopped"}
+# Argo workflow phases that mean a run is no longer active. The k6-operator's own TestRun stages
+# (finished/error/stopped) are what the workflow's success/failure conditions watch; by the time a
+# phase below appears, that verdict has already been folded into it.
+DONE_PHASES = {"Succeeded", "Failed", "Error"}
+SUCCESS_PHASE = "Succeeded"
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +100,7 @@ def k6_available(namespace, force=False):
     """True if load testing is enabled here.
 
     `K6_LOADTEST_ENABLED` (true/false) is an explicit override — used by tests and as a kill
-    switch. Otherwise we probe (cached) whether the TestRun CRD is usable in the namespace.
+    switch. Otherwise we probe (cached) whether the chart's WorkflowTemplates are in the namespace.
 
     `force=True` bypasses the cache and re-probes the cluster, refreshing the cached value, for a
     long-running process that has to notice the k6LoadTest chart being installed *after* it started
@@ -124,7 +128,7 @@ def _require_k6(ctx, namespace):
 
 
 class _LoadTestGroup(click.Group):
-    """A group hidden from `--help` unless the k6 load-test infra (TestRun CRD) is installed."""
+    """A group hidden from `--help` unless the k6 load-test chart is installed."""
 
     @property
     def hidden(self):
@@ -153,26 +157,32 @@ def _age(creation_timestamp):
     return f"{secs}s"
 
 
-def _k6_testruns(namespace, scenario=None):
-    """k6 TestRuns in the namespace, optionally narrowed to one scenario."""
+def _k6_workflows(namespace, scenario=None):
+    """k6 run Workflows in the namespace, optionally narrowed to one scenario."""
     selector = f"app={K6_APP_LABEL}"
     if scenario:
         selector += f",k6-scenario={scenario}"
-    return list_testruns(namespace, label_selector=selector)
+    return list_workflows(namespace, label_selector=selector)
 
 
 # ---------------------------------------------------------------------------
 # Run assembly.
 # ---------------------------------------------------------------------------
-def load_example(namespace, scenario):
-    """Load the chart-rendered example TestRun (JSON) for a scenario. Helm is the single source of
-    the run spec (images, script path, K6_OUT, default preset); the console only patches it."""
-    data = read_configmap(namespace, EXAMPLES_CONFIGMAP)
-    if scenario not in data:
-        available = ", ".join(sorted(data)) or "none"
-        raise ValueError(f"no example for scenario '{scenario}' in ConfigMap {EXAMPLES_CONFIGMAP} "
+def load_template_defaults(namespace, scenario):
+    """The parameter defaults of the scenario's WorkflowTemplate, as a name → value dict.
+
+    Helm is the single source of the run spec (images, script path, K6_OUT, default preset); the
+    console reads those defaults and overrides only what the run asks for, so the static values are
+    never restated here.
+    """
+    name = workflow_template_name(scenario)
+    template = get_workflow_template(namespace, name)
+    if template is None:
+        available = ", ".join(list_scenarios(namespace)) or "none"
+        raise ValueError(f"no WorkflowTemplate '{name}' for scenario '{scenario}' "
                          f"(available: {available}); is the k6LoadTest chart installed?")
-    return json.loads(data[scenario])
+    params = template.get("spec", {}).get("arguments", {}).get("parameters", [])
+    return {p["name"]: p.get("value", "") for p in params if "name" in p}
 
 
 # Named run options → the scenario env vars each one sets. A value-carrying option is applied only
@@ -249,39 +259,61 @@ def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=No
     }
 
 
-def _set_env(container, name, value):
-    """Set an env var on a TestRun container spec, replacing any existing entry with that name.
+def _set_env(env, name, value):
+    """Return the env list with `name` set to `value`, replacing any existing entry of that name.
 
-    The example already carries K6_PRESET (and the K6_OUT trio), so appending would leave the
-    container with two entries of the same name and make the run depend on how the runtime resolves
-    that — replacing keeps the spec unambiguous.
+    The template's default already carries K6_PRESET (and the K6_OUT trio), so appending would leave
+    the container with two entries of the same name and make the run depend on how the runtime
+    resolves that — replacing keeps the spec unambiguous.
     """
-    env = [e for e in container.get("env", []) if e.get("name") != name]
-    env.append({"name": name, "value": str(value)})
-    container["env"] = env
+    out = [e for e in env if e.get("name") != name]
+    out.append({"name": name, "value": str(value)})
+    return out
 
 
-def build_testrun_spec(namespace, params):
-    """Load the scenario's example TestRun and patch it: point K6_PRESET at the chosen preset, apply
-    the env overrides (which win over the preset, since the scenarios read real env vars over the
-    preset file), set parallelism, and pass any extra `k6 run` args. The example already carries the
-    images, the scripts mount, the script path under it, K6_OUT, labels, and generateName."""
-    testrun = load_example(namespace, params["scenario"])
-    runner = testrun["spec"]["runner"]
+def build_workflow_submission(namespace, params):
+    """Build the Workflow that runs a scenario: name its WorkflowTemplate and pass only the
+    parameters that differ from the template's defaults.
 
-    _set_env(runner, PRESET_ENV, params["configName"])
+    The runner env is carried whole in one `runnerEnv` parameter. We start from the template's
+    default so the static vars (K6_OUT and the OTel endpoint) have exactly one definition, then point
+    K6_PRESET at the chosen preset and apply the overrides — which win over the preset file, since
+    the scenarios read real env vars over it. Everything else the run needs (the images, the scripts
+    mount, the script path under it, labels) is already in the template.
+    """
+    scenario = params["scenario"]
+    defaults = load_template_defaults(namespace, scenario)
+
+    env = json.loads(defaults.get("runnerEnv") or "[]")
+    env = _set_env(env, PRESET_ENV, params["configName"])
     for entry in _override_env(params):
-        _set_env(runner, entry["name"], entry["value"])
+        env = _set_env(env, entry["name"], entry["value"])
 
-    testrun["spec"]["parallelism"] = int(params.get("parallelism", 1))
+    parameters = [
+        {"name": "runnerEnv", "value": json.dumps(env)},
+        {"name": "parallelism", "value": str(int(params.get("parallelism", 1)))},
+    ]
     if params.get("extraArgs"):
-        testrun["spec"]["arguments"] = params["extraArgs"]
-    return testrun
+        parameters.append({"name": "arguments", "value": params["extraArgs"]})
+
+    return {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "metadata": {
+            "generateName": f"{workflow_template_name(scenario)}-",
+            "labels": {"app": K6_APP_LABEL, "k6-scenario": scenario},
+        },
+        "spec": {
+            "workflowTemplateRef": {"name": workflow_template_name(scenario)},
+            "arguments": {"parameters": parameters},
+        },
+    }
 
 
 def submit_k6_run(namespace, params):
-    """Build + create a TestRun from normalized params. Returns the generated name."""
-    return create_testrun(namespace, build_testrun_spec(namespace, params))
+    """Build + create the run Workflow from normalized params. Returns the generated name, which is
+    also the name of the TestRun the workflow creates."""
+    return create_workflow(namespace, build_workflow_submission(namespace, params))
 
 
 def _warn_if_unknown_preset(config_name):
@@ -293,23 +325,35 @@ def _warn_if_unknown_preset(config_name):
                    f"({', '.join(CONFIG_PRESETS)}); running anyway.", err=True)
 
 
+def _workflow_parameter(workflow, name, default="-"):
+    """A submitted workflow parameter's value. Absent means the run took the template's default,
+    which is not on the Workflow object."""
+    for p in workflow.get("spec", {}).get("arguments", {}).get("parameters", []):
+        if p.get("name") == name:
+            return str(p.get("value", default))
+    return default
+
+
 def list_runs(namespace, scenario=None, active_only=False):
-    """k6 runs as UI-friendly dicts, sorted by name — the one place a TestRun is flattened for
+    """k6 runs as UI-friendly dicts, sorted by name — the one place a run Workflow is flattened for
     display, shared by `loadtest list`, the TUI's run table, and the launch panel.
 
-    `active_only=True` drops runs that reached a terminal stage.
+    One row per submission: the Workflow. The TestRun it drives shares its name, so `logs` and
+    `stop` take the same identifier.
+
+    `active_only=True` drops runs that reached a terminal phase.
     """
     out = []
-    for tr in _k6_testruns(namespace, scenario):
-        stage = tr.get("status", {}).get("stage", "")
-        if active_only and stage in DONE_STAGES:
+    for wf in _k6_workflows(namespace, scenario):
+        phase = wf.get("status", {}).get("phase", "")
+        if active_only and phase in DONE_PHASES:
             continue
-        meta = tr.get("metadata", {})
+        meta = wf.get("metadata", {})
         out.append({
             "name": meta.get("name", ""),
             "scenario": meta.get("labels", {}).get("k6-scenario", "?"),
-            "phase": stage or "unknown",
-            "parallelism": str(tr.get("spec", {}).get("parallelism", "-")),
+            "phase": phase or "unknown",
+            "parallelism": _workflow_parameter(wf, "parallelism"),
             "age": _age(meta.get("creationTimestamp")),
         })
     out.sort(key=lambda r: r["name"])
@@ -323,7 +367,11 @@ def list_active_k6_runs(namespace):
 
 def logs_command(namespace, name, follow=False):
     """The `kubectl logs` argv for a run's k6 containers. Shared by the `logs` subcommand and the
-    TUI, so both show the same stream."""
+    TUI, so both show the same stream.
+
+    The pods belong to the operator's TestRun, not to the workflow — but the template names the
+    TestRun after the workflow, so the run's one name selects them.
+    """
     cmd = ["kubectl", "logs", "-n", namespace,
            "-l", f"k6_cr={name},runner=true", "-c", "k6", "--tail=-1", "--prefix"]
     if follow:
@@ -331,14 +379,18 @@ def logs_command(namespace, name, follow=False):
     return cmd
 
 
-def _wait_for_testrun(namespace, name, timeout, interval):
-    """Poll a TestRun until it reaches a terminal stage; return the stage, or None on timeout."""
+def wait_for_run(namespace, name, timeout, interval):
+    """Poll a run Workflow until it reaches a terminal phase; return the phase, or None on timeout.
+
+    The workflow's success/failure conditions already encode the operator's verdict, so a
+    `Succeeded` phase means the TestRun reached stage `finished`.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        tr = get_testrun(namespace, name)
-        stage = (tr or {}).get("status", {}).get("stage", "")
-        if stage in DONE_STAGES:
-            return stage
+        wf = get_workflow(namespace, name)
+        phase = (wf or {}).get("status", {}).get("phase", "")
+        if phase in DONE_PHASES:
+            return phase
         time.sleep(interval)
     return None
 
@@ -442,12 +494,12 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
 
     if wait:
         click.echo(f"\nWaiting for completion (timeout {timeout}s)...")
-        stage = _wait_for_testrun(namespace, name, timeout, wait_interval)
-        if stage is None:
+        phase = wait_for_run(namespace, name, timeout, wait_interval)
+        if phase is None:
             click.echo(f"Timed out after {timeout}s waiting for {name}.", err=True)
             ctx.exit(ExitCode.FAILURE.value)
-        click.echo(f"Run {name} finished: {stage}")
-        if stage != "finished":
+        click.echo(f"Run {name} finished: {phase}")
+        if phase != SUCCESS_PHASE:
             ctx.exit(ExitCode.FAILURE.value)
 
 
@@ -490,12 +542,12 @@ def k6_list(ctx, scenario, namespace):
 def k6_stop(ctx, name, stop_all, scenario, namespace):
     """Stop k6 run(s).
 
-    Stopping a TestRun deletes the CR; the operator tears down its runner/initializer pods (there
-    is no graceful pause).
+    Stopping a run deletes its Workflow; the TestRun is owned by it, so the CR and the operator's
+    runner/initializer pods go with it (there is no graceful pause).
 
     \b
     Examples:
-      workflow loadtest stop k6-run-abc12
+      workflow loadtest stop k6-ingest-abc12
       workflow loadtest stop --scenario mixed
       workflow loadtest stop --all
     """
@@ -509,8 +561,8 @@ def k6_stop(ctx, name, stop_all, scenario, namespace):
         if name:
             names = [name]
         else:
-            names = [tr.get("metadata", {}).get("name", "")
-                     for tr in _k6_testruns(namespace, scenario)]
+            names = [wf.get("metadata", {}).get("name", "")
+                     for wf in _k6_workflows(namespace, scenario)]
             names = [n for n in names if n]
     except Exception as e:
         click.echo(f"Error resolving k6 runs: {e}", err=True)
@@ -522,7 +574,7 @@ def k6_stop(ctx, name, stop_all, scenario, namespace):
         return
 
     for n in names:
-        deleted = delete_testrun(namespace, n)
+        deleted = delete_workflow(namespace, n)
         click.echo(f"{n}: {'stopped' if deleted else 'stop failed'}")
 
 
@@ -536,8 +588,8 @@ def k6_logs(ctx, name, follow, namespace):
 
     \b
     Examples:
-      workflow loadtest logs k6-run-abc12
-      workflow loadtest logs k6-run-abc12 -f
+      workflow loadtest logs k6-ingest-abc12
+      workflow loadtest logs k6-ingest-abc12 -f
     """
     _require_k6(ctx, namespace)
     subprocess.run(logs_command(namespace, name, follow))

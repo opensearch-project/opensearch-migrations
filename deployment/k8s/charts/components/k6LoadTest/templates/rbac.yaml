@@ -1,6 +1,8 @@
-# Grants the migration-console pod's ServiceAccount the ability to drive TestRun CRs and read the
-# k6 ConfigMaps. Because this lives in the separate load-test chart, the console gains the
+# Grants the ability to drive TestRun CRs to the accounts that need it: the migration-console pod's,
+# and the Argo workflow executor's. Because this lives in the separate load-test chart, they gain the
 # capability ONLY when this chart is installed — a normal migration deployment cannot submit runs.
+#
+# Submitting a run needs no grant here: it creates an Argo Workflow, which the console can already do.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -12,11 +14,6 @@ rules:
   - apiGroups: ["k6.io"]
     resources: ["testruns"]
     verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  # Read the k6-testrun-examples ConfigMap (by name) to assemble a TestRun. Scenarios and presets
-  # live in the runner image, so there is nothing else here for the console to read.
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get"]
   # Read runner pod status/logs for `workflow loadtest list` / `logs`.
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
@@ -33,6 +30,13 @@ subjects:
   - kind: ServiceAccount
     name: {{ .Values.console.serviceAccountName }}
     namespace: {{ .Release.Namespace }}
+  # The Argo workflow that wraps a run creates and watches the TestRun on the console's behalf, so
+  # its executor account needs the same grant.
+  {{- range concat (list .Values.workflow.serviceAccountName) (.Values.workflow.extraServiceAccountNames | default list) }}
+  - kind: ServiceAccount
+    name: {{ . }}
+    namespace: {{ $.Release.Namespace }}
+  {{- end }}
 roleRef:
   kind: Role
   name: k6-testrun-manager

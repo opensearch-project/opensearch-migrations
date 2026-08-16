@@ -1,4 +1,5 @@
-"""Tests for the `workflow loadtest` command group (loads chart-rendered example TestRuns + patches)."""
+"""Tests for the `workflow loadtest` command group (submits a Workflow against the chart's
+per-scenario WorkflowTemplate, overriding only what the run asks for)."""
 
 import json
 from pathlib import Path
@@ -11,43 +12,41 @@ from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands import loadtest as ltmod
 from console_link.workflow.commands.loadtest import (
     build_k6_parameters,
-    build_testrun_spec,
-    load_example,
+    build_workflow_submission,
+    load_template_defaults,
     list_active_k6_runs,
 )
-from console_link.workflow.commands.testrun_utils import EXAMPLES_CONFIGMAP
 
 LT = "console_link.workflow.commands.loadtest"
 ENV = {"K6_LOADTEST_ENABLED": "true", "WORKFLOW_NAMESPACE": "ma"}
 
 
-def _example(scenario):
-    """A minimal stand-in for what the chart renders into k6-testrun-examples: stock grafana/k6 pods
-    with the scenarios and presets mounted at /scripts from the k6_scripts data image, and the
-    preset named by the K6_PRESET env var."""
-    volume = {"name": "scripts",
-              "image": {"reference": "migrations/k6_scripts:latest", "pullPolicy": "IfNotPresent"}}
-    pod = {"image": "grafana/k6:latest", "imagePullPolicy": "IfNotPresent",
-           "volumes": [volume], "volumeMounts": [{"name": "scripts", "mountPath": "/scripts"}]}
+def _template(scenario):
+    """A minimal stand-in for the WorkflowTemplate the chart renders per scenario: the run's static
+    values live in its parameter defaults, so the console overrides only what a run changes."""
+    env = [{"name": "K6_PRESET", "value": f"{scenario}-steady"},
+           {"name": "K6_OUT", "value": "opentelemetry"}]
     return {
-        "apiVersion": "k6.io/v1alpha1", "kind": "TestRun",
-        "metadata": {"generateName": "k6-run-",
+        "apiVersion": "argoproj.io/v1alpha1", "kind": "WorkflowTemplate",
+        "metadata": {"name": f"k6-{scenario}",
                      "labels": {"app": "k6-load-test", "k6-scenario": scenario}},
         "spec": {
-            "parallelism": 1,
-            "script": {"localFile": f"/scripts/scenarios/{scenario}.js"},
-            "initializer": dict(pod),
-            "runner": dict(pod,
-                           env=[{"name": "K6_PRESET", "value": f"{scenario}-steady"},
-                                {"name": "K6_OUT", "value": "opentelemetry"}]),
+            "entrypoint": "run",
+            "arguments": {"parameters": [
+                {"name": "parallelism", "value": "1"},
+                {"name": "separate", "value": "false"},
+                {"name": "arguments", "value": ""},
+                {"name": "runnerImage", "value": "grafana/k6:latest"},
+                {"name": "scriptsRef", "value": "migrations/k6_scripts:latest"},
+                {"name": "runnerEnv", "value": json.dumps(env)},
+            ]},
         },
     }
 
 
-def _fake_read_configmap(namespace, name):
-    if name == EXAMPLES_CONFIGMAP:
-        return {s: json.dumps(_example(s)) for s in ("ingest", "search", "mixed")}
-    return {}
+def _fake_get_workflow_template(namespace, name):
+    scenario = name[len("k6-"):] if name.startswith("k6-") else None
+    return _template(scenario) if scenario in ("ingest", "search", "mixed") else None
 
 
 def _runner():
@@ -64,12 +63,19 @@ def _clear_cache():
 @pytest.fixture
 def cluster(monkeypatch):
     monkeypatch.setattr(ltmod, "load_k8s_config", lambda: None)
-    monkeypatch.setattr(ltmod, "read_configmap", _fake_read_configmap)
+    monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
     yield
 
 
+def _submitted_parameters(body):
+    return {p["name"]: p["value"]
+            for p in body["spec"]["arguments"]["parameters"]}
+
+
 def _env_map(body):
-    return {e["name"]: e["value"] for e in body["spec"]["runner"]["env"]}
+    """The runner env the submission carries, as name → value."""
+    return {e["name"]: e["value"]
+            for e in json.loads(_submitted_parameters(body)["runnerEnv"])}
 
 
 class TestAvailabilityGuard:
@@ -116,7 +122,7 @@ class TestLoadTestTui:
 
     @patch(f"{LT}.load_k8s_config")
     @patch("console_link.workflow.tui.loadtest_app.LoadTestApp")
-    @patch(f"{LT}.list_testruns", return_value=[])
+    @patch(f"{LT}.list_workflows", return_value=[])
     def test_subcommand_does_not_open_the_tui(self, _list, mock_app, _cfg):
         _runner().invoke(workflow_cli, ["loadtest", "list"], env=ENV)
         mock_app.assert_not_called()
@@ -132,74 +138,79 @@ class TestLoadTestHelp:
 
 
 class TestLoadTestRun:
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
-    def test_patches_example(self, mock_create, cluster):
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_submits_against_the_template(self, mock_create, cluster):
         result = _runner().invoke(workflow_cli, [
             "loadtest", "run", "--scenario", "ingest", "--target", "https://p:9200",
             "--rate", "80", "--parallelism", "3",
         ], env=ENV)
         assert result.exit_code == 0, result.output
         body = mock_create.call_args.args[1]
-        spec = body["spec"]
-        # example structure preserved
-        assert body["kind"] == "TestRun"
-        assert spec["script"]["localFile"] == "/scripts/scenarios/ingest.js"
-        assert spec["initializer"]["image"] == spec["runner"]["image"]  # both run stock k6
-        # the scripts mount survives patching on BOTH pods — the initializer runs `k6 archive` and
-        # needs the same files the runners do
-        for pod in ("initializer", "runner"):
-            assert spec[pod]["volumes"][0]["image"]["reference"] == "migrations/k6_scripts:latest"
-            assert spec[pod]["volumeMounts"][0]["mountPath"] == "/scripts"
-        # patched bits
-        assert spec["parallelism"] == 3
+        # A submission is a Workflow naming the scenario's template — the run spec itself (images,
+        # script path, the scripts mount on both pods) stays in the template.
+        assert body["kind"] == "Workflow"
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-ingest"
+        assert body["metadata"]["generateName"] == "k6-ingest-"
+        assert body["metadata"]["labels"] == {"app": "k6-load-test", "k6-scenario": "ingest"}
+        params = _submitted_parameters(body)
+        assert params["parallelism"] == "3"
         env = _env_map(body)
         assert env["K6_PRESET"] == "ingest-steady"
-        assert env["K6_OUT"] == "opentelemetry"          # from the example
+        assert env["K6_OUT"] == "opentelemetry"          # carried over from the template default
         assert env["CAPTURE_PROXY_URL"] == "https://p:9200"  # override wins over the preset
         assert env["INGEST_RATE"] == "80" and env["SEARCH_RATE"] == "80"  # --rate fans out
-        assert "arguments" not in spec
+        assert "arguments" not in params
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_only_overridden_parameters_are_submitted(self, mock_create, cluster):
+        """Anything the run does not change stays with the template, so its defaults remain the one
+        definition — a submission never restates the images or the pull policies."""
+        _runner().invoke(workflow_cli, ["loadtest", "run", "--scenario", "ingest"], env=ENV)
+        params = _submitted_parameters(mock_create.call_args.args[1])
+        assert set(params) == {"runnerEnv", "parallelism"}
+
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_config_swaps_preset(self, mock_create, cluster):
         _runner().invoke(workflow_cli, ["loadtest", "run", "--scenario", "ingest",
                                         "--config", "ingest-burst"], env=ENV)
-        body = mock_create.call_args.args[1]
+        env = json.loads(_submitted_parameters(mock_create.call_args.args[1])["runnerEnv"])
         # replaced, not appended: exactly one K6_PRESET entry, carrying the chosen preset
-        presets = [e for e in body["spec"]["runner"]["env"] if e["name"] == "K6_PRESET"]
+        presets = [e for e in env if e["name"] == "K6_PRESET"]
         assert presets == [{"name": "K6_PRESET", "value": "ingest-burst"}]
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_default_config_is_scenario_steady(self, mock_create, cluster):
         _runner().invoke(workflow_cli, ["loadtest", "run", "--scenario", "search"], env=ENV)
         body = mock_create.call_args.args[1]
         assert _env_map(body)["K6_PRESET"] == "search-steady"
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
-    def test_override_replaces_example_env(self, mock_create, cluster):
-        """A -e override of a var the example already sets must replace it, not duplicate it —
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_override_replaces_template_env(self, mock_create, cluster):
+        """A -e override of a var the template already sets must replace it, not duplicate it —
         two entries of the same name would leave the winner to the container runtime."""
         _runner().invoke(workflow_cli, ["loadtest", "run", "-e", "K6_OUT=json"], env=ENV)
-        env = mock_create.call_args.args[1]["spec"]["runner"]["env"]
+        env = json.loads(_submitted_parameters(mock_create.call_args.args[1])["runnerEnv"])
         assert [e for e in env if e["name"] == "K6_OUT"] == [{"name": "K6_OUT", "value": "json"}]
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_extra_args_set_arguments(self, mock_create, cluster):
         _runner().invoke(workflow_cli, ["loadtest", "run", "--extra-args", "--no-thresholds"], env=ENV)
-        assert mock_create.call_args.args[1]["spec"]["arguments"] == "--no-thresholds"
+        params = _submitted_parameters(mock_create.call_args.args[1])
+        assert params["arguments"] == "--no-thresholds"
 
-    @patch(f"{LT}.create_testrun")
+    @patch(f"{LT}.create_workflow")
     def test_bad_override_rejected(self, mock_create, cluster):
         result = _runner().invoke(workflow_cli, ["loadtest", "run", "-e", "NOEQUALS"], env=ENV)
         assert result.exit_code == 2
         mock_create.assert_not_called()
 
-    @patch(f"{LT}.create_testrun", side_effect=RuntimeError("boom"))
+    @patch(f"{LT}.create_workflow", side_effect=RuntimeError("boom"))
     def test_submit_failure_exits_nonzero(self, _create, cluster):
         result = _runner().invoke(workflow_cli, ["loadtest", "run"], env=ENV)
         assert result.exit_code == 1
         assert "Error submitting k6 run" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_unknown_preset_warns_but_runs(self, mock_create, cluster):
         # A custom runner image may ship its own presets, so an unrecognised name only warns.
         result = _runner().invoke(workflow_cli, [
@@ -209,108 +220,115 @@ class TestLoadTestRun:
         mock_create.assert_called_once()                        # but ran anyway
         assert _env_map(mock_create.call_args.args[1])["K6_PRESET"] == "home-brewed"
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_known_preset_no_warning(self, mock_create, cluster):
         result = _runner().invoke(workflow_cli, [
             "loadtest", "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
         assert result.exit_code == 0, result.output
         assert "not one of the stock presets" not in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-custom-xy")
     def test_custom_scenario_accepted(self, mock_create, monkeypatch):
         # --scenario is no longer a fixed Choice: any scenario present in the cluster is launchable.
-        def fake(ns, name):
-            return {"my-custom": json.dumps(_example("my-custom"))} if name == EXAMPLES_CONFIGMAP else {}
         monkeypatch.setattr(ltmod, "load_k8s_config", lambda: None)
-        monkeypatch.setattr(ltmod, "read_configmap", fake)
+        monkeypatch.setattr(ltmod, "get_workflow_template",
+                            lambda ns, name: _template("my-custom") if name == "k6-my-custom" else None)
         result = _runner().invoke(workflow_cli, ["loadtest", "run", "--scenario", "my-custom"], env=ENV)
         assert result.exit_code == 0, result.output
         body = mock_create.call_args.args[1]
         assert body["metadata"]["labels"]["k6-scenario"] == "my-custom"
-        assert body["spec"]["script"]["localFile"] == "/scripts/scenarios/my-custom.js"
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-my-custom"
 
 
 class TestLoadTestRunWait:
-    """`--wait` polls the TestRun to a terminal stage and maps it onto the exit code, so a load
+    """`--wait` polls the run Workflow to a terminal phase and maps it onto the exit code, so a load
     test wired into a script fails the script when the run itself failed."""
 
     @staticmethod
-    def _stages(monkeypatch, *stages):
-        """Feed get_testrun a canned sequence of stages, one per poll."""
-        it = iter(stages)
-        monkeypatch.setattr(ltmod, "get_testrun", lambda ns, name: {"status": {"stage": next(it)}})
+    def _phases(monkeypatch, *phases):
+        """Feed get_workflow a canned sequence of phases, one per poll."""
+        it = iter(phases)
+        monkeypatch.setattr(ltmod, "get_workflow", lambda ns, name: {"status": {"phase": next(it)}})
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_wait_succeeds_when_run_finishes(self, _create, cluster, monkeypatch):
-        self._stages(monkeypatch, "finished")
+        self._phases(monkeypatch, "Succeeded")
         result = _runner().invoke(workflow_cli, ["loadtest", "run", "--wait"], env=ENV)
         assert result.exit_code == 0, result.output
-        assert "finished" in result.output
+        assert "Succeeded" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_wait_polls_until_terminal(self, _create, cluster, monkeypatch):
         # A run that is still going keeps the poll loop alive; --wait-interval 0 keeps it instant.
-        self._stages(monkeypatch, "started", "started", "finished")
+        self._phases(monkeypatch, "Running", "Running", "Succeeded")
         result = _runner().invoke(
             workflow_cli, ["loadtest", "run", "--wait", "--wait-interval", "0"], env=ENV)
         assert result.exit_code == 0, result.output
-        assert "Run k6-run-xy finished: finished" in result.output
+        assert "Run k6-ingest-xy finished: Succeeded" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
-    def test_wait_exits_nonzero_when_run_errors(self, _create, cluster, monkeypatch):
-        # "error" is terminal, so waiting ends promptly — but it is not success.
-        self._stages(monkeypatch, "error")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_wait_exits_nonzero_when_run_fails(self, _create, cluster, monkeypatch):
+        # The workflow's failureCondition folds the operator's `error` stage into this phase.
+        self._phases(monkeypatch, "Failed")
         result = _runner().invoke(workflow_cli, ["loadtest", "run", "--wait"], env=ENV)
         assert result.exit_code == 1
-        assert "finished: error" in result.output
+        assert "finished: Failed" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
-    def test_wait_exits_nonzero_when_stopped(self, _create, cluster, monkeypatch):
-        self._stages(monkeypatch, "stopped")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_wait_exits_nonzero_on_workflow_error(self, _create, cluster, monkeypatch):
+        self._phases(monkeypatch, "Error")
         result = _runner().invoke(workflow_cli, ["loadtest", "run", "--wait"], env=ENV)
         assert result.exit_code == 1
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_wait_times_out(self, _create, cluster, monkeypatch):
         # --timeout 0 puts the deadline in the past, so the loop gives up without polling.
-        monkeypatch.setattr(ltmod, "get_testrun", lambda ns, name: {"status": {"stage": "started"}})
+        monkeypatch.setattr(ltmod, "get_workflow", lambda ns, name: {"status": {"phase": "Running"}})
         result = _runner().invoke(
             workflow_cli, ["loadtest", "run", "--wait", "--timeout", "0"], env=ENV)
         assert result.exit_code == 1
-        assert "Timed out after 0s waiting for k6-run-xy" in result.output
+        assert "Timed out after 0s waiting for k6-ingest-xy" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
-    def test_missing_testrun_keeps_waiting_until_timeout(self, _create, cluster, monkeypatch):
-        # get_testrun returns None for a run the API doesn't know about yet; that must not be
-        # mistaken for a terminal stage.
-        monkeypatch.setattr(ltmod, "get_testrun", lambda ns, name: None)
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
+    def test_missing_workflow_keeps_waiting_until_timeout(self, _create, cluster, monkeypatch):
+        # get_workflow returns None for a run the API doesn't know about yet; that must not be
+        # mistaken for a terminal phase.
+        monkeypatch.setattr(ltmod, "get_workflow", lambda ns, name: None)
         result = _runner().invoke(
             workflow_cli, ["loadtest", "run", "--wait", "--timeout", "0"], env=ENV)
         assert result.exit_code == 1
         assert "Timed out" in result.output
 
-    @patch(f"{LT}.create_testrun", return_value="k6-run-xy")
+    @patch(f"{LT}.create_workflow", return_value="k6-ingest-xy")
     def test_no_wait_returns_immediately(self, _create, cluster, monkeypatch):
         # Without --wait the command must not poll at all.
         polled = []
-        monkeypatch.setattr(ltmod, "get_testrun", lambda ns, name: polled.append(name))
+        monkeypatch.setattr(ltmod, "get_workflow", lambda ns, name: polled.append(name))
         result = _runner().invoke(workflow_cli, ["loadtest", "run"], env=ENV)
         assert result.exit_code == 0, result.output
         assert polled == []
 
 
-class TestBuildTestrunSpec:
-    def test_missing_example_raises(self, monkeypatch):
-        monkeypatch.setattr(ltmod, "read_configmap", lambda ns, name: {})
+class TestLoadTemplateDefaults:
+    def test_missing_template_raises(self, monkeypatch):
+        monkeypatch.setattr(ltmod, "get_workflow_template", lambda ns, name: None)
+        monkeypatch.setattr(ltmod, "list_scenarios", lambda ns: [])
         with pytest.raises(ValueError):
-            load_example("ma", "ingest")
+            load_template_defaults("ma", "ingest")
 
-    def test_missing_example_lists_available(self, monkeypatch):
-        monkeypatch.setattr(ltmod, "read_configmap", _fake_read_configmap)
+    def test_missing_template_lists_available(self, monkeypatch):
+        monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
+        monkeypatch.setattr(ltmod, "list_scenarios", lambda ns: ["ingest", "mixed", "search"])
         with pytest.raises(ValueError) as e:
-            load_example("ma", "nope")
+            load_template_defaults("ma", "nope")
         msg = str(e.value)
         assert "available:" in msg and "ingest" in msg and "mixed" in msg
+
+    def test_defaults_are_read_from_the_template(self, monkeypatch):
+        monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
+        defaults = load_template_defaults("ma", "ingest")
+        assert defaults["runnerImage"] == "grafana/k6:latest"
+        assert defaults["scriptsRef"] == "migrations/k6_scripts:latest"
 
 
 class TestCompletion:
@@ -334,42 +352,49 @@ class TestCompletion:
         assert ltmod._complete_scenarios(None, None, "sea") == ["search"]
 
     def test_registry_and_bag_overrides(self, monkeypatch):
-        monkeypatch.setattr(ltmod, "read_configmap", _fake_read_configmap)
+        monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
         p = build_k6_parameters(scenario="mixed", registry_enabled=True,
                                 overrides_text="INGEST_RATE=7\nFOO=bar")
-        body = build_testrun_spec("ma", p)
+        body = build_workflow_submission("ma", p)
         env = _env_map(body)
         assert env["REGISTRY_ENABLED"] == "true"
         assert env["INGEST_RATE"] == "7" and env["FOO"] == "bar"
 
 
-FAKE_TESTRUNS = [
-    {"metadata": {"name": "k6-run-a", "labels": {"k6-scenario": "ingest"},
-                  "creationTimestamp": "2026-07-27T00:00:00Z"},
-     "spec": {"parallelism": 2}, "status": {"stage": "started"}},
-    {"metadata": {"name": "k6-run-b", "labels": {"k6-scenario": "mixed"},
-                  "creationTimestamp": "2026-07-27T00:00:00Z"},
-     "spec": {"parallelism": 1}, "status": {"stage": "finished"}},
+def _fake_run(name, scenario, phase, parallelism):
+    """A run as the API returns it: the Workflow, with parallelism among its submitted parameters."""
+    return {
+        "metadata": {"name": name, "labels": {"app": "k6-load-test", "k6-scenario": scenario},
+                     "creationTimestamp": "2026-07-27T00:00:00Z"},
+        "spec": {"workflowTemplateRef": {"name": f"k6-{scenario}"},
+                 "arguments": {"parameters": [{"name": "parallelism", "value": str(parallelism)}]}},
+        "status": {"phase": phase},
+    }
+
+
+FAKE_RUNS = [
+    _fake_run("k6-ingest-a", "ingest", "Running", 2),
+    _fake_run("k6-mixed-b", "mixed", "Succeeded", 1),
 ]
 
 
 class TestLoadTestList:
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.list_testruns", return_value=FAKE_TESTRUNS)
+    @patch(f"{LT}.list_workflows", return_value=FAKE_RUNS)
     def test_list_selector_and_rows(self, mock_list, _cfg):
         result = _runner().invoke(workflow_cli, ["loadtest", "list"], env=ENV)
         assert result.exit_code == 0
         assert mock_list.call_args.kwargs["label_selector"] == "app=k6-load-test"
-        assert "k6-run-a" in result.output and "started" in result.output
+        assert "k6-ingest-a" in result.output and "Running" in result.output
 
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.list_testruns", return_value=FAKE_TESTRUNS)
+    @patch(f"{LT}.list_workflows", return_value=FAKE_RUNS)
     def test_list_scenario_filter(self, mock_list, _cfg):
         _runner().invoke(workflow_cli, ["loadtest", "list", "--scenario", "mixed"], env=ENV)
         assert mock_list.call_args.kwargs["label_selector"] == "app=k6-load-test,k6-scenario=mixed"
 
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.list_testruns", return_value=[])
+    @patch(f"{LT}.list_workflows", return_value=[])
     def test_list_empty(self, _list, _cfg):
         result = _runner().invoke(workflow_cli, ["loadtest", "list"], env=ENV)
         assert "No k6 runs found." in result.output
@@ -377,26 +402,26 @@ class TestLoadTestList:
 
 class TestLoadTestStop:
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.delete_testrun", return_value=True)
+    @patch(f"{LT}.delete_workflow", return_value=True)
     def test_stop_by_name_deletes(self, mock_delete, _cfg):
-        result = _runner().invoke(workflow_cli, ["loadtest", "stop", "k6-run-a"], env=ENV)
+        result = _runner().invoke(workflow_cli, ["loadtest", "stop", "k6-ingest-a"], env=ENV)
         assert result.exit_code == 0
-        mock_delete.assert_called_once_with("ma", "k6-run-a")
+        mock_delete.assert_called_once_with("ma", "k6-ingest-a")
 
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.list_testruns", return_value=[FAKE_TESTRUNS[1]])
-    @patch(f"{LT}.delete_testrun", return_value=True)
+    @patch(f"{LT}.list_workflows", return_value=[FAKE_RUNS[1]])
+    @patch(f"{LT}.delete_workflow", return_value=True)
     def test_stop_scenario(self, mock_delete, mock_list, _cfg):
         result = _runner().invoke(workflow_cli, ["loadtest", "stop", "--scenario", "mixed"], env=ENV)
         assert result.exit_code == 0
-        mock_delete.assert_called_once_with("ma", "k6-run-b")
+        mock_delete.assert_called_once_with("ma", "k6-mixed-b")
 
     def test_stop_conflicting_selectors(self):
         result = _runner().invoke(workflow_cli, ["loadtest", "stop", "somename", "--all"], env=ENV)
         assert result.exit_code == 2
 
     @patch(f"{LT}.load_k8s_config")
-    @patch(f"{LT}.list_testruns", return_value=[])
+    @patch(f"{LT}.list_workflows", return_value=[])
     def test_stop_no_match(self, _list, _cfg):
         result = _runner().invoke(workflow_cli, ["loadtest", "stop", "--all"], env=ENV)
         assert "No matching k6 runs." in result.output
@@ -413,44 +438,45 @@ class TestBuildParams:
 
 
 class TestListActiveRuns:
-    @patch(f"{LT}.list_testruns", return_value=FAKE_TESTRUNS)
-    def test_excludes_terminal_stages(self, _list):
+    @patch(f"{LT}.list_workflows", return_value=FAKE_RUNS)
+    def test_excludes_terminal_phases(self, _list):
         active = list_active_k6_runs("ma")
-        assert [r["name"] for r in active] == ["k6-run-a"]
-        assert active[0]["scenario"] == "ingest" and active[0]["phase"] == "started"
+        assert [r["name"] for r in active] == ["k6-ingest-a"]
+        assert active[0]["scenario"] == "ingest" and active[0]["phase"] == "Running"
 
-    @patch(f"{LT}.list_testruns", return_value=FAKE_TESTRUNS)
+    @patch(f"{LT}.list_workflows", return_value=FAKE_RUNS)
     def test_list_runs_keeps_finished_runs(self, _list):
         """The TUI table shows history, so the unfiltered call keeps terminal runs — and carries
         the parallelism column the CLI table also prints."""
         runs = ltmod.list_runs("ma")
-        assert [r["name"] for r in runs] == ["k6-run-a", "k6-run-b"]
+        assert [r["name"] for r in runs] == ["k6-ingest-a", "k6-mixed-b"]
         assert all("parallelism" in r for r in runs)
 
 
 class TestIsolation:
-    """A k6 run must be a standalone TestRun so it can't fail a migration workflow."""
+    """A k6 run must be its own top-level Workflow so it can't fail a migration workflow."""
 
     def test_no_owner_references(self, monkeypatch):
-        monkeypatch.setattr(ltmod, "read_configmap", _fake_read_configmap)
-        body = build_testrun_spec("ma", build_k6_parameters(scenario="ingest"))
+        monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
+        body = build_workflow_submission("ma", build_k6_parameters(scenario="ingest"))
         assert "ownerReferences" not in body["metadata"]
-        assert body["metadata"]["generateName"] == "k6-run-"
-        assert body["kind"] == "TestRun"
+        assert body["metadata"]["generateName"] == "k6-ingest-"
+        assert body["kind"] == "Workflow"
 
 
 class TestLoadTestLogs:
     @patch(f"{LT}.subprocess.run")
     def test_logs_builds_kubectl_command(self, mock_run):
-        _runner().invoke(workflow_cli, ["loadtest", "logs", "k6-run-a"], env=ENV)
+        _runner().invoke(workflow_cli, ["loadtest", "logs", "k6-ingest-a"], env=ENV)
         cmd = mock_run.call_args.args[0]
         assert cmd[:2] == ["kubectl", "logs"]
         assert "-c" in cmd and "k6" in cmd
-        assert "k6_cr=k6-run-a,runner=true" in cmd
+        # the TestRun shares the workflow's name, so one identifier reaches the k6 pods
+        assert "k6_cr=k6-ingest-a,runner=true" in cmd
 
     @patch(f"{LT}.subprocess.run")
     def test_logs_follow(self, mock_run):
-        _runner().invoke(workflow_cli, ["loadtest", "logs", "k6-run-a", "-f"], env=ENV)
+        _runner().invoke(workflow_cli, ["loadtest", "logs", "k6-ingest-a", "-f"], env=ENV)
         assert "-f" in mock_run.call_args.args[0]
 
 

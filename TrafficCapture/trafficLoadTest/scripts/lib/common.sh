@@ -2,7 +2,7 @@
 # scripts/lib/common.sh — shared helpers for the k6 load-test validation scripts.
 #
 # These validate the k6-operator setup against an ALREADY-RUNNING CDC pipeline (bring it up first
-# with deployment/k8s/deployCdcWorkflow.sh up). k6 runs are submitted as TestRuns through
+# with deployment/k8s/deployCdcWorkflow.sh up). k6 runs are submitted as Argo Workflows through
 # the migration console (`workflow loadtest …`); assertions query the in-cluster services via kubectl.
 #
 # The pipeline is the one the migration workflow builds, so the things being asserted on are
@@ -47,7 +47,7 @@ CLUSTER_PASSWORD="${CLUSTER_PASSWORD:-admin}"
 # pod (deploy/opensearch-source) no longer exists — the clusters come from their own charts now —
 # so the console pod is the reliable choice.
 CURL_POD="${CURL_POD:-$CONSOLE_POD}"
-# Console-independent run submitter (reads the chart's example TestRuns, kubectl-creates one).
+# Console-independent run submitter (kubectl-creates a Workflow against the chart's template).
 K6_RUN="${K6_RUN:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/k6-run.sh}"
 
 K()  { kubectl --context "$CONTEXT" -n "$NAMESPACE" "$@"; }
@@ -117,29 +117,33 @@ run_k6() {
   # Submit and block until the run finishes (fails the script if it errors/times out).
   local name; name=$(submit_k6 "$@") || return 1
   [[ -n "$name" ]] || { fail "k6 submit produced no run name"; return 1; }
-  wait_testrun "$name"
+  wait_run "$name"
 }
 
-wait_testrun() {
-  local name="$1" timeout="${2:-600}" t=0 st
+# A run is a Workflow that creates a TestRun and waits on it, so the workflow's phase already folds
+# in the operator's verdict. Wait on the workflow, not the TestRun.
+wait_run() {
+  local name="$1" timeout="${2:-600}" t=0 ph
   while (( t < timeout )); do
-    st=$(K get testrun "$name" -o jsonpath='{.status.stage}' 2>/dev/null || echo "")
-    case "$st" in
-      finished) return 0 ;;
-      error|stopped) fail "run $name ended in stage '$st'"; return 1 ;;
+    ph=$(K get wf "$name" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    case "$ph" in
+      Succeeded) return 0 ;;
+      Failed|Error) fail "run $name ended in phase '$ph'"; return 1 ;;
     esac
     sleep 6; t=$(( t + 6 ))
   done
   fail "run $name timed out after ${timeout}s"; return 1
 }
 
-k6_list()     { K get testrun -l app=k6-load-test 2>/dev/null; }
-k6_stop()     { K delete testrun "$1" >/dev/null 2>&1 || true; }
-k6_stop_all() { K delete testrun -l app=k6-load-test >/dev/null 2>&1 || true; }
+k6_list() { K get wf -l app=k6-load-test 2>/dev/null; }
+# Stop by deleting the Workflow — the TestRun is owned by it and goes too. Deleting the TestRun
+# instead would leave the workflow behind waiting on a resource that no longer exists.
+k6_stop()     { K delete wf "$1" >/dev/null 2>&1 || true; }
+k6_stop_all() { K delete wf -l app=k6-load-test >/dev/null 2>&1 || true; }
 k6_active_count() {
-  # Count TestRuns not yet in a terminal stage (empty/created/started all count as active).
-  K get testrun -l app=k6-load-test -o jsonpath='{range .items[*]}{.status.stage}{"\n"}{end}' 2>/dev/null \
-    | grep -cvE 'finished|error|stopped' || true
+  # Count runs not yet in a terminal phase (empty/Pending/Running all count as active).
+  K get wf -l app=k6-load-test -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}' 2>/dev/null \
+    | grep -cvE 'Succeeded|Failed|Error' || true
 }
 
 # ── Webdis (chaos / consistency control bus) ───────────────────────────────────

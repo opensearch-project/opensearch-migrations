@@ -166,11 +166,11 @@ async def test_launch_ignores_cancel():
 
 @pytest.mark.asyncio
 async def test_stop_counts_only_runs_actually_stopped():
-    """delete_testrun reports False when the CR could not be removed; the tally must reflect that
+    """delete_workflow reports False when the workflow could not be removed; the tally must reflect that
     rather than claiming every requested run was stopped."""
     app = _app()
     with patch(f"{LT}.list_runs", return_value=RUNS), \
-            patch(f"{TESTRUN_UTILS}.delete_testrun", side_effect=[True, False]) as delete:
+            patch(f"{TESTRUN_UTILS}.delete_workflow", side_effect=[True, False]) as delete:
         async with app.run_test() as pilot:
             with patch.object(app, "notify") as notify:
                 app._stop(["k6-run-a", "k6-run-b"])
@@ -184,7 +184,7 @@ async def test_stop_counts_only_runs_actually_stopped():
 async def test_stop_asks_for_confirmation_first():
     app = _app()
     with patch(f"{LT}.list_runs", return_value=RUNS), \
-            patch(f"{TESTRUN_UTILS}.delete_testrun", return_value=True) as delete:
+            patch(f"{TESTRUN_UTILS}.delete_workflow", return_value=True) as delete:
         async with app.run_test() as pilot:
             assert await wait_until(pilot, lambda: app.table.row_count == 2)
             await pilot.press("s")
@@ -199,7 +199,7 @@ async def test_stop_asks_for_confirmation_first():
 async def test_stop_all_with_no_runs_warns():
     app = _app()
     with patch(f"{LT}.list_runs", return_value=[]), \
-            patch(f"{TESTRUN_UTILS}.delete_testrun") as delete:
+            patch(f"{TESTRUN_UTILS}.delete_workflow") as delete:
         async with app.run_test() as pilot:
             assert await wait_until(pilot, lambda: app.table.row_count == 0)
             with patch.object(app, "notify") as notify:

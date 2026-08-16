@@ -178,15 +178,15 @@ class LoadTestApp(App):
         self._confirm_stop(names, f"Stop all {len(names)} k6 run(s)?")
 
     def _confirm_stop(self, names: List[str], message: str) -> None:
-        # Stopping a TestRun deletes the CR; the operator tears down the pods. There is no
-        # graceful pause, so confirm first.
+        # Stopping a run deletes its Workflow; the TestRun it owns goes with it and the operator
+        # tears down the pods. There is no graceful pause, so confirm first.
         self.push_screen(ConfirmModal(message),
                          lambda confirmed: self._stop(names) if confirmed else None)
 
     def _stop(self, names: List[str]) -> None:
-        from ..commands.testrun_utils import delete_testrun
+        from ..commands.testrun_utils import delete_workflow
         try:
-            stopped = sum(1 for n in names if delete_testrun(self._namespace, n))
+            stopped = sum(1 for n in names if delete_workflow(self._namespace, n))
             self.notify(f"⏹ Stopped {stopped}/{len(names)} k6 run(s)")
         except Exception as e:
             self.notify(f"k6 action failed: {e}", severity="error")

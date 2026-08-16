@@ -1,21 +1,21 @@
 # Load Test Traffic Generator
 
 Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-and-replay pipeline.
-The scenarios run on Kubernetes as **k6-operator `TestRun`** CRs, driven from the migration console
-(`workflow loadtest …`), a thin shell helper, or plain `kubectl`.
+A run is an **Argo Workflow** that creates a **k6-operator `TestRun`** and waits for it, driven from
+the migration console (`workflow loadtest …`), a thin shell helper, or plain `kubectl`.
 
 The load test itself — the scenario scripts, their libs, the document schemas and the load-profile
 presets — lives **in this directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
 image** (`migrations/k6_scripts`), mounted read-only at `/scripts` with a Kubernetes `image:` volume
 on pods running **stock `grafana/k6`**. That is the same mechanism as the migration's
 [mountable transforms](../../docs/MountableTransformsDesign.md), and it is why this chart requires
-**Kubernetes ≥ 1.35**. The cluster-side pieces (the operator, the example TestRuns, the console's
-RBAC) ship in one **standalone, opt-in** chart:
+**Kubernetes ≥ 1.35**. The cluster-side pieces (the operator, the per-scenario WorkflowTemplates,
+the RBAC) ship in one **standalone, opt-in** chart:
 `deployment/k8s/charts/components/k6LoadTest`. The chart holds no scenario content, so a run is
 specified by two names — a scenario (a script path under `/scripts`) and a preset (`K6_PRESET`).
 
 > **Deliberately separate from the migration.** The chart is **not** a dependency of any migration
-> aggregate, so a normal migration deployment contains no operator, no example runs, no RBAC, and
+> aggregate, so a normal migration deployment contains no operator, no run templates, no RBAC, and
 > the `workflow loadtest` commands are hidden/inert. Load testing only becomes possible after you
 > explicitly install this chart — nothing (and no agent) can trigger a load test by accident.
 
@@ -54,17 +54,19 @@ INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
   deployment/k8s/charts/components/k6LoadTest [3]     (deployment resources only — no scenarios)
     ├── Chart dependency: grafana/k6-operator [4]  ──►  TestRun CRD + controller
-    ├── ConfigMap/k6-testrun-examples [5]  (one ready-to-run TestRun JSON per scenario)
-    └── Role/RoleBinding [6]               (grants the console SA rights on testruns.k6.io)
+    ├── WorkflowTemplate/k6-<scenario> [5]  (one per scenario — the whole run definition)
+    └── Role/RoleBinding [6]                (console + Argo executor rights on testruns.k6.io)
 
-USAGE  (console optional — the example is the definition)
+USAGE  (console optional — the WorkflowTemplate is the definition)
 ──────────────────────────────────────────────────────────────
-  kubectl create (from example) │ ./k6-run.sh [7] │ workflow loadtest run [8] │ TUI [9]
+  kubectl create (Workflow stub) │ ./k6-run.sh [7] │ workflow loadtest run [8] │ TUI [9]
         └──────────────────┬───────────────┴──────────────────┘
-                           ▼  load k6-testrun-examples.<scenario>, patch env/preset/parallelism
-   TestRun (k6.io/v1alpha1)   labels: app=k6-load-test
+                           ▼  name k6-<scenario>, pass only the parameters that differ
+   Workflow (argoproj.io/v1alpha1)   labels: app=k6-load-test
+     parameters ◄─ runnerEnv (K6_PRESET=<config> + overrides) · parallelism · arguments
+                           ▼  (one resource task: create + wait on the TestRun's stage)
+   TestRun (k6.io/v1alpha1)   name = the workflow's, owned by it
      spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
-     runner.env ◄─ K6_PRESET=<config> + overrides (win over the preset) + K6_OUT
      initializer+runner volumes ◄─ image: migrations/k6_scripts  →  mounted at /scripts
                            ▼  (operator: initializer → N runner pods)
      k6 runner pods  (stock grafana/k6 + the scripts image mounted at /scripts)
@@ -76,7 +78,7 @@ USAGE  (console optional — the example is the definition)
         ▼
   Kafka ─► replayer ─► target      (migration capture-and-replay pipeline)
 
-  observe / manage:   kubectl get/delete testrun -l app=k6-load-test   (or workflow loadtest list/stop)
+  observe / manage:   kubectl get/delete wf -l app=k6-load-test   (or workflow loadtest list/stop)
 ```
 
 | # | Piece | Source |
@@ -85,7 +87,7 @@ USAGE  (console optional — the example is the definition)
 | 2 | Scripts image (the data store) | `Dockerfile` here, built by `buildImages/build.gradle` as `migrations/k6_scripts` |
 | 3 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
 | 4 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
-| 5 | Example TestRuns (the run definition) | `templates/k6-testrun-examples.yaml` |
+| 5 | Per-scenario WorkflowTemplates (the run definition) | `templates/k6-workflowtemplates.yaml` |
 | 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
 | 7 | `k6-run.sh` (console-independent submit) | `scripts/k6-run.sh` |
 | 8 | `workflow loadtest` CLI (optional) | `migrationConsole/lib/console_link/console_link/workflow/commands/loadtest.py` |
@@ -169,10 +171,10 @@ Verify:
 ```bash
 kubectl get crd testruns.k6.io
 kubectl -n ma get pods -l app.kubernetes.io/name=k6-operator
-kubectl -n ma get cm k6-testrun-examples                  # ready-to-run examples
+kubectl -n ma get workflowtemplates -l app=k6-load-test    # one per launchable scenario
 # both images the run will pull — the k6 runtime and the scenarios:
-kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
-  | jq '{runner: .spec.runner.image, scripts: .spec.runner.volumes[0].image.reference}'
+kubectl -n ma get workflowtemplate k6-ingest \
+  -o "jsonpath={range .spec.arguments.parameters[?(@.name=='runnerImage')]}{.value}{end} {range .spec.arguments.parameters[?(@.name=='scriptsRef')]}{.value}{end}"
 ```
 
 On EKS the operator image, the `grafana/k6` runner image and the operator chart are mirrored to ECR
@@ -192,9 +194,10 @@ Which side you edit decides whether you rebuild an image or run a `helm upgrade`
 | Scenario / lib / generator / schema JS | `scenarios/*.js`, `lib/**` | `migrations/k6_scripts`, mounted at `/scripts` | rebuild + push the image |
 | Preset load-shape/config | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
 | Grafana dashboard | chart `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `helm upgrade` |
-| Run distribution defaults (`parallelism`/`separate`/`cleanup`) | chart `values.yaml` (`testRun.*`) | `k6-testrun-examples` ConfigMap | `helm upgrade` |
-| Runner image / tag | chart `values.yaml` (`image.*`) | every example's `spec.{initializer,runner}.image` | `helm upgrade` |
-| Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | every example's scripts volume `image.reference` | `helm upgrade` |
+| Run distribution defaults (`parallelism`/`separate`) | chart `values.yaml` (`testRun.*`) | each `k6-<scenario>` WorkflowTemplate's parameter defaults | `helm upgrade` |
+| The TestRun manifest itself (mount shape, `K6_OUT` trio, labels) | chart `templates/k6-workflowtemplates.yaml` | the templates' `resource.manifest` | `helm upgrade` |
+| Runner image / tag | chart `values.yaml` (`image.*`) | the `runnerImage` parameter default | `helm upgrade` |
+| Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | the `scriptsRef` parameter default | `helm upgrade` |
 
 **Apply a scenario or preset edit** — rebuild the image, then submit a fresh run:
 
@@ -305,21 +308,21 @@ against either cluster configuration.
 
 ## Running a load test
 
-Three ways, all producing the same TestRun. **None requires the migration console** — it's
-optional convenience. The chart renders a ready-to-run TestRun per scenario into the
-`k6-testrun-examples` ConfigMap, with the runner image, the scripts image mounted at `/scripts`,
-`K6_OUT` metrics, and a default `K6_PRESET` all baked in. Override defaults by changing `K6_PRESET` or adding
-`runner.env` entries — the scenarios read **real environment variables over the preset file**.
+Three ways, all producing the same Workflow. **None requires the migration console** — it's
+optional convenience. The chart renders one `k6-<scenario>` WorkflowTemplate per scenario, carrying
+the runner image, the scripts image mounted at `/scripts`, `K6_OUT` metrics, and a default
+`K6_PRESET` as parameter defaults. A submission overrides only what it changes — the scenarios read
+**real environment variables over the preset file**.
 
 ### Distributing the run: `parallelism` & `separate`
 
-Both fields are baked into every example from chart values (`templates/k6-testrun-examples.yaml`):
+Both come from chart values as WorkflowTemplate parameter defaults
+(`templates/k6-workflowtemplates.yaml`):
 
-| Chart value | Default | TestRun field | Effect |
+| Chart value | Default | Workflow parameter → TestRun field | Effect |
 |---|---|---|---|
-| `testRun.parallelism` | `1` | `spec.parallelism` | Runner pods the load is split across (k6 execution segments). `--rate`/`--vus` are **global totals** divided among them. |
-| `testRun.separate` | `false` | `spec.separate` | Operator shorthand for **required** node anti-affinity — forces each runner pod onto a distinct node. |
-| `testRun.cleanup` | `""` (off) | `spec.cleanup` | `post` makes the operator tear down the **entire** run on finish — pods **and** the TestRun CR. Off by default because it races the `stage=finished` polling below (see the warning). |
+| `testRun.parallelism` | `1` | `parallelism` → `spec.parallelism` | Runner pods the load is split across (k6 execution segments). `--rate`/`--vus` are **global totals** divided among them. |
+| `testRun.separate` | `false` | `separate` → `spec.separate` | Operator shorthand for **required** node anti-affinity — forces each runner pod onto a distinct node. |
 
 > **`separate: true` needs at least `parallelism` schedulable nodes.** It uses
 > `requiredDuringSchedulingIgnoredDuringExecution`, so if nodes < parallelism the surplus runner
@@ -332,44 +335,67 @@ Both fields are baked into every example from chart values (`templates/k6-testru
 > `separate` is valid on the vendored **k6-operator chart 4.5.0 / operator v1.5.0** TestRun CRD.
 
 **Overriding per run — behavior differs by submission path:**
-- **kubectl** / **`k6-run.sh`**: inherit the example's `parallelism`, `separate`, and `cleanup` unless
-  you pass `--parallelism` (patch `.spec.separate` / `.spec.cleanup` by hand).
-- **`workflow loadtest`**: **always** sets `spec.parallelism` (its own default is `1`), so it overrides the
-  example unless you pass `--parallelism`. Neither CLI exposes `--separate` or `--cleanup`; those
-  always come from the baked-in example value.
+- **kubectl** / **`k6-run.sh`**: inherit the template's `parallelism` and `separate` unless you pass
+  `--parallelism` (add a `separate` parameter by hand).
+- **`workflow loadtest`**: **always** sends `parallelism` (its own default is `1`), so it overrides
+  the template unless you pass `--parallelism`. Neither CLI exposes `--separate`; that always comes
+  from the template default.
 
-> **`cleanup: post` conflicts with waiting for a run.** The operator deletes the TestRun CR the
-> instant it reaches `finished`, so any flow that polls for completion — `run_test.sh --run`,
-> `workflow loadtest run --wait`, the `Test0080` integ test — will see the CR vanish mid-poll and time out.
-> Only enable it for fire-and-forget submissions you don't wait on.
+> **Stopping a run means deleting its Workflow.** The TestRun carries an owner reference to it, so
+> the CR and the operator's pods go with it. There is no graceful pause.
 
 ### 1. kubectl (no console, no extra tooling)
 
-```bash
-# Defaults straight from the example:
-kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" | kubectl create -f -
+A submission names the template and overrides only what it changes — everything else stays with the
+template's defaults, so there is nothing to fetch and patch:
 
-# With overrides (jq): different preset, parallelism, and an env override:
-kubectl -n ma get cm k6-testrun-examples -o "jsonpath={.data.ingest}" \
-  | jq '.spec.parallelism=4
-        | .spec.runner.env = (.spec.runner.env | map(select(.name != "K6_PRESET")))
-        | .spec.runner.env += [{"name":"K6_PRESET","value":"ingest-burst"},
-                               {"name":"INGEST_RATE","value":"120"}]' \
-  | kubectl -n ma create -f -
+```bash
+# Defaults straight from the template:
+kubectl -n ma create -f - <<'EOF'
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: k6-ingest-
+  labels: {app: k6-load-test, k6-scenario: ingest}
+spec:
+  workflowTemplateRef: {name: k6-ingest}
+EOF
+
+# With overrides: more runner pods, a different preset, and an env override. `runnerEnv` carries the
+# WHOLE env list, so start from the template's default rather than restating K6_OUT and the OTel vars:
+env=$(kubectl -n ma get workflowtemplate k6-ingest \
+        -o "jsonpath={.spec.arguments.parameters[?(@.name=='runnerEnv')].value}" \
+      | jq -c 'map(select(.name != "K6_PRESET"))
+               + [{"name":"K6_PRESET","value":"ingest-burst"},
+                  {"name":"INGEST_RATE","value":"120"}]')
+kubectl -n ma create -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: k6-ingest-
+  labels: {app: k6-load-test, k6-scenario: ingest}
+spec:
+  workflowTemplateRef: {name: k6-ingest}
+  arguments:
+    parameters:
+      - {name: parallelism, value: "4"}
+      - {name: runnerEnv, value: '${env}'}
+EOF
 ```
-Use `kubectl create` (not `apply`).
+Use `kubectl create` (not `apply`) — submissions use `generateName`.
 
 ### 2. `k6-run.sh` (thin helper, still no console)
 
 ```bash
 ./scripts/k6-run.sh ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
 ```
-Fetches the example, applies `--config` / `--parallelism` / `--target` / `-e KEY=VAL`, creates it,
-prints the run name. `CONTEXT` / `NAMESPACE` env-overridable.
+Builds that Workflow for you: reads the template's `runnerEnv` default, applies `--config` /
+`--parallelism` / `--target` / `-e KEY=VAL`, creates it, prints the run name. `CONTEXT` / `NAMESPACE`
+env-overridable.
 
 ### 3. `workflow loadtest` (console convenience, when it's up)
 
-Nicer flags + `list`/`stop`/`logs` + the TUI. **Hidden/inert unless the TestRun CRD is present.**
+Nicer flags + `list`/`stop`/`logs` + the TUI. **Hidden/inert unless the chart's WorkflowTemplates are present.**
 ```bash
 workflow loadtest                 # TUI: run table + launch / stop / logs
 workflow loadtest run --scenario ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
@@ -553,14 +579,17 @@ Control commands are written to a Redis key (via Webdis) and polled by VUs mid-r
 ## Observe & metrics
 
 ```bash
-kubectl -n ma get testrun -l app=k6-load-test
+kubectl -n ma get wf -l app=k6-load-test          # one row per run
 kubectl -n ma logs -l k6_cr=<run-name>,runner=true -c k6 --prefix -f
 ```
 
-> **`kubectl logs` only works while the pods exist.** If you opt into `testRun.cleanup=post`, the
-> operator deletes the runner pods (and the whole TestRun) the moment the run finishes — so tail logs
-> *during* the run. With the default (`cleanup` off) the pods linger for post-run inspection. Metrics
-> land in Grafana either way.
+The run name is the same on both objects — the workflow names its TestRun after itself — so it
+selects the k6 pods directly.
+
+> **`kubectl logs` only works while the pods exist.** They belong to the TestRun, which is owned by
+> the run's workflow: deleting the workflow takes the pods with it. They linger after a run finishes,
+> so post-run inspection works, but tail *during* a long run if you want live output. Metrics land in
+> Grafana either way.
 
 Metrics land in the existing Grafana (kube-prometheus-stack); open the **k6-load-test** dashboard.
 k6 pushes OTLP gRPC to the otel-collector (`K6_OUT=opentelemetry`,
@@ -575,7 +604,7 @@ endpoint the dashboard reads.
 ## Tear down
 
 ```bash
-helm uninstall k6-load-test -n ma        # removes operator + example TestRuns + RBAC
+helm uninstall k6-load-test -n ma        # removes operator + WorkflowTemplates + RBAC
 # or, if you brought it up via the data-plane script:
 ./deployment/k8s/deployCdcWorkflow.sh down
 ```
@@ -647,7 +676,8 @@ Why the current setup looks the way it does (decision → rationale → alternat
    no example runs, no RBAC, and the `workflow loadtest` commands are hidden/inert. This is deliberate
    safety: a user or an agent cannot accidentally fire a load test while running a migration.
    *Defense in depth:* four independent things are missing by default (the `testruns.k6.io` CRD,
-   the console RBAC, the example TestRuns, and the visible CLI) — any one blocks a run.
+   the RBAC on it, the `k6-<scenario>` WorkflowTemplates, and the visible CLI) — any one blocks a run.
+   Argo being present changes nothing: with no template to instantiate, there is no run to submit.
    *Rejected:* bundling k6 into `migrationAssistantWithArgo`, which would make load testing always
    present and discoverable.
 
@@ -677,21 +707,28 @@ Why the current setup looks the way it does (decision → rationale → alternat
    var because the operator also feeds `spec.arguments` to that same `k6 archive`, which rejects the
    run-only `--out` flag.
 
-5. **Helm-rendered example TestRuns are the single definition; runs are kubectl-native; the console
-   is optional.** The chart renders one ready-to-run TestRun per scenario into
-   `k6-testrun-examples` (runner image, the scripts image mounted at `/scripts`, the script path
-   under it, `K6_OUT`, default `K6_PRESET`, labels, `generateName`). A run is `kubectl create` from that example (optionally patched), so it
-   works with **no console and no console image** — `./k6-run.sh` is a ~20-line `jq` helper over it,
-   and `workflow loadtest` is the same load-and-patch as convenience (nicer flags, `list`/`stop`/`logs`,
-   TUI), guarded by the CRD-presence check. One definition (Helm), consumed everywhere; no
-   spec-builder to keep in sync. *Rejected:* the console CLI as the *only* submission path (couples
-   every run to a current console image). *Note:* `kubectl create` (not `apply`), because the
-   examples use `generateName`.
+5. **Helm-rendered WorkflowTemplates are the single definition; runs are kubectl-native; the console
+   is optional.** The chart renders one `k6-<scenario>` WorkflowTemplate per scenario (runner image,
+   the scripts image mounted at `/scripts`, the script path under it, `K6_OUT`, default `K6_PRESET`,
+   labels) whose single task creates the TestRun and waits on its stage. A run is `kubectl create` of
+   a small Workflow naming that template, so it works with **no console and no console image** —
+   `./k6-run.sh` is a thin helper over it, and `workflow loadtest` is the same submission as
+   convenience (nicer flags, `list`/`stop`/`logs`, TUI), guarded by the template-presence check. One
+   definition (Helm), consumed everywhere; no spec-builder to keep in sync.
+   *Why a WorkflowTemplate rather than a ConfigMap of example TestRuns:* creating a TestRun starts a
+   load test, so the chart cannot ship TestRun objects — the definition used to be stashed as JSON
+   strings in a ConfigMap, which every consumer had to fetch and patch. A WorkflowTemplate is inert
+   until instantiated, which is the definition/instance split that ConfigMap was imitating. Argo is
+   already a hard dependency of the migration, and the operator still does the part Argo cannot
+   (execution-segment sharding and the synchronised start). *Rejected:* the console CLI as the *only*
+   submission path (couples every run to a current console image); replacing the operator with a
+   pure-Argo fan-out (would mean reimplementing segment sharding). *Note:* `kubectl create` (not
+   `apply`), because submissions use `generateName`.
 
 6. **`--parallelism` splits global load; `separate` spreads pods across nodes.** `--rate` / `--vus`
    are totals divided across runner pods by k6 execution segments — surfaced explicitly so results
-   aren't misread as per-pod. The example defaults live in chart values (`testRun.parallelism`,
-   `testRun.separate`) and bake into every `k6-testrun-examples` entry. `separate: true` is the
+   aren't misread as per-pod. The defaults live in chart values (`testRun.parallelism`,
+   `testRun.separate`) and render as parameter defaults on every WorkflowTemplate. `separate: true` is the
    operator's shorthand for **required** node anti-affinity; it defaults to `false` because it needs
    ≥ `parallelism` schedulable nodes (single-node minikube would otherwise wedge surplus pods in
    `Pending`). *Rejected:* hand-writing an `affinity` block per runner — `separate` is the
