@@ -59,6 +59,10 @@ class DiagnosticV1(WebModel):
     message: str
     path: List[str] = Field(default_factory=list)
     source: Optional[str] = None
+    code: Optional[str] = None
+    title: Optional[str] = None
+    remedy: Optional[str] = None
+    technical_detail: Optional[str] = None
 
 
 class ProblemV1(WebModel):
@@ -71,30 +75,35 @@ class EditCapabilityV1(WebModel):
     kind: Literal["edit"]
     edit_target_id: str
     label: Optional[str] = None
+    disabled_reason: Optional[str] = None
 
 
 class ApproveCapabilityV1(WebModel):
     kind: Literal["approve"]
     approval_target_id: str
     label: str
+    disabled_reason: Optional[str] = None
 
 
 class ResetCapabilityV1(WebModel):
     kind: Literal["reset"]
     reset_target_id: str
     label: str
+    disabled_reason: Optional[str] = None
 
 
 class LogsCapabilityV1(WebModel):
     kind: Literal["logs"]
     log_target_id: str
     label: Optional[str] = None
+    disabled_reason: Optional[str] = None
 
 
 class OutputCapabilityV1(WebModel):
     kind: Literal["output"]
     output_target_id: str
     label: Optional[str] = None
+    disabled_reason: Optional[str] = None
 
 
 NodeCapabilityV1 = Union[
@@ -128,6 +137,16 @@ class DetailV1(WebModel):
     kind: str
 
 
+class RelationshipV1(WebModel):
+    kind: Literal["runtime-dependency"]
+    direction: Literal["requires", "required-by"]
+    target_id: Optional[str] = None
+    target_name: str
+    target_plural: Optional[str] = None
+    target_phase: Optional[str] = None
+    target_status: str
+
+
 class ManageNodeV1(WebModel):
     id: str
     revision: str
@@ -142,6 +161,7 @@ class ManageNodeV1(WebModel):
     diagnostics: List[DiagnosticV1] = Field(default_factory=list)
     capabilities: List[NodeCapabilityV1] = Field(default_factory=list)
     details: List[DetailV1] = Field(default_factory=list)
+    relationships: List[RelationshipV1] = Field(default_factory=list)
     comparisons: List[ComparisonV1] = Field(default_factory=list)
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
@@ -481,7 +501,8 @@ class ApproveRequestV1(WebModel):
 
 
 class ResetPlanRequestV1(WebModel):
-    target_id: str
+    target_id: Optional[str] = None
+    target_ids: List[str] = Field(default_factory=list)
 
 
 class ResetTargetV1(WebModel):
@@ -525,8 +546,14 @@ class ResetPlanV1(WebModel):
         )
 
 
+class ResetApprovalRequestV1(WebModel):
+    target_id: str
+    expected_gate_revision: str
+
+
 class ExecuteResetRequestV1(WebModel):
     plan_token: str
+    approvals: List[ResetApprovalRequestV1] = Field(default_factory=list)
 
 
 class OutputDescriptorV1(WebModel):
@@ -823,4 +850,6 @@ def _capability_payload(capability: ManageCapability) -> Dict[str, Any]:
     }
     if capability.label:
         payload["label"] = capability.label
+    if capability.disabled_reason:
+        payload["disabledReason"] = capability.disabled_reason
     return payload

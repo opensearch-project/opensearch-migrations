@@ -82,6 +82,7 @@ class ResetService:
             Callable[[str, str], Mapping[str, Any]]
         ] = None,
         deleter: Optional[Callable[..., bool]] = None,
+        custom_api: Optional[Any] = None,
         plan_limit: int = 30,
     ):
         self.namespace = namespace
@@ -92,17 +93,30 @@ class ResetService:
         self._plan_builder = plan_builder or _reset_plan
         self._version_loader = version_loader or self._load_version
         self._deleter = deleter or _delete_targets
+        self._custom_api = custom_api
         self._plan_limit = max(1, plan_limit)
         self._lock = RLock()
         self._plans: Dict[str, _StoredResetPlan] = {}
         self._order: list[str] = []
 
     def plan(self, target_id: str) -> ResetPlan:
-        plural, name = _reset_target(target_id)
+        return self.plan_many((target_id,))
+
+    def plan_many(self, target_ids: Sequence[str]) -> ResetPlan:
+        unique_target_ids = tuple(dict.fromkeys(target_ids))
+        if not unique_target_ids:
+            raise ResetUnavailable("At least one reset target is required.")
+        requested = [
+            _reset_target(target_id)
+            for target_id in unique_target_ids
+        ]
         messages: list[str] = []
-        path = resource_display_name(plural, name)
+        paths = [
+            resource_display_name(plural, name)
+            for plural, name in requested
+        ]
         resolved = self._target_resolver(
-            [path],
+            paths,
             self.namespace,
             True,
             True,
@@ -110,7 +124,8 @@ class ResetService:
         )
         if resolved is None:
             raise ResetUnavailable(
-                "\n".join(messages) or f"Reset is blocked for {path}."
+                "\n".join(messages)
+                or f"Reset is blocked for {', '.join(paths)}."
             )
         plan_data = self._plan_builder(
             resolved,
@@ -127,7 +142,7 @@ class ResetService:
         token = uuid4().hex
         public = ResetPlan(
             token=token,
-            request_target_id=target_id,
+            request_target_id=unique_target_ids[0],
             targets=targets,
             messages=tuple(
                 str(item) for item in plan_data.get("messages") or []
@@ -249,7 +264,8 @@ class ResetService:
         )
 
     def _load_version(self, plural: str, name: str) -> Mapping[str, Any]:
-        resource = client.CustomObjectsApi().get_namespaced_custom_object(
+        custom_api = self._custom_api or client.CustomObjectsApi()
+        resource = custom_api.get_namespaced_custom_object(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace=self.namespace,

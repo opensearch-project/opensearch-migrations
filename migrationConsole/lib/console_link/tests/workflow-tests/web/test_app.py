@@ -568,6 +568,7 @@ class _Approvals:
 class _Resets:
     def __init__(self):
         self.executed = False
+        self.planned_target_ids = None
         self.plan_result = ResetPlan(
             token="reset-token",
             request_target_id="reset:snapshotmigrations:migration-0",
@@ -589,6 +590,10 @@ class _Resets:
 
     def plan(self, target_id):
         assert target_id == self.plan_result.request_target_id
+        return self.plan_result
+
+    def plan_many(self, target_ids):
+        self.planned_target_ids = list(target_ids)
         return self.plan_result
 
     def validate(self, token):
@@ -638,6 +643,15 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
                 "targetId": "reset:snapshotmigrations:migration-0",
             },
         )
+        combined_reset_plan = client.post(
+            "/api/v1/resets/plan",
+            json={
+                "targetIds": [
+                    "reset:snapshotmigrations:migration-0",
+                    "reset:datasnapshots:snapshot-0",
+                ],
+            },
+        )
         reset = client.post(
             "/api/v1/resets",
             json={"planToken": "reset-token"},
@@ -655,6 +669,11 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
     assert approvals.approved is True
 
     assert reset_plan.status_code == 200
+    assert combined_reset_plan.status_code == 200
+    assert resets.planned_target_ids == [
+        "reset:snapshotmigrations:migration-0",
+        "reset:datasnapshots:snapshot-0",
+    ]
     assert reset_plan.json()["targets"][0]["name"] == "migration-0"
     assert "resourceVersion" not in reset_plan.text
     assert reset.status_code == 202
@@ -663,6 +682,42 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
     assert resets.executed is True
     assert stale.status_code == 409
     assert stale.json()["detail"]["code"] == "reset_plan_stale"
+
+
+def test_reset_can_retry_the_exact_approval_after_deletion(tmp_path):
+    approvals = _Approvals()
+    resets = _Resets()
+    operations = _Operations()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        approvals=approvals,
+        resets=resets,
+        operations=operations,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/resets",
+            json={
+                "planToken": "reset-token",
+                "approvals": [{
+                    "targetId": "approval:node-1",
+                    "expectedGateRevision": "11",
+                }],
+            },
+        )
+        worker = operations.started["worker"]
+
+    assert response.status_code == 202
+    assert operations.started["label"] == (
+        "Reset and retry snapshotmigration.migration-0"
+    )
+    result = worker()
+    assert resets.executed is True
+    assert approvals.approved is True
+    assert result.waiting is True
+    assert result.result["approvalTargetIds"] == ["approval:node-1"]
+    assert "workflow reconciliation" in result.message
 
 
 def _edit_state():

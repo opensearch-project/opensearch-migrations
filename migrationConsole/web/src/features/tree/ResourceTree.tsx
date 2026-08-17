@@ -13,7 +13,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
-  LoaderCircle,
   Pencil,
   Plus,
   Search,
@@ -23,6 +22,8 @@ import {
 
 import type { ManageNode, ManageSnapshot } from "../../api/client";
 import { resourceAddPlacements } from "../configuration/resourceAdds";
+import { StatusIndicator } from "../status/StatusIndicator";
+import { statusLabel } from "../status/status";
 import type {
   ResourceAddController,
   ResourceAddOption,
@@ -186,20 +187,94 @@ const TreeRow = memo(function TreeRow({
 }: TreeRowProps) {
   const { node, depth } = row;
   const expandable = node.childIds.length > 0;
+  const runtimeState = node.phase ?? statusLabel(node.status);
+  const configurationState = (
+    node.valueSummary
+    && node.valueSummary !== node.phase
+    && node.valueSummary !== runtimeState
+  )
+    ? node.valueSummary
+    : null;
+  const explicitConfigurationState = [
+    "Addition pending submission",
+    "Rename pending submission",
+    "Removal pending submission",
+    "Will be orphaned by new configuration",
+    "Orphaned; cleanup required",
+    "Removing",
+  ].includes(node.valueSummary ?? "");
   const spokenState = node.status === "removed"
     ? node.valueSummary ?? "Marked for removal"
     : node.status === "syncing"
       ? node.valueSummary ?? "Syncing"
-      : (
-        node.valueSummary === "Addition pending submission"
-        || node.valueSummary === "Rename pending submission"
-      )
+      : explicitConfigurationState
         ? node.valueSummary
         : node.phase ?? node.status;
-  const summary = node.valueSummary ?? node.phase ?? node.kind;
-  const visibleSummary = resourceType
-    ? `${resourceType} - ${summary}`
-    : summary;
+  const attentionState = (
+    node.phase
+    && ["warning", "required", "gated", "blocked", "error"].includes(node.status)
+    && !(
+      node.status === "error"
+      && ["error", "failed"].includes(node.phase.toLocaleLowerCase())
+    )
+  )
+    ? (
+      (node.diagnostics ?? []).some(
+        (diagnostic) => diagnostic.source === "workflow-apply",
+      )
+        ? "Update blocked"
+        : statusLabel(node.status)
+    )
+    : null;
+  const activeRequirements = (node.relationships ?? []).filter(
+    (relationship) => (
+      relationship.direction === "requires"
+      && relationship.targetStatus !== "ok"
+    ),
+  );
+  const activeRequirement = [...activeRequirements].sort((left, right) => {
+    const rank: Record<string, number> = {
+      error: 3,
+      unknown: 2,
+      blocked: 2,
+      running: 1,
+      pending: 1,
+    };
+    return (rank[right.targetStatus] ?? 0) - (rank[left.targetStatus] ?? 0);
+  })[0];
+  const dependencyPrefix = activeRequirement?.targetStatus === "error"
+    ? "Blocked by"
+    : activeRequirement?.targetStatus === "unknown"
+      ? "Depends on"
+      : "Waiting for";
+  const approvalCapability = node.capabilities.find(
+    (capability) => capability.kind === "approve",
+  );
+  const approvalDiagnostic = node.diagnostics.find(
+    (diagnostic) => diagnostic.source === "workflow-apply",
+  );
+  const approvalAttention = approvalCapability || approvalDiagnostic
+    ? {
+        headline: approvalCapability?.disabledReason
+          ? "Reset before approval"
+          : approvalCapability
+            ? "Approval required"
+            : approvalDiagnostic?.title ?? "Approval blocked",
+        reason: approvalDiagnostic?.message
+          ?? approvalCapability?.disabledReason
+          ?? approvalCapability?.label
+          ?? "",
+      }
+    : null;
+  const indicatorState = [
+    "blocked",
+    "error",
+    "gated",
+    "required",
+    "warning",
+  ].includes(node.status)
+    ? node.status
+    : node.phase ?? node.status;
   return (
     <div
       aria-expanded={expandable ? expanded : undefined}
@@ -217,6 +292,8 @@ const TreeRow = memo(function TreeRow({
         validationErrorAncestor ? "validation-error-ancestor" : "",
         selected ? "selected" : "",
         inserted ? "inserted" : "",
+        activeRequirement ? "has-dependency-hint" : "",
+        approvalAttention ? "has-approval-hint" : "",
       ].join(" ")}
       data-node-id={node.id}
       onClick={() => onSelect(node.id)}
@@ -245,12 +322,7 @@ const TreeRow = memo(function TreeRow({
       ) : (
         <span className="tree-expander-spacer" />
       )}
-      {node.status === "syncing" ? (
-        <LoaderCircle
-          aria-hidden="true"
-          className="tree-syncing-indicator spin"
-        />
-      ) : <span className="status-dot" aria-hidden="true" />}
+      <StatusIndicator status={indicatorState} />
       {renaming && renameOption ? (
         <form
           className="tree-inline-name"
@@ -318,7 +390,76 @@ const TreeRow = memo(function TreeRow({
         <>
           <span className="tree-row-copy">
             <strong>{node.label}</strong>
-            <span>{visibleSummary}</span>
+            <span className="tree-row-state">
+              {resourceType ? (
+                <span className="tree-resource-type">{resourceType}</span>
+              ) : null}
+              <span>{runtimeState}</span>
+              {attentionState && !approvalAttention ? (
+                <span className={`tree-attention-state attention-${node.status}`}>
+                  {attentionState}
+                </span>
+              ) : null}
+              {configurationState ? (
+                <span className={[
+                  "tree-config-state",
+                  (
+                    configurationState.includes("orphaned")
+                    || configurationState.includes("Orphaned")
+                    || configurationState.includes("Removal")
+                    || configurationState === "Removing"
+                  )
+                    ? "tree-removal-state"
+                    : "",
+                ].join(" ")}>
+                  {configurationState}
+                </span>
+              ) : null}
+            </span>
+            {approvalAttention ? (
+              <span
+                className="tree-approval-hint"
+                title={approvalAttention.reason}
+              >
+                <strong>{approvalAttention.headline}</strong>
+                <span>{approvalAttention.reason}</span>
+              </span>
+            ) : null}
+            {activeRequirement ? (
+              <button
+                aria-label={
+                  activeRequirement.targetStatus === "error"
+                    ? `View blocker ${activeRequirement.targetName}`
+                    : `View prerequisite ${activeRequirement.targetName}`
+                }
+                className={[
+                  "tree-dependency-hint",
+                  activeRequirement.targetStatus === "error"
+                    ? "dependency-blocked"
+                    : "",
+                ].join(" ")}
+                disabled={!activeRequirement.targetId}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (activeRequirement.targetId) {
+                    onSelect(activeRequirement.targetId);
+                  }
+                }}
+                title={`${dependencyPrefix} ${activeRequirement.targetName}`}
+                type="button"
+              >
+                <span>
+                  {dependencyPrefix} {activeRequirement.targetName}
+                  {activeRequirements.length > 1
+                    ? ` +${activeRequirements.length - 1}`
+                    : ""}
+                </span>
+                <small>
+                  {activeRequirement.targetPhase
+                    ?? statusLabel(activeRequirement.targetStatus)}
+                </small>
+              </button>
+            ) : null}
           </span>
           <span
             className="tree-row-tools"
@@ -466,7 +607,7 @@ function InlineCreateRow({
       style={{ "--tree-depth": depth } as React.CSSProperties}
     >
       <span className="tree-expander-spacer" />
-      <span className="status-dot" aria-hidden="true" />
+      <StatusIndicator status="pending" />
       <div className="tree-inline-name">
         <input
           aria-label={`${create.option.label} name`}

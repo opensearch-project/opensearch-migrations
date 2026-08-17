@@ -730,8 +730,22 @@ def create_app(
         request_body: ResetPlanRequestV1,
     ) -> ResetPlanV1:
         try:
+            target_ids = list(request_body.target_ids)
+            if request_body.target_id:
+                target_ids.insert(0, request_body.target_id)
+            target_ids = list(dict.fromkeys(target_ids))
+            if not target_ids:
+                raise ResetUnavailable(
+                    "At least one reset target is required."
+                )
+            service = reset_service()
+            plan = (
+                service.plan_many(target_ids)
+                if len(target_ids) > 1
+                else service.plan(target_ids[0])
+            )
             return ResetPlanV1.from_domain(
-                reset_service().plan(request_body.target_id)
+                plan
             )
         except ResetUnavailable as error:
             raise _action_error(
@@ -747,7 +761,7 @@ def create_app(
         status_code=202,
         tags=["resets", "operations"],
     )
-    def execute_reset(
+    async def execute_reset(
         request_body: ExecuteResetRequestV1,
     ) -> OperationV1:
         try:
@@ -755,25 +769,85 @@ def create_app(
         except ResetPlanStale as error:
             raise _action_error(409, "reset_plan_stale", error) from error
 
+        approval_reviews = []
+        for requested_approval in request_body.approvals:
+            try:
+                approval_reviews.append(approval_service().validate(
+                    requested_approval.target_id,
+                    requested_approval.expected_gate_revision,
+                ))
+            except ApprovalUnavailable as error:
+                raise _action_error(
+                    404,
+                    "approval_unavailable",
+                    error,
+                ) from error
+            except ApprovalStale as error:
+                raise _action_error(
+                    409,
+                    "approval_stale",
+                    error,
+                ) from error
+
+        baseline_revision = ""
+        if coordinator is not None and approval_reviews:
+            try:
+                baseline_revision = (
+                    await coordinator.get_observation()
+                ).snapshot.revision
+            except Exception:
+                pass
+
         def reset_worker() -> OperationWorkResult:
             result = reset_service().execute(request_body.plan_token)
+            accepted = [
+                approval_service().approve(
+                    review.target_id,
+                    review.gate_revision,
+                )
+                for review in approval_reviews
+            ]
+            operation_result = {
+                "planToken": result.plan.token,
+                "targetCount": len(result.plan.targets),
+            }
+            if accepted:
+                operation_result.update({
+                    "approvalTargetId": accepted[0].target_id,
+                    "approvalTargetIds": [
+                        review.target_id for review in accepted
+                    ],
+                    "gateNames": [
+                        review.gate_name for review in accepted
+                    ],
+                    "baselineRevision": baseline_revision,
+                })
             return OperationWorkResult(
-                waiting=False,
-                message=result.message,
+                waiting=bool(accepted),
+                message=(
+                    "Reset completed and apply retry accepted; "
+                    "waiting for workflow reconciliation"
+                    if accepted else result.message
+                ),
                 detail=result.detail,
-                result={
-                    "planToken": result.plan.token,
-                    "targetCount": len(result.plan.targets),
-                },
+                result=operation_result,
             )
 
-        operation = operation_service().start(
-            kind="reset",
-            label=(
+        if approval_reviews:
+            label = (
+                f"Reset and retry {plan.targets[0].path}"
+                if len(plan.targets) == 1
+                else f"Reset and retry {len(plan.targets)} resources"
+            )
+        else:
+            label = (
                 f"Reset {plan.targets[0].path}"
                 if len(plan.targets) == 1
                 else f"Reset {len(plan.targets)} resources"
-            ),
+            )
+        operation = operation_service().start(
+            kind="reset",
+            label=label,
             target_ids=tuple(
                 f"resource:{target.plural}:{target.name}"
                 for target in plan.targets

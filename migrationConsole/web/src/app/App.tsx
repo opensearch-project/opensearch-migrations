@@ -9,10 +9,12 @@ import {
   Pencil,
   RefreshCw,
   Send,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
 import {
+  getApprovalReview,
   getConfigDraft,
   getHealth,
   getManageState,
@@ -24,6 +26,11 @@ import {
 import { useManageEvents } from "../api/useManageEvents";
 import { useOperationEvents } from "../api/useOperationEvents";
 import { ActivityPanel } from "../features/activity/ActivityPanel";
+import { ApprovalDialog } from "../features/actions/ResourceActionDialogs";
+import {
+  approvalCandidates,
+  type ApprovalCandidate,
+} from "../features/actions/approvals";
 import { ConfigEditor } from "../features/configuration/ConfigEditor";
 import {
   editTarget,
@@ -38,11 +45,17 @@ import type {
 import { SubmitConfigDialog } from "../features/submission/SubmitConfigDialog";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
+import { StatusIndicator } from "../features/status/StatusIndicator";
+import {
+  activeResetTargetIds,
+  presentActiveResets,
+} from "../features/status/operationPresentation";
 
 
 const HISTORY_GUARD_KEY = "__workflowManageGuard";
 const HISTORY_GUARD_MESSAGE =
   "Leave Workflow Manage? Active operations will continue in the cluster.";
+const PROMPTED_APPROVALS_KEY = "workflow-manage-prompted-approvals";
 
 
 interface EditContext {
@@ -82,6 +95,7 @@ function hasPendingConfiguration(snapshot: ManageSnapshot): boolean {
     const summary = (node.valueSummary ?? "").toLocaleLowerCase();
     return (
       summary.includes("pending submission")
+      || summary.includes("will be orphaned")
       || /changes? to submit/.test(summary)
     );
   });
@@ -100,6 +114,18 @@ function isExpectedWorkflowReplacementProblem(
 }
 
 
+function promptedApprovalKeys(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(
+      window.sessionStorage.getItem(PROMPTED_APPROVALS_KEY) ?? "[]",
+    ) as unknown;
+    return new Set(Array.isArray(stored) ? stored.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+
 export function App() {
   const queryClient = useQueryClient();
   const health = useQuery({
@@ -110,6 +136,7 @@ export function App() {
   const state = useQuery({
     queryKey: ["manage-state"],
     queryFn: getManageState,
+    refetchInterval: 10_000,
     structuralSharing: (previous, incoming) =>
       reconcileManageState(previous, incoming),
   });
@@ -132,6 +159,9 @@ export function App() {
   const [treeOpen, setTreeOpen] = useState(false);
   const [editContext, setEditContext] = useState<EditContext | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
+  const [approvalDialogTargetId, setApprovalDialogTargetId] =
+    useState<string | null>(null);
+  const [promptedApprovals] = useState(promptedApprovalKeys);
   const [resourceAdds, setResourceAdds] =
     useState<ResourceAddController | null>(null);
   const [pendingResourceAdditions, setPendingResourceAdditions] =
@@ -149,6 +179,14 @@ export function App() {
     enabled: editContext !== null || pendingConfiguration,
     staleTime: Infinity,
   });
+  const resetTargetIds = useMemo(
+    () => activeResetTargetIds(operations.data),
+    [operations.data],
+  );
+  const observedState = useMemo(
+    () => presentActiveResets(state.data, resetTargetIds),
+    [resetTargetIds, state.data],
+  );
 
   useEffect(() => {
     const currentState = (
@@ -197,23 +235,34 @@ export function App() {
 
   const displayedState = useMemo(
     () => (
-      state.data && editContext
+      observedState && editContext
         ? projectEditSnapshot(
-          state.data,
+          observedState,
           configDraft.data,
           pendingResourceAdditions,
           pendingResourceRenames,
         )
-        : state.data
+        : observedState
     ),
     [
       configDraft.data,
       editContext,
       pendingResourceAdditions,
       pendingResourceRenames,
-      state.data,
+      observedState,
     ],
   );
+  const approvals = useMemo(
+    () => approvalCandidates(state.data),
+    [state.data],
+  );
+  const firstApproval = approvals[0] ?? null;
+  const approvalPreview = useQuery({
+    queryKey: ["approval-review", firstApproval?.targetId],
+    queryFn: () => getApprovalReview(firstApproval?.targetId ?? ""),
+    enabled: Boolean(firstApproval),
+    retry: false,
+  });
 
   useEffect(() => {
     if (!displayedState) return;
@@ -242,11 +291,11 @@ export function App() {
   );
   const observedSelectedNode = useMemo(
     () => (
-      selectedId && state.data
-        ? state.data.nodes[selectedId] ?? null
+      selectedId && observedState
+        ? observedState.nodes[selectedId] ?? null
         : null
     ),
-    [selectedId, state.data],
+    [observedState, selectedId],
   );
   const submitActive = operations.data?.some((operation) => (
     operation.kind === "submit"
@@ -432,6 +481,91 @@ export function App() {
       targetId: targetId ?? "edit:workflowConfiguration",
     });
   };
+  const selectNode = (nodeId: string) => {
+    const node = displayedState?.nodes[nodeId];
+    if (!node) return;
+    if (editContext) {
+      const targetId = editTarget(node);
+      if (!targetId) return;
+      setEditContext({
+        resourceId: nodeId,
+        targetId,
+      });
+    }
+    setSelectedId(nodeId);
+    setTreeOpen(false);
+  };
+  const editApprovalResource = (candidate: ApprovalCandidate) => {
+    const node = state.data?.nodes[candidate.nodeId];
+    const targetId = candidate.editTargetId ?? (
+      node ? editTarget(node) : null
+    );
+    if (!node || !targetId) return;
+    setApprovalDialogTargetId(null);
+    setSelectedId(node.id);
+    setEditContext({
+      resourceId: node.id,
+      targetId,
+    });
+    setTreeOpen(false);
+  };
+  const persistPromptedApprovals = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(
+        PROMPTED_APPROVALS_KEY,
+        JSON.stringify([...promptedApprovals]),
+      );
+    } catch {
+      // Session storage is an enhancement; the persistent banner remains.
+    }
+  }, [promptedApprovals]);
+  const rememberApprovalPrompt = useCallback((
+    targetId: string,
+    gateRevision?: string,
+  ) => {
+    promptedApprovals.add(`${targetId}@${gateRevision ?? "*"}`);
+    persistPromptedApprovals();
+  }, [persistPromptedApprovals, promptedApprovals]);
+
+  useEffect(() => {
+    const review = approvalPreview.data;
+    if (!firstApproval || !review || approvalDialogTargetId) return;
+    const key = `${firstApproval.targetId}@${review.gateRevision}`;
+    if (
+      promptedApprovals.has(key)
+      || promptedApprovals.has(`${firstApproval.targetId}@*`)
+    ) {
+      return;
+    }
+    if (
+      editContext
+      || submitOpen
+      || document.visibilityState !== "visible"
+      || document.querySelector('[role="dialog"]')
+    ) {
+      return;
+    }
+    rememberApprovalPrompt(firstApproval.targetId, review.gateRevision);
+    setApprovalDialogTargetId(firstApproval.targetId);
+  }, [
+    approvalDialogTargetId,
+    approvalPreview.data,
+    editContext,
+    firstApproval,
+    promptedApprovals,
+    rememberApprovalPrompt,
+    submitOpen,
+  ]);
+
+  useEffect(() => {
+    if (!approvalDialogTargetId) return;
+    if (approvals.some(
+      (candidate) => candidate.targetId === approvalDialogTargetId,
+    )) {
+      return;
+    }
+    setApprovalDialogTargetId(approvals[0]?.targetId ?? null);
+  }, [approvalDialogTargetId, approvals]);
 
   return (
     <div className="app-shell">
@@ -445,7 +579,7 @@ export function App() {
         </div>
         {state.data?.workflow ? (
           <div className="workflow-state">
-            <span className={`status-dot status-${state.data.workflow.phase.toLocaleLowerCase()}`} />
+            <StatusIndicator status={state.data.workflow.phase} />
             <span>{state.data.workflow.name}</span>
             <strong>{state.data.workflow.phase}</strong>
           </div>
@@ -515,8 +649,11 @@ export function App() {
           <button
             aria-label="Refresh state"
             className="icon-button"
-            disabled={state.isFetching}
-            onClick={() => void state.refetch()}
+            disabled={state.isFetching || operations.isFetching}
+            onClick={() => {
+              void state.refetch();
+              void operations.refetch();
+            }}
             title="Refresh state"
             type="button"
           >
@@ -556,6 +693,17 @@ export function App() {
           onSubmitted={() => setSubmitOpen(false)}
         />
       ) : null}
+      {approvalDialogTargetId && approvals.length > 0 ? (
+        <ApprovalDialog
+          candidates={approvals}
+          initialTargetId={approvalDialogTargetId}
+          key={approvalDialogTargetId}
+          onClose={() => {
+            setApprovalDialogTargetId(null);
+          }}
+          onEdit={editApprovalResource}
+        />
+      ) : null}
       {state.isPending ? (
         <main className="shell-loading">
           <LoaderCircle className="spin" aria-hidden="true" />
@@ -585,6 +733,48 @@ export function App() {
               <span>{problem.message}</span>
             </div>
           ))}
+          {firstApproval ? (
+            <section
+              aria-label="Approval required"
+              className="state-banner approval-banner"
+            >
+              <ShieldCheck aria-hidden="true" />
+              <div>
+                <strong>
+                  Action required
+                  {approvals.length > 1 ? ` (${approvals.length})` : ""}
+                </strong>
+                {approvalPreview.data ? (
+                  <>
+                    <span className="approval-context">
+                      <b>
+                        {approvalPreview.data.resourceName
+                          ?? firstApproval.nodeLabel}
+                      </b>
+                      <span>{approvalPreview.data.stage}</span>
+                    </span>
+                    <small>{approvalPreview.data.effect}</small>
+                    {approvalPreview.data.reason ? (
+                      <small className="approval-reason">
+                        {approvalPreview.data.reason}
+                      </small>
+                    ) : null}
+                  </>
+                ) : (
+                  <span>{firstApproval.label}</span>
+                )}
+              </div>
+              <button
+                onClick={() => setApprovalDialogTargetId(
+                  firstApproval.targetId,
+                )}
+                type="button"
+              >
+                <ShieldCheck aria-hidden="true" />
+                Review required actions
+              </button>
+            </section>
+          ) : null}
           {displayedState.rootIds.length === 0 ? (
             <main className="empty-state">
               <Activity aria-hidden="true" />
@@ -607,19 +797,7 @@ export function App() {
                   </div>
                 </header>
                 <ResourceTree
-                  onSelect={(nodeId) => {
-                    const node = displayedState.nodes[nodeId];
-                    if (editContext) {
-                      const targetId = node ? editTarget(node) : null;
-                      if (!targetId) return;
-                      setEditContext({
-                        resourceId: nodeId,
-                        targetId,
-                      });
-                    }
-                    setSelectedId(nodeId);
-                    setTreeOpen(false);
-                  }}
+                  onSelect={selectNode}
                   resourceAdds={editContext ? resourceAdds : null}
                   selectedId={selectedId}
                   snapshot={displayedState}
@@ -657,16 +835,25 @@ export function App() {
                   resourceSyncing={selectedNode?.status === "syncing"}
                 />
               ) : selectedNode ? (
-                <ResourceWorkspace node={selectedNode} />
+                <ResourceWorkspace
+                  node={selectedNode}
+                  onEdit={startEditing}
+                  onRequestApproval={setApprovalDialogTargetId}
+                  onSelect={selectNode}
+                  resetInProgress={resetTargetIds.has(selectedNode.id)}
+                />
               ) : (
                 <section className="workspace empty-state">
                   <h2>Select a resource</h2>
                 </section>
               )}
               <ActivityPanel
+                approvals={approvals}
                 operations={operations.data ?? []}
+                onReviewApproval={setApprovalDialogTargetId}
+                onSelectNode={selectNode}
                 selectedNode={observedSelectedNode}
-                snapshot={state.data}
+                snapshot={observedState ?? state.data}
               />
             </main>
           )}

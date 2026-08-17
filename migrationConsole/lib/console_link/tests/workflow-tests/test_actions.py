@@ -83,6 +83,35 @@ def test_approval_review_names_exact_gate_resource_stage_and_effect():
     assert approved == [review.gate_name]
 
 
+def test_approval_review_extracts_the_vap_denial_reason():
+    workflow = _approval_workflow()
+    approval = workflow["status"]["nodes"]["approval-node"]
+    approval["boundaryID"] = "retry-group"
+    workflow["status"]["nodes"]["failed-apply"] = {
+        "id": "failed-apply",
+        "displayName": "tryApply",
+        "phase": "Failed",
+        "boundaryID": "retry-group",
+        "message": (
+            'main: Error (exit code 64): The datasnapshots "source-snap1" '
+            "is invalid: ValidatingAdmissionPolicy denied request: Impossible: "
+            "sourceVersion cannot be changed. Delete and recreate."
+        ),
+    }
+    service = ApprovalService(
+        namespace="ma",
+        workflow_name="migration",
+        workflow_loader=lambda: workflow,
+        gate_loader=lambda _name: _gate(),
+    )
+
+    review = service.review("approval:approval-node")
+
+    assert review.reason == (
+        "Impossible: sourceVersion cannot be changed. Delete and recreate"
+    )
+
+
 def test_approval_rejects_changed_or_completed_gate():
     gate = _gate()
     service = ApprovalService(
@@ -173,6 +202,62 @@ def test_reset_executes_only_the_versioned_dependency_safe_plan():
     }
     with pytest.raises(ResetPlanStale):
         service.execute(changed_plan.token)
+
+
+def test_reset_plans_multiple_requested_resources_as_one_dependency_set():
+    versions = {
+        ("capturedtraffics", "p2-topic"): {
+            "uid": "topic-uid",
+            "resourceVersion": "10",
+        },
+        ("datasnapshots", "source-snap1"): {
+            "uid": "snapshot-uid",
+            "resourceVersion": "11",
+        },
+    }
+    targets = [
+        ("capturedtraffics", "p2-topic", "Ready", []),
+        ("datasnapshots", "source-snap1", "Ready", []),
+    ]
+    requested_paths = []
+
+    def resolve(paths, *_args, **_kwargs):
+        requested_paths.append(paths)
+        return targets
+
+    service = ResetService(
+        namespace="ma",
+        target_resolver=resolve,
+        exact_resolver=lambda *_args, **_kwargs: targets,
+        plan_builder=lambda resolved, _namespace, messages, _delete: {
+            "targets": [{
+                "plural": plural,
+                "type": plural,
+                "name": name,
+                "path": f"{plural}.{name}",
+                "phase": phase,
+                "dependsOn": dependencies,
+            } for plural, name, phase, dependencies in resolved],
+            "messages": messages,
+            "warnings": [],
+        },
+        version_loader=lambda plural, name: versions[(plural, name)],
+        deleter=lambda *_args: True,
+    )
+
+    plan = service.plan_many([
+        "reset:capturedtraffics:p2-topic",
+        "reset:datasnapshots:source-snap1",
+    ])
+
+    assert requested_paths == [[
+        "capturedtraffic.p2-topic",
+        "datasnapshot.source-snap1",
+    ]]
+    assert [target.name for target in plan.targets] == [
+        "p2-topic",
+        "source-snap1",
+    ]
 
 
 def test_reset_plan_is_stale_when_a_reviewed_target_was_removed():

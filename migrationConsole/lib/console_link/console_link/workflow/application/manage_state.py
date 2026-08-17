@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from kubernetes.client.rest import ApiException
+
 from .. import resource_tree as resource_tree_module
 from ..commands.crd_utils import RESETTABLE_PLURALS
 from ..manage_tree_schema import group_plurals_for
@@ -41,6 +43,7 @@ from .models import (
     ManageDiagnostic,
     ManageNode,
     ManageProblem,
+    ManageRelationship,
     ManageSnapshot,
     ManageValueState,
     ManageWorkflow,
@@ -70,6 +73,21 @@ _STATUS_RANK = {
 }
 
 
+def _problem_message(error: Exception) -> str:
+    if isinstance(error, ApiException):
+        if error.status == 401:
+            return (
+                "Kubernetes authentication failed for the cluster selected "
+                "when this server started."
+            )
+        if error.status == 403:
+            return (
+                "Kubernetes denied access to the requested resources for the "
+                "cluster selected when this server started."
+            )
+    return str(error)
+
+
 @dataclass
 class _NodeDraft:
     id: str
@@ -84,6 +102,7 @@ class _NodeDraft:
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
     capabilities: Tuple[ManageCapability, ...] = ()
     details: Tuple[ManageDetail, ...] = ()
+    relationships: List[ManageRelationship] = field(default_factory=list)
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
@@ -179,7 +198,10 @@ class ManageStateService:
             sections = self.build_resource_sections(workflow_data, problems)
         except Exception as error:
             logger.exception("Failed to build workflow manage resource state")
-            problems.append(ManageProblem(source="kubernetes", message=str(error)))
+            problems.append(ManageProblem(
+                source="kubernetes",
+                message=_problem_message(error),
+            ))
             sections = []
         return self.build_snapshot(sections, workflow_data, problems)
 
@@ -213,40 +235,52 @@ class ManageStateService:
         problems: Optional[List[ManageProblem]] = None,
     ) -> List[ResourceSection]:
         sections = self._resource_loader(self.namespace)
+        steps: Mapping[str, List[Dict[str, Any]]] = {}
         if workflow_data and (workflow_data.get("status") or {}).get("nodes"):
             tree_nodes = build_nested_workflow_tree(dict(workflow_data))
             filtered_tree = filter_tree_nodes(tree_nodes)
             steps = extract_workflow_steps_by_resource(filtered_tree)
-            assign_workflow_progress(sections, steps)
             mark_not_configured_groups(sections, filtered_tree)
 
-        if self._config_service_provider is None:
-            return sections
-        try:
-            service = self._config_service_provider()
-            if service is None or not hasattr(service, "load_resource_config_snapshots"):
-                return sections
-            snapshots = service.load_resource_config_snapshots(self.workflow_name)
-            self.last_config_snapshots = snapshots
-            submitted_active = workflow_has_active_rollout(workflow_data)
-            apply_config_overlays(
-                sections,
-                submitted_resolved_config=(
-                    snapshots.get("submitted") if submitted_active else None
-                ),
-                pending_resolved_config=snapshots.get("pending"),
-                deployed_console_config=(
-                    snapshots.get("submitted_console") if not submitted_active else None
-                ),
-                submitted_console_config=(
-                    snapshots.get("submitted_console") if submitted_active else None
-                ),
-                pending_console_config=snapshots.get("pending_console"),
-            )
-        except Exception as error:
-            logger.exception("Failed to load resource config change overlays")
-            if problems is not None:
-                problems.append(ManageProblem(source="configuration", message=str(error)))
+        if self._config_service_provider is not None:
+            try:
+                service = self._config_service_provider()
+                if (
+                    service is not None
+                    and hasattr(service, "load_resource_config_snapshots")
+                ):
+                    snapshots = service.load_resource_config_snapshots(
+                        self.workflow_name
+                    )
+                    self.last_config_snapshots = snapshots
+                    submitted_active = workflow_has_active_rollout(workflow_data)
+                    apply_config_overlays(
+                        sections,
+                        submitted_resolved_config=(
+                            snapshots.get("submitted")
+                            if submitted_active else None
+                        ),
+                        pending_resolved_config=snapshots.get("pending"),
+                        deployed_console_config=(
+                            snapshots.get("submitted_console")
+                            if not submitted_active else None
+                        ),
+                        submitted_console_config=(
+                            snapshots.get("submitted_console")
+                            if submitted_active else None
+                        ),
+                        pending_console_config=snapshots.get("pending_console"),
+                    )
+            except Exception as error:
+                logger.exception("Failed to load resource config change overlays")
+                if problems is not None:
+                    problems.append(ManageProblem(
+                        source="configuration",
+                        message=_problem_message(error),
+                    ))
+
+        # Config overlays can add pending resources that own active workflow steps.
+        assign_workflow_progress(sections, steps)
         return sections
 
     def build_snapshot(
@@ -312,6 +346,7 @@ class ManageStateService:
                     )
                     group_draft.child_ids.append(resource_id)
 
+        _attach_reverse_relationships(drafts)
         nodes = _finalize_nodes(drafts)
         workflow = _workflow_summary(workflow_data)
         semantic = {
@@ -345,7 +380,10 @@ class ManageStateService:
     ) -> str:
         resource_id = f"resource:{resource.plural}:{resource.name}"
         comparisons = _comparisons(resource)
-        diagnostics = tuple(_diagnostic(item) for item in resource.diagnostics or [])
+        diagnostics = (
+            *tuple(_diagnostic(item) for item in resource.diagnostics or []),
+            *_resource_workflow_diagnostics(resource),
+        )
         capabilities = _resource_capabilities(resource, output_refs.get(resource.name, ()))
         draft = _NodeDraft(
             id=resource_id,
@@ -359,6 +397,7 @@ class ManageStateService:
             diagnostics=diagnostics,
             capabilities=capabilities,
             details=_resource_details(resource),
+            relationships=_resource_relationships(resource),
             comparisons=comparisons,
             resource_plural=resource.plural,
             resource_name=resource.name,
@@ -375,6 +414,7 @@ class ManageStateService:
                 step,
                 resource_id,
                 resource_id,
+                resource,
             )
             draft.child_ids.append(step_id)
         return resource_id
@@ -385,18 +425,39 @@ class ManageStateService:
         step: Mapping[str, Any],
         parent_id: str,
         resource_id: str,
+        owner: ResourceNode,
     ) -> str:
         step_key = str(step.get("id") or _revision(step))
         step_id = f"workflow-step:{resource_id}:{step_key}"
         display_step = maybe_rewrite_wait_step(dict(step))
         label = str(display_step.get("display_name") or step_key)
         phase = get_node_phase(step)
+        external_target = _external_approval_target(owner, step)
+        approval_failure = _approval_failure_diagnostic(owner, step)
+        if approval_failure:
+            label = (
+                f"{external_target[1]} apply failed"
+                if external_target
+                else "Apply failed"
+            )
+            phase = "Blocked"
         details = []
         if step.get("started_at"):
             details.append(ManageDetail("Started", step.get("started_at"), "timestamp"))
         if step.get("finished_at"):
             details.append(ManageDetail("Finished", step.get("finished_at"), "timestamp"))
-        if step.get("message"):
+        if approval_failure:
+            details.extend([
+                ManageDetail("Reason", approval_failure.message, "message"),
+                ManageDetail("Remedy", approval_failure.remedy, "remedy"),
+            ])
+            if approval_failure.technical_detail:
+                details.append(ManageDetail(
+                    "Technical details",
+                    approval_failure.technical_detail,
+                    "technical",
+                ))
+        elif step.get("message"):
             details.append(ManageDetail("Message", str(step.get("message")), "message"))
         draft = _NodeDraft(
             id=step_id,
@@ -405,7 +466,11 @@ class ManageStateService:
             label=label,
             phase=phase,
             status=_phase_status(phase),
-            capabilities=_step_capabilities(step),
+            capabilities=_step_capabilities(
+                step,
+                _approval_disabled_reason(owner, step),
+                allow_approval=external_target is None,
+            ),
             details=tuple(details),
         )
         drafts[step_id] = draft
@@ -418,6 +483,7 @@ class ManageStateService:
                 child,
                 step_id,
                 resource_id,
+                owner,
             )
             draft.child_ids.append(child_id)
         return step_id
@@ -482,10 +548,20 @@ def _resource_capabilities(
         ])
     approval = active_approval_node(resource)
     if approval:
+        approval_failure = _approval_failure_diagnostic(resource, approval)
+        approval_node_id = approval.get("approval_node_id") or approval.get("id")
         capabilities.append(ManageCapability(
             kind="approve",
-            target_id=f"approval:{approval.get('id')}",
-            label=str(approval.get("display_name") or f"Approve {resource.name}"),
+            target_id=f"approval:{approval_node_id}",
+            label=(
+                "Retry apply"
+                if approval_failure
+                else str(
+                    approval.get("display_name")
+                    or f"Approve {resource.name}"
+                )
+            ),
+            disabled_reason=_approval_disabled_reason(resource, approval),
         ))
     for plural, output_name in output_refs:
         capabilities.append(ManageCapability(
@@ -496,16 +572,27 @@ def _resource_capabilities(
     return tuple(sorted(capabilities, key=lambda item: (item.kind, item.target_id)))
 
 
-def _step_capabilities(step: Mapping[str, Any]) -> Tuple[ManageCapability, ...]:
+def _step_capabilities(
+    step: Mapping[str, Any],
+    approval_disabled_reason: Optional[str] = None,
+    allow_approval: bool = True,
+) -> Tuple[ManageCapability, ...]:
     capabilities = []
     step_id = str(step.get("id") or "")
     if step.get("type") == "Pod":
         capabilities.append(ManageCapability("logs", f"logs:workflow-step:{step_id}", "View logs"))
-    if is_approval_node(step) and get_node_phase(step) == "Running":
+    if (
+        allow_approval
+        and is_approval_node(step)
+        and get_node_phase(step) == "Running"
+    ):
+        retry = bool(step.get("denial_reason"))
+        approval_node_id = step.get("approval_node_id") or step_id
         capabilities.append(ManageCapability(
             "approve",
-            f"approval:{step_id}",
-            str(step.get("display_name") or "Approve"),
+            f"approval:{approval_node_id}",
+            "Retry apply" if retry else str(step.get("display_name") or "Approve"),
+            approval_disabled_reason,
         ))
     step_name = str(step.get("display_name") or "").split("(", 1)[0].strip()
     output = OUTPUT_STEP_MAPPINGS.get(step_name)
@@ -526,7 +613,149 @@ def _diagnostic(value: Mapping[str, Any]) -> ManageDiagnostic:
         message=str(value.get("message") or "Invalid value"),
         path=tuple(str(part) for part in value.get("path") or []),
         source=str(value.get("source")) if value.get("source") else None,
+        code=str(value.get("code")) if value.get("code") else None,
+        title=str(value.get("title")) if value.get("title") else None,
+        remedy=str(value.get("remedy")) if value.get("remedy") else None,
+        technical_detail=(
+            str(value.get("technicalDetail"))
+            if value.get("technicalDetail")
+            else None
+        ),
     )
+
+
+def _with_terminal_period(value: str) -> str:
+    result = value.strip()
+    if result and result[-1] not in ".!?":
+        result += "."
+    return result
+
+
+def _approval_failure_diagnostic(
+    resource: ResourceNode,
+    approval: Mapping[str, Any],
+) -> Optional[ManageDiagnostic]:
+    reason = str(approval.get("denial_reason") or "").strip()
+    if not reason:
+        return None
+    immutable_update = "delete and recreate" in reason.lower()
+    external_target = _external_approval_target(resource, approval)
+    target_name = external_target[1] if external_target else resource.name
+    deployed = (resource.config_presence or {}).get(
+        "deployed",
+        resource.phase != PENDING_CONFIG_PHASE,
+    )
+    reset_required = immutable_update and deployed
+    return ManageDiagnostic(
+        severity="error",
+        message=_with_terminal_period(reason),
+        source="workflow-apply",
+        code=(
+            "immutable-resource-update"
+            if immutable_update
+            else "apply-approval-required"
+        ),
+        title=(
+            f"Blocked by {target_name} apply failure"
+            if external_target
+            else "Apply retry requires approval"
+            if immutable_update and not deployed
+            else "Apply failed; reset required"
+            if reset_required
+            else "Apply failed; approval required"
+        ),
+        remedy=(
+            (
+                f"Open {target_name}, reset it to delete and recreate it, "
+                "then retry the apply."
+                if external_target
+                else f"Reset {target_name} to delete and recreate it, then "
+                "retry the apply."
+            )
+            if reset_required
+            else (
+                f"{target_name} is already absent. Approve the retry to "
+                "recreate it with the submitted configuration."
+            )
+            if immutable_update
+            else "Review the denied change, then approve the retry when it "
+            "is safe to continue."
+        ),
+        technical_detail=(
+            str(approval.get("message")).strip()
+            if approval.get("message")
+            else None
+        ),
+    )
+
+
+def _external_approval_target(
+    resource: ResourceNode,
+    approval: Mapping[str, Any],
+) -> Optional[Tuple[str, str]]:
+    target = approval_target_ref(dict(approval))
+    if target and target != (resource.plural, resource.name):
+        return target
+    return None
+
+
+def _approval_disabled_reason(
+    resource: ResourceNode,
+    approval: Mapping[str, Any],
+) -> Optional[str]:
+    diagnostic = _approval_failure_diagnostic(resource, approval)
+    if (
+        not diagnostic
+        or diagnostic.code != "immutable-resource-update"
+    ):
+        return None
+    deployed = (resource.config_presence or {}).get(
+        "deployed",
+        resource.phase != PENDING_CONFIG_PHASE,
+    )
+    if not deployed:
+        return None
+    return f"Reset {resource.name} before retrying this apply."
+
+
+def _iter_workflow_steps(
+    steps: Iterable[Mapping[str, Any]],
+):
+    for step in steps:
+        yield step
+        yield from _iter_workflow_steps(step.get("children", []))
+
+
+def _resource_workflow_diagnostics(
+    resource: ResourceNode,
+) -> Tuple[ManageDiagnostic, ...]:
+    approval = active_approval_node(resource)
+    if approval:
+        diagnostic = _approval_failure_diagnostic(resource, approval)
+        if diagnostic:
+            return (diagnostic,)
+    for step in _iter_workflow_steps(resource.workflow_progress or []):
+        diagnostic = _approval_failure_diagnostic(resource, step)
+        if diagnostic:
+            return (diagnostic,)
+        if get_node_phase(step) not in {"Failed", "Error"}:
+            continue
+        message = str(step.get("message") or "").strip()
+        if not message:
+            continue
+        label = str(step.get("display_name") or "Workflow step")
+        return (ManageDiagnostic(
+            severity="error",
+            message=message,
+            source="workflow-step",
+            code="workflow-step-failed",
+            title=f"{label} failed",
+            remedy=(
+                "Review the failure details and logs before retrying or "
+                "resetting."
+            ),
+        ),)
+    return ()
 
 
 def _comparisons(resource: ResourceNode) -> Tuple[ManageComparison, ...]:
@@ -584,6 +813,60 @@ def _resource_details(resource: ResourceNode) -> Tuple[ManageDetail, ...]:
     return tuple(details)
 
 
+def _resource_relationships(resource: ResourceNode) -> List[ManageRelationship]:
+    states_by_name = {
+        str(dependency.get("name")): dependency
+        for dependency in resource.dependency_states
+        if dependency.get("name")
+    }
+    relationships = []
+    for dependency_name in resource.depends_on:
+        name = str(dependency_name)
+        dependency = states_by_name.get(name)
+        if dependency is None:
+            relationships.append(ManageRelationship(
+                kind="runtime-dependency",
+                direction="requires",
+                target_name=name,
+                target_status="unknown",
+            ))
+            continue
+        plural = str(dependency.get("plural") or "")
+        phase = str(dependency.get("phase") or "")
+        relationships.append(ManageRelationship(
+            kind="runtime-dependency",
+            direction="requires",
+            target_id=f"resource:{plural}:{name}" if plural else None,
+            target_name=name,
+            target_plural=plural or None,
+            target_phase=phase or None,
+            target_status=_phase_status(phase),
+        ))
+    return relationships
+
+
+def _attach_reverse_relationships(drafts: Mapping[str, _NodeDraft]) -> None:
+    for source in tuple(drafts.values()):
+        for relationship in tuple(source.relationships):
+            if (
+                relationship.direction != "requires"
+                or not relationship.target_id
+            ):
+                continue
+            target = drafts.get(relationship.target_id)
+            if target is None:
+                continue
+            target.relationships.append(ManageRelationship(
+                kind=relationship.kind,
+                direction="required-by",
+                target_id=source.id,
+                target_name=source.label,
+                target_plural=source.resource_plural,
+                target_phase=source.phase,
+                target_status=_phase_status(source.phase),
+            ))
+
+
 def _nested_value(source: Mapping[str, Any], path: str) -> Tuple[bool, Any]:
     current: Any = source
     for part in path.split("."):
@@ -602,12 +885,14 @@ def _resource_value_summary(
     submitted = presence.get("submitted", deployed)
     pending_presence = presence.get("pending", submitted)
     if "pending" in presence and pending_presence != submitted:
+        if deployed and submitted and not pending_presence:
+            return "Will be orphaned by new configuration"
         return (
             "Addition pending submission"
             if pending_presence else "Removal pending submission"
         )
     if "submitted" in presence and submitted != deployed:
-        return "Addition in progress" if submitted else "Removal in progress"
+        return "Addition in progress" if submitted else "Orphaned; cleanup required"
     pending = sum(1 for item in comparisons if item.pending_changed)
     submitted = sum(1 for item in comparisons if item.submitted_changed)
     if pending:
@@ -642,11 +927,26 @@ def _phase_status(phase: Optional[str]) -> str:
     normalized = str(phase or "").lower()
     if normalized in {"failed", "error"}:
         return "error"
+    if normalized == "blocked":
+        return "blocked"
     if normalized in {"running"}:
         return "running"
-    if normalized in {"pending", "initialized", "pending config"}:
+    if normalized in {
+        "created",
+        "deleting",
+        "pending",
+        "initialized",
+        "pending config",
+    }:
         return "pending"
-    if normalized in {"ready", "completed", "succeeded", "skipped"}:
+    if normalized in {
+        "approved",
+        "checked",
+        "ready",
+        "completed",
+        "succeeded",
+        "skipped",
+    }:
         return "ok"
     return "unknown"
 
@@ -705,6 +1005,7 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             diagnostics=draft.diagnostics,
             capabilities=draft.capabilities,
             details=draft.details,
+            relationships=tuple(draft.relationships),
             comparisons=draft.comparisons,
             resource_plural=draft.resource_plural,
             resource_name=draft.resource_name,
@@ -731,6 +1032,10 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "diagnostics": [item.to_dict() for item in draft.diagnostics],
         "capabilities": [item.to_dict() for item in draft.capabilities],
         "details": [item.to_dict() for item in draft.details],
+        "relationships": [
+            item.to_dict()
+            for item in draft.relationships
+        ],
         "comparisons": [item.to_dict() for item in draft.comparisons],
         "resourcePlural": draft.resource_plural,
         "resourceName": draft.resource_name,

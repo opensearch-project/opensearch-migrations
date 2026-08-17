@@ -5,6 +5,7 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_CURRENT_WORKFLOW,
     CONFIG_MODE_DEPLOYED,
     CONFIG_MODE_PENDING_SUBMIT,
+    PENDING_CONFIG_PHASE,
     ResourceGroup,
     ResourceNode,
     ResourceSection,
@@ -435,6 +436,55 @@ class TestConfigOverlays:
                 'required: traffic.proxies.capture-new.proxyConfig: '
                 'Invalid input: expected object, received undefined'
             ),
+        }]
+
+    def test_attaches_dependencies_after_pending_resources_are_added(self):
+        sections = _build_tree_from_raw({})
+        pending = {'resources': [
+            {
+                'kind': 'CapturedTraffic',
+                'name': 'p2-topic',
+                'parameters': {},
+            },
+            {
+                'kind': 'CaptureProxy',
+                'name': 'p2',
+                'parameters': {'dependsOn': ['p2-topic']},
+            },
+            {
+                'kind': 'DataSnapshot',
+                'name': 'source-snap1',
+                'parameters': {'dependsOn': ['p2']},
+            },
+            {
+                'kind': 'SnapshotMigration',
+                'name': 'source-target-snap1-migration-0',
+                'parameters': {'dependsOn': ['source-snap1']},
+            },
+        ]}
+
+        apply_config_overlays(sections, pending_resolved_config=pending)
+
+        proxy = group_by_plural(sections, 'captureproxies').resources[0]
+        snapshot = group_by_plural(sections, 'datasnapshots').resources[0]
+        migration = group_by_plural(
+            sections,
+            'snapshotmigrations',
+        ).resources[0]
+        assert proxy.dependency_states == [{
+            'name': 'p2-topic',
+            'phase': PENDING_CONFIG_PHASE,
+            'plural': 'capturedtraffics',
+        }]
+        assert snapshot.dependency_states == [{
+            'name': 'p2',
+            'phase': PENDING_CONFIG_PHASE,
+            'plural': 'captureproxies',
+        }]
+        assert migration.dependency_states == [{
+            'name': 'source-snap1',
+            'phase': PENDING_CONFIG_PHASE,
+            'plural': 'datasnapshots',
         }]
 
     def test_existing_resource_absent_from_saved_config_is_marked_for_delete(self):

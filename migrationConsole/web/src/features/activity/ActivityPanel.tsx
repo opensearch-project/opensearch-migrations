@@ -4,6 +4,7 @@ import {
   CircleDashed,
   CircleX,
   LoaderCircle,
+  ShieldCheck,
 } from "lucide-react";
 
 import type {
@@ -11,6 +12,8 @@ import type {
   ManageSnapshot,
   Operation,
 } from "../../api/client";
+import type { ApprovalCandidate } from "../actions/approvals";
+import { StatusIndicator } from "../status/StatusIndicator";
 
 
 function workflowSteps(
@@ -34,12 +37,37 @@ export function ActivityPanel({
   snapshot,
   selectedNode,
   operations,
+  onSelectNode,
+  approvals,
+  onReviewApproval,
 }: {
   snapshot: ManageSnapshot;
   selectedNode: ManageNode | null;
   operations: Operation[];
+  onSelectNode: (nodeId: string) => void;
+  approvals: ApprovalCandidate[];
+  onReviewApproval: (targetId: string) => void;
 }) {
   const steps = workflowSteps(snapshot, selectedNode);
+  const resources = Object.values(snapshot.nodes).filter(
+    (node) => node.kind === "resource",
+  );
+  const failedResources = resources.filter((node) => (
+    node.phase === "Failed"
+    || node.phase === "Error"
+  ));
+  const waitingResources = resources.filter((node) => (
+    (node.relationships ?? []).some((relationship) => (
+      relationship.direction === "requires"
+      && relationship.targetStatus !== "ok"
+    ))
+  ));
+  const currentBlocker = failedResources[0] ?? null;
+  const blockerStep = currentBlocker
+    ? workflowSteps(snapshot, currentBlocker).find(
+      (step) => step.status === "error",
+    )
+    : null;
   const activeSubmit = operations.find((operation) => (
     operation.kind === "submit"
     && (
@@ -63,7 +91,7 @@ export function ActivityPanel({
       </header>
       {snapshot.workflow ? (
         <div className="workflow-summary">
-          <span className={`status-dot status-${snapshot.workflow.phase.toLocaleLowerCase()}`} />
+          <StatusIndicator status={snapshot.workflow.phase} />
           <div>
             <strong>{snapshot.workflow.name}</strong>
             <span>{snapshot.workflow.phase}</span>
@@ -75,9 +103,68 @@ export function ActivityPanel({
             ? "Waiting for submitted workflow."
             : activeSubmit
               ? "Submitting workflow."
-              : "No active Argo workflow."}
+          : "No active Argo workflow."}
         </p>
       )}
+      {approvals.length > 0 ? (
+        <section
+          aria-label="Pending approvals"
+          className="approval-activity"
+        >
+          <ShieldCheck aria-hidden="true" />
+          <div>
+            <strong>Approval required</strong>
+            <span>
+              {approvals.length} {
+                approvals.length === 1 ? "gate is" : "gates are"
+              } waiting for an explicit decision.
+            </span>
+          </div>
+          <button
+            aria-label={`Review approval for ${approvals[0].nodeLabel}`}
+            onClick={() => onReviewApproval(approvals[0].targetId)}
+            type="button"
+          >
+            Review
+          </button>
+        </section>
+      ) : null}
+      {snapshot.workflow && (
+        failedResources.length > 0
+        || waitingResources.length > 0
+      ) ? (
+        <section className="workflow-health" aria-label="Workflow blockers">
+          {failedResources.length > 0 ? (
+            <strong>
+              {snapshot.workflow.phase} with {failedResources.length} failed {
+                failedResources.length === 1 ? "resource" : "resources"
+              }
+            </strong>
+          ) : (
+            <strong>{snapshot.workflow.phase}</strong>
+          )}
+          {waitingResources.length > 0 ? (
+            <span>
+              {waitingResources.length} downstream {
+                waitingResources.length === 1 ? "resource" : "resources"
+              } waiting
+            </span>
+          ) : null}
+          {currentBlocker ? (
+            <button
+              aria-label={`View blocker ${currentBlocker.label}`}
+              onClick={() => onSelectNode(currentBlocker.id)}
+              type="button"
+            >
+              <CircleX aria-hidden="true" />
+              <span>
+                Current blocker: {currentBlocker.label}
+                {blockerStep ? ` / ${blockerStep.label}` : ""}
+              </span>
+            </button>
+          ) : null}
+        </section>
+      ) : null}
       <div className="activity-steps">
         {operations.map((operation) => (
           <div

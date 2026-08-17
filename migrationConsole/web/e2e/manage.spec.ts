@@ -1025,6 +1025,15 @@ test("reviews managed output, approval, and reset actions", async ({ page }, tes
   api.enableManagedActions();
   await page.goto("/");
 
+  const initialActions = page.getByRole("dialog", {
+    name: "Review required actions",
+  });
+  await expect(initialActions.getByText(/advances to metadata migration/))
+    .toBeVisible();
+  await initialActions.getByRole("button", {
+    name: "Close required actions",
+  }).click();
+
   await page.getByRole("button", { name: "View metadata output" }).click();
   const output = page.getByRole("region", { name: "Managed output" });
   await expect(output.getByRole("tab")).toHaveText([
@@ -1038,12 +1047,18 @@ test("reviews managed output, approval, and reset actions", async ({ page }, tes
 
   await page.getByRole("button", { name: "Approve metadata" }).click();
   const approval = page.getByRole("dialog", {
-    name: "Approve Metadata evaluation?",
+    name: "Review required actions",
   });
   await expect(approval.getByText(/advances to metadata migration/))
     .toBeVisible();
   await approval.getByRole("button", {
-    name: "Approve exact gate",
+    name: "Approve",
+  }).click();
+  await expect(approval.getByText(
+    "Action accepted. Waiting for workflow reconciliation.",
+  )).toBeVisible();
+  await approval.getByRole("button", {
+    name: "Close required actions",
   }).click();
   await expect(page.getByText(
     "Approval accepted; waiting for workflow reconciliation",

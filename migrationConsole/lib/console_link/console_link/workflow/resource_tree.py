@@ -169,9 +169,12 @@ class ResourceSection:
     tree_default_expanded: Optional[bool] = None
 
 
-def build_resource_tree(namespace: str) -> List[ResourceSection]:
+def build_resource_tree(
+    namespace: str,
+    custom_api: Optional[Any] = None,
+) -> List[ResourceSection]:
     """Query all migration CRs and build a resource tree grouped by type."""
-    raw = list_migration_resources_full(namespace)
+    raw = list_migration_resources_full(namespace, custom_api)
     return _build_tree_from_raw(raw)
 
 
@@ -275,6 +278,10 @@ def apply_config_overlays(
             deployed,
         )
         _add_virtual_resource(sections, virtual)
+
+    # Config overlays can introduce resources referenced by other overlays.
+    # Resolve links only after the complete intended resource set is present.
+    _attach_dependency_states(sections)
 
 
 def resource_visible_in_config_mode(resource: ResourceNode, value_mode: str) -> bool:

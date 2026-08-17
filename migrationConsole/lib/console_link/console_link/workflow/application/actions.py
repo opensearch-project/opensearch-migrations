@@ -14,7 +14,11 @@ from ..commands.approve import (
 )
 from ..commands.crd_utils import CRD_GROUP, CRD_VERSION
 from ..resource_tree import RESOURCE_KIND_TO_PLURAL
-from ..tree_utils import get_node_input_parameter, is_approval_node
+from ..tree_utils import (
+    extract_denial_reason,
+    get_node_input_parameter,
+    is_approval_node,
+)
 
 
 APPROVAL_STAGES = {
@@ -78,13 +82,16 @@ class ApprovalService:
             Callable[[str], Mapping[str, Any]]
         ] = None,
         approver: Optional[Callable[[str], bool]] = None,
+        custom_api: Optional[Any] = None,
     ):
         self.namespace = namespace
         self.workflow_name = workflow_name
         self._workflow_loader = workflow_loader
+        self._custom_api = custom_api
         self._gate_loader = gate_loader or self._load_gate
         self._approver = approver or (
-            lambda name: approve_gate(self.namespace, name)
+            self._approve_gate if custom_api is not None
+            else lambda name: approve_gate(self.namespace, name)
         )
 
     def review(
@@ -178,13 +185,28 @@ class ApprovalService:
         return review
 
     def _load_gate(self, name: str) -> Mapping[str, Any]:
-        return client.CustomObjectsApi().get_namespaced_custom_object(
+        custom_api = self._custom_api or client.CustomObjectsApi()
+        return custom_api.get_namespaced_custom_object(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace=self.namespace,
             plural="approvalgates",
             name=name,
         )
+
+    def _approve_gate(self, name: str) -> bool:
+        try:
+            self._custom_api.patch_namespaced_custom_object_status(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=self.namespace,
+                plural="approvalgates",
+                name=name,
+                body={"status": {"phase": "Approved"}},
+            )
+            return True
+        except Exception:
+            return False
 
 
 def _workflow_nodes(
@@ -234,7 +256,8 @@ def _approval_reason(
             and sibling.get("phase") == "Failed"
             and sibling.get("message")
         ):
-            return str(sibling["message"])
+            message = str(sibling["message"])
+            return extract_denial_reason(message) or message
     return None
 
 

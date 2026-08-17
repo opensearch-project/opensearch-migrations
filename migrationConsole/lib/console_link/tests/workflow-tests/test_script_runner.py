@@ -83,6 +83,23 @@ class TestScriptRunner:
         assert "--quiet" in mock_run.call_args[0][0]
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_uses_pinned_environment(self, mock_run):
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow"}',
+        )
+        runner = ScriptRunner(env={"KUBECONFIG": "/tmp/pinned-config"})
+
+        runner.submit_workflow(
+            "sourceClusters: {}",
+            ["--workflow-name", "test-workflow"],
+        )
+
+        assert mock_run.call_args.kwargs["env"] == {
+            "KUBECONFIG": "/tmp/pinned-config",
+        }
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
     def test_submit_workflow_can_request_verbose_script_output(self, mock_run):
         """Verbose submit keeps the generated resource handler output visible."""
         mock_run.return_value = Mock(

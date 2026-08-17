@@ -535,6 +535,11 @@ export interface components {
             /** Approvaltargetid */
             approvalTargetId: string;
             /**
+             * Disabledreason
+             * @default null
+             */
+            disabledReason: string | null;
+            /**
              * Kind
              * @constant
              */
@@ -640,10 +645,20 @@ export interface components {
         };
         /** DiagnosticV1 */
         DiagnosticV1: {
+            /**
+             * Code
+             * @default null
+             */
+            code: string | null;
             /** Message */
             message: string;
             /** Path */
             path?: string[];
+            /**
+             * Remedy
+             * @default null
+             */
+            remedy: string | null;
             /** Severity */
             severity: string;
             /**
@@ -651,6 +666,16 @@ export interface components {
              * @default null
              */
             source: string | null;
+            /**
+             * Technicaldetail
+             * @default null
+             */
+            technicalDetail: string | null;
+            /**
+             * Title
+             * @default null
+             */
+            title: string | null;
         };
         /** DraftRevisionRequestV1 */
         DraftRevisionRequestV1: {
@@ -659,6 +684,11 @@ export interface components {
         };
         /** EditCapabilityV1 */
         EditCapabilityV1: {
+            /**
+             * Disabledreason
+             * @default null
+             */
+            disabledReason: string | null;
             /** Edittargetid */
             editTargetId: string;
             /**
@@ -845,6 +875,8 @@ export interface components {
         };
         /** ExecuteResetRequestV1 */
         ExecuteResetRequestV1: {
+            /** Approvals */
+            approvals?: components["schemas"]["ResetApprovalRequestV1"][];
             /** Plantoken */
             planToken: string;
         };
@@ -1071,6 +1103,11 @@ export interface components {
         /** LogsCapabilityV1 */
         LogsCapabilityV1: {
             /**
+             * Disabledreason
+             * @default null
+             */
+            disabledReason: string | null;
+            /**
              * Kind
              * @constant
              */
@@ -1120,6 +1157,8 @@ export interface components {
              * @default null
              */
             phase: string | null;
+            /** Relationships */
+            relationships?: components["schemas"]["RelationshipV1"][];
             /**
              * Resourcename
              * @default null
@@ -1217,6 +1256,11 @@ export interface components {
         /** OutputCapabilityV1 */
         OutputCapabilityV1: {
             /**
+             * Disabledreason
+             * @default null
+             */
+            disabledReason: string | null;
+            /**
              * Kind
              * @constant
              */
@@ -1286,6 +1330,38 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** RelationshipV1 */
+        RelationshipV1: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "requires" | "required-by";
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "runtime-dependency";
+            /**
+             * Targetid
+             * @default null
+             */
+            targetId: string | null;
+            /** Targetname */
+            targetName: string;
+            /**
+             * Targetphase
+             * @default null
+             */
+            targetPhase: string | null;
+            /**
+             * Targetplural
+             * @default null
+             */
+            targetPlural: string | null;
+            /** Targetstatus */
+            targetStatus: string;
+        };
         /** RemoveConfigEditOperationV1 */
         RemoveConfigEditOperationV1: {
             /**
@@ -1308,8 +1384,20 @@ export interface components {
             /** Path */
             path: string[];
         };
+        /** ResetApprovalRequestV1 */
+        ResetApprovalRequestV1: {
+            /** Expectedgaterevision */
+            expectedGateRevision: string;
+            /** Targetid */
+            targetId: string;
+        };
         /** ResetCapabilityV1 */
         ResetCapabilityV1: {
+            /**
+             * Disabledreason
+             * @default null
+             */
+            disabledReason: string | null;
             /**
              * Kind
              * @constant
@@ -1323,7 +1411,9 @@ export interface components {
         /** ResetPlanRequestV1 */
         ResetPlanRequestV1: {
             /** Targetid */
-            targetId: string;
+            targetId?: string | null;
+            /** Targetids */
+            targetIds?: string[];
         };
         /** ResetPlanV1 */
         ResetPlanV1: {

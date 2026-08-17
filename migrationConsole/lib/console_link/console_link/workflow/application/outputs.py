@@ -98,6 +98,7 @@ class OutputService:
         ] = None,
         artifact_reader: Optional[Callable[[str], str]] = None,
         artifact_source: Optional[Callable[[str], str]] = None,
+        custom_api: Optional[Any] = None,
         inline_limit: int = DEFAULT_INLINE_LIMIT,
         clock: Optional[Callable[[], Any]] = None,
     ):
@@ -105,6 +106,7 @@ class OutputService:
         self._resource_loader = resource_loader or self._load_resource
         self._artifact_reader = artifact_reader or read_artifact_text
         self._artifact_source = artifact_source or artifact_uri
+        self._custom_api = custom_api
         self.inline_limit = inline_limit
         # Kept injectable for deterministic service construction and future history.
         self._clock = clock
@@ -178,7 +180,8 @@ class OutputService:
 
     def _load_resource(self, plural: str, name: str) -> Mapping[str, Any]:
         try:
-            return client.CustomObjectsApi().get_namespaced_custom_object(
+            custom_api = self._custom_api or client.CustomObjectsApi()
+            return custom_api.get_namespaced_custom_object(
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=self.namespace,

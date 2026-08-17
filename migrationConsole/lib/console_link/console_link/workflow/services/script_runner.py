@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Mapping
 
 logger = logging.getLogger(__name__)
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
@@ -27,7 +27,11 @@ def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError)
 class ScriptRunner:
     """Runs workflow scripts with standard interface."""
 
-    def __init__(self, script_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        script_dir: Optional[Path] = None,
+        env: Optional[Mapping[str, str]] = None,
+    ):
         """
         Initialize with script directory path.
 
@@ -35,6 +39,8 @@ class ScriptRunner:
             script_dir: Optional path to scripts. If None, uses CONFIG_PROCESSOR_DIR environment variable.
                        Raises ValueError if neither is provided or if the directory doesn't exist.
         """
+        self.env = dict(env) if env is not None else None
+
         if script_dir is None:
             config_processor_dir = os.environ.get('CONFIG_PROCESSOR_DIR')
             if not config_processor_dir:
@@ -87,14 +93,16 @@ class ScriptRunner:
             logger.debug(f"Input data length: {len(input_data)} bytes")
 
         try:
-            result = subprocess.run(
-                cmd,
-                input=input_data,
-                capture_output=True,
-                text=True,
-                check=True,
-                cwd=str(self.script_dir)
-            )
+            run_options = {
+                "input": input_data,
+                "capture_output": True,
+                "text": True,
+                "check": True,
+                "cwd": str(self.script_dir),
+            }
+            if self.env is not None:
+                run_options["env"] = self.env
+            result = subprocess.run(cmd, **run_options)
 
             logger.debug("Script completed successfully")
             return result.stdout.strip()
@@ -239,10 +247,17 @@ class ScriptRunner:
             if not script_path.exists():
                 raise FileNotFoundError(f"Script not found: {script_path}")
 
+            run_options = {
+                "capture_output": True,
+                "text": True,
+                "check": True,
+                "cwd": str(self.script_dir),
+            }
+            if self.env is not None:
+                run_options["env"] = self.env
             result = subprocess.run(
                 [str(script_path), temp_file_path] + submit_args,
-                capture_output=True, text=True, check=True,
-                cwd=str(self.script_dir)
+                **run_options,
             )
             output = result.stdout.strip()
 

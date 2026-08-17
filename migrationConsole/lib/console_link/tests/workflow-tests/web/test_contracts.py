@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from console_link.workflow.application.models import (
     ManageCapability,
     ManageNode,
+    ManageRelationship,
     ManageSnapshot,
 )
 from console_link.workflow.web.contracts import ManageSnapshotV1
@@ -24,11 +25,23 @@ def test_snapshot_transport_uses_camel_case_and_exact_capability_target():
                 kind="resource",
                 label="capture",
                 status="ok",
+                relationships=(
+                    ManageRelationship(
+                        kind="runtime-dependency",
+                        direction="requires",
+                        target_id="resource:kafkaclusters:default",
+                        target_name="default",
+                        target_plural="kafkaclusters",
+                        target_phase="Ready",
+                        target_status="ok",
+                    ),
+                ),
                 capabilities=(
                     ManageCapability(
                         kind="edit",
                         target_id="edit:captureproxies:capture",
                         label="Edit capture",
+                        disabled_reason="Reset capture before retrying.",
                     ),
                 ),
             ),
@@ -49,6 +62,18 @@ def test_snapshot_transport_uses_camel_case_and_exact_capability_target():
             "kind": "edit",
             "editTargetId": "edit:captureproxies:capture",
             "label": "Edit capture",
+            "disabledReason": "Reset capture before retrying.",
+        },
+    ]
+    assert payload["nodes"]["resource:captureproxies:capture"]["relationships"] == [
+        {
+            "kind": "runtime-dependency",
+            "direction": "requires",
+            "targetId": "resource:kafkaclusters:default",
+            "targetName": "default",
+            "targetPlural": "kafkaclusters",
+            "targetPhase": "Ready",
+            "targetStatus": "ok",
         },
     ]
 

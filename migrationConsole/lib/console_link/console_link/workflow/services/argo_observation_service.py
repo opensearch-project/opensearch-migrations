@@ -76,6 +76,7 @@ def load_slim_workflow(
                         )
                         if parameter["name"] in (
                             "groupName_view",
+                            "retryGroupName_view",
                             "sortOrder_view",
                             "configContents",
                             "name",

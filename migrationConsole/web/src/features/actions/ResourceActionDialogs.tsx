@@ -1,8 +1,13 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import {
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   AlertTriangle,
   LoaderCircle,
+  Pencil,
   RotateCcw,
   ShieldCheck,
   X,
@@ -12,8 +17,10 @@ import {
   approveTarget,
   executeReset,
   getApprovalReview,
+  getCombinedResetPlan,
   getResetPlan,
 } from "../../api/client";
+import type { ApprovalCandidate } from "./approvals";
 
 
 function DialogError({
@@ -34,52 +41,171 @@ function DialogError({
 
 
 export function ApprovalDialog({
-  targetId,
+  candidates,
+  initialTargetId,
   onClose,
+  onEdit,
+  onStarted,
 }: {
-  targetId: string;
+  candidates: ApprovalCandidate[];
+  initialTargetId: string;
   onClose: () => void;
+  onEdit: (candidate: ApprovalCandidate) => void;
+  onStarted?: (targetId: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const [submitting, setSubmitting] = useState(false);
-  const [problem, setProblem] = useState("");
-  const review = useQuery({
-    queryKey: ["approval-review", targetId],
-    queryFn: () => getApprovalReview(targetId),
+  const [submitting, setSubmitting] = useState<Set<string>>(new Set());
+  const [processing, setProcessing] = useState<Set<string>>(new Set());
+  const [problems, setProblems] = useState<Record<string, string>>({});
+  const reviews = useQueries({
+    queries: candidates.map((candidate) => ({
+      queryKey: ["approval-review", candidate.targetId],
+      queryFn: () => getApprovalReview(candidate.targetId),
+      retry: false,
+    })),
+  });
+  const resetCandidates = candidates.filter(
+    (candidate) => candidate.immutable && candidate.resetTargetId,
+  );
+  const resetTargetIds = resetCandidates.map(
+    (candidate) => candidate.resetTargetId as string,
+  );
+  const combinedPlan = useQuery({
+    queryKey: ["reset-plan", "combined", ...resetTargetIds],
+    queryFn: () => getCombinedResetPlan(resetTargetIds),
+    enabled: resetTargetIds.length > 0,
     retry: false,
   });
-  const approve = async () => {
-    if (!review.data) return;
-    setSubmitting(true);
-    setProblem("");
+  useEffect(() => {
+    if (processing.size === 0) return;
+    const timer = window.setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ["manage-state"] });
+      void queryClient.invalidateQueries({ queryKey: ["operations"] });
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [processing.size, queryClient]);
+  const reviewFor = (targetId: string) => (
+    reviews[candidates.findIndex(
+      (candidate) => candidate.targetId === targetId,
+    )]
+  );
+  const setTargetsSubmitting = (
+    targetIds: string[],
+    active: boolean,
+  ) => {
+    setSubmitting((current) => {
+      const next = new Set(current);
+      targetIds.forEach((targetId) => (
+        active ? next.add(targetId) : next.delete(targetId)
+      ));
+      return next;
+    });
+  };
+  const clearProblems = (targetIds: string[]) => {
+    setProblems((current) => {
+      const next = { ...current };
+      targetIds.forEach((targetId) => delete next[targetId]);
+      return next;
+    });
+  };
+  const finishStarted = async (targetIds: string[]) => {
+    setProcessing((current) => new Set([...current, ...targetIds]));
+    targetIds.forEach((targetId) => onStarted?.(targetId));
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["operations"] }),
+      queryClient.invalidateQueries({ queryKey: ["manage-state"] }),
+    ]);
+  };
+  const approve = async (candidate: ApprovalCandidate) => {
+    const review = reviewFor(candidate.targetId)?.data;
+    if (!review) return;
+    setTargetsSubmitting([candidate.targetId], true);
+    clearProblems([candidate.targetId]);
     try {
-      await approveTarget(targetId, review.data.gateRevision);
-      await queryClient.invalidateQueries({ queryKey: ["operations"] });
-      onClose();
+      await approveTarget(candidate.targetId, review.gateRevision);
+      await finishStarted([candidate.targetId]);
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : String(error));
+      setProblems((current) => ({
+        ...current,
+        [candidate.targetId]: (
+          error instanceof Error ? error.message : String(error)
+        ),
+      }));
     } finally {
-      setSubmitting(false);
+      setTargetsSubmitting([candidate.targetId], false);
     }
   };
+  const resetAndRetry = async (
+    selectedCandidates: ApprovalCandidate[],
+    planToken?: string,
+  ) => {
+    const targetIds = selectedCandidates.map(
+      (candidate) => candidate.targetId,
+    );
+    const resetIds = selectedCandidates.flatMap(
+      (candidate) => candidate.resetTargetId
+        ? [candidate.resetTargetId]
+        : [],
+    );
+    const approvalRequests = selectedCandidates.flatMap((candidate) => {
+      const review = reviewFor(candidate.targetId)?.data;
+      return review ? [{
+        targetId: candidate.targetId,
+        expectedGateRevision: review.gateRevision,
+      }] : [];
+    });
+    if (
+      resetIds.length !== selectedCandidates.length
+      || approvalRequests.length !== selectedCandidates.length
+    ) {
+      return;
+    }
+    setTargetsSubmitting(targetIds, true);
+    clearProblems(targetIds);
+    try {
+      const plan = planToken
+        ? { token: planToken }
+        : resetIds.length === 1
+          ? await getResetPlan(resetIds[0])
+          : await getCombinedResetPlan(resetIds);
+      await executeReset(plan.token, approvalRequests);
+      await finishStarted(targetIds);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setProblems((current) => ({
+        ...current,
+        ...Object.fromEntries(targetIds.map((targetId) => [
+          targetId,
+          message,
+        ])),
+      }));
+      void combinedPlan.refetch();
+    } finally {
+      setTargetsSubmitting(targetIds, false);
+    }
+  };
+  const allResetReviewsReady = resetCandidates.every(
+    (candidate) => Boolean(reviewFor(candidate.targetId)?.data),
+  );
   return (
     <div className="modal-backdrop">
       <section
         aria-labelledby="approval-dialog-title"
         aria-modal="true"
-        className="confirmation-dialog action-review-dialog"
+        className="confirmation-dialog action-review-dialog approval-list-dialog"
         role="dialog"
       >
         <header>
           <ShieldCheck aria-hidden="true" />
           <div>
-            <span>Workflow approval</span>
-            <h2 id="approval-dialog-title">
-              {review.data ? `Approve ${review.data.stage}?` : "Review approval"}
-            </h2>
+            <span>Workflow intervention</span>
+            <h2 id="approval-dialog-title">Review required actions</h2>
+            <small>{candidates.length} waiting {
+              candidates.length === 1 ? "gate" : "gates"
+            }</small>
           </div>
           <button
-            aria-label="Close approval"
+            aria-label="Close required actions"
             className="icon-button"
             onClick={onClose}
             type="button"
@@ -87,60 +213,222 @@ export function ApprovalDialog({
             <X aria-hidden="true" />
           </button>
         </header>
-        {review.isPending ? (
-          <div className="action-review-loading" role="status">
-            <LoaderCircle className="spin" aria-hidden="true" />
-            Resolving the exact approval target
-          </div>
-        ) : review.isError ? (
-          <DialogError
-            error={review.error}
-            retry={() => void review.refetch()}
-          />
-        ) : review.data ? (
-          <>
-            <dl className="action-review-facts">
+        <div className="approval-review-list">
+          {candidates.map((candidate) => {
+            const review = reviewFor(candidate.targetId);
+            const busy = submitting.has(candidate.targetId);
+            const waiting = processing.has(candidate.targetId);
+            const impossible = candidate.immutable;
+            const resetRequired = impossible && candidate.resetTargetId;
+            return (
+              <article
+                className={[
+                  "approval-review-item",
+                  impossible ? "impossible-change" : "",
+                  candidate.targetId === initialTargetId ? "initial" : "",
+                ].filter(Boolean).join(" ")}
+                key={candidate.targetId}
+              >
+                <header>
+                  {impossible
+                    ? <AlertTriangle aria-hidden="true" />
+                    : <ShieldCheck aria-hidden="true" />}
+                  <div>
+                    <span>
+                      {resetRequired
+                        ? "Impossible update / reset required"
+                        : impossible
+                          ? "Impossible update / resource absent"
+                          : "Approval required"}
+                    </span>
+                    <h3>
+                      {review?.data?.resourceName ?? candidate.nodeLabel}
+                    </h3>
+                  </div>
+                  {review?.data ? (
+                    <strong>{review.data.stage}</strong>
+                  ) : null}
+                </header>
+                {review?.isPending ? (
+                  <div className="action-review-loading" role="status">
+                    <LoaderCircle className="spin" aria-hidden="true" />
+                    Resolving the exact gate
+                  </div>
+                ) : review?.isError ? (
+                  <DialogError
+                    error={review.error}
+                    retry={() => void review.refetch()}
+                  />
+                ) : review?.data ? (
+                  <>
+                    <p className="approval-item-effect">
+                      {review.data.effect}
+                    </p>
+                    {candidate.immutableReason ?? review.data.reason ? (
+                      <div className="action-warning">
+                        <AlertTriangle aria-hidden="true" />
+                        <span>
+                          {candidate.immutableReason ?? review.data.reason}
+                        </span>
+                      </div>
+                    ) : null}
+                    {resetRequired ? (
+                      <p className="approval-remedy">
+                        The deployed resource must be deleted before this
+                        configuration can be applied. Reset and retry performs
+                        both steps as one tracked operation.
+                      </p>
+                    ) : impossible ? (
+                      <p className="approval-remedy">
+                        The old resource is already absent. Edit the
+                        configuration or retry creating it.
+                      </p>
+                    ) : null}
+                    <small
+                      className="approval-gate-name"
+                      title={review.data.gateName}
+                    >
+                      Gate: {review.data.gateName}
+                    </small>
+                  </>
+                ) : null}
+                {waiting ? (
+                  <div className="approval-processing" role="status">
+                    <LoaderCircle className="spin" aria-hidden="true" />
+                    <span>
+                      Action accepted. Waiting for workflow reconciliation.
+                    </span>
+                  </div>
+                ) : null}
+                {problems[candidate.targetId] ? (
+                  <p className="action-inline-error">
+                    {problems[candidate.targetId]}
+                  </p>
+                ) : null}
+                <footer>
+                  {candidate.editTargetId ? (
+                    <button
+                      disabled={busy || waiting}
+                      onClick={() => onEdit(candidate)}
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" />
+                      Edit configuration
+                    </button>
+                  ) : null}
+                  {resetRequired ? (
+                    <button
+                      className="danger-confirm"
+                      disabled={busy || waiting || !review?.data}
+                      onClick={() => void resetAndRetry([candidate])}
+                      type="button"
+                    >
+                      {busy
+                        ? <LoaderCircle className="spin" aria-hidden="true" />
+                        : <RotateCcw aria-hidden="true" />}
+                      Reset &amp; retry apply
+                    </button>
+                  ) : (
+                    <button
+                      className="primary-button"
+                      disabled={
+                        busy
+                        || waiting
+                        || !review?.data
+                        || (!impossible && Boolean(candidate.disabledReason))
+                      }
+                      onClick={() => void approve(candidate)}
+                      title={
+                        !impossible
+                          ? candidate.disabledReason ?? undefined
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      {busy
+                        ? <LoaderCircle className="spin" aria-hidden="true" />
+                        : <ShieldCheck aria-hidden="true" />}
+                      {impossible ? "Retry create" : "Approve"}
+                    </button>
+                  )}
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+        {resetCandidates.length > 0 ? (
+          <section className="combined-reset-review">
+            <header>
               <div>
-                <dt>Resource</dt>
-                <dd>{review.data.resourceName ?? "Workflow"}</dd>
+                <strong>Combined reset plan</strong>
+                <span>
+                  Review and retry all impossible deployed updates together.
+                </span>
               </div>
-              <div>
-                <dt>Stage</dt>
-                <dd>{review.data.stage}</dd>
+              {combinedPlan.data ? (
+                <small>
+                  {combinedPlan.data.targets.length} {
+                    combinedPlan.data.targets.length === 1
+                      ? "resource"
+                      : "resources"
+                  } removed
+                </small>
+              ) : null}
+            </header>
+            {combinedPlan.isPending ? (
+              <div className="action-review-loading" role="status">
+                <LoaderCircle className="spin" aria-hidden="true" />
+                Building the dependency-safe reset plan
               </div>
-              <div>
-                <dt>ApprovalGate</dt>
-                <dd title={review.data.gateName}>{review.data.gateName}</dd>
-              </div>
-            </dl>
-            <div className="action-effect">
-              <strong>Effect</strong>
-              <p>{review.data.effect}</p>
-            </div>
-            {review.data.reason ? (
-              <div className="action-warning">
-                <AlertTriangle aria-hidden="true" />
-                <span>{review.data.reason}</span>
-              </div>
+            ) : combinedPlan.isError ? (
+              <DialogError
+                error={combinedPlan.error}
+                retry={() => void combinedPlan.refetch()}
+              />
+            ) : combinedPlan.data ? (
+              <details>
+                <summary>Show resources in deletion order</summary>
+                <ol className="reset-target-list">
+                  {combinedPlan.data.targets.map((target) => (
+                    <li key={`${target.plural}-${target.name}`}>
+                      <span>
+                        <strong>{target.path}</strong>
+                        <small>{target.phase}</small>
+                      </span>
+                      {target.dependsOn.length > 0 ? (
+                        <span>Depends on {target.dependsOn.join(", ")}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              </details>
             ) : null}
-          </>
+          </section>
         ) : null}
-        {problem ? <p className="action-inline-error">{problem}</p> : null}
         <footer>
-          <button disabled={submitting} onClick={onClose} type="button">
-            Cancel
-          </button>
-          <button
-            className="primary-button"
-            disabled={submitting || !review.data}
-            onClick={() => void approve()}
-            type="button"
-          >
-            {submitting
-              ? <LoaderCircle className="spin" aria-hidden="true" />
-              : <ShieldCheck aria-hidden="true" />}
-            Approve exact gate
-          </button>
+          <button onClick={onClose} type="button">Close</button>
+          {resetCandidates.length > 0 ? (
+            <button
+              className="danger-confirm"
+              disabled={
+                combinedPlan.isPending
+                || !combinedPlan.data
+                || !allResetReviewsReady
+                || resetCandidates.some((candidate) => (
+                  submitting.has(candidate.targetId)
+                  || processing.has(candidate.targetId)
+                ))
+              }
+              onClick={() => void resetAndRetry(
+                resetCandidates,
+                combinedPlan.data?.token,
+              )}
+              type="button"
+            >
+              <RotateCcw aria-hidden="true" />
+              Reset &amp; retry all ({resetCandidates.length})
+            </button>
+          ) : null}
         </footer>
       </section>
     </div>

@@ -179,6 +179,18 @@
             "title": "Approvaltargetid",
             "type": "string"
           },
+          "disabledReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disabledreason"
+          },
           "kind": {
             "const": "approve",
             "title": "Kind",
@@ -488,6 +500,18 @@
       "DiagnosticV1": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -498,6 +522,18 @@
             },
             "title": "Path",
             "type": "array"
+          },
+          "remedy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Remedy"
           },
           "severity": {
             "title": "Severity",
@@ -514,6 +550,30 @@
             ],
             "default": null,
             "title": "Source"
+          },
+          "technicalDetail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Technicaldetail"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
           }
         },
         "required": [
@@ -540,6 +600,18 @@
       "EditCapabilityV1": {
         "additionalProperties": false,
         "properties": {
+          "disabledReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disabledreason"
+          },
           "editTargetId": {
             "title": "Edittargetid",
             "type": "string"
@@ -1071,6 +1143,13 @@
       "ExecuteResetRequestV1": {
         "additionalProperties": false,
         "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ResetApprovalRequestV1"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
           "planToken": {
             "title": "Plantoken",
             "type": "string"
@@ -1676,6 +1755,18 @@
       "LogsCapabilityV1": {
         "additionalProperties": false,
         "properties": {
+          "disabledReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disabledreason"
+          },
           "kind": {
             "const": "logs",
             "title": "Kind",
@@ -1813,6 +1904,13 @@
             ],
             "default": null,
             "title": "Phase"
+          },
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/RelationshipV1"
+            },
+            "title": "Relationships",
+            "type": "array"
           },
           "resourceName": {
             "anyOf": [
@@ -2052,6 +2150,18 @@
       "OutputCapabilityV1": {
         "additionalProperties": false,
         "properties": {
+          "disabledReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disabledreason"
+          },
           "kind": {
             "const": "output",
             "title": "Kind",
@@ -2259,6 +2369,76 @@
         "title": "ProblemV1",
         "type": "object"
       },
+      "RelationshipV1": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "requires",
+              "required-by"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "kind": {
+            "const": "runtime-dependency",
+            "title": "Kind",
+            "type": "string"
+          },
+          "targetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Targetid"
+          },
+          "targetName": {
+            "title": "Targetname",
+            "type": "string"
+          },
+          "targetPhase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Targetphase"
+          },
+          "targetPlural": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Targetplural"
+          },
+          "targetStatus": {
+            "title": "Targetstatus",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "direction",
+          "targetName",
+          "targetStatus"
+        ],
+        "title": "RelationshipV1",
+        "type": "object"
+      },
       "RemoveConfigEditOperationV1": {
         "additionalProperties": false,
         "properties": {
@@ -2310,9 +2490,40 @@
         "title": "RenameConfigEditOperationV1",
         "type": "object"
       },
+      "ResetApprovalRequestV1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedGateRevision": {
+            "title": "Expectedgaterevision",
+            "type": "string"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId",
+          "expectedGateRevision"
+        ],
+        "title": "ResetApprovalRequestV1",
+        "type": "object"
+      },
       "ResetCapabilityV1": {
         "additionalProperties": false,
         "properties": {
+          "disabledReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disabledreason"
+          },
           "kind": {
             "const": "reset",
             "title": "Kind",
@@ -2339,13 +2550,24 @@
         "additionalProperties": false,
         "properties": {
           "targetId": {
-            "title": "Targetid",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetid"
+          },
+          "targetIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targetids",
+            "type": "array"
           }
         },
-        "required": [
-          "targetId"
-        ],
         "title": "ResetPlanRequestV1",
         "type": "object"
       },

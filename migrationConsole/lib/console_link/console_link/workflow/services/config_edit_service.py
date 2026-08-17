@@ -22,6 +22,7 @@ from ..external_resource_validation import (
     looks_like_pem_private_key,
 )
 from ..models.config import WorkflowConfig
+from ..models.secret_store import SecretStore
 from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
 from .script_runner import ScriptRunner
@@ -73,6 +74,9 @@ class ConfigEditService:
     store: Optional[WorkflowConfigStore] = None
     runner: Optional[ScriptRunner] = None
     session_name: str = "default"
+    core_api: Optional[Any] = None
+    custom_api: Optional[Any] = None
+    secret_store: Optional[SecretStore] = None
 
     def load_edit_session(self) -> ConfigEditSession:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
@@ -262,7 +266,11 @@ class ConfigEditService:
         )
 
     def load_latest_submitted_resolved_config(self, workflow_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        runs = list_resources_full(self.namespace, ["migrationruns"]).get("migrationruns", [])
+        runs = list_resources_full(
+            self.namespace,
+            ["migrationruns"],
+            self.custom_api,
+        ).get("migrationruns", [])
         if workflow_name:
             runs = [
                 run for run in runs
@@ -285,8 +293,10 @@ class ConfigEditService:
 
         self._validate_raw_config_for_submit(config.raw_yaml)
 
-        load_k8s_config()
-        secret_store = get_credentials_secret_store_for_namespace(self.namespace)
+        secret_store = (
+            self.secret_store
+            or get_credentials_secret_store_for_namespace(self.namespace)
+        )
         verify_configured_secrets_exist(secret_store, config.raw_yaml)
 
         if workflow_exists(self.namespace, workflow_name):
@@ -441,11 +451,15 @@ class ConfigEditService:
             raise RuntimeError(_format_config_processor_error(e)) from e
 
     def _core_v1(self):
+        if self.core_api is not None:
+            return self.core_api
         load_k8s_config()
         api_client = client.ApiClient(client.Configuration.get_default_copy())
         return client.CoreV1Api(api_client)
 
     def _custom_objects(self):
+        if self.custom_api is not None:
+            return self.custom_api
         load_k8s_config()
         api_client = client.ApiClient(client.Configuration.get_default_copy())
         return client.CustomObjectsApi(api_client)

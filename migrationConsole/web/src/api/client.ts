@@ -5,6 +5,7 @@ import type { components, paths } from "./schema.generated";
 
 export type ManageSnapshot = components["schemas"]["ManageSnapshotV1"];
 export type ManageNode = components["schemas"]["ManageNodeV1"];
+export type ManageRelationship = components["schemas"]["RelationshipV1"];
 export type ConfigDraft = components["schemas"]["ConfigDraftV1"];
 export type ConfigRemovalImpact =
   components["schemas"]["ConfigRemovalImpactV1"];
@@ -295,10 +296,34 @@ export async function getResetPlan(targetId: string): Promise<ResetPlan> {
 }
 
 
-export async function executeReset(planToken: string): Promise<Operation> {
+export async function getCombinedResetPlan(
+  targetIds: string[],
+): Promise<ResetPlan> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/resets/plan",
+    { body: { targetIds } },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "A combined reset plan could not be created",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function executeReset(
+  planToken: string,
+  approvals: {
+    targetId: string;
+    expectedGateRevision: string;
+  }[] = [],
+): Promise<Operation> {
   const { data, error, response } = await client.POST(
     "/api/v1/resets",
-    { body: { planToken } },
+    { body: { planToken, approvals } },
   );
   if (!response.ok || error || !data) {
     throw new ConfigApiError(

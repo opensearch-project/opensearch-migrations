@@ -134,6 +134,17 @@ export const manageSnapshot: ManageSnapshot = {
         { label: "Phase", value: "Ready", kind: "phase" },
         { label: "listenPort", value: 9201, kind: "spec" },
       ],
+      relationships: [
+        {
+          kind: "runtime-dependency",
+          direction: "required-by",
+          targetId: "resource:trafficreplays:replay",
+          targetName: "replay",
+          targetPlural: "trafficreplays",
+          targetPhase: "Running",
+          targetStatus: "running",
+        },
+      ],
       comparisons: [
         {
           path: "serviceType",
@@ -186,6 +197,17 @@ export const manageSnapshot: ManageSnapshot = {
         },
       ],
       details: [{ label: "Phase", value: "Running", kind: "phase" }],
+      relationships: [
+        {
+          kind: "runtime-dependency",
+          direction: "requires",
+          targetId: "resource:captureproxies:capture",
+          targetName: "capture",
+          targetPlural: "captureproxies",
+          targetPhase: "Ready",
+          targetStatus: "ok",
+        },
+      ],
       comparisons: [],
       resourcePlural: "trafficreplays",
       resourceName: "replay",

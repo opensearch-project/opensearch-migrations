@@ -80,6 +80,280 @@ test("renders real manage state with exact-node details and capabilities", async
 });
 
 
+test("separates runtime state from configuration state in the resource tree", async () => {
+  renderApp();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const capture = within(tree).getByRole(
+    "treeitem",
+    { name: /^capture, Ready$/ },
+  );
+
+  expect(within(capture).getByText("Ready")).toBeInTheDocument();
+  expect(within(capture).getByText("Needs attention")).toBeInTheDocument();
+  expect(within(capture).getByText("1 change to submit")).toBeInTheDocument();
+  expect(capture.querySelector(".status-dot")).toBeNull();
+});
+
+
+test("shows navigable upstream and downstream runtime dependencies", async () => {
+  renderApp();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  await userEvent.click(within(tree).getByRole(
+    "treeitem",
+    { name: /^capture, Ready$/ },
+  ));
+
+  expect(
+    screen.getByRole("heading", { name: "Required by" }),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", {
+    name: "Open dependent replay, Running",
+  }));
+
+  expect(screen.getByRole("heading", { name: "replay" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Requires" })).toBeInTheDocument();
+  expect(screen.getByRole("button", {
+    name: "Open prerequisite capture, Ready",
+  })).toBeInTheDocument();
+});
+
+
+test("surfaces failed prerequisites in navigation and workflow activity", async () => {
+  const blockedSnapshot = structuredClone(manageSnapshot);
+  const captureId = "resource:captureproxies:capture";
+  const replayId = "resource:trafficreplays:replay";
+  const failedStepId = `workflow-step:${captureId}:endpoint`;
+  blockedSnapshot.nodes[captureId] = {
+    ...blockedSnapshot.nodes[captureId],
+    childIds: [failedStepId],
+    status: "error",
+    phase: "Error",
+    valueSummary: "Error",
+    relationships: [{
+      kind: "runtime-dependency",
+      direction: "required-by",
+      targetId: replayId,
+      targetName: "replay",
+      targetPlural: "trafficreplays",
+      targetPhase: "Pending",
+      targetStatus: "pending",
+    }],
+  };
+  blockedSnapshot.nodes[replayId] = {
+    ...blockedSnapshot.nodes[replayId],
+    status: "pending",
+    phase: "Pending",
+    valueSummary: "Pending",
+    relationships: [{
+      kind: "runtime-dependency",
+      direction: "requires",
+      targetId: captureId,
+      targetName: "capture",
+      targetPlural: "captureproxies",
+      targetPhase: "Error",
+      targetStatus: "error",
+    }],
+  };
+  blockedSnapshot.nodes[failedStepId] = {
+    id: failedStepId,
+    revision: "failed-endpoint-1",
+    parentId: captureId,
+    childIds: [],
+    kind: "workflow-step",
+    label: "waitForProxyEndpointReady",
+    description: null,
+    status: "error",
+    phase: "Failed",
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+  };
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(blockedSnapshot),
+    ),
+  );
+
+  renderApp();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const replay = within(tree).getByRole(
+    "treeitem",
+    { name: /^replay, Pending$/ },
+  );
+  expect(within(replay).getByRole("button", {
+    name: "View blocker capture",
+  })).toHaveTextContent("Blocked by capture");
+  expect(screen.getByText("Running with 1 failed resource")).toBeInTheDocument();
+  expect(screen.getByText("1 downstream resource waiting")).toBeInTheDocument();
+  expect(screen.getByText(
+    "Current blocker: capture / waitForProxyEndpointReady",
+  )).toBeInTheDocument();
+
+  await userEvent.click(within(replay).getByRole("button", {
+    name: "View blocker capture",
+  }));
+  expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
+});
+
+
+test("lifts a VAP retry failure and requires reset before retrying apply", async () => {
+  const blockedSnapshot = structuredClone(manageSnapshot);
+  const captureId = "resource:captureproxies:capture";
+  const applyStepId = `workflow-step:${captureId}:apply`;
+  const failureMessage = (
+    'main: Error (exit code 64): no more retries The captureproxies "capture" '
+    + "is invalid: ValidatingAdmissionPolicy denied request: Impossible: "
+    + "sourceLabel cannot be changed. Delete and recreate."
+  );
+  blockedSnapshot.nodes[captureId] = {
+    ...blockedSnapshot.nodes[captureId],
+    childIds: [applyStepId],
+    status: "blocked",
+    phase: "Ready",
+    valueSummary: "Ready",
+    diagnostics: [{
+      severity: "error",
+      message: (
+        "Impossible: sourceLabel cannot be changed. Delete and recreate."
+      ),
+      path: [],
+      source: "workflow-apply",
+      code: "immutable-resource-update",
+      title: "Apply failed; reset required",
+      remedy: (
+        "Reset capture to delete and recreate it, then retry the apply."
+      ),
+      technicalDetail: failureMessage,
+    }],
+    capabilities: [
+      ...blockedSnapshot.nodes[captureId].capabilities,
+      {
+        kind: "approve",
+        approvalTargetId: "approval:apply",
+        label: "Retry apply",
+        disabledReason: "Reset capture before retrying this apply.",
+      },
+    ],
+  };
+  blockedSnapshot.nodes[applyStepId] = {
+    id: applyStepId,
+    revision: "apply-blocked-1",
+    parentId: captureId,
+    childIds: [],
+    kind: "workflow-step",
+    label: "Apply failed",
+    description: null,
+    status: "blocked",
+    phase: "Blocked",
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [{
+      kind: "approve",
+      approvalTargetId: "approval:apply",
+      label: "Retry apply",
+      disabledReason: "Reset capture before retrying this apply.",
+    }],
+    details: [
+      {
+        label: "Reason",
+        value: (
+          "Impossible: sourceLabel cannot be changed. Delete and recreate."
+        ),
+        kind: "message",
+      },
+      {
+        label: "Remedy",
+        value: (
+          "Reset capture to delete and recreate it, then retry the apply."
+        ),
+        kind: "remedy",
+      },
+      {
+        label: "Technical details",
+        value: failureMessage,
+        kind: "technical",
+      },
+    ],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+  };
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(blockedSnapshot),
+    ),
+  );
+
+  renderApp();
+
+  const requiredActions = await screen.findByRole("dialog", {
+    name: "Review required actions",
+  });
+  expect(within(requiredActions).getByText(
+    "Impossible update / reset required",
+  )).toBeInTheDocument();
+  expect(await within(requiredActions).findByText(
+    /deployed resource must be deleted/,
+  )).toBeInTheDocument();
+  expect(within(requiredActions).getByRole("button", {
+    name: "Edit configuration",
+  })).toBeEnabled();
+  await waitFor(() => expect(within(requiredActions).getByRole("button", {
+    name: "Reset & retry apply",
+  })).toBeEnabled());
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const capture = within(tree).getByRole(
+    "treeitem",
+    { name: /^capture, Ready$/ },
+  );
+  expect(within(capture).getByText("Reset before approval"))
+    .toBeInTheDocument();
+  expect(within(capture).getByText(/sourceLabel cannot be changed/))
+    .toBeInTheDocument();
+  await userEvent.click(capture);
+
+  expect(screen.getByRole("region", {
+    name: "Reset required before approval",
+  })).toBeInTheDocument();
+  const issue = screen.getByRole("alert", {
+    name: "Apply failed; reset required",
+  });
+  expect(within(issue).getByText(
+    "Impossible: sourceLabel cannot be changed. Delete and recreate.",
+  )).toBeInTheDocument();
+  expect(within(issue).getByText(
+    "Reset capture to delete and recreate it, then retry the apply.",
+  )).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Retry apply" }))
+    .toBeDisabled();
+  expect(screen.getByRole("button", { name: "Retry apply" }))
+    .toHaveAttribute(
+      "title",
+      "Reset capture before retrying this apply.",
+    );
+
+  await userEvent.click(within(capture).getByRole("button", {
+    name: "Expand capture",
+  }));
+  expect(within(tree).getByRole("treeitem", {
+    name: "Apply failed, Blocked",
+  })).toBeInTheDocument();
+});
+
+
 test("starts pauses and explicitly stops bounded resource logs", async () => {
   let startRequest: unknown;
   let stoppedStream: string | undefined;
@@ -197,12 +471,157 @@ test("opens resource-owned managed output with context and download", async () =
 });
 
 
+test("resets and retries all impossible deployed updates in one action", async () => {
+  const actionState = structuredClone(manageSnapshot);
+  const immutableMessage = (
+    "Impossible: sourceLabel cannot be changed. Delete and recreate."
+  );
+  const targets = [
+    {
+      nodeId: "resource:captureproxies:capture",
+      approvalTargetId: "approval:capture-apply",
+      resetTargetId: "reset:captureproxies:capture",
+      name: "capture",
+      revision: "11",
+    },
+    {
+      nodeId: "resource:trafficreplays:replay",
+      approvalTargetId: "approval:replay-apply",
+      resetTargetId: "reset:trafficreplays:replay",
+      name: "replay",
+      revision: "12",
+    },
+  ];
+  targets.forEach((target) => {
+    const node = actionState.nodes[target.nodeId];
+    node.status = "blocked";
+    node.configPresence = { deployed: true };
+    node.diagnostics = [{
+      severity: "error",
+      message: immutableMessage,
+      path: [],
+      source: "workflow-apply",
+      code: "immutable-resource-update",
+      title: "Apply failed; reset required",
+      remedy: "Reset the resource, then retry the apply.",
+    }];
+    node.capabilities = [
+      ...node.capabilities.filter((capability) => (
+        capability.kind !== "reset"
+        && capability.kind !== "approve"
+      )),
+      {
+        kind: "reset",
+        resetTargetId: target.resetTargetId,
+        label: `Reset ${target.name}`,
+      },
+      {
+        kind: "approve",
+        approvalTargetId: target.approvalTargetId,
+        label: "Retry apply",
+        disabledReason: `Reset ${target.name} before retrying this apply.`,
+      },
+    ];
+  });
+  let resetPlanRequest: unknown;
+  let resetRequest: unknown;
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(actionState)),
+    http.get("*/api/v1/approvals/review", ({ request }) => {
+      const targetId = new URL(request.url).searchParams.get("targetId");
+      const target = targets.find(
+        (candidate) => candidate.approvalTargetId === targetId,
+      ) as (typeof targets)[number];
+      return HttpResponse.json({
+        targetId,
+        nodeId: targetId?.replace("approval:", ""),
+        gateName: `${target.name}.vapretry`,
+        gateRevision: target.revision,
+        workflowName: "migration",
+        resourceId: target.nodeId,
+        resourceKind: "MigrationResource",
+        resourceName: target.name,
+        stage: "Resource reconciliation",
+        effect: "Approving retries applying the resource configuration.",
+        reason: immutableMessage,
+        snapshotRevision: actionState.revision,
+      });
+    }),
+    http.post("*/api/v1/resets/plan", async ({ request }) => {
+      resetPlanRequest = await request.json();
+      return HttpResponse.json({
+        token: "combined-reset-token",
+        requestTargetId: targets[0].resetTargetId,
+        targets: targets.map((target) => ({
+          plural: target.resetTargetId.split(":")[1],
+          type: "migrationresource",
+          name: target.name,
+          path: `migrationresource.${target.name}`,
+          phase: "Ready",
+          dependsOn: [],
+        })),
+        messages: [],
+        warnings: [],
+      });
+    }),
+    http.post("*/api/v1/resets", async ({ request }) => {
+      resetRequest = await request.json();
+      return HttpResponse.json({
+        id: "operation-reset-all",
+        kind: "reset",
+        label: "Reset and retry 2 resources",
+        status: "queued",
+        targetIds: targets.map((target) => target.nodeId),
+        createdAt: "2026-08-15T12:00:00Z",
+        updatedAt: "2026-08-15T12:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+  );
+
+  renderApp();
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Review required actions",
+  });
+  expect(await within(dialog).findByText("2 resources removed"))
+    .toBeInTheDocument();
+  const resetAll = within(dialog).getByRole("button", {
+    name: "Reset & retry all (2)",
+  });
+  expect(resetAll).toBeEnabled();
+  await userEvent.click(resetAll);
+
+  await waitFor(() => expect(resetPlanRequest).toEqual({
+    targetIds: targets.map((target) => target.resetTargetId),
+  }));
+  await waitFor(() => expect(resetRequest).toEqual({
+    planToken: "combined-reset-token",
+    approvals: targets.map((target) => ({
+      targetId: target.approvalTargetId,
+      expectedGateRevision: target.revision,
+    })),
+  }));
+  expect(within(dialog).getAllByText(
+    "Action accepted. Waiting for workflow reconciliation.",
+  )).toHaveLength(2);
+});
+
+
 test("reviews exact approval and reset targets before starting operations", async () => {
   const actionState = structuredClone(manageSnapshot);
   actionState.nodes["resource:captureproxies:capture"].capabilities.push({
     kind: "approve",
     approvalTargetId: "approval:approval-node",
     label: "Approve metadata",
+  });
+  actionState.nodes["resource:trafficreplays:replay"].capabilities.push({
+    kind: "approve",
+    approvalTargetId: "approval:replay-node",
+    label: "Approve replay",
   });
   let approvalRequest: unknown;
   let resetRequest: unknown;
@@ -238,21 +657,31 @@ test("reviews exact approval and reset targets before starting operations", asyn
   );
   renderApp();
 
-  await userEvent.click(await screen.findByRole("button", {
-    name: "Approve metadata",
-  }));
   const approval = await screen.findByRole("dialog", {
-    name: "Approve Metadata evaluation?",
+    name: "Review required actions",
   });
-  expect(within(approval).getByText("migration-0")).toBeInTheDocument();
-  expect(within(approval).getByText(/advances to metadata migration/))
-    .toBeInTheDocument();
-  await userEvent.click(within(approval).getByRole("button", {
-    name: "Approve exact gate",
-  }));
+  expect(within(approval).getByText("2 waiting gates")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(within(approval).getAllByText("migration-0")).toHaveLength(2);
+    expect(within(approval).getAllByText(
+      /advances to metadata migration/,
+    )).toHaveLength(2);
+  });
+  expect(within(approval).getAllByText("Approval required")).toHaveLength(2);
+  await userEvent.click(within(approval).getAllByRole("button", {
+    name: "Approve",
+  })[0]);
   await waitFor(() => expect(approvalRequest).toEqual({
     targetId: "approval:approval-node",
     expectedGateRevision: "11",
+  }));
+  expect(within(approval).getByText(
+    "Action accepted. Waiting for workflow reconciliation.",
+  )).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Approval required" }))
+    .toBeInTheDocument();
+  await userEvent.click(within(approval).getByRole("button", {
+    name: "Close required actions",
   }));
 
   await userEvent.click(screen.getByRole("button", {
@@ -268,7 +697,113 @@ test("reviews exact approval and reset targets before starting operations", asyn
   }));
   await waitFor(() => expect(resetRequest).toEqual({
     planToken: "reset-token",
+    approvals: [],
   }));
+});
+
+
+test("keeps a dismissed approval visible without repeatedly opening it", async () => {
+  const actionState = structuredClone(manageSnapshot);
+  actionState.nodes["resource:captureproxies:capture"].capabilities.push({
+    kind: "approve",
+    approvalTargetId: "approval:approval-node",
+    label: "Approve metadata",
+  });
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(actionState)),
+  );
+  renderApp();
+
+  const approval = await screen.findByRole("dialog", {
+    name: "Review required actions",
+  });
+  await userEvent.click(within(approval).getByRole("button", {
+    name: "Close required actions",
+  }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Refresh state",
+  }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+  const notice = screen.getByRole("region", { name: "Approval required" });
+  expect(within(notice).getByText("migration-0")).toBeInTheDocument();
+  expect(within(notice).getByText("Metadata evaluation")).toBeInTheDocument();
+  expect(within(notice).getByText(/advances to metadata migration/))
+    .toBeInTheDocument();
+  await userEvent.click(within(notice).getByRole("button", {
+    name: "Review required actions",
+  }));
+  expect(await screen.findByRole("dialog", {
+    name: "Review required actions",
+  })).toBeInTheDocument();
+});
+
+
+test("labels orphan cleanup and active removal without implying automatic pruning", async () => {
+  const orphanedState = structuredClone(manageSnapshot);
+  const capture = orphanedState.nodes["resource:captureproxies:capture"];
+  capture.valueSummary = "Orphaned; cleanup required";
+  capture.configPresence = {
+    deployed: true,
+    submitted: false,
+    pending: false,
+  };
+  let operations = { operations: [] as Array<{
+    id: string;
+    kind: string;
+    label: string;
+    status: "running";
+    targetIds: string[];
+    createdAt: string;
+    updatedAt: string;
+    message: string;
+    detail: null;
+    result: Record<string, never>;
+  }> };
+  server.use(
+    http.get("*/api/v1/manage/state", () =>
+      HttpResponse.json(orphanedState)),
+    http.get("*/api/v1/operations", () => HttpResponse.json(operations)),
+  );
+  renderApp();
+
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  expect(within(tree).getByRole("treeitem", {
+    name: /^capture, Orphaned; cleanup required$/,
+  })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Cleanup required" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reset capture" }))
+    .toHaveClass("primary-button");
+
+  operations = {
+    operations: [{
+      id: "reset-capture",
+      kind: "reset",
+      label: "Reset captureproxy.capture",
+      status: "running",
+      targetIds: ["resource:captureproxies:capture"],
+      createdAt: "2026-08-14T13:00:00Z",
+      updatedAt: "2026-08-14T13:00:01Z",
+      message: "Removing resource",
+      detail: null,
+      result: {},
+    }],
+  };
+  await userEvent.click(screen.getByRole("button", {
+    name: "Refresh state",
+  }));
+  await waitFor(() => expect(within(tree).getByRole("treeitem", {
+    name: /^capture, Removing$/,
+  })).toBeInTheDocument());
+  expect(screen.getAllByText("Removing")).not.toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Reset capture" }))
+    .toBeDisabled();
 });
 
 
@@ -972,10 +1507,12 @@ test("identifies resources within a mixed-type navigation group", async () => {
   const s3 = within(tree).getByRole("treeitem", {
     name: /^proxy-topic, S3 source, Ready$/,
   });
-  expect(within(kafka).getByText("Kafka cluster - Configured"))
-    .toBeInTheDocument();
-  expect(within(s3).getByText("S3 source - Configured"))
-    .toBeInTheDocument();
+  expect(within(kafka).getByText("Kafka cluster")).toBeInTheDocument();
+  expect(within(kafka).getByText("Ready")).toBeInTheDocument();
+  expect(within(kafka).getByText("Configured")).toBeInTheDocument();
+  expect(within(s3).getByText("S3 source")).toBeInTheDocument();
+  expect(within(s3).getByText("Ready")).toBeInTheDocument();
+  expect(within(s3).getByText("Configured")).toBeInTheDocument();
 });
 
 

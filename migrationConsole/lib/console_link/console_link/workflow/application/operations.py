@@ -184,13 +184,21 @@ class OperationManager:
         active = set(active_target_ids)
         completed = []
         for operation in self.list():
-            if operation.kind != "approve" or operation.status != "waiting":
+            if (
+                operation.kind not in {"approve", "reset"}
+                or operation.status != "waiting"
+            ):
                 continue
-            target_id = str(
-                operation.result.get("approvalTargetId") or ""
-            )
+            target_ids = {
+                str(target_id)
+                for target_id in (
+                    operation.result.get("approvalTargetIds")
+                    or [operation.result.get("approvalTargetId")]
+                )
+                if target_id
+            }
             baseline = str(operation.result.get("baselineRevision") or "")
-            if snapshot_revision == baseline or target_id in active:
+            if snapshot_revision == baseline or target_ids & active:
                 continue
             self.succeed(
                 operation.id,

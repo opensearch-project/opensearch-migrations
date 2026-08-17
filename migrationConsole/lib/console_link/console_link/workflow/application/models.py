@@ -10,6 +10,10 @@ class ManageDiagnostic:
     message: str
     path: Tuple[str, ...] = ()
     source: Optional[str] = None
+    code: Optional[str] = None
+    title: Optional[str] = None
+    remedy: Optional[str] = None
+    technical_detail: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -19,6 +23,14 @@ class ManageDiagnostic:
         }
         if self.source:
             result["source"] = self.source
+        if self.code:
+            result["code"] = self.code
+        if self.title:
+            result["title"] = self.title
+        if self.remedy:
+            result["remedy"] = self.remedy
+        if self.technical_detail:
+            result["technicalDetail"] = self.technical_detail
         return result
 
 
@@ -41,6 +53,7 @@ class ManageCapability:
     kind: str
     target_id: str
     label: Optional[str] = None
+    disabled_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -49,6 +62,8 @@ class ManageCapability:
         }
         if self.label:
             result["label"] = self.label
+        if self.disabled_reason:
+            result["disabledReason"] = self.disabled_reason
         return result
 
 
@@ -104,6 +119,32 @@ class ManageDetail:
 
 
 @dataclass(frozen=True)
+class ManageRelationship:
+    kind: str
+    direction: str
+    target_name: str
+    target_status: str
+    target_id: Optional[str] = None
+    target_plural: Optional[str] = None
+    target_phase: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "kind": self.kind,
+            "direction": self.direction,
+            "targetName": self.target_name,
+            "targetStatus": self.target_status,
+        }
+        if self.target_id:
+            result["targetId"] = self.target_id
+        if self.target_plural:
+            result["targetPlural"] = self.target_plural
+        if self.target_phase:
+            result["targetPhase"] = self.target_phase
+        return result
+
+
+@dataclass(frozen=True)
 class ManageNode:
     id: str
     revision: str
@@ -118,6 +159,7 @@ class ManageNode:
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
     capabilities: Tuple[ManageCapability, ...] = ()
     details: Tuple[ManageDetail, ...] = ()
+    relationships: Tuple[ManageRelationship, ...] = ()
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
@@ -134,6 +176,7 @@ class ManageNode:
             "diagnostics": [item.to_dict() for item in self.diagnostics],
             "capabilities": [item.to_dict() for item in self.capabilities],
             "details": [item.to_dict() for item in self.details],
+            "relationships": [item.to_dict() for item in self.relationships],
             "comparisons": [item.to_dict() for item in self.comparisons],
         }
         if self.parent_id:
