@@ -93,6 +93,21 @@ spec:
                 - {name: CONSOLE_CONFIG_BASE64,      value: "${CONSOLE_CONFIG_BASE64}"}
                 - {name: WORKFLOW_SCRIPTS_ROOT,      value: "${WORKFLOW_SCRIPTS_ROOT}"}
                 - {name: RFS_MONITOR_WORKFLOW_UID_LABEL, value: "${RFS_MONITOR_WORKFLOW_UID_LABEL}"}
+                # Phase 3 reads the failed document stream from S3 to tell Completed from
+                # CompletedWithErrors. Present only under LocalStack; on real AWS the Secret
+                # is absent and the pod's own credentials apply.
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: migrations-default-s3-creds
+                      key: accessKey
+                      optional: true
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: migrations-default-s3-creds
+                      key: secretKey
+                      optional: true
 YAML
 }
 
