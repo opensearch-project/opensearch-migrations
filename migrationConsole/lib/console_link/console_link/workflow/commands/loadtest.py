@@ -382,8 +382,18 @@ def logs_command(namespace, name, follow=False):
 def wait_for_run(namespace, name, timeout, interval):
     """Poll a run Workflow until it reaches a terminal phase; return the phase, or None on timeout.
 
-    The workflow's success/failure conditions already encode the operator's verdict, so a
-    `Succeeded` phase means the TestRun reached stage `finished`.
+    The phase is Argo's `.status.phase` on the Workflow, NOT the k6-operator's `.status.stage` on
+    the TestRun it drives. Argo defines five:
+
+      Pending    - accepted, no pod scheduled yet
+      Running    - the resource task is creating the TestRun or polling its stage
+      Succeeded  - terminal, the only success
+      Failed     - terminal, the run itself failed
+      Error      - terminal, Argo could not run the step (RBAC, a malformed manifest, the
+                   `activeDeadlineSeconds` cap)
+
+    `Failed` vs `Error` is worth reading as a hint about where to look: the former points at
+    the load test, the latter at the setup around it.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:

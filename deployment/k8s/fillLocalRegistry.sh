@@ -11,21 +11,6 @@ MIGRATIONS_REPO_ROOT_DIR="$(git rev-parse --show-toplevel)"
 
 docker network inspect local-migrations-network >/dev/null 2>&1 || docker network create local-migrations-network
 
-# A container that exists but isn't running (exited, or stuck in a restart loop) would otherwise be
-# treated as "already there" by the checks below, silently reusing a broken container forever. Drop
-# it so it gets recreated with the current arguments.
-drop_if_not_running() {
-  local name=$1
-  if docker ps -a -q -f "name=^${name}$" | grep -q . && \
-     [ "$(docker inspect -f '{{.State.Running}}{{.State.Restarting}}' "$name")" != "truefalse" ]; then
-    echo "Removing stale '${name}' container (not running)"
-    docker rm -f "$name" >/dev/null
-  fi
-}
-
-drop_if_not_running docker-registry
-drop_if_not_running buildkitd
-
 docker ps -q -f name=^docker-registry$ | grep -q . || docker run -d --restart=always \
   --name docker-registry \
   --network local-migrations-network \
