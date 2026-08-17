@@ -348,6 +348,18 @@ class TestConfigureEditHints:
 class TestSubmitHints:
     """workflow submit — success, --wait, and error paths."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_admission_preflight(self):
+        with patch(
+            "console_link.workflow.commands.submit."
+            "ConfigEditService.preflight_raw_config"
+        ) as preflight:
+            preflight.return_value = Mock(
+                allowed=True,
+                warning_issues=(),
+            )
+            yield
+
     def _base_patches(self):
         """Return list of patch targets always needed for submit."""
         return [

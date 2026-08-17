@@ -221,6 +221,19 @@ class ConfigDraftService:
                 )
             return self.save(expected_revision)
 
+    def preflight(
+        self,
+        expected_revision: str,
+        workflow_name: str,
+    ) -> Any:
+        """Check the exact in-memory draft against live admission without saving."""
+        with self._lock:
+            self._require_revision(expected_revision)
+            return self._edit_service.preflight_raw_config(
+                self._raw_yaml or "",
+                workflow_name,
+            )
+
     def submit_saved(self, workflow_name: str) -> Dict[str, Any]:
         """Submit the already-validated saved config from an operation worker."""
         return self._edit_service.submit_saved_config(workflow_name)

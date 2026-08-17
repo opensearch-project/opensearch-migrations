@@ -25,6 +25,10 @@ from ..models.config import WorkflowConfig
 from ..models.secret_store import SecretStore
 from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
+from .admission_preflight import (
+    AdmissionPreflightReport,
+    AdmissionPreflightService,
+)
 from .script_runner import ScriptRunner
 
 
@@ -61,6 +65,19 @@ class ConfigEditApplyResult:
     edit_state: Dict[str, Any]
 
 
+class AdmissionPreflightBlocked(ValueError):
+    def __init__(self, report: AdmissionPreflightReport):
+        self.report = report
+        details = "; ".join(
+            f"{issue.kind} {issue.name}: {issue.message}"
+            for issue in report.blocking_issues
+        )
+        super().__init__(
+            "Workflow submission is blocked by admission preflight"
+            + (f": {details}" if details else "")
+        )
+
+
 @dataclass
 class ConfigEditService:
     """Loads edit-state DTOs from config-processor.
@@ -77,6 +94,7 @@ class ConfigEditService:
     core_api: Optional[Any] = None
     custom_api: Optional[Any] = None
     secret_store: Optional[SecretStore] = None
+    admission_preflight: Optional[AdmissionPreflightService] = None
 
     def load_edit_session(self) -> ConfigEditSession:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
@@ -299,6 +317,13 @@ class ConfigEditService:
         )
         verify_configured_secrets_exist(secret_store, config.raw_yaml)
 
+        report = self.preflight_raw_config(
+            config.raw_yaml,
+            workflow_name,
+        )
+        if not report.allowed:
+            raise AdmissionPreflightBlocked(report)
+
         if workflow_exists(self.namespace, workflow_name):
             stop_workflow(self.namespace, workflow_name)
             delete_workflow(self.namespace, workflow_name)
@@ -306,12 +331,41 @@ class ConfigEditService:
                 raise TimeoutError(f"Timed out waiting for workflow '{workflow_name}' to be deleted")
 
         runner = self.runner or ScriptRunner()
-        return runner.submit_workflow(
+        result = runner.submit_workflow(
             config.raw_yaml,
             [
                 "--workflow-name", workflow_name,
                 "--unique-run-nonce", unique_run_nonce or str(int(time.time())),
             ],
+        )
+        warnings = list(result.get("warnings") or ())
+        warnings.extend(
+            f"{issue.kind} {issue.name}: {issue.message}"
+            for issue in report.warning_issues
+        )
+        if warnings:
+            result["warnings"] = list(dict.fromkeys(warnings))
+        return result
+
+    def preflight_raw_config(
+        self,
+        raw_yaml: str,
+        workflow_name: str = DEFAULT_WORKFLOW_NAME,
+    ) -> AdmissionPreflightReport:
+        resolved = self._run_resolve_migration_resources(
+            raw_yaml,
+            "--user-config",
+            workflow_name,
+            include_parameter_policies=True,
+        )
+        service = self.admission_preflight or AdmissionPreflightService(
+            self.namespace,
+            custom_api=self._custom_objects(),
+        )
+        return service.check(
+            resolved,
+            workflow_name=workflow_name,
+            run_number=str(int(time.time() * 1000)),
         )
 
     def _validate_raw_config_for_submit(self, raw_yaml: str) -> None:
@@ -410,6 +464,7 @@ class ConfigEditService:
         input_arg: str,
         workflow_name: Optional[str] = None,
         validation_mode: str = "strict",
+        include_parameter_policies: bool = False,
     ) -> Dict[str, Any]:
         with tempfile.NamedTemporaryFile(mode="w", suffix=YAML_SUFFIX, delete=True) as temp_file:
             temp_file.write(input_data)
@@ -421,6 +476,8 @@ class ConfigEditService:
             ]
             if workflow_name:
                 args.extend(["--workflow-name", workflow_name])
+            if include_parameter_policies:
+                args.append("--include-parameter-policies")
             if validation_mode != "strict":
                 args.extend(["--validation-mode", validation_mode])
             output = self._run_config_processor_node_script(*args)

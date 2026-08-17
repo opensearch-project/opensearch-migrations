@@ -65,6 +65,13 @@ export const server = setupServer(
       changes: [],
     }),
   ),
+  http.post("*/api/v1/config/preflight", () =>
+    HttpResponse.json({
+      checkedResources: 0,
+      allowed: true,
+      issues: [],
+    }),
+  ),
   http.get("*/api/v1/outputs", ({ request }) => {
     const targetId = new URL(request.url).searchParams.get("targetId") ?? "";
     return HttpResponse.json({

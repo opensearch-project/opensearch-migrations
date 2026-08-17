@@ -35,6 +35,7 @@ from ..application.resets import (
 )
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from .contracts import (
+    AdmissionPreflightV1,
     ApplyEditOperationRequestV1,
     ApproveRequestV1,
     ApprovalReviewV1,
@@ -614,6 +615,26 @@ def create_app(
         )
         return OperationV1.from_domain(operation)
 
+    @app.post(
+        "/api/v1/config/preflight",
+        response_model=AdmissionPreflightV1,
+        response_model_exclude_none=True,
+        tags=["configuration"],
+    )
+    def preflight_config(
+        request_body: DraftRevisionRequestV1,
+    ) -> AdmissionPreflightV1:
+        try:
+            report = draft_service().preflight(
+                request_body.expected_draft_revision,
+                workflow_name,
+            )
+        except ConfigDraftConflict as error:
+            raise _draft_conflict(error) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return AdmissionPreflightV1.from_domain(report)
+
     @app.get(
         "/api/v1/operations",
         response_model=OperationListV1,
@@ -769,28 +790,37 @@ def create_app(
         except ResetPlanStale as error:
             raise _action_error(409, "reset_plan_stale", error) from error
 
-        approval_reviews = []
-        for requested_approval in request_body.approvals:
+        resubmit = request_body.resubmit or bool(request_body.approvals)
+        if resubmit and config_drafts is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Configuration submission is not configured",
+            )
+        if request_body.expected_draft_revision:
+            if not resubmit:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "A draft revision is only valid for reset and "
+                        "resubmit."
+                    ),
+                )
             try:
-                approval_reviews.append(approval_service().validate(
-                    requested_approval.target_id,
-                    requested_approval.expected_gate_revision,
-                ))
-            except ApprovalUnavailable as error:
-                raise _action_error(
-                    404,
-                    "approval_unavailable",
-                    error,
-                ) from error
-            except ApprovalStale as error:
-                raise _action_error(
-                    409,
-                    "approval_stale",
-                    error,
+                draft_service().prepare_submit(
+                    request_body.expected_draft_revision
+                )
+            except ConfigDraftConflict as error:
+                raise _draft_conflict(error) from error
+            except SavedConfigConflict as error:
+                raise _saved_config_conflict(error) from error
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(error),
                 ) from error
 
         baseline_revision = ""
-        if coordinator is not None and approval_reviews:
+        if coordinator is not None and resubmit:
             try:
                 baseline_revision = (
                     await coordinator.get_observation()
@@ -800,44 +830,37 @@ def create_app(
 
         def reset_worker() -> OperationWorkResult:
             result = reset_service().execute(request_body.plan_token)
-            accepted = [
-                approval_service().approve(
-                    review.target_id,
-                    review.gate_revision,
-                )
-                for review in approval_reviews
-            ]
             operation_result = {
                 "planToken": result.plan.token,
                 "targetCount": len(result.plan.targets),
             }
-            if accepted:
+            submission = None
+            if resubmit:
+                submission = draft_service().submit_saved(workflow_name)
+                submitted_name = str(
+                    (submission or {}).get("workflow_name")
+                    or workflow_name
+                )
                 operation_result.update({
-                    "approvalTargetId": accepted[0].target_id,
-                    "approvalTargetIds": [
-                        review.target_id for review in accepted
-                    ],
-                    "gateNames": [
-                        review.gate_name for review in accepted
-                    ],
+                    "workflowName": submitted_name,
                     "baselineRevision": baseline_revision,
                 })
             return OperationWorkResult(
-                waiting=bool(accepted),
+                waiting=resubmit,
                 message=(
-                    "Reset completed and apply retry accepted; "
-                    "waiting for workflow reconciliation"
-                    if accepted else result.message
+                    "Reset completed and configuration submitted; "
+                    "waiting for the replacement workflow"
+                    if resubmit else result.message
                 ),
                 detail=result.detail,
                 result=operation_result,
             )
 
-        if approval_reviews:
+        if resubmit:
             label = (
-                f"Reset and retry {plan.targets[0].path}"
+                f"Reset and resubmit {plan.targets[0].path}"
                 if len(plan.targets) == 1
-                else f"Reset and retry {len(plan.targets)} resources"
+                else f"Reset and resubmit {len(plan.targets)} resources"
             )
         else:
             label = (

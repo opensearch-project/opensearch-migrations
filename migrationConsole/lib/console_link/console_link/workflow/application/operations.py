@@ -149,7 +149,11 @@ class OperationManager:
     ) -> Tuple[str, ...]:
         completed = []
         for operation in self.list():
-            if operation.kind != "submit" or operation.status != "waiting":
+            if (
+                operation.kind not in {"submit", "reset"}
+                or operation.status != "waiting"
+                or not operation.result.get("workflowName")
+            ):
                 continue
             expected_name = str(operation.result.get("workflowName") or "")
             baseline = str(operation.result.get("baselineRevision") or "")
@@ -185,7 +189,7 @@ class OperationManager:
         completed = []
         for operation in self.list():
             if (
-                operation.kind not in {"approve", "reset"}
+                operation.kind != "approve"
                 or operation.status != "waiting"
             ):
                 continue

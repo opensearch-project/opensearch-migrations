@@ -11,6 +11,10 @@ from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
+from console_link.workflow.services.admission_preflight import (
+    AdmissionPreflightIssue,
+    AdmissionPreflightReport,
+)
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 
 
@@ -254,11 +258,58 @@ class TestWorkflowCLICommands:
         assert "--workflow-name" in mock_subprocess.call_args[0][0]
         assert "migration-workflow" in mock_subprocess.call_args[0][0]
         assert "--quiet" in mock_subprocess.call_args[0][0]
-        assert mock_subprocess.call_count == 1
+        assert mock_subprocess.call_count == 2
+        assert "resolveMigrationResources" in mock_subprocess.call_args_list[0][0][0]
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
         _mock_verify_secrets.assert_called_once()
+
+    @patch(
+        "console_link.workflow.commands.submit.ConfigEditService.preflight_raw_config"
+    )
+    @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
+    @patch(
+        "console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace"
+    )
+    @patch("console_link.workflow.commands.submit.workflow_exists")
+    @patch("console_link.workflow.commands.submit.load_k8s_config")
+    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
+    def test_submit_command_stops_before_replacing_workflow_when_preflight_blocks(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+        mock_preflight,
+    ):
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.load_config.return_value = WorkflowConfig({
+            "sourceClusters": {},
+        })
+        mock_preflight.return_value = AdmissionPreflightReport(
+            checked_resources=1,
+            issues=(AdmissionPreflightIssue(
+                kind="CapturedTraffic",
+                name="p2-topic",
+                plural="capturedtraffics",
+                classification="recreate-required",
+                message="sourceLabel cannot be changed",
+                source="kubernetes",
+            ),),
+        )
+
+        result = CliRunner().invoke(workflow_cli, ["submit"])
+
+        assert result.exit_code == 1
+        assert "blocked by admission preflight" in result.output
+        assert "sourceLabel cannot be changed" in result.output
+        mock_exists.assert_not_called()
+        mock_subprocess.assert_not_called()
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -437,7 +488,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
-        assert mock_subprocess.call_count == 1
+        assert mock_subprocess.call_count == 2
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -495,7 +546,7 @@ class TestWorkflowCLICommands:
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
         mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
-        assert mock_subprocess.call_count == 1
+        assert mock_subprocess.call_count == 2
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -1866,7 +1917,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
-        assert mock_subprocess.call_count == 1
+        assert mock_subprocess.call_count == 2
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 

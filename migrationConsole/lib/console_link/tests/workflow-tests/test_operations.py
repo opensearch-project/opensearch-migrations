@@ -129,39 +129,38 @@ def test_approval_stays_waiting_until_capability_disappears():
     assert manager.get(approval.id).status == "succeeded"
 
 
-def test_reset_and_retry_waits_for_every_approval_to_disappear():
+def test_reset_and_resubmit_waits_for_the_new_workflow_to_be_observed():
     manager = OperationManager(
         executor=_InlineExecutor(),
         clock=_clock,
     )
     reset = manager.start(
         kind="reset",
-        label="Reset and retry 2 resources",
+        label="Reset and resubmit 2 resources",
         target_ids=(
             "resource:capturedtraffics:p2-topic",
             "resource:datasnapshots:source-snap1",
         ),
         worker=lambda: OperationWorkResult(
             waiting=True,
-            message="Waiting for workflow reconciliation",
+            message="Waiting for the replacement workflow",
             result={
-                "approvalTargetIds": [
-                    "approval:topic",
-                    "approval:snapshot",
-                ],
+                "workflowName": "migration",
                 "baselineRevision": "before",
             },
         ),
     )
 
-    assert manager.reconcile_approvals(
-        active_target_ids=("approval:snapshot",),
+    assert manager.reconcile_submit(
+        workflow_name=None,
         snapshot_revision="during",
+        workflow_phase=None,
     ) == ()
     assert manager.get(reset.id).status == "waiting"
 
-    assert manager.reconcile_approvals(
-        active_target_ids=(),
+    assert manager.reconcile_submit(
+        workflow_name="migration",
         snapshot_revision="after",
+        workflow_phase="Running",
     ) == (reset.id,)
     assert manager.get(reset.id).status == "succeeded"

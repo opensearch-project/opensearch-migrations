@@ -11,6 +11,8 @@ export type ConfigRemovalImpact =
   components["schemas"]["ConfigRemovalImpactV1"];
 export type ConfigSubmission = components["schemas"]["ConfigSubmissionV1"];
 export type ConfigReview = components["schemas"]["ConfigReviewV1"];
+export type AdmissionPreflight =
+  components["schemas"]["AdmissionPreflightV1"];
 export type Operation = components["schemas"]["OperationV1"];
 export type ApprovalReview = components["schemas"]["ApprovalReviewV1"];
 export type ResetPlan = components["schemas"]["ResetPlanV1"];
@@ -231,6 +233,23 @@ export async function getConfigReview(
   return data;
 }
 
+export async function getConfigPreflight(
+  draftRevision: string,
+): Promise<AdmissionPreflight> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/config/preflight",
+    { body: { expectedDraftRevision: draftRevision } },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Admission preflight could not be completed",
+      error,
+    );
+  }
+  return data;
+}
+
 
 export async function getOperations(): Promise<Operation[]> {
   const { data, error, response } = await client.GET(
@@ -316,14 +335,14 @@ export async function getCombinedResetPlan(
 
 export async function executeReset(
   planToken: string,
-  approvals: {
-    targetId: string;
-    expectedGateRevision: string;
-  }[] = [],
+  options: {
+    resubmit?: boolean;
+    expectedDraftRevision?: string;
+  } = {},
 ): Promise<Operation> {
   const { data, error, response } = await client.POST(
     "/api/v1/resets",
-    { body: { planToken, approvals } },
+    { body: { planToken, ...options } },
   );
   if (!response.ok || error || !data) {
     throw new ConfigApiError(

@@ -1,10 +1,19 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, LoaderCircle, Send } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  LoaderCircle,
+  RotateCcw,
+  Send,
+} from "lucide-react";
 
 import {
   ConfigApiError,
+  executeReset,
+  getCombinedResetPlan,
   getConfigDraft,
+  getConfigPreflight,
   getConfigReview,
   submitConfigDraft,
 } from "../../api/client";
@@ -39,15 +48,43 @@ export function SubmitConfigDialog({
     enabled: revision !== undefined,
     retry: false,
   });
+  const preflight = useQuery({
+    queryKey: ["config-preflight", sessionKey, revision],
+    queryFn: () => getConfigPreflight(revision ?? ""),
+    enabled: revision !== undefined,
+    retry: false,
+  });
+  const resetIssues = preflight.data?.issues.filter(
+    (issue) => issue.classification === "recreate-required"
+      && issue.resetTargetId,
+  ) ?? [];
+  const resetTargetIds = [...new Set(resetIssues.flatMap(
+    (issue) => issue.resetTargetId ? [issue.resetTargetId] : [],
+  ))];
+  const resetPlan = useQuery({
+    queryKey: ["reset-plan", "submit-preflight", ...resetTargetIds],
+    queryFn: () => getCombinedResetPlan(resetTargetIds),
+    enabled: resetTargetIds.length > 0,
+    retry: false,
+  });
+  const hasNonResetBlocker = preflight.data?.issues.some(
+    (issue) => issue.blocking && !issue.resetTargetId,
+  ) ?? false;
   const loading = (
     draftRevision === undefined && currentDraft.isPending
-  ) || (revision !== undefined && review.isPending);
-  const loadError = currentDraft.error ?? review.error;
+  ) || (
+    revision !== undefined
+    && (review.isPending || preflight.isPending)
+  );
+  const loadError = currentDraft.error ?? review.error ?? preflight.error;
 
   const retry = () => {
     setProblem("");
     if (currentDraft.isError) void currentDraft.refetch();
-    else void review.refetch();
+    else {
+      void review.refetch();
+      void preflight.refetch();
+    }
   };
 
   const submit = async () => {
@@ -66,6 +103,30 @@ export function SubmitConfigDialog({
         queryClient.setQueryData(["config-draft"], error.current);
       }
       setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const resetAndResubmit = async () => {
+    if (!review.data || !resetPlan.data) return;
+    setSubmitting(true);
+    setProblem("");
+    try {
+      await executeReset(resetPlan.data.token, {
+        resubmit: true,
+        expectedDraftRevision: review.data.draftRevision,
+      });
+      queryClient.removeQueries({ queryKey: ["config-draft"] });
+      queryClient.removeQueries({ queryKey: ["submission-draft"] });
+      void queryClient.invalidateQueries({ queryKey: ["operations"] });
+      void queryClient.invalidateQueries({ queryKey: ["manage-state"] });
+      onSubmitted();
+    } catch (error) {
+      if (error instanceof ConfigApiError && error.current) {
+        queryClient.setQueryData(["config-draft"], error.current);
+      }
+      setProblem(error instanceof Error ? error.message : String(error));
+      void resetPlan.refetch();
     } finally {
       setSubmitting(false);
     }
@@ -130,6 +191,83 @@ export function SubmitConfigDialog({
                 </span>
               </div>
             ) : null}
+            {preflight.data ? (
+              <section
+                aria-label="Admission preflight"
+                className="submit-preflight"
+              >
+                <header>
+                  {preflight.data.issues.length === 0
+                    ? <CheckCircle2 aria-hidden="true" />
+                    : <AlertTriangle aria-hidden="true" />}
+                  <div>
+                    <strong>Cluster admission preflight</strong>
+                    <span>
+                      {preflight.data.checkedResources} {
+                        preflight.data.checkedResources === 1
+                          ? "resource checked"
+                          : "resources checked"
+                      }
+                    </span>
+                  </div>
+                </header>
+                {preflight.data.issues.length === 0 ? (
+                  <p>No admission conflicts were found.</p>
+                ) : (
+                  <ul>
+                    {preflight.data.issues.map((issue) => (
+                      <li key={`${issue.kind}-${issue.name}-${issue.message}`}>
+                        <div>
+                          <strong>{issue.name}</strong>
+                          <span>{issue.kind}</span>
+                        </div>
+                        <p>{issue.message}</p>
+                        <small>
+                          {issue.classification === "recreate-required"
+                            ? "Reset required"
+                            : issue.classification === "invalid"
+                              ? "Submission blocked"
+                              : issue.classification === "approval-required"
+                                ? "The workflow can request approval"
+                                : "Preflight warning"}
+                        </small>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {resetTargetIds.length > 0 ? (
+                  <div className="submit-reset-plan">
+                    {resetPlan.isPending ? (
+                      <span>
+                        <LoaderCircle className="spin" aria-hidden="true" />
+                        Building dependency-safe reset plan
+                      </span>
+                    ) : resetPlan.isError ? (
+                      <span className="submit-reset-error">
+                        {resetPlan.error.message}
+                      </span>
+                    ) : resetPlan.data ? (
+                      <>
+                        <strong>
+                          Reset plan: {resetPlan.data.targets.length} {
+                            resetPlan.data.targets.length === 1
+                              ? "resource"
+                              : "resources"
+                          }
+                        </strong>
+                        <ol>
+                          {resetPlan.data.targets.map((target) => (
+                            <li key={`${target.plural}-${target.name}`}>
+                              {target.path}
+                            </li>
+                          ))}
+                        </ol>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
           </div>
         ) : null}
         {problem ? (
@@ -142,6 +280,19 @@ export function SubmitConfigDialog({
           <button disabled={submitting} onClick={onClose} type="button">
             Cancel
           </button>
+          {resetTargetIds.length > 0 && !hasNonResetBlocker ? (
+            <button
+              className="danger-confirm"
+              disabled={submitting || !resetPlan.data}
+              onClick={() => void resetAndResubmit()}
+              type="button"
+            >
+              {submitting
+                ? <LoaderCircle className="spin" aria-hidden="true" />
+                : <RotateCcw aria-hidden="true" />}
+              Reset &amp; resubmit ({resetTargetIds.length})
+            </button>
+          ) : null}
           <button
             aria-label="Confirm submit"
             className="primary-button"
@@ -150,6 +301,8 @@ export function SubmitConfigDialog({
               || loading
               || !review.data
               || !review.data.valid
+              || !preflight.data
+              || !preflight.data.allowed
             }
             onClick={() => void submit()}
             type="button"

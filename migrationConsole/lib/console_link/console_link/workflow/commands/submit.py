@@ -15,6 +15,10 @@ from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
+from ..services.config_edit_service import (
+    AdmissionPreflightBlocked,
+    ConfigEditService,
+)
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
@@ -176,6 +180,19 @@ def submit_command(
         runner = ScriptRunner()
 
         config_yaml = config.raw_yaml
+        preflight = ConfigEditService(
+            namespace=namespace,
+            runner=runner,
+            secret_store=secret_store,
+        ).preflight_raw_config(config_yaml, workflow_name)
+        if not preflight.allowed:
+            raise AdmissionPreflightBlocked(preflight)
+        for issue in preflight.warning_issues:
+            click.echo(
+                f"Admission preflight warning for "
+                f"{issue.kind} {issue.name}: {issue.message}",
+                err=True,
+            )
 
         click.echo(f"Initializing workflow from session: {session}")
         _remove_existing_workflow(workflow_name, namespace)

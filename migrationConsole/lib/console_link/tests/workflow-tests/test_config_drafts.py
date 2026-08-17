@@ -16,6 +16,10 @@ from console_link.workflow.services.config_edit_service import (
     ConfigEditApplyResult,
     ConfigEditSession,
 )
+from console_link.workflow.services.admission_preflight import (
+    AdmissionPreflightIssue,
+    AdmissionPreflightReport,
+)
 
 
 def _edit_state(value="saved", *, selection=None):
@@ -82,6 +86,7 @@ class _FakeEditService:
         self.saved = []
         self.submitted = []
         self.saved_external = []
+        self.preflights = []
         self.edit_state_override = None
         self.external_payload = {
             "kind": "ConfigMap",
@@ -138,6 +143,20 @@ class _FakeEditService:
     def submit_saved_config(self, workflow_name):
         self.submitted.append(workflow_name)
         return {"workflow_name": workflow_name}
+
+    def preflight_raw_config(self, raw_yaml, workflow_name):
+        self.preflights.append((raw_yaml, workflow_name))
+        return AdmissionPreflightReport(
+            checked_resources=1,
+            issues=(AdmissionPreflightIssue(
+                kind="CapturedTraffic",
+                name="capture-topic",
+                plural="capturedtraffics",
+                classification="approval-required",
+                message="partitions may require approval",
+                source="kubernetes",
+            ),),
+        )
 
     def list_external_resources(self, external_ref, current_value=None):
         return deepcopy(self.rows)
@@ -294,6 +313,25 @@ def test_submit_rejects_invalid_draft_without_saving_or_submitting():
 
     assert edit_service.saved == []
     assert edit_service.submitted == []
+
+
+def test_preflight_checks_the_exact_revisioned_draft_without_saving_it():
+    edit_service = _FakeEditService()
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+    edited = drafts.apply(
+        opened.draft_revision,
+        {"op": "set", "path": ["value"], "value": "pending"},
+    )
+
+    report = drafts.preflight(edited.draft_revision, "migration")
+
+    assert report.allowed is True
+    assert report.issues[0].classification == "approval-required"
+    assert edit_service.preflights == [
+        ("value: operation-1\n", "migration"),
+    ]
+    assert edit_service.saved == []
 
 
 def test_removal_impact_lists_direct_and_transitive_config_entries():

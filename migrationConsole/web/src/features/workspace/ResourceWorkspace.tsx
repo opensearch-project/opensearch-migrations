@@ -239,7 +239,7 @@ function ResourceIssues({
                         type="button"
                       >
                         <RotateCcw aria-hidden="true" />
-                        Review reset &amp; retry
+                        Review reset &amp; resubmit
                       </button>
                     )
                     : null

@@ -211,6 +211,108 @@ button {
   flex: 0 0 auto;
 }
 
+.submit-preflight {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.submit-preflight > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 0 8px;
+}
+
+.submit-preflight > header svg {
+  width: 17px;
+  height: 17px;
+  color: #2f855a;
+}
+
+.submit-preflight:has(li) > header svg {
+  color: #9a5c19;
+}
+
+.submit-preflight > header strong,
+.submit-preflight > header span {
+  display: block;
+}
+
+.submit-preflight > header span,
+.submit-preflight > p {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.submit-preflight > p {
+  margin: 0;
+}
+
+.submit-preflight > ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  list-style: none;
+}
+
+.submit-preflight > ul > li {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  padding: 8px;
+  background: var(--surface-subtle);
+  font-size: 10px;
+}
+
+.submit-preflight > ul > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.submit-preflight li div strong,
+.submit-preflight li div span {
+  display: block;
+}
+
+.submit-preflight li div span,
+.submit-preflight li small {
+  color: var(--text-muted);
+}
+
+.submit-preflight li p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.submit-reset-plan {
+  margin-top: 8px;
+  padding: 8px;
+  border-left: 2px solid #a33d36;
+  background: #fff6f5;
+  font-size: 10px;
+}
+
+.submit-reset-plan > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.submit-reset-plan svg {
+  width: 14px;
+}
+
+.submit-reset-plan ol {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.submit-reset-error {
+  color: var(--danger);
+}
+
 .action-review-dialog {
   width: min(620px, calc(100vw - 28px));
 }

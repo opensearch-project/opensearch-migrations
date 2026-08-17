@@ -26,6 +26,10 @@ from ..application.config_drafts import (
 from ..application.operations import Operation
 from ..application.actions import ApprovalReview
 from ..application.resets import ResetPlan, ResetTarget
+from ..services.admission_preflight import (
+    AdmissionPreflightIssue,
+    AdmissionPreflightReport,
+)
 from ..application.outputs import (
     OutputContent,
     OutputDescriptor,
@@ -449,6 +453,60 @@ class ConfigReviewV1(WebModel):
         )
 
 
+class AdmissionPreflightIssueV1(WebModel):
+    kind: str
+    name: str
+    plural: Optional[str] = None
+    classification: Literal[
+        "recreate-required",
+        "invalid",
+        "approval-required",
+        "warning",
+    ]
+    message: str
+    source: str
+    blocking: bool
+    resource_id: Optional[str] = None
+    reset_target_id: Optional[str] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        issue: AdmissionPreflightIssue,
+    ) -> "AdmissionPreflightIssueV1":
+        return cls(
+            kind=issue.kind,
+            name=issue.name,
+            plural=issue.plural,
+            classification=issue.classification,
+            message=issue.message,
+            source=issue.source,
+            blocking=issue.blocking,
+            resource_id=issue.resource_id,
+            reset_target_id=issue.reset_target_id,
+        )
+
+
+class AdmissionPreflightV1(WebModel):
+    checked_resources: int
+    allowed: bool
+    issues: List[AdmissionPreflightIssueV1]
+
+    @classmethod
+    def from_domain(
+        cls,
+        report: AdmissionPreflightReport,
+    ) -> "AdmissionPreflightV1":
+        return cls(
+            checked_resources=report.checked_resources,
+            allowed=report.allowed,
+            issues=[
+                AdmissionPreflightIssueV1.from_domain(issue)
+                for issue in report.issues
+            ],
+        )
+
+
 class OperationV1(WebModel):
     id: str
     kind: str
@@ -553,6 +611,10 @@ class ResetApprovalRequestV1(WebModel):
 
 class ExecuteResetRequestV1(WebModel):
     plan_token: str
+    resubmit: bool = False
+    expected_draft_revision: Optional[str] = None
+    # Kept for one contract transition; legacy reset-and-retry clients now
+    # trigger resubmission and these old gate revisions are never approved.
     approvals: List[ResetApprovalRequestV1] = Field(default_factory=list)
 
 

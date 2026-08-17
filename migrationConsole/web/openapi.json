@@ -28,6 +28,111 @@
         "title": "AddEditOperationV1",
         "type": "object"
       },
+      "AdmissionPreflightIssueV1": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking": {
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "classification": {
+            "enum": [
+              "recreate-required",
+              "invalid",
+              "approval-required",
+              "warning"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plural": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plural"
+          },
+          "resetTargetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resettargetid"
+          },
+          "resourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourceid"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "classification",
+          "message",
+          "source",
+          "blocking"
+        ],
+        "title": "AdmissionPreflightIssueV1",
+        "type": "object"
+      },
+      "AdmissionPreflightV1": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "checkedResources": {
+            "title": "Checkedresources",
+            "type": "integer"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/AdmissionPreflightIssueV1"
+            },
+            "title": "Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checkedResources",
+          "allowed",
+          "issues"
+        ],
+        "title": "AdmissionPreflightV1",
+        "type": "object"
+      },
       "ApplyEditOperationRequestV1": {
         "additionalProperties": false,
         "properties": {
@@ -1150,9 +1255,25 @@
             "title": "Approvals",
             "type": "array"
           },
+          "expectedDraftRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expecteddraftrevision"
+          },
           "planToken": {
             "title": "Plantoken",
             "type": "string"
+          },
+          "resubmit": {
+            "default": false,
+            "title": "Resubmit",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3145,6 +3266,47 @@
           }
         },
         "summary": "Apply Config Operation",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
+    "/api/v1/config/preflight": {
+      "post": {
+        "operationId": "preflight_config_api_v1_config_preflight_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionPreflightV1"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preflight Config",
         "tags": [
           "configuration"
         ]

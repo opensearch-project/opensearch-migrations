@@ -43,6 +43,10 @@ from console_link.workflow.application.operations import (
     OperationEvent,
 )
 from console_link.workflow.application.actions import ApprovalReview
+from console_link.workflow.services.admission_preflight import (
+    AdmissionPreflightIssue,
+    AdmissionPreflightReport,
+)
 from console_link.workflow.application.resets import (
     ResetExecutionResult,
     ResetPlan,
@@ -684,15 +688,20 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
     assert stale.json()["detail"]["code"] == "reset_plan_stale"
 
 
-def test_reset_can_retry_the_exact_approval_after_deletion(tmp_path):
+def test_vap_reset_saves_then_submits_a_new_workflow_without_approving_old_gate(
+    tmp_path,
+):
     approvals = _Approvals()
     resets = _Resets()
     operations = _Operations()
+    drafts = _Drafts()
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         approvals=approvals,
         resets=resets,
         operations=operations,
+        config_drafts=drafts,
+        workflow_name="migration-test",
     )
 
     with TestClient(app) as client:
@@ -700,24 +709,25 @@ def test_reset_can_retry_the_exact_approval_after_deletion(tmp_path):
             "/api/v1/resets",
             json={
                 "planToken": "reset-token",
-                "approvals": [{
-                    "targetId": "approval:node-1",
-                    "expectedGateRevision": "11",
-                }],
+                "resubmit": True,
+                "expectedDraftRevision": "draft-1",
             },
         )
         worker = operations.started["worker"]
 
     assert response.status_code == 202
     assert operations.started["label"] == (
-        "Reset and retry snapshotmigration.migration-0"
+        "Reset and resubmit snapshotmigration.migration-0"
     )
+    assert drafts.prepared is True
+    assert drafts.expected_revision == "draft-1"
     result = worker()
     assert resets.executed is True
-    assert approvals.approved is True
+    assert approvals.approved is False
+    assert drafts.submitted is True
     assert result.waiting is True
-    assert result.result["approvalTargetIds"] == ["approval:node-1"]
-    assert "workflow reconciliation" in result.message
+    assert result.result["workflowName"] == "migration-test"
+    assert "replacement workflow" in result.message
 
 
 def _edit_state():
@@ -829,6 +839,30 @@ class _Drafts:
         self.expected_revision = expected_revision
         self.prepared = True
         return self.current
+
+    def preflight(self, expected_revision, workflow_name):
+        self.expected_revision = expected_revision
+        return AdmissionPreflightReport(
+            checked_resources=2,
+            issues=(
+                AdmissionPreflightIssue(
+                    kind="CapturedTraffic",
+                    name="capture-topic",
+                    plural="capturedtraffics",
+                    classification="recreate-required",
+                    message="sourceLabel cannot be changed",
+                    source="kubernetes",
+                ),
+                AdmissionPreflightIssue(
+                    kind="TrafficReplay",
+                    name="replay",
+                    plural="trafficreplays",
+                    classification="approval-required",
+                    message="tupleMaxFileSizeMb requires approval",
+                    source="kubernetes",
+                ),
+            ),
+        )
 
     def submit_saved(self, workflow_name):
         self.submitted = True
@@ -1066,6 +1100,52 @@ def test_config_review_and_submit_start_a_tracked_operation(tmp_path):
     assert result.waiting is True
     assert result.result["workflowName"] == "migration-test"
     assert drafts.submitted is True
+
+
+def test_config_preflight_reports_blocking_and_nonblocking_admission_results(
+    tmp_path,
+):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+        workflow_name="migration-test",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/preflight",
+            json={"expectedDraftRevision": "draft-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "checkedResources": 2,
+        "allowed": False,
+        "issues": [
+            {
+                "kind": "CapturedTraffic",
+                "name": "capture-topic",
+                "plural": "capturedtraffics",
+                "classification": "recreate-required",
+                "message": "sourceLabel cannot be changed",
+                "source": "kubernetes",
+                "blocking": True,
+                "resourceId": "resource:capturedtraffics:capture-topic",
+                "resetTargetId": "reset:capturedtraffics:capture-topic",
+            },
+            {
+                "kind": "TrafficReplay",
+                "name": "replay",
+                "plural": "trafficreplays",
+                "classification": "approval-required",
+                "message": "tupleMaxFileSizeMb requires approval",
+                "source": "kubernetes",
+                "blocking": False,
+                "resourceId": "resource:trafficreplays:replay",
+            },
+        ],
+    }
 
 
 def test_config_removal_impact_returns_exact_dependent_paths(tmp_path):

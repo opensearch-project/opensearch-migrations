@@ -135,7 +135,7 @@ export function ApprovalDialog({
       setTargetsSubmitting([candidate.targetId], false);
     }
   };
-  const resetAndRetry = async (
+  const resetAndResubmit = async (
     selectedCandidates: ApprovalCandidate[],
     planToken?: string,
   ) => {
@@ -147,17 +147,7 @@ export function ApprovalDialog({
         ? [candidate.resetTargetId]
         : [],
     );
-    const approvalRequests = selectedCandidates.flatMap((candidate) => {
-      const review = reviewFor(candidate.targetId)?.data;
-      return review ? [{
-        targetId: candidate.targetId,
-        expectedGateRevision: review.gateRevision,
-      }] : [];
-    });
-    if (
-      resetIds.length !== selectedCandidates.length
-      || approvalRequests.length !== selectedCandidates.length
-    ) {
+    if (resetIds.length !== selectedCandidates.length) {
       return;
     }
     setTargetsSubmitting(targetIds, true);
@@ -168,7 +158,7 @@ export function ApprovalDialog({
         : resetIds.length === 1
           ? await getResetPlan(resetIds[0])
           : await getCombinedResetPlan(resetIds);
-      await executeReset(plan.token, approvalRequests);
+      await executeReset(plan.token, { resubmit: true });
       await finishStarted(targetIds);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -184,9 +174,6 @@ export function ApprovalDialog({
       setTargetsSubmitting(targetIds, false);
     }
   };
-  const allResetReviewsReady = resetCandidates.every(
-    (candidate) => Boolean(reviewFor(candidate.targetId)?.data),
-  );
   return (
     <div className="modal-backdrop">
       <section
@@ -275,8 +262,8 @@ export function ApprovalDialog({
                     {resetRequired ? (
                       <p className="approval-remedy">
                         The deployed resource must be deleted before this
-                        configuration can be applied. Reset and retry performs
-                        both steps as one tracked operation.
+                        configuration can be applied. Reset and resubmit
+                        performs both steps as one tracked operation.
                       </p>
                     ) : impossible ? (
                       <p className="approval-remedy">
@@ -319,14 +306,14 @@ export function ApprovalDialog({
                   {resetRequired ? (
                     <button
                       className="danger-confirm"
-                      disabled={busy || waiting || !review?.data}
-                      onClick={() => void resetAndRetry([candidate])}
+                      disabled={busy || waiting}
+                      onClick={() => void resetAndResubmit([candidate])}
                       type="button"
                     >
                       {busy
                         ? <LoaderCircle className="spin" aria-hidden="true" />
                         : <RotateCcw aria-hidden="true" />}
-                      Reset &amp; retry apply
+                      Reset &amp; resubmit
                     </button>
                   ) : (
                     <button
@@ -362,7 +349,7 @@ export function ApprovalDialog({
               <div>
                 <strong>Combined reset plan</strong>
                 <span>
-                  Review and retry all impossible deployed updates together.
+                  Review and resubmit all impossible deployed updates together.
                 </span>
               </div>
               {combinedPlan.data ? (
@@ -413,20 +400,19 @@ export function ApprovalDialog({
               disabled={
                 combinedPlan.isPending
                 || !combinedPlan.data
-                || !allResetReviewsReady
                 || resetCandidates.some((candidate) => (
                   submitting.has(candidate.targetId)
                   || processing.has(candidate.targetId)
                 ))
               }
-              onClick={() => void resetAndRetry(
+              onClick={() => void resetAndResubmit(
                 resetCandidates,
                 combinedPlan.data?.token,
               )}
               type="button"
             >
               <RotateCcw aria-hidden="true" />
-              Reset &amp; retry all ({resetCandidates.length})
+              Reset &amp; resubmit all ({resetCandidates.length})
             </button>
           ) : null}
         </footer>

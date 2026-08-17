@@ -205,7 +205,7 @@ test("surfaces failed prerequisites in navigation and workflow activity", async 
 });
 
 
-test("lifts a VAP retry failure and requires reset before retrying apply", async () => {
+test("lifts a VAP retry failure and requires reset before resubmitting", async () => {
   const blockedSnapshot = structuredClone(manageSnapshot);
   const captureId = "resource:captureproxies:capture";
   const applyStepId = `workflow-step:${captureId}:apply`;
@@ -310,7 +310,7 @@ test("lifts a VAP retry failure and requires reset before retrying apply", async
     name: "Edit configuration",
   })).toBeEnabled();
   await waitFor(() => expect(within(requiredActions).getByRole("button", {
-    name: "Reset & retry apply",
+    name: "Reset & resubmit",
   })).toBeEnabled());
 
   const tree = await screen.findByRole("tree", { name: "Workflow resources" });
@@ -590,7 +590,7 @@ test("resets and retries all impossible deployed updates in one action", async (
   expect(await within(dialog).findByText("2 resources removed"))
     .toBeInTheDocument();
   const resetAll = within(dialog).getByRole("button", {
-    name: "Reset & retry all (2)",
+    name: "Reset & resubmit all (2)",
   });
   expect(resetAll).toBeEnabled();
   await userEvent.click(resetAll);
@@ -600,10 +600,7 @@ test("resets and retries all impossible deployed updates in one action", async (
   }));
   await waitFor(() => expect(resetRequest).toEqual({
     planToken: "combined-reset-token",
-    approvals: targets.map((target) => ({
-      targetId: target.approvalTargetId,
-      expectedGateRevision: target.revision,
-    })),
+    resubmit: true,
   }));
   expect(within(dialog).getAllByText(
     "Action accepted. Waiting for workflow reconciliation.",
@@ -697,7 +694,6 @@ test("reviews exact approval and reset targets before starting operations", asyn
   }));
   await waitFor(() => expect(resetRequest).toEqual({
     planToken: "reset-token",
-    approvals: [],
   }));
 });
 
@@ -3194,6 +3190,176 @@ test("reviews and submits saved pending changes without entering edit mode", asy
   expect(await screen.findByText(
     "Workflow accepted; waiting for refreshed cluster state",
   )).toBeInTheDocument();
+});
+
+
+test("keeps submit enabled for admission warnings that may converge later", async () => {
+  let submitRequest: unknown;
+  const savedDraft = structuredClone(configDraft);
+  savedDraft.dirty = false;
+  savedDraft.draftRevision = "warning-preflight";
+  savedDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(savedDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: savedDraft.draftRevision,
+      baseRevision: savedDraft.baseRevision,
+      dirty: false,
+      valid: true,
+      validationMessages: [],
+      changes: [],
+    })),
+    http.post("*/api/v1/config/preflight", () => HttpResponse.json({
+      checkedResources: 1,
+      allowed: true,
+      issues: [{
+        kind: "CapturedTraffic",
+        name: "capture-topic",
+        plural: "capturedtraffics",
+        classification: "warning",
+        message: "The resource is still being deleted.",
+        source: "kubernetes",
+        blocking: false,
+        resourceId: "resource:capturedtraffics:capture-topic",
+      }],
+    })),
+    http.post("*/api/v1/config/submit", async ({ request }) => {
+      submitRequest = await request.json();
+      return HttpResponse.json({
+        id: "submit-after-warning",
+        kind: "submit",
+        label: "Submit workflow configuration",
+        status: "queued",
+        targetIds: [],
+        createdAt: "2026-08-16T13:00:00Z",
+        updatedAt: "2026-08-16T13:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Review and submit",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  expect(within(dialog).getByText(
+    "The resource is still being deleted.",
+  )).toBeInTheDocument();
+  const submit = within(dialog).getByRole("button", {
+    name: "Confirm submit",
+  });
+  expect(submit).toBeEnabled();
+  await userEvent.click(submit);
+
+  await waitFor(() => expect(submitRequest).toEqual({
+    expectedDraftRevision: "warning-preflight",
+  }));
+});
+
+
+test("offers one reset and resubmit action for immutable preflight failures", async () => {
+  let resetRequest: unknown;
+  let submitCalled = false;
+  const savedDraft = structuredClone(configDraft);
+  savedDraft.dirty = false;
+  savedDraft.draftRevision = "immutable-preflight";
+  savedDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(savedDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: savedDraft.draftRevision,
+      baseRevision: savedDraft.baseRevision,
+      dirty: false,
+      valid: true,
+      validationMessages: [],
+      changes: [],
+    })),
+    http.post("*/api/v1/config/preflight", () => HttpResponse.json({
+      checkedResources: 1,
+      allowed: false,
+      issues: [{
+        kind: "CapturedTraffic",
+        name: "capture-topic",
+        plural: "capturedtraffics",
+        classification: "recreate-required",
+        message: "Impossible: sourceLabel cannot be changed.",
+        source: "kubernetes",
+        blocking: true,
+        resourceId: "resource:capturedtraffics:capture-topic",
+        resetTargetId: "reset:capturedtraffics:capture-topic",
+      }],
+    })),
+    http.post("*/api/v1/resets/plan", () => HttpResponse.json({
+      token: "preflight-reset-token",
+      requestTargetId: "reset:capturedtraffics:capture-topic",
+      targets: [{
+        plural: "capturedtraffics",
+        type: "capturedtraffic",
+        name: "capture-topic",
+        path: "capturedtraffic.capture-topic",
+        phase: "Ready",
+        dependsOn: [],
+      }],
+      messages: [],
+      warnings: [],
+    })),
+    http.post("*/api/v1/resets", async ({ request }) => {
+      resetRequest = await request.json();
+      return HttpResponse.json({
+        id: "reset-resubmit-preflight",
+        kind: "reset",
+        label: "Reset and resubmit capturedtraffic.capture-topic",
+        status: "queued",
+        targetIds: ["resource:capturedtraffics:capture-topic"],
+        createdAt: "2026-08-16T13:00:00Z",
+        updatedAt: "2026-08-16T13:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+    http.post("*/api/v1/config/submit", () => {
+      submitCalled = true;
+      return new HttpResponse(null, { status: 500 });
+    }),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Review and submit",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  expect(within(dialog).getByText(
+    "Impossible: sourceLabel cannot be changed.",
+  )).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", {
+    name: "Confirm submit",
+  })).toBeDisabled();
+  await userEvent.click(await within(dialog).findByRole("button", {
+    name: "Reset & resubmit (1)",
+  }));
+
+  await waitFor(() => expect(resetRequest).toEqual({
+    planToken: "preflight-reset-token",
+    resubmit: true,
+    expectedDraftRevision: "immutable-preflight",
+  }));
+  expect(submitCalled).toBe(false);
 });
 
 

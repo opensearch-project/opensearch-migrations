@@ -144,6 +144,12 @@ To replace a running workflow, use `workflow submit`, which stops and deletes th
 existing Argo workflow before resubmitting. This separation keeps reset focused
 on the CR graph and submit focused on the workflow lifecycle.
 
+Workflow Manage preserves this boundary while composing the two operations for impossible
+VAP recovery. After the user confirms the exact reset plan, the server executes reset and
+then calls the normal submit service. It never approves the old workflow's retry gate:
+initialization of the replacement workflow recreates the deleted roots and captures their
+new UIDs.
+
 ---
 
 ## CLI: `workflow submit`
