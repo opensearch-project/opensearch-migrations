@@ -463,7 +463,7 @@ class TestRunner:
             return repo, tag
         return "mirror.gcr.io/grafana/k6", "latest"
 
-    def _resolve_scripts_image(self) -> Dict[str, str]:
+    def _resolve_k6_scripts_image(self) -> Dict[str, str]:
         """Helm values for the k6 scripts image — the data image mounted at /scripts that carries
         the scenarios and presets.
 
@@ -504,10 +504,10 @@ class TestRunner:
                           capture_output=True, text=True).returncode != 0:
             subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
         repo, tag = self._resolve_load_test_image()
-        scripts_values = self._resolve_scripts_image()
-        logger.info("k6 runner image: %s:%s (scripts: %s)", repo, tag, scripts_values)
+        k6_scripts_values = self._resolve_k6_scripts_image()
+        logger.info("k6 runner image: %s:%s (k6 scripts: %s)", repo, tag, k6_scripts_values)
         values = {"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent"}
-        values.update(scripts_values)
+        values.update(k6_scripts_values)
         if not self.k8s_service.helm_install(
                 chart_path=self.k6_chart_path, release_name="k6-load-test", values=values):
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")

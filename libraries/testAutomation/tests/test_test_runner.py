@@ -276,7 +276,7 @@ class TestLoadTestChartSelection:
             mock_install.assert_not_called()
 
 
-class TestScriptsImageResolution:
+class TestK6ScriptsImageResolution:
     """The k6 scripts image is a data-only image, handed over as a complete reference the way the
     mountable transform images are. Deriving it from a registry prefix stays as the fallback."""
 
@@ -290,7 +290,7 @@ class TestScriptsImageResolution:
         runner = self._runner(k6_scripts_image="1234.dkr.ecr.us-east-1.amazonaws.com/repo:"
                                                "migrations_k6_scripts_latest",
                               registry_prefix="docker-registry:5001/")
-        assert runner._resolve_scripts_image() == {
+        assert runner._resolve_k6_scripts_image() == {
             "scriptsImage.repository": "1234.dkr.ecr.us-east-1.amazonaws.com/repo",
             "scriptsImage.tag": "migrations_k6_scripts_latest",
             "scriptsImage.pullPolicy": "Always",
@@ -299,19 +299,19 @@ class TestScriptsImageResolution:
     def test_digest_reference_sets_digest_and_no_tag(self):
         digest = "sha256:" + "a" * 64
         runner = self._runner(k6_scripts_image=f"1234.dkr.ecr.us-east-1.amazonaws.com/repo@{digest}")
-        values = runner._resolve_scripts_image()
+        values = runner._resolve_k6_scripts_image()
         assert values["scriptsImage.digest"] == digest
         assert "scriptsImage.tag" not in values
 
     def test_ecr_registry_prefix_uses_the_flattened_tag(self):
         runner = self._runner(registry_prefix="1234.dkr.ecr.us-east-1.amazonaws.com/repo/")
-        values = runner._resolve_scripts_image()
+        values = runner._resolve_k6_scripts_image()
         assert values["scriptsImage.repository"] == "1234.dkr.ecr.us-east-1.amazonaws.com/repo"
         assert values["scriptsImage.tag"] == "migrations_k6_scripts_latest"
 
     def test_other_registry_prefix_keeps_the_path_layout(self):
         runner = self._runner(registry_prefix="docker-registry:5001/")
-        values = runner._resolve_scripts_image()
+        values = runner._resolve_k6_scripts_image()
         assert values["scriptsImage.repository"] == "docker-registry:5001/migrations/k6_scripts"
         assert values["scriptsImage.tag"] == "latest"
 
