@@ -1,5 +1,17 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,5 +105,74 @@ class SolrSnapshotCreatorTest {
     @Test
     void buildPerCollectionLocation_nullLocationReturnsNull() {
         assertNull(SolrSnapshotCreator.buildPerCollectionLocation(null, "snap1"));
+    }
+
+    /**
+     * Drives the Collections API calls against an in-process {@link HttpServer} to assert the
+     * path the BACKUP and REQUESTSTATUS requests are actually sent to.
+     */
+    @Nested
+    class ContextPath {
+
+        private HttpServer server;
+        private String baseUrl;
+        private final List<String> requestedPaths = new CopyOnWriteArrayList<>();
+
+        @BeforeEach
+        void startServer() throws IOException {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/", exchange -> {
+                requestedPaths.add(exchange.getRequestURI().getPath());
+                var body = "{\"responseHeader\":{\"status\":0},\"status\":{\"state\":\"completed\"}}"
+                    .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+        }
+
+        @AfterEach
+        void stopServer() {
+            if (server != null) {
+                server.stop(0);
+            }
+        }
+
+        private SolrSnapshotCreator creatorWithContextPath(String contextPath) {
+            var connectionContext = new ConnectionContext.SourceArgs() {{
+                host = baseUrl;
+                insecure = true;
+            }}.toConnectionContext();
+            return new SolrSnapshotCreator(baseUrl, "snap1", "/var/solr/data",
+                List.of("coll1"), connectionContext, null, contextPath);
+        }
+
+        @Test
+        void nullContextPathKeepsStockSolrPrefix() {
+            var creator = creatorWithContextPath(null);
+            creator.createSnapshot();
+            assertTrue(creator.isSnapshotFinished());
+            assertEquals(List.of("/solr/admin/collections", "/solr/admin/collections"), requestedPaths);
+        }
+
+        @Test
+        void customContextPathIsUsed() {
+            var creator = creatorWithContextPath("/tenant-a/solr");
+            creator.createSnapshot();
+            assertTrue(creator.isSnapshotFinished());
+            assertEquals(
+                List.of("/tenant-a/solr/admin/collections", "/tenant-a/solr/admin/collections"),
+                requestedPaths);
+        }
+
+        @Test
+        void emptyContextPathServesSolrFromHostRoot() {
+            var creator = creatorWithContextPath("");
+            creator.createSnapshot();
+            assertEquals(List.of("/admin/collections"), requestedPaths);
+        }
     }
 }

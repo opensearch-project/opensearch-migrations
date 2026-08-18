@@ -485,6 +485,7 @@ def test_solr_s3_snapshot_uses_configured_collections_and_mode(monkeypatch):
                                       "--source-host", source.endpoint,
                                       "--source-type", "solr",
                                       "--mode", "import",
+                                      "--solr-context-path", "/solr",
                                       "--source-insecure",
                                       "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                       "--s3-region", config["snapshot"]["s3"]["aws_region"],
@@ -861,7 +862,7 @@ def test_solr_snapshot_status_returns_success_when_all_shards_completed_with_lag
 
     def fake_call_api(path, *args, **kwargs):
         resp = mock.Mock()
-        if path == snapshot_module.SOLR_LIST_COLLECTIONS_API:
+        if path == snapshot_module.solr_list_collections_api():
             resp.status_code = 200
             resp.json.return_value = {"collections": ["col-a", "col-b", "col-c"]}
             return resp
@@ -883,3 +884,131 @@ def test_solr_snapshot_status_returns_success_when_all_shards_completed_with_lag
     assert result.success
     assert result.value == "SUCCESS", \
         f"expected SUCCESS so the workflow poll terminates, got {result.value!r}"
+
+
+def test_normalize_solr_context_path():
+    from console_link.models.cluster import normalize_solr_context_path
+
+    assert normalize_solr_context_path(None) == "/solr"
+    assert normalize_solr_context_path("/solr") == "/solr"
+    assert normalize_solr_context_path("/solr/") == "/solr"
+    assert normalize_solr_context_path("tenant-a/solr") == "/tenant-a/solr"
+    assert normalize_solr_context_path("  /solr  ") == "/solr"
+    assert normalize_solr_context_path("") == ""
+    assert normalize_solr_context_path("/") == ""
+
+
+def test_solr_snapshot_create_passes_custom_context_path(monkeypatch):
+    config = {
+        "snapshot": {
+            "snapshot_name": "solr_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket/solr",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4",
+                                  solr_context_path="/tenant-a/solr/")
+    snapshot = S3Snapshot(config["snapshot"], source)
+    monkeypatch.setattr(snapshot, "_get_solr_collections", lambda: ["products"])
+
+    monkeypatch.setattr("sys.stdout.write", mock.Mock())
+    monkeypatch.setattr("sys.stderr.write", mock.Mock())
+    run_mock = mock.Mock()
+    monkeypatch.setattr(subprocess, "run", run_mock)
+    snapshot.create()
+
+    command = run_mock.call_args[0][0]
+    assert "--solr-context-path" in command
+    # The trailing slash is normalized away before it reaches CreateSnapshot.
+    assert command[command.index("--solr-context-path") + 1] == "/tenant-a/solr"
+
+
+def test_solr_snapshot_status_uses_configured_context_path():
+    from console_link.models import snapshot as snapshot_module
+
+    requested_paths = []
+
+    def fake_call_api(path, *args, **kwargs):
+        requested_paths.append(path)
+        resp = mock.Mock()
+        resp.status_code = 200
+        if path.endswith("action=LIST&wt=json"):
+            resp.json.return_value = {"collections": ["col-a"]}
+            return resp
+        resp.json.return_value = {
+            "status": {"state": "completed"},
+            "response": {"numShards": 1, "indexSizeMB": 0.0, "startTime": "2026-05-12T21:42:31Z"},
+            "success": {"shard1": "ok"},
+        }
+        return resp
+
+    cluster = mock.Mock()
+    cluster.call_api.side_effect = fake_call_api
+
+    result = snapshot_module._solr_backup_status(cluster, "snap-1", deep_check=False,
+                                                 context_path="/tenant-a/solr")
+
+    assert result.success
+    assert requested_paths[0] == "/tenant-a/solr/admin/collections?action=LIST&wt=json"
+    assert all(p.startswith("/tenant-a/solr/") for p in requested_paths)
+
+
+def test_solr_standalone_status_uses_empty_context_path():
+    from console_link.models import snapshot as snapshot_module
+
+    requested_paths = []
+
+    def fake_call_api(path, *args, **kwargs):
+        requested_paths.append(path)
+        resp = mock.Mock()
+        if path.endswith("action=LIST&wt=json"):
+            # Non-200 marks the source as standalone.
+            resp.status_code = 404
+            resp.json.return_value = {}
+            return resp
+        resp.status_code = 200
+        if "action=STATUS" in path:
+            resp.json.return_value = {"status": {"core1": {}}}
+        else:
+            resp.json.return_value = {"details": {"backup": {"status": "success"}}}
+        return resp
+
+    cluster = mock.Mock()
+    cluster.call_api.side_effect = fake_call_api
+
+    result = snapshot_module._solr_backup_status(cluster, "snap-1", deep_check=False, context_path="")
+
+    assert result.success
+    assert result.value == "SUCCESS"
+    assert requested_paths == [
+        "/admin/collections?action=LIST&wt=json",
+        "/admin/cores?action=STATUS&wt=json",
+        "/core1/replication?command=details&wt=json",
+    ]
+
+
+def test_solr_collections_discovery_uses_configured_context_path():
+    config = {
+        "snapshot": {
+            "snapshot_name": "solr_snapshot",
+            "s3": {"repo_uri": "s3://my-bucket/solr", "aws_region": "us-east-1"},
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR 9.4",
+                                  solr_context_path="/tenant-a/solr")
+    snapshot = S3Snapshot(config["snapshot"], source)
+
+    requested_paths = []
+
+    def fake_call_api(path, *args, **kwargs):
+        requested_paths.append(path)
+        resp = mock.Mock()
+        resp.status_code = 200
+        resp.json.return_value = {"collections": ["products"]}
+        return resp
+
+    source.call_api = fake_call_api
+    assert snapshot._get_solr_collections() == ["products"]
+    assert requested_paths == ["/tenant-a/solr/admin/collections?action=LIST&wt=json"]

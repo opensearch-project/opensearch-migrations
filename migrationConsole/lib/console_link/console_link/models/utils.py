@@ -180,6 +180,10 @@ def map_cluster_from_workflow_config(workflow_config_obj) -> dict:
     if "allowInsecure" in workflow_config_obj:
         mapped_config["allow_insecure"] = workflow_config_obj["allowInsecure"]
 
+    # Map solrContextPath -> solr_context_path
+    if "solrContextPath" in workflow_config_obj:
+        mapped_config["solr_context_path"] = workflow_config_obj["solrContextPath"]
+
     # Handle authentication configuration
     auth_config = workflow_config_obj.get("authConfig")
     mapped_config.update(_map_cluster_auth_from_workflow_config(auth_config))

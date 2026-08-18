@@ -13,6 +13,7 @@ import java.util.function.BooleanSupplier;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
@@ -52,6 +53,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private final SnapshotMode mode;
     private final RepoUri repoUri;
     private final boolean isCloud;
+    private final String contextPath;
 
     public SolrBackupStrategy(CreateSnapshot.Args args) {
         this.args = args;
@@ -60,7 +62,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         this.connectionContext = args.sourceArgs.toConnectionContext();
         this.httpClient = new SolrHttpClient(connectionContext);
         this.mode = CreateSnapshot.getSnapshotMode(args);
-        this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient);
+        this.contextPath = SolrContextPath.normalize(args.solrContextPath);
+        this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient, contextPath);
     }
 
     private static final String COLLECTION_LABEL = "collection";
@@ -369,7 +372,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             : List.of(configFile);
 
         for (var fileName : variants) {
-            var url = solrUrl + "/solr/" + collection + "/admin/file?file=" + fileName + "&contentType=text/xml";
+            var url = solrUrl + contextPath + "/" + collection
+                + "/admin/file?file=" + fileName + "&contentType=text/xml";
             try {
                 var body = httpClient.getString(url, Duration.ofSeconds(30));
                 if (body != null && !body.isBlank()) {
@@ -386,7 +390,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     private String fetchViaSchemaApi(String solrUrl, String collection) {
-        var schemaUrl = solrUrl + "/solr/" + collection + "/schema?wt=schema.xml";
+        var schemaUrl = solrUrl + contextPath + "/" + collection + "/schema?wt=schema.xml";
         try {
             var body = httpClient.getString(schemaUrl, Duration.ofSeconds(30));
             if (body != null && !body.isBlank()) {
@@ -514,7 +518,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private void resolveCollections(String solrUrl) {
         if (args.solrCollections.isEmpty()) {
             try {
-                args.solrCollections = discoverCollections(solrUrl, httpClient);
+                args.solrCollections = discoverCollections(solrUrl, httpClient, contextPath);
                 log.info("Auto-discovered {} Solr {}: {}",
                     args.solrCollections.size(),
                     isCloud ? "collection(s)" : "core(s)",
@@ -534,10 +538,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient, String contextPath) {
         try {
             var response = httpClient.getRaw(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
+                solrUrl + contextPath + "/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
             return response.statusCode() == 200;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -551,11 +555,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Collection / core discovery ----
 
-    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient) throws IOException {
+    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient, String contextPath)
+            throws IOException {
         // Try SolrCloud Collections API first
         try {
             var json = httpClient.getString(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
+                solrUrl + contextPath + "/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
             var node = MAPPER.readTree(json).path("collections");
             var collections = new ArrayList<String>();
             if (node.isArray()) {
@@ -567,7 +572,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         // Fall back to Core Admin API (standalone)
         var json = httpClient.getString(
-            solrUrl + "/solr/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
+            solrUrl + contextPath + "/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
         return objectFieldKeys(MAPPER.readTree(json), "status");
     }
 
@@ -601,7 +606,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, args.snapshotRepoName
+            args.solrCollections, connectionContext, args.snapshotRepoName, contextPath
         );
         creator.registerRepo();
         creator.createSnapshot();
@@ -629,7 +634,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, repositoryName
+            args.solrCollections, connectionContext, repositoryName, contextPath
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);

@@ -1547,6 +1547,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
         };
     }
