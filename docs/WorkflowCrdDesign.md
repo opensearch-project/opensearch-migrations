@@ -154,16 +154,23 @@ new UIDs.
 
 ## CLI: `workflow submit`
 
-Submit replaces any existing Argo workflow before creating a new one. It does
-**not** delete migration CRDs — those survive across workflow resubmissions.
+Submit prepares and admission-checks a replacement before deleting an existing
+Argo workflow. It does **not** delete migration CRDs; those survive across
+ordinary workflow resubmissions.
 
-The initializer runs before each submission to:
-1. Clean up stale ApprovalGate CRs (label-based deletion + per-name fallback)
-2. Create or reuse migration CRD resources, including one immutable `MigrationRun`
-   history record for the submitted run
-3. Enrich the workflow config with server-assigned CR UIDs
-4. Submit the Argo workflow with workflow-name/run-number labels and a
-   MigrationRun-name annotation
+The submission path:
+
+1. runs the initializer once to prepare the complete bundle and run number;
+2. server-dry-runs final desired resources and writes a structured report;
+3. blocks before mutation for proven impossible/sealed or schema-invalid changes;
+4. stops and deletes the old Argo workflow only after preflight succeeds;
+5. cleans up stale ApprovalGates and creates or reuses migration resources,
+   including one immutable `MigrationRun` history record;
+6. enriches workflow config with server-assigned CR UIDs; and
+7. submits the Argo workflow with workflow-name/run-number labels and a
+   MigrationRun-name annotation.
+
+Steps 5-7 commit the prepared bundle; they do not rerun initialization.
 
 After the Argo workflow starts, its first bookkeeping step, `initializeRunMetadata`,
 patches the matching `MigrationRun` with `status.workflowUid`,

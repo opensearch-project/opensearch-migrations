@@ -168,13 +168,15 @@ Before submit, show a review of relevant pending changes and validation results.
 then becomes a visible operation with understandable phases rather than a blocking command
 or a transient notification.
 
-Review also runs a best-effort admission preflight against the pinned Kubernetes API.
-The server resolves the pending configuration to the same full root CR specs that the
-workflow applies, then uses Kubernetes server dry-run for existing updates and missing
-resource creates. Explicit impossible changes, completed-resource seals, and definite CRD
-schema errors block direct submit. Approval-gated, deleting, unavailable, and otherwise
-state-dependent results are warnings because the workflow or cluster may make them valid
-later. Submission repeats the preflight immediately before replacing Argo state.
+Review also runs the config-processor's best-effort admission preflight against
+the pinned Kubernetes API. The initializer prepares one bundle containing the
+same final CR specs that the workflow later applies. Kubernetes server dry-run
+and package-owned projected-field policy classification produce a structured
+report. Explicit impossible changes, completed-resource seals, and definite CRD
+schema errors block direct submit. Approval-gated, deleting, unavailable, and
+otherwise state-dependent results are warnings because the workflow or cluster
+may make them valid later. Submission prepares and preflights the exact bundle
+before replacing Argo state, then commits it without regenerating.
 
 The first design does not need to solve every possible dependency visualization. A clear
 list of active work and its current phase is sufficient; richer dependency connections can

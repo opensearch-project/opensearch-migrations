@@ -150,7 +150,7 @@ describe('migration initializer CRD resource generation', () => {
         }
 
         expect(enrichScript).toContain(
-            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+            "data_snapshot_source_snap1=\"$(run_kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('dataSnapshots: {');
         expect(enrichScript).toContain('"source-snap1": $data_snapshot_source_snap1');
@@ -158,7 +158,7 @@ describe('migration initializer CRD resource generation', () => {
             '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[crdname($snapshot.sourceConfig.label + "-" + .label)]}))))'
         );
         expect(enrichScript).toContain(
-            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
+            "snapshot_migration_source_target_snap1_migration_0=\"$(run_kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
@@ -243,7 +243,7 @@ describe('migration initializer CRD resource generation', () => {
         }));
 
         expect(enrichScript).toContain(
-            "s3loader_loaded_dump=\"$(kubectl get capturedtraffics.migrations.opensearch.org/loaded-dump-topic -o jsonpath='{.metadata.uid}')\""
+            "s3loader_loaded_dump=\"$(run_kubectl get capturedtraffics.migrations.opensearch.org/loaded-dump-topic -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain("s3TrafficLoaders: {");
         expect(enrichScript).toContain('"loaded-dump": $s3loader_loaded_dump');
@@ -460,10 +460,10 @@ describe('migration initializer CRD resource generation', () => {
 
         expect(enrichScript).not.toBeNull();
         expect(enrichScript).toContain(
-            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+            "data_snapshot_source_snap1=\"$(run_kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain(
-            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
+            "snapshot_migration_source_target_snap1_migration_0=\"$(run_kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');

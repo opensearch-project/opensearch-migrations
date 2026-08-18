@@ -658,7 +658,7 @@ def _approval_failure_diagnostic(
         title=(
             f"Blocked by {target_name} apply failure"
             if external_target
-            else "Apply retry requires approval"
+            else "Replacement workflow required"
             if immutable_update and not deployed
             else "Apply failed; reset required"
             if reset_required
@@ -667,18 +667,18 @@ def _approval_failure_diagnostic(
         remedy=(
             (
                 f"Open {target_name}, reset it to delete and recreate it, "
-                "then retry the apply."
+                "then submit a replacement workflow."
                 if external_target
                 else f"Reset {target_name} to delete and recreate it, then "
-                "retry the apply."
+                "submit a replacement workflow."
             )
             if reset_required
             else (
-                f"{target_name} is already absent. Approve the retry to "
-                "recreate it with the submitted configuration."
+                f"{target_name} is already absent. Submit a replacement "
+                "workflow to recreate it from the saved configuration."
             )
             if immutable_update
-            else "Review the denied change, then approve the retry when it "
+            else "Review the denied change, then approve the change when it "
             "is safe to continue."
         ),
         technical_detail=(
@@ -714,8 +714,14 @@ def _approval_disabled_reason(
         resource.phase != PENDING_CONFIG_PHASE,
     )
     if not deployed:
-        return None
-    return f"Reset {resource.name} before retrying this apply."
+        return (
+            f"Submit a replacement workflow to recreate {resource.name}; "
+            "the current workflow cannot recreate it."
+        )
+    return (
+        f"Reset {resource.name} and submit a replacement workflow; "
+        "the current workflow cannot recreate it."
+    )
 
 
 def _iter_workflow_steps(

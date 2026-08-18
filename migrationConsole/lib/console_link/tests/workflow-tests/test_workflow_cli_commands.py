@@ -4,6 +4,7 @@ import base64
 import gzip
 import json
 import sys
+from pathlib import Path
 
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
@@ -11,11 +12,47 @@ from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
-from console_link.workflow.services.admission_preflight import (
-    AdmissionPreflightIssue,
-    AdmissionPreflightReport,
-)
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
+
+
+def _successful_submission_process(
+    workflow_name="test-workflow-abc",
+    report=None,
+):
+    preflight = report or {
+        "formatVersion": 1,
+        "allowed": True,
+        "checkedResources": 0,
+        "issues": [],
+    }
+
+    def run(command, **_kwargs):
+        if "editConfig" in command:
+            return Mock(
+                returncode=0,
+                stdout=json.dumps({
+                    "validation": {"valid": True, "errors": []},
+                }),
+                stderr="",
+            )
+        if "--prepare-only" in command:
+            bundle_dir = Path(
+                command[command.index("--prepare-only") + 1]
+            )
+            (bundle_dir / "submissionPreflight.json").write_text(
+                json.dumps(preflight)
+            )
+            return Mock(returncode=0, stdout="", stderr="", args=command)
+        return Mock(
+            returncode=0,
+            stdout=(
+                f"workflow.argoproj.io/{workflow_name} created"
+            ),
+            stderr="",
+            args=command,
+        )
+
+    return run
 
 
 class TestWorkflowCLICommands:
@@ -227,10 +264,7 @@ class TestWorkflowCLICommands:
     ):
         """Test basic submit command execution."""
         # Mock subprocess to avoid actual Kubernetes submission
-        mock_subprocess.return_value = Mock(
-            returncode=0,
-            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
-        )
+        mock_subprocess.side_effect = _successful_submission_process()
         mock_exists.return_value = False
 
         runner = CliRunner()
@@ -255,19 +289,19 @@ class TestWorkflowCLICommands:
         assert 'NOT checking' not in result.output
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
-        assert "--workflow-name" in mock_subprocess.call_args[0][0]
-        assert "migration-workflow" in mock_subprocess.call_args[0][0]
-        assert "--quiet" in mock_subprocess.call_args[0][0]
-        assert mock_subprocess.call_count == 2
-        assert "resolveMigrationResources" in mock_subprocess.call_args_list[0][0][0]
+        prepare_command = mock_subprocess.call_args_list[1][0][0]
+        assert "--workflow-name" in prepare_command
+        assert "migration-workflow" in prepare_command
+        assert "--quiet" in prepare_command
+        assert mock_subprocess.call_count == 3
+        assert "editConfig" in mock_subprocess.call_args_list[0][0][0]
+        assert "--prepare-only" in mock_subprocess.call_args_list[1][0][0]
+        assert "--commit-prepared" in mock_subprocess.call_args_list[2][0][0]
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
         _mock_verify_secrets.assert_called_once()
 
-    @patch(
-        "console_link.workflow.commands.submit.ConfigEditService.preflight_raw_config"
-    )
     @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
     @patch(
         "console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace"
@@ -284,23 +318,26 @@ class TestWorkflowCLICommands:
         mock_exists,
         _mock_get_secret_store,
         _mock_verify_secrets,
-        mock_preflight,
     ):
         mock_store = Mock()
         mock_store_class.return_value = mock_store
         mock_store.load_config.return_value = WorkflowConfig({
             "sourceClusters": {},
         })
-        mock_preflight.return_value = AdmissionPreflightReport(
-            checked_resources=1,
-            issues=(AdmissionPreflightIssue(
-                kind="CapturedTraffic",
-                name="p2-topic",
-                plural="capturedtraffics",
-                classification="recreate-required",
-                message="sourceLabel cannot be changed",
-                source="kubernetes",
-            ),),
+        mock_subprocess.side_effect = _successful_submission_process(
+            report={
+                "formatVersion": 1,
+                "allowed": False,
+                "checkedResources": 1,
+                "issues": [{
+                    "kind": "CapturedTraffic",
+                    "name": "p2-topic",
+                    "plural": "capturedtraffics",
+                    "classification": "recreate-required",
+                    "message": "sourceLabel cannot be changed",
+                    "source": "kubernetes",
+                }],
+            },
         )
 
         result = CliRunner().invoke(workflow_cli, ["submit"])
@@ -309,7 +346,98 @@ class TestWorkflowCLICommands:
         assert "blocked by admission preflight" in result.output
         assert "sourceLabel cannot be changed" in result.output
         mock_exists.assert_not_called()
-        mock_subprocess.assert_not_called()
+        assert mock_subprocess.call_count == 2
+        assert "--prepare-only" in mock_subprocess.call_args_list[1][0][0]
+
+    @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
+    @patch(
+        "console_link.workflow.commands.submit."
+        "get_credentials_secret_store_for_namespace"
+    )
+    @patch("console_link.workflow.commands.submit.workflow_exists")
+    @patch("console_link.workflow.commands.submit.load_k8s_config")
+    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
+    def test_submit_dry_run_outputs_package_report_without_mutation(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+    ):
+        mock_store_class.return_value.load_config.return_value = WorkflowConfig({
+            "sourceClusters": {},
+        })
+        mock_subprocess.side_effect = _successful_submission_process(
+            report={
+                "formatVersion": 1,
+                "allowed": True,
+                "checkedResources": 3,
+                "issues": [],
+            }
+        )
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ["submit", "--dry-run", "--output", "json"],
+        )
+
+        assert result.exit_code == 0
+        assert json.loads(result.output)["checkedResources"] == 3
+        mock_exists.assert_not_called()
+        assert mock_subprocess.call_count == 2
+        assert "--commit-prepared" not in str(mock_subprocess.call_args_list)
+
+    @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
+    @patch(
+        "console_link.workflow.commands.submit."
+        "get_credentials_secret_store_for_namespace"
+    )
+    @patch("console_link.workflow.commands.submit.workflow_exists")
+    @patch("console_link.workflow.commands.submit.load_k8s_config")
+    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
+    def test_submit_blocked_dry_run_returns_only_the_json_report(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        _mock_get_secret_store,
+        _mock_verify_secrets,
+    ):
+        mock_store_class.return_value.load_config.return_value = WorkflowConfig({
+            "sourceClusters": {},
+        })
+        report = {
+            "formatVersion": 1,
+            "allowed": False,
+            "checkedResources": 1,
+            "issues": [{
+                "kind": "CapturedTraffic",
+                "name": "p2-topic",
+                "plural": "capturedtraffics",
+                "classification": "recreate-required",
+                "blocking": True,
+                "message": "sourceLabel cannot be changed",
+                "source": "kubernetes",
+            }],
+        }
+        mock_subprocess.side_effect = _successful_submission_process(
+            report=report
+        )
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ["submit", "--dry-run", "--output", "json"],
+        )
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == report
+        mock_exists.assert_not_called()
+        assert "--commit-prepared" not in str(mock_subprocess.call_args_list)
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
@@ -330,10 +458,7 @@ class TestWorkflowCLICommands:
         _mock_get_secret_store,
         _mock_verify_secrets,
     ):
-        mock_subprocess.return_value = Mock(
-            returncode=0,
-            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
-        )
+        mock_subprocess.side_effect = _successful_submission_process()
         mock_exists.return_value = False
 
         mock_store = Mock()
@@ -446,10 +571,7 @@ class TestWorkflowCLICommands:
     ):
         """Test submit command with --wait flag."""
         # Mock subprocess to avoid actual Kubernetes submission
-        mock_subprocess.return_value = Mock(
-            returncode=0,
-            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
-        )
+        mock_subprocess.side_effect = _successful_submission_process()
         mock_exists.return_value = False
 
         runner = CliRunner()
@@ -488,7 +610,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
-        assert mock_subprocess.call_count == 2
+        assert mock_subprocess.call_count == 3
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -514,10 +636,7 @@ class TestWorkflowCLICommands:
         _mock_verify_secrets,
     ):
         """Test submit replaces an existing workflow before resubmitting."""
-        mock_subprocess.return_value = Mock(
-            returncode=0,
-            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
-        )
+        mock_subprocess.side_effect = _successful_submission_process()
         mock_exists.return_value = True
         mock_stop.return_value = True
         mock_delete.return_value = True
@@ -546,7 +665,7 @@ class TestWorkflowCLICommands:
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
         mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
-        assert mock_subprocess.call_count == 2
+        assert mock_subprocess.call_count == 3
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -817,8 +936,12 @@ class TestWorkflowCLICommands:
             'labels': labels,
             'name': 'captureproxy.capture-proxy.vapretry',
             'prerequisite': {
-                'command': 'workflow reset capture-proxy',
-                'description': 'Reset the CaptureProxy so the workflow can recreate it',
+                'command': (
+                    'workflow reset captureproxy.capture-proxy --resubmit'
+                ),
+                'description': (
+                    'Reset the CaptureProxy and submit a replacement workflow'
+                ),
             },
             'reason': None,
             'resourceKind': 'CaptureProxy',
@@ -1054,12 +1177,11 @@ class TestWorkflowCLICommands:
         assert result.exit_code != 0
         assert '--pre-approve' in result.output.lower() or 'no such option' in result.output.lower()
 
-    @patch('console_link.workflow.commands.approve._resource_still_exists')
     @patch('console_link.workflow.commands.approve.approve_gate')
     @patch('console_link.workflow.commands.approve._gather_gates')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
-    def test_approve_retry_blocks_when_resource_exists(
-        self, mock_k8s, mock_gather, mock_approve, mock_exists
+    def test_approve_retry_requires_resubmit_when_resource_exists(
+        self, mock_k8s, mock_gather, mock_approve
     ):
         runner = CliRunner()
         mock_gather.return_value = [
@@ -1072,23 +1194,21 @@ class TestWorkflowCLICommands:
                 }
             )
         ]
-        mock_exists.return_value = True  # resource still present → block
-
         result = runner.invoke(
             workflow_cli,
             ['approve', 'retry', 'captureproxy.capture-proxy.vapretry']
         )
 
         assert result.exit_code != 0
-        assert 'still exist' in result.output or 'still exist' in result.stderr_bytes.decode('utf-8', errors='replace')
+        assert 'cannot be approved safely' in result.output
+        assert 'workflow reset captureproxy.capture-proxy --resubmit' in result.output
         assert mock_approve.call_count == 0
 
-    @patch('console_link.workflow.commands.approve._resource_still_exists')
     @patch('console_link.workflow.commands.approve.approve_gate')
     @patch('console_link.workflow.commands.approve._gather_gates')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
-    def test_approve_retry_approves_when_resource_gone(
-        self, mock_k8s, mock_gather, mock_approve, mock_exists
+    def test_approve_retry_requires_resubmit_when_resource_is_absent(
+        self, mock_k8s, mock_gather, mock_approve
     ):
         runner = CliRunner()
         mock_gather.return_value = [
@@ -1101,7 +1221,6 @@ class TestWorkflowCLICommands:
                 }
             )
         ]
-        mock_exists.return_value = False  # resource absent → allow
         mock_approve.return_value = True
 
         result = runner.invoke(
@@ -1109,9 +1228,10 @@ class TestWorkflowCLICommands:
             ['approve', 'retry', 'captureproxy.capture-proxy.vapretry']
         )
 
-        assert result.exit_code == 0
-        assert 'Approved 1 gate' in result.output
-        mock_approve.assert_called_once_with('ma', 'captureproxy.capture-proxy.vapretry')
+        assert result.exit_code != 0
+        assert 'cannot be approved safely' in result.output
+        assert 'replacement workflow' in result.output
+        mock_approve.assert_not_called()
 
     @patch('console_link.workflow.commands.approve.approve_gate')
     @patch('console_link.workflow.commands.approve._gather_gates')
@@ -1891,9 +2011,8 @@ class TestWorkflowCLICommands:
     ):
         """Test submit command with parameter injection from config."""
         # Mock subprocess to avoid actual Kubernetes submission
-        mock_subprocess.return_value = Mock(
-            returncode=0,
-            stdout='{"workflow_name": "test-workflow-def", "workflow_uid": "uid-789", "namespace": "ma"}'
+        mock_subprocess.side_effect = _successful_submission_process(
+            "test-workflow-def"
         )
         mock_exists.return_value = False
 
@@ -1917,7 +2036,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
-        assert mock_subprocess.call_count == 2
+        assert mock_subprocess.call_count == 3
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 

@@ -437,6 +437,22 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.resources.every((resource: any) =>
             resource.parameterPolicies === undefined
         )).toBe(true);
+
+        const preflightResources = JSON.parse(
+            await fs.readFile(
+                path.join(outputDir, "submissionPreflightResources.json"),
+                "utf8",
+            )
+        );
+        const policyCandidates = preflightResources.filter(
+            (candidate: any) => candidate.policyResource
+        );
+        expect(policyCandidates.length).toBeGreaterThan(0);
+        for (const candidate of policyCandidates) {
+            expect(candidate.manifest.spec).toEqual(
+                candidate.policyResource.parameters
+            );
+        }
     });
 
     it("builds resolved migration resources from a transformed workflow config file", async () => {

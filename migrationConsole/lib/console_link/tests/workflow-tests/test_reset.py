@@ -516,6 +516,58 @@ class TestResetCommandDelete:
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with(resources, 'ma', True)
 
+    @patch(
+        "console_link.workflow.services.config_edit_service."
+        "ConfigEditService"
+    )
+    @patch("console_link.workflow.application.resets.ResetService")
+    @patch(
+        "console_link.workflow.commands.reset."
+        "_resolve_named_reset_targets"
+    )
+    @patch("console_link.workflow.commands.reset.load_k8s_config")
+    def test_reset_resubmit_uses_version_bound_plan_then_replaces_workflow(
+        self,
+        _mock_k8s,
+        mock_resolve,
+        mock_reset_service_class,
+        mock_edit_service_class,
+    ):
+        targets = [
+            ("capturedtraffics", "p2-topic", "Ready", ["default"]),
+        ]
+        mock_resolve.return_value = targets
+        reset_service = mock_reset_service_class.return_value
+        reset_service.plan_many.return_value = SimpleNamespace(
+            token="plan-token",
+            targets=(
+                SimpleNamespace(
+                    plural="capturedtraffics",
+                    name="p2-topic",
+                ),
+            ),
+        )
+        edit_service = mock_edit_service_class.return_value
+        edit_service.submit_saved_config.return_value = {
+            "workflow_name": "migration-workflow",
+        }
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ["reset", "capturedtraffic.p2-topic", "--resubmit"],
+        )
+
+        assert result.exit_code == 0
+        edit_service.validate_saved_config_for_submit.assert_called_once()
+        reset_service.plan_many.assert_called_once_with(
+            ("reset:capturedtraffics:p2-topic",)
+        )
+        reset_service.execute.assert_called_once_with("plan-token")
+        edit_service.submit_saved_config.assert_called_once_with(
+            "migration-workflow"
+        )
+        assert "replacement workflow submitted" in result.output
+
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')

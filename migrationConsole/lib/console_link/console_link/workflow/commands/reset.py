@@ -1166,6 +1166,57 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
     _warn_target_indexes_remain(targets)
 
 
+def _reset_and_resubmit(
+    targets,
+    namespace,
+    workflow_name,
+    session,
+    delete_storage,
+):
+    """Execute a version-bound reset, then create a replacement workflow."""
+    from ..application.resets import ResetService
+    from ..services.config_edit_service import ConfigEditService
+
+    edit_service = ConfigEditService(
+        namespace=namespace,
+        session_name=session,
+    )
+    # Validate config and external references before deleting anything.
+    edit_service.validate_saved_config_for_submit()
+
+    reset_service = ResetService(namespace)
+    target_ids = tuple(
+        f"reset:{plural}:{name}"
+        for plural, name, _phase, _depends_on in targets
+    )
+    plan = reset_service.plan_many(target_ids)
+    click.echo(
+        f"Resetting {len(plan.targets)} resource"
+        f"{'s' if len(plan.targets) != 1 else ''} before resubmission..."
+    )
+    kafka_names = [
+        target.name
+        for target in plan.targets
+        if target.plural == "kafkaclusters"
+    ]
+    _handle_kafka_storage(namespace, kafka_names, delete_storage)
+    reset_service.execute(plan.token)
+
+    try:
+        result = edit_service.submit_saved_config(workflow_name)
+    except Exception as error:
+        raise click.ClickException(
+            "Reset completed, but replacement workflow submission failed. "
+            "The reset resources remain absent. Fix the error and run "
+            f"`workflow submit --workflow-name {workflow_name}`.\n{error}"
+        ) from error
+
+    click.echo(
+        "Reset completed and replacement workflow submitted: "
+        f"{result.get('workflow_name', workflow_name)}"
+    )
+
+
 @click.command(name="reset")
 @click.argument('names', nargs=-1, metavar='NAME', shell_complete=_get_resource_completions)
 @click.option('--list', 'list_resources', is_flag=True, default=False, help='List migration resources and exit')
@@ -1182,10 +1233,17 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
               help='Delete Kafka PVCs and orphaned PVs during reset')
 @click.option('--keep-output-artifacts', is_flag=True, default=False,
               help='Keep retained workflow output artifacts and print their S3 prefix')
+@click.option('--resubmit', is_flag=True, default=False,
+              help='Reset the named resources and submit a replacement workflow')
+@click.option('--workflow-name', default='migration-workflow', hidden=True,
+              help='Name of the workflow to replace after reset')
+@click.option('--session', default='default', hidden=True,
+              help='Saved configuration session to resubmit')
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.pass_context
 def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxies, dry_run, exact,
-                  output_format, delete_storage, keep_output_artifacts, namespace):
+                  output_format, delete_storage, keep_output_artifacts, resubmit,
+                  workflow_name, session, namespace):
     """Reset deletes named workflow resources but does not alter resources
     that are managed outside the migration system, such as the target clusters.
     To fully reset or reverse a previous step, actions will need to be made on
@@ -1214,6 +1272,22 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             click.echo("--exact cannot be combined with --cascade.", err=True)
             ctx.exit(ExitCode.FAILURE.value)
             return
+        if resubmit and (dry_run or list_resources or reset_all or not names):
+            click.echo(
+                "--resubmit requires one or more named resources and cannot "
+                "be combined with --dry-run, --list, or --all.",
+                err=True,
+            )
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+        if resubmit and keep_output_artifacts:
+            click.echo(
+                "--resubmit cannot be combined with "
+                "--keep-output-artifacts.",
+                err=True,
+            )
+            ctx.exit(ExitCode.FAILURE.value)
+            return
 
         if list_resources:
             resources = list_migration_resources(namespace)
@@ -1237,6 +1311,15 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
                     output_format,
                 )
                 return
+            if resubmit:
+                _reset_and_resubmit(
+                    targets,
+                    namespace,
+                    workflow_name,
+                    session,
+                    delete_storage,
+                )
+                return
             kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
             _handle_kafka_storage(namespace, kafka_names, delete_storage)
             if targets and not _delete_targets(targets, namespace, not keep_output_artifacts):
@@ -1246,6 +1329,28 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             return
 
         if names:
+            if resubmit:
+                messages = []
+                targets = _resolve_named_reset_targets(
+                    names,
+                    namespace,
+                    cascade,
+                    include_proxies,
+                    messages,
+                )
+                if targets is None:
+                    for message in messages:
+                        click.echo(message)
+                    ctx.exit(ExitCode.FAILURE.value)
+                    return
+                _reset_and_resubmit(
+                    targets,
+                    namespace,
+                    workflow_name,
+                    session,
+                    delete_storage,
+                )
+                return
             if dry_run:
                 messages = []
                 targets = _resolve_named_reset_targets(

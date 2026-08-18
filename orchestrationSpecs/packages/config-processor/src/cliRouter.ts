@@ -8,6 +8,7 @@ process.argv.splice(2, 1);
         ['initialize', async () => require('./runMigrationInitializer').main()],
         ['resolveMigrationResources', async () => require('./resolveMigrationResources').main()],
         ['resolveConsoleResources', async () => require('./resolveConsoleResources').main()],
+        ['preflightSubmission', async () => require('./submissionPreflight').main()],
         ['findSecrets', async () => require('./findSecrets').main()],
         ['validate', async () => require('./validateConfig').main()],
         ['editConfig', async () => require('./editConfig').main()],

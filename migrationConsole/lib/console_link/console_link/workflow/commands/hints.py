@@ -76,10 +76,6 @@ def hint_after_approve_change() -> None:
     _hint(MONITOR_PROGRESS)
 
 
-def hint_after_approve_retry() -> None:
-    _hint(MONITOR_PROGRESS)
-
-
 # ── status ─────────────────────────────────────────────────────────────────
 
 def hint_after_status(phase: str) -> None:

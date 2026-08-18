@@ -1,6 +1,7 @@
 """Tests for script runner service."""
 
 import subprocess
+import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -132,6 +133,52 @@ class TestScriptRunner:
         assert "Workflow submit script failed with exit code 1" in message
         assert "Error: missing required workflow value" in message
         assert "stdout: Running configuration conversion..." in message
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_prepare_and_commit_reuse_the_exact_submission_bundle(self, mock_run):
+        def run(command, **_kwargs):
+            if "--prepare-only" in command:
+                bundle_dir = Path(command[command.index("--prepare-only") + 1])
+                (bundle_dir / "submissionPreflight.json").write_text(json.dumps({
+                    "formatVersion": 1,
+                    "allowed": True,
+                    "checkedResources": 2,
+                    "issues": [],
+                }))
+                return Mock(returncode=0, stdout="", stderr="")
+            return Mock(
+                returncode=0,
+                stdout="workflow.argoproj.io/migration-workflow created",
+                stderr="",
+            )
+
+        mock_run.side_effect = run
+        runner = ScriptRunner()
+
+        prepared = runner.prepare_workflow(
+            "sourceClusters: {}",
+            ["--workflow-name", "migration-workflow"],
+        )
+        try:
+            result = runner.commit_prepared_workflow(prepared)
+            prepare_command = mock_run.call_args_list[0].args[0]
+            commit_command = mock_run.call_args_list[1].args[0]
+
+            assert prepared.report["checkedResources"] == 2
+            assert "--prepare-only" in prepare_command
+            assert "--commit-prepared" in commit_command
+            assert (
+                prepare_command[prepare_command.index("--prepare-only") + 1]
+                == commit_command[commit_command.index("--commit-prepared") + 1]
+            )
+            assert result["workflow_name"] == "migration-workflow"
+        finally:
+            bundle_dir = prepared.bundle_dir
+            config_path = prepared.config_path
+            prepared.cleanup()
+
+        assert not bundle_dir.exists()
+        assert not config_path.exists()
 
     def test_script_not_found(self):
         """Test error handling when script doesn't exist."""

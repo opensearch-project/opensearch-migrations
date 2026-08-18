@@ -27,8 +27,9 @@ from .crd_utils import (
     CRD_GROUP,
     CRD_VERSION,
     match_names,
+    resource_display_name,
 )
-from .hints import hint_after_approve_step, hint_after_approve_change, hint_after_approve_retry
+from .hints import hint_after_approve_step, hint_after_approve_change
 
 logger = logging.getLogger(__name__)
 
@@ -462,15 +463,21 @@ _KIND_TO_PLURAL = {
 
 
 def _retry_prerequisite(gate):
-    """Return (description, command) for the prereq required before approving
-    this retry gate, or None if we can't determine one.
-    """
+    """Return the replacement-workflow recovery action for a retry gate."""
     kind = gate.resource_kind
     name = gate.resource_name
     if not kind or not name:
         return None
-    return (f"Reset the {kind} so the workflow can recreate it",
-            f"workflow reset {name}")
+    plural = _KIND_TO_PLURAL.get(kind)
+    resource_path = (
+        resource_display_name(plural, name)
+        if plural
+        else name
+    )
+    return (
+        f"Reset the {kind} and submit a replacement workflow",
+        f"workflow reset {resource_path} --resubmit",
+    )
 
 
 def _prerequisite_to_json(gate):
@@ -482,41 +489,6 @@ def _prerequisite_to_json(gate):
         "description": description,
         "command": command,
     }
-
-
-def _resource_still_exists(namespace, kind, name):
-    """Check if a migration CRD still exists."""
-    plural = _KIND_TO_PLURAL.get(kind)
-    if not plural:
-        return False
-    custom = client.CustomObjectsApi()
-    try:
-        custom.get_namespaced_custom_object(
-            group=CRD_GROUP, version=CRD_VERSION,
-            namespace=namespace, plural=plural, name=name,
-        )
-        return True
-    except ApiException as e:
-        if e.status == 404:
-            return False
-        logger.warning(f"Unexpected error checking {kind}/{name}: {e}")
-        return True  # err on the side of blocking
-
-
-def _retry_blockers(namespace, gates):
-    """Return a list of (gate, prereq) tuples for gates whose prereqs are
-    still unsatisfied (resource still exists).
-    """
-    blockers = []
-    for gate in gates:
-        prereq = _retry_prerequisite(gate)
-        if prereq is None:
-            continue  # advisory-only prereqs aren't blockers
-        kind = gate.resource_kind
-        name = gate.resource_name
-        if kind and name and _resource_still_exists(namespace, kind, name):
-            blockers.append((gate, prereq))
-    return blockers
 
 
 # ─────────────────────────────────────────────────────────────
@@ -779,8 +751,7 @@ def _apply_approvals(ctx, namespace, targets):
 
 
 def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace, output_format='text',
-                    enforce_retry_prereqs=False):
+                    workflow_name, namespace, output_format='text'):
     """Core logic shared by all three subcommands."""
     _require_single_action(ctx, names, list_flag, all_flag)
 
@@ -832,20 +803,25 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
     if not targets:
         return
 
-    if enforce_retry_prereqs:
-        blockers = _retry_blockers(namespace, targets)
-        if blockers:
-            click.echo("Cannot approve retry gates. These resources still exist:", err=True)
-            for gate, _ in blockers:
-                click.echo(f"  {gate.resource_kind}/{gate.resource_name}", err=True)
-            click.echo("\nRun the following, then re-run the approve command:", err=True)
-            shown = set()
-            for _, (_, cmd) in blockers:
-                if cmd not in shown:
-                    click.echo(f"  {cmd}", err=True)
-                    shown.add(cmd)
-            ctx.exit(ExitCode.FAILURE.value)
-            return
+    if category == "retry":
+        click.echo(
+            "Impossible-change retry gates cannot be approved safely. "
+            "These resources are initialized before the Argo workflow, so "
+            "the current workflow cannot recreate a reset resource.",
+            err=True,
+        )
+        click.echo(
+            "\nReset and submit a replacement workflow instead:",
+            err=True,
+        )
+        shown = set()
+        for gate in targets:
+            prerequisite = _retry_prerequisite(gate)
+            if prerequisite and prerequisite[1] not in shown:
+                click.echo(f"  {prerequisite[1]}", err=True)
+                shown.add(prerequisite[1])
+        ctx.exit(ExitCode.FAILURE.value)
+        return
 
     _apply_approvals(ctx, namespace, targets)
 
@@ -853,8 +829,6 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
         hint_after_approve_step()
     elif category == 'change':
         hint_after_approve_change()
-    elif category == 'retry':
-        hint_after_approve_retry()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -966,18 +940,17 @@ def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
 @click.pass_context
 def approve_retry(ctx, names, list_flag, output_format, all_flag,
                   workflow_name, argo_server, namespace, insecure, token):
-    """Confirm recovery is complete after an impossible change.
+    """Inspect recovery gates after an impossible change.
 
-    The VAP denied an UPDATE because the field is immutable in place.
-    The user must reset the resource first; approving tells the workflow
-    the recovery is done so it can re-create the resource fresh.
+    The VAP denied an UPDATE because the field is immutable in place. List
+    mode shows the required reset-and-resubmit action. Retry gates cannot be
+    approved because the current workflow cannot recreate initializer-owned
+    resources.
 
     \b
     Examples:
         workflow approve retry --list
-        workflow approve retry captureproxy.capture-proxy
-        workflow approve retry --all
+        workflow reset captureproxy.capture-proxy --resubmit
     """
     _run_subcommand(ctx, 'retry', names, list_flag, all_flag, False,
-                    workflow_name, namespace, output_format=output_format,
-                    enforce_retry_prereqs=True)
+                    workflow_name, namespace, output_format=output_format)

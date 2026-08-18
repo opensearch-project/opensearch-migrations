@@ -28,6 +28,40 @@ single TypeScript-owned parser/projection pipeline with two validation modes:
 Loose mode is allowed to return partial resources and `valid: false`; it is not
 allowed to submit workflows or generate final CR manifests.
 
+## Submission Admission Preflight
+
+Strict validation is followed by a package-owned submission preflight. The
+initializer generates one submission bundle, including final desired root CR
+specs. The submission path then:
+
+1. runs Kubernetes server dry-run against that exact bundle;
+2. classifies projected-field restrictions with the metadata that generates
+   the VAP rules;
+3. writes the versioned `submissionPreflight.json` report;
+4. stops before every mutating command when the report is blocked; and
+5. commits the prepared bundle without rerunning initialization.
+
+| Classification | Blocks submit | Meaning |
+| --- | --- | --- |
+| `recreate-required` | yes | A proven impossible or sealed update requires reset and a replacement workflow. |
+| `invalid` | yes | The candidate is definitely invalid against the live CRD/schema. |
+| `approval-required` | no | The workflow may converge after its normal approval gate. |
+| `warning` | no | Admission is unavailable, state-dependent, or not proven permanent. |
+
+Only proven permanent failures block. Deleting resources, transient API
+failures, generic state-dependent VAP failures, and approval-gated changes do
+not block because a later workflow step may still converge.
+
+`packages/config-processor/src/submissionPreflight.ts` owns the report contract,
+Kubernetes classification, and projected-policy fallback. The submission shell
+script owns prepare/commit. Python Click, FastAPI, and Textual code adapts the
+report and coordinates replacement of the existing Argo Workflow; it does not
+reimplement policy semantics.
+
+`workflow submit --dry-run --output json` exposes the same report and exits
+nonzero when `allowed` is false. Normal direct script submission and every
+Python submission path always run the preflight.
+
 ## Direct `config-processor` Entry Points
 
 - `packages/config-processor/src/validateConfig.ts`

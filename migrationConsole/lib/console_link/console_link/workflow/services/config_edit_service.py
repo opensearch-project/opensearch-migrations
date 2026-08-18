@@ -27,7 +27,6 @@ from ..models.utils import load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
 from .admission_preflight import (
     AdmissionPreflightReport,
-    AdmissionPreflightService,
 )
 from .script_runner import ScriptRunner
 
@@ -94,7 +93,6 @@ class ConfigEditService:
     core_api: Optional[Any] = None
     custom_api: Optional[Any] = None
     secret_store: Optional[SecretStore] = None
-    admission_preflight: Optional[AdmissionPreflightService] = None
 
     def load_edit_session(self) -> ConfigEditSession:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
@@ -304,71 +302,78 @@ class ConfigEditService:
         workflow_name: str = DEFAULT_WORKFLOW_NAME,
         unique_run_nonce: Optional[str] = None,
     ) -> Dict[str, Any]:
+        config = self.validate_saved_config_for_submit()
+
+        runner = self.runner or ScriptRunner()
+        prepared = runner.prepare_workflow(
+            config.raw_yaml,
+            [
+                "--workflow-name", workflow_name,
+                "--namespace", self.namespace,
+                "--unique-run-nonce", unique_run_nonce or str(int(time.time())),
+            ],
+        )
+        try:
+            report = AdmissionPreflightReport.from_payload(prepared.report)
+            if not report.allowed:
+                raise AdmissionPreflightBlocked(report)
+
+            if workflow_exists(self.namespace, workflow_name):
+                stop_workflow(self.namespace, workflow_name)
+                delete_workflow(self.namespace, workflow_name)
+                if not wait_until_workflow_deleted(
+                    self.namespace,
+                    workflow_name,
+                ):
+                    raise TimeoutError(
+                        "Timed out waiting for workflow "
+                        f"'{workflow_name}' to be deleted"
+                    )
+
+            result = runner.commit_prepared_workflow(prepared)
+            warnings = list(result.get("warnings") or ())
+            warnings.extend(
+                f"{issue.kind} {issue.name}: {issue.message}"
+                for issue in report.warning_issues
+            )
+            if warnings:
+                result["warnings"] = list(dict.fromkeys(warnings))
+            return result
+        finally:
+            prepared.cleanup()
+
+    def validate_saved_config_for_submit(self) -> WorkflowConfig:
+        """Validate the saved config and references before destructive work."""
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
         config = store.load_config(self.session_name)
         if not config or not config.raw_yaml.strip():
             raise ValueError(f"No workflow configuration found for session '{self.session_name}'")
 
-        self._validate_raw_config_for_submit(config.raw_yaml)
+        self.validate_raw_config_for_submit(config.raw_yaml)
 
         secret_store = (
             self.secret_store
             or get_credentials_secret_store_for_namespace(self.namespace)
         )
         verify_configured_secrets_exist(secret_store, config.raw_yaml)
-
-        report = self.preflight_raw_config(
-            config.raw_yaml,
-            workflow_name,
-        )
-        if not report.allowed:
-            raise AdmissionPreflightBlocked(report)
-
-        if workflow_exists(self.namespace, workflow_name):
-            stop_workflow(self.namespace, workflow_name)
-            delete_workflow(self.namespace, workflow_name)
-            if not wait_until_workflow_deleted(self.namespace, workflow_name):
-                raise TimeoutError(f"Timed out waiting for workflow '{workflow_name}' to be deleted")
-
-        runner = self.runner or ScriptRunner()
-        result = runner.submit_workflow(
-            config.raw_yaml,
-            [
-                "--workflow-name", workflow_name,
-                "--unique-run-nonce", unique_run_nonce or str(int(time.time())),
-            ],
-        )
-        warnings = list(result.get("warnings") or ())
-        warnings.extend(
-            f"{issue.kind} {issue.name}: {issue.message}"
-            for issue in report.warning_issues
-        )
-        if warnings:
-            result["warnings"] = list(dict.fromkeys(warnings))
-        return result
+        return config
 
     def preflight_raw_config(
         self,
         raw_yaml: str,
         workflow_name: str = DEFAULT_WORKFLOW_NAME,
     ) -> AdmissionPreflightReport:
-        resolved = self._run_resolve_migration_resources(
+        runner = self.runner or ScriptRunner()
+        payload = runner.preflight_workflow(
             raw_yaml,
-            "--user-config",
-            workflow_name,
-            include_parameter_policies=True,
+            [
+                "--workflow-name", workflow_name,
+                "--namespace", self.namespace,
+            ],
         )
-        service = self.admission_preflight or AdmissionPreflightService(
-            self.namespace,
-            custom_api=self._custom_objects(),
-        )
-        return service.check(
-            resolved,
-            workflow_name=workflow_name,
-            run_number=str(int(time.time() * 1000)),
-        )
+        return AdmissionPreflightReport.from_payload(payload)
 
-    def _validate_raw_config_for_submit(self, raw_yaml: str) -> None:
+    def validate_raw_config_for_submit(self, raw_yaml: str) -> None:
         edit_state = self._run_edit_state(raw_yaml, validate_external_refs=True)
         validation = edit_state.get("validation") or {}
         if validation.get("valid", True):

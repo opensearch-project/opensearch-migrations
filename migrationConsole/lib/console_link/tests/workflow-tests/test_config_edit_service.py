@@ -8,10 +8,6 @@ import pytest
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.models.config import WorkflowConfig
-from console_link.workflow.services.admission_preflight import (
-    AdmissionPreflightIssue,
-    AdmissionPreflightReport,
-)
 from console_link.workflow.services.config_edit_service import (
     AdmissionPreflightBlocked,
     ConfigEditService,
@@ -669,7 +665,7 @@ def test_submit_saved_config_validates_before_touching_workflow(_workflow_exists
     assert "Workflow configuration is not valid" in message
     assert "traffic.replayers.sourceTarget.replayerConfig.requestTransforms.0" in message
     assert "Exactly one of entryPoint or transformName is required" in message
-    runner.submit_workflow.assert_not_called()
+    runner.prepare_workflow.assert_not_called()
     _load_k8s.assert_not_called()
     _workflow_exists.assert_not_called()
 
@@ -694,7 +690,18 @@ def test_submit_saved_config_replaces_existing_workflow(
     runner.run_config_processor_node_script.return_value = json.dumps({
         "validation": {"valid": True, "errors": []},
     })
-    runner.submit_workflow.return_value = {"workflow_name": "migration"}
+    prepared = MagicMock(
+        report={
+            "formatVersion": 1,
+            "allowed": True,
+            "checkedResources": 0,
+            "issues": [],
+        },
+    )
+    runner.prepare_workflow.return_value = prepared
+    runner.commit_prepared_workflow.return_value = {
+        "workflow_name": "migration"
+    }
     service = ConfigEditService(
         namespace="test",
         store=FakeStore(WorkflowConfig(raw_yaml="sourceClusters: {}")),
@@ -704,10 +711,16 @@ def test_submit_saved_config_replaces_existing_workflow(
     result = service.submit_saved_config("migration", unique_run_nonce="123")
 
     assert result == {"workflow_name": "migration"}
-    runner.submit_workflow.assert_called_once_with(
+    runner.prepare_workflow.assert_called_once_with(
         "sourceClusters: {}",
-        ["--workflow-name", "migration", "--unique-run-nonce", "123"],
+        [
+            "--workflow-name", "migration",
+            "--namespace", "test",
+            "--unique-run-nonce", "123",
+        ],
     )
+    runner.commit_prepared_workflow.assert_called_once_with(prepared)
+    prepared.cleanup.assert_called_once()
     _stop_workflow.assert_called_once_with("test", "migration")
     _delete_workflow.assert_called_once_with("test", "migration")
 
@@ -719,33 +732,27 @@ def test_submit_preflight_blocks_before_workflow_is_touched(
     _workflow_exists,
 ):
     runner = MagicMock()
-    runner.run_config_processor_node_script.side_effect = [
-        json.dumps({"validation": {"valid": True, "errors": []}}),
-        json.dumps({
-            "resources": [{
-                "kind": "CapturedTraffic",
-                "name": "p2-topic",
-                "parameters": {"sourceLabel": "next"},
-            }],
-        }),
-    ]
-    preflight = MagicMock()
-    preflight.check.return_value = AdmissionPreflightReport(
-        checked_resources=1,
-        issues=(AdmissionPreflightIssue(
-            kind="CapturedTraffic",
-            name="p2-topic",
-            plural="capturedtraffics",
-            classification="recreate-required",
-            message="sourceLabel cannot be changed",
-            source="kubernetes",
-        ),),
-    )
+    runner.run_config_processor_node_script.return_value = json.dumps({
+        "validation": {"valid": True, "errors": []},
+    })
+    prepared = MagicMock(report={
+        "formatVersion": 1,
+        "allowed": False,
+        "checkedResources": 1,
+        "issues": [{
+            "kind": "CapturedTraffic",
+            "name": "p2-topic",
+            "plural": "capturedtraffics",
+            "classification": "recreate-required",
+            "message": "sourceLabel cannot be changed",
+            "source": "kubernetes",
+        }],
+    })
+    runner.prepare_workflow.return_value = prepared
     service = ConfigEditService(
         namespace="test",
         store=FakeStore(WorkflowConfig(raw_yaml="sourceClusters: {}")),
         runner=runner,
-        admission_preflight=preflight,
         secret_store=MagicMock(),
     )
 
@@ -754,7 +761,8 @@ def test_submit_preflight_blocks_before_workflow_is_touched(
 
     _verify_secrets.assert_called_once()
     _workflow_exists.assert_not_called()
-    runner.submit_workflow.assert_not_called()
+    runner.commit_prepared_workflow.assert_not_called()
+    prepared.cleanup.assert_called_once()
 
 
 @patch(
@@ -782,31 +790,31 @@ def test_submit_continues_with_nonblocking_preflight_warnings(
     _wait_deleted,
 ):
     runner = MagicMock()
-    runner.run_config_processor_node_script.side_effect = [
-        json.dumps({"validation": {"valid": True, "errors": []}}),
-        json.dumps({"resources": []}),
-    ]
-    runner.submit_workflow.return_value = {
+    runner.run_config_processor_node_script.return_value = json.dumps({
+        "validation": {"valid": True, "errors": []},
+    })
+    prepared = MagicMock(report={
+        "formatVersion": 1,
+        "allowed": True,
+        "checkedResources": 1,
+        "issues": [{
+            "kind": "CapturedTraffic",
+            "name": "p2-topic",
+            "plural": "capturedtraffics",
+            "classification": "approval-required",
+            "message": "Approval will be required",
+            "source": "kubernetes",
+        }],
+    })
+    runner.prepare_workflow.return_value = prepared
+    runner.commit_prepared_workflow.return_value = {
         "workflow_name": "migration",
         "warnings": ["initializer warning"],
     }
-    preflight = MagicMock()
-    preflight.check.return_value = AdmissionPreflightReport(
-        checked_resources=1,
-        issues=(AdmissionPreflightIssue(
-            kind="CapturedTraffic",
-            name="p2-topic",
-            plural="capturedtraffics",
-            classification="approval-required",
-            message="Approval will be required",
-            source="kubernetes",
-        ),),
-    )
     service = ConfigEditService(
         namespace="test",
         store=FakeStore(WorkflowConfig(raw_yaml="sourceClusters: {}")),
         runner=runner,
-        admission_preflight=preflight,
         secret_store=MagicMock(),
     )
 
@@ -816,4 +824,4 @@ def test_submit_continues_with_nonblocking_preflight_warnings(
         "initializer warning",
         "CapturedTraffic p2-topic: Approval will be required",
     ]
-    runner.submit_workflow.assert_called_once()
+    runner.commit_prepared_workflow.assert_called_once_with(prepared)

@@ -725,14 +725,16 @@ def test_vap_retry_failure_is_lifted_with_reset_before_retry_remedy():
         "code": "immutable-resource-update",
         "title": "Apply failed; reset required",
         "remedy": (
-            "Reset p2-topic to delete and recreate it, then retry the apply."
+            "Reset p2-topic to delete and recreate it, then submit a "
+            "replacement workflow."
         ),
         "technicalDetail": failure_message,
     }]
     capabilities = _capabilities(resource_node)
     assert capabilities["approve"].label == "Retry apply"
     assert capabilities["approve"].disabled_reason == (
-        "Reset p2-topic before retrying this apply."
+        "Reset p2-topic and submit a replacement workflow; the current "
+        "workflow cannot recreate it."
     )
     apply_step = snapshot.nodes[resource_node.child_ids[0]]
     assert apply_step.label == "Apply failed"
@@ -750,8 +752,8 @@ def test_vap_retry_failure_is_lifted_with_reset_before_retry_remedy():
         "code": "immutable-resource-update",
         "title": "Blocked by p2-topic apply failure",
         "remedy": (
-            "Open p2-topic, reset it to delete and recreate it, then retry "
-            "the apply."
+            "Open p2-topic, reset it to delete and recreate it, then submit "
+            "a replacement workflow."
         ),
         "technicalDetail": failure_message,
     }]
@@ -764,11 +766,12 @@ def test_vap_retry_failure_is_lifted_with_reset_before_retry_remedy():
         for detail in dependent_step.details
         if detail.kind == "remedy"
     ) == (
-        "Open p2-topic, reset it to delete and recreate it, then retry the apply."
+        "Open p2-topic, reset it to delete and recreate it, then submit a "
+        "replacement workflow."
     )
 
 
-def test_vap_retry_for_absent_resource_can_recreate_without_reset():
+def test_vap_retry_for_absent_resource_requires_replacement_workflow():
     approval = {
         "id": "gate-1",
         "display_name": "Apply",
@@ -813,12 +816,15 @@ def test_vap_retry_for_absent_resource_can_recreate_without_reset():
     resource_node = _node(snapshot, "datasnapshots:source-snap1")
     diagnostic = resource_node.diagnostics[0]
 
-    assert diagnostic.title == "Apply retry requires approval"
+    assert diagnostic.title == "Replacement workflow required"
     assert diagnostic.remedy == (
-        "source-snap1 is already absent. Approve the retry to recreate it "
-        "with the submitted configuration."
+        "source-snap1 is already absent. Submit a replacement workflow to "
+        "recreate it from the saved configuration."
     )
-    assert _capabilities(resource_node)["approve"].disabled_reason is None
+    assert _capabilities(resource_node)["approve"].disabled_reason == (
+        "Submit a replacement workflow to recreate source-snap1; the current "
+        "workflow cannot recreate it."
+    )
 
 
 def test_approval_is_attributed_after_pending_resources_are_projected():

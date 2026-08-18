@@ -138,7 +138,9 @@ class ResetService:
             for item in plan_data.get("targets") or []
         )
         if not targets:
-            raise ResetUnavailable(f"Reset plan is empty for {path}.")
+            raise ResetUnavailable(
+                f"Reset plan is empty for {', '.join(paths)}."
+            )
         token = uuid4().hex
         public = ResetPlan(
             token=token,
