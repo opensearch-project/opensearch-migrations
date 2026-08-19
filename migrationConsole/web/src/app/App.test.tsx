@@ -3387,7 +3387,7 @@ test("explains why submission is unavailable after validation state changes", as
 
   expect(await screen.findByText(
     "Configuration is current; no resources are missing or failed",
-  )).toBeInTheDocument();
+  )).toHaveClass("sr-only");
   const submit = screen.getByRole("button", {
     name: "Review and submit",
   });
@@ -3435,8 +3435,11 @@ test("offers resubmission when a configured resource is missing", async () => {
     name: "Review and resubmit",
   });
   await waitFor(() => expect(resubmit).toBeEnabled());
-  expect(screen.getByText("1 configured resource is missing"))
-    .toBeInTheDocument();
+  expect(resubmit).toHaveAttribute(
+    "title",
+    "Review and resubmit the saved configuration. "
+      + "1 configured resource is missing",
+  );
   await userEvent.click(resubmit);
   const dialog = await screen.findByRole("dialog", {
     name: "Resubmit configuration?",
@@ -3480,8 +3483,11 @@ test("offers resubmission when a managed resource has failed", async () => {
     name: "Review and resubmit",
   });
   await waitFor(() => expect(resubmit).toBeEnabled());
-  expect(screen.getByText("1 managed resource has failed"))
-    .toBeInTheDocument();
+  expect(resubmit).toHaveAttribute(
+    "title",
+    "Review and resubmit the saved configuration. "
+      + "1 managed resource has failed",
+  );
 });
 
 
@@ -3508,7 +3514,7 @@ test("offers submission for a pending resource addition without field diffs", as
 });
 
 
-test("blocks pending config submission with a visible validation reason", async () => {
+test("exposes a blocking validation reason through the submit tooltip", async () => {
   renderApp();
 
   const submit = await screen.findByRole("button", {

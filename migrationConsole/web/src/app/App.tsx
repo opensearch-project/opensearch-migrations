@@ -238,6 +238,8 @@ export function App() {
   const submissionAvailable = pendingConfiguration
     || submitSignals.missingResourceCount > 0
     || submitSignals.failedResourceCount > 0;
+  const recoveryAvailable = submitSignals.missingResourceCount > 0
+    || submitSignals.failedResourceCount > 0;
   const resubmissionOnly = !pendingConfiguration && submissionAvailable;
   const submitSignalText = submissionSignalText(submitSignals);
   const configDraft = useQuery({
@@ -439,6 +441,11 @@ export function App() {
             : resubmissionOnly
               ? "Review and resubmit the saved configuration"
               : "Review and submit pending configuration";
+  const submitTooltip = (
+    recoveryAvailable && !submissionBlockedReason
+      ? submitTitle + ". " + submitStatusText
+      : submitTitle
+  );
 
   const registerEditExit = useCallback((handler: (() => void) | null) => {
     editExitRef.current = handler;
@@ -687,7 +694,7 @@ export function App() {
             <span>{editContext ? "Exit editing" : "Edit configuration"}</span>
           </button>
           {!editContext ? (
-            <div className="submit-mode-control">
+            <>
               <button
                 aria-describedby="submit-status-reason"
                 aria-label={submitLabel}
@@ -698,23 +705,20 @@ export function App() {
                   || submitValidationBlocked
                 }
                 onClick={() => setSubmitOpen(true)}
-                title={submitTitle}
+                title={submitTooltip}
                 type="button"
               >
                 <Send aria-hidden="true" />
                 <span>{submitLabel}</span>
               </button>
               <span
-                className={`submit-blocked-reason ${
-                  submissionBlockedReason ? "blocked" : "informational"
-                }`}
+                className="sr-only"
                 id="submit-status-reason"
                 role="status"
-                title={submitStatusText}
               >
                 {submitStatusText}
               </span>
-            </div>
+            </>
           ) : null}
           <span className="revision" title="Manage state revision">
             {state.data?.revision ?? "waiting"}
