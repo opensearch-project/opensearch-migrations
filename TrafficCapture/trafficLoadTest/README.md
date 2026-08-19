@@ -150,7 +150,7 @@ helm repo add grafana https://grafana.github.io/helm-charts
 helm dependency build "$CHART"          # vendors grafana/k6-operator into charts/
 
 helm upgrade --install k6-load-test "$CHART" -n ma \
-  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest \
+  --set image.repository=mirror.gcr.io/grafana/k6 \
   --set scriptsImage.repository=<registry>/migrations/k6_scripts --set scriptsImage.tag=latest
 ```
 
@@ -187,10 +187,12 @@ kubectl -n ma get workflowtemplate k6-ingest \
   -o "jsonpath={range .spec.arguments.parameters[?(@.name=='runnerImage')]}{.value}{end} {range .spec.arguments.parameters[?(@.name=='scriptsRef')]}{.value}{end}"
 ```
 
-On EKS the operator image, the `grafana/k6` runner image and the operator chart are mirrored to ECR
-via `deployment/k8s/charts/components/k6LoadTest/infra/mirror/k6-ecr-manifest.yaml` (opt-in —
-nothing mirrors it automatically). `migrations/k6_scripts` is **not** in that manifest: mirroring
-copies upstream artifacts, and it has no upstream — you build and push it yourself, as above.
+A run therefore needs egress to three upstream hosts: Docker Hub (or a mirror) for the runner image,
+`ghcr.io` for the operator's controller and starter images, and `grafana.github.io` for the operator
+chart when it is not already vendored. None of them is mirrored into ECR — the load test assumes the
+cluster can pull from them, which is why it belongs on the public-access EKS clusters rather than the
+isolated-VPC pipeline. Only `migrations/k6_scripts` is ours, and it has no upstream to mirror: you
+build and push it, as above.
 
 ---
 
@@ -221,7 +223,7 @@ Which side you edit decides whether you rebuild an image or run a `helm upgrade`
 ```bash
 CHART=deployment/k8s/charts/components/k6LoadTest
 helm upgrade k6-load-test "$CHART" -n ma \
-  --set image.repository=mirror.gcr.io/grafana/k6 --set image.tag=latest \
+  --set image.repository=mirror.gcr.io/grafana/k6 \
   --set scriptsImage.repository=<registry>/migrations/k6_scripts --set scriptsImage.pullPolicy=Always
 ```
 
@@ -744,10 +746,14 @@ Why the current setup looks the way it does (decision → rationale → alternat
    `Pending`). *Rejected:* hand-writing an `affinity` block per runner — `separate` is the
    CRD-native equivalent, valid since well before the vendored operator v1.5.0.
 
-7. **Only the scenarios are ours; the runtime is upstream and mirrored normally.** The runner image
-   is `grafana/k6`, so it goes through the ordinary mirroring path
-   (`infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's manifest so k6 mirroring
-   is also opt-in). `migrations/k6_scripts` is deliberately **not** published as a release artifact
+7. **Only the scenarios are ours; the runtime is upstream and pulled directly.** The runner image is
+   stock `grafana/k6`, pinned to one version in the chart's `values.yaml` and pulled from Docker Hub
+   or a mirror. Nothing is copied into ECR: a `k6-ecr-manifest.yaml` once listed the upstream
+   artifacts for that purpose, but no code ever read it, so it was removed rather than left to rot.
+   *Rejected (for now):* mirroring the k6 artifacts into private ECR — worth revisiting if the load
+   test has to run without egress, or if pulls from `grafana.github.io`/`ghcr.io` become a CI flake
+   source. Note that a values override cannot solve the chart pull; only vendoring or an OCI copy
+   can. `migrations/k6_scripts` is deliberately **not** published as a release artifact
    — load testing is a dev/test capability, so it is absent from `publishedRepoByImageName` and from
    the list `aws-bootstrap.sh` mirrors out of `public.ecr.aws`. It is still an ordinary build target,
    so `aws-bootstrap.sh --build` pushes it to the private ECR registry with everything else; only a

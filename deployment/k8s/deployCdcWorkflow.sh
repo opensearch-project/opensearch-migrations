@@ -64,7 +64,10 @@ MIGRATION_KINDS="kafkaclusters,capturedtraffics,captureproxies,trafficreplays"
 # deploy.
 K6_CHART="${SCRIPT_DIR}/charts/components/k6LoadTest"
 K6_RELEASE="k6-load-test"
-K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6:latest}"
+# Repository only — the k6 version is pinned once in the chart's values.yaml, so overriding the
+# registry here (a Docker Hub mirror) leaves that pin in force. Set K6_IMAGE with an explicit
+# `:tag` to override the version too.
+K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6}"
 # The scenarios and presets ride in migrations/k6_scripts (built from TrafficCapture/trafficLoadTest
 # by buildImages) and are mounted at /scripts. Being a migrations/* image it lives in the same
 # registry as the migration's own images, so the default is derived from captureProxyImage in
@@ -333,12 +336,17 @@ install_k6_chart() {
   helm dependency build "$K6_CHART" >/dev/null 2>&1 \
     || helm dependency update "$K6_CHART" >/dev/null 2>&1 \
     || die "helm dependency build failed for $K6_CHART"
-  local repo="${K6_IMAGE%:*}" tag="${K6_IMAGE##*:}"
+  # Split off a tag only when the colon comes after the last slash — otherwise a registry port
+  # (host:5001/grafana/k6) would be mistaken for one. No tag means the chart's pinned version wins.
+  local repo="$K6_IMAGE" tag=""
+  if [[ "${K6_IMAGE##*/}" == *:* ]]; then
+    repo="${K6_IMAGE%:*}"; tag="${K6_IMAGE##*:}"
+  fi
   local s_repo="${K6_SCRIPTS_IMAGE%:*}" s_tag="${K6_SCRIPTS_IMAGE##*:}"
   # Always re-pull the scripts image: it is rebuilt in place under a moving tag while iterating on
   # scenarios, so IfNotPresent would pin runner pods to whatever the node cached first.
   helm --kube-context "$CONTEXT" upgrade --install "$K6_RELEASE" "$K6_CHART" -n "$NAMESPACE" \
-    --set image.repository="$repo" --set image.tag="$tag" --set image.pullPolicy=IfNotPresent \
+    --set image.repository="$repo" ${tag:+--set image.tag="$tag"} --set image.pullPolicy=IfNotPresent \
     --set scriptsImage.repository="$s_repo" --set scriptsImage.tag="$s_tag" \
     --set scriptsImage.pullPolicy=Always \
     --timeout 300s 2>&1 | sed 's/^/  /'

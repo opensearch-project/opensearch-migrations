@@ -456,12 +456,16 @@ class TestRunner:
         self.k8s_service.copy_log_files(destination=destination)
 
     def _resolve_load_test_image(self) -> Tuple[str, str]:
-        """(repository, tag) of the k6 runner image — stock grafana/k6, which runs the test. An
-        explicit load_test_image wins."""
+        """(repository, tag) of the k6 runner image — stock grafana/k6, which runs the test.
+
+        Only the repository is chosen here, to reach a Docker Hub mirror; the k6 version is pinned
+        once in the chart's values.yaml and deliberately left alone, so `tag` is empty and the chart
+        default applies. An explicit load_test_image wins and carries both.
+        """
         if self.load_test_image:
             repo, _, tag = self.load_test_image.rpartition(":")
             return repo, tag
-        return "mirror.gcr.io/grafana/k6", "latest"
+        return "mirror.gcr.io/grafana/k6", ""
 
     def _resolve_k6_scripts_image(self) -> Dict[str, str]:
         """Helm values for the k6 scripts image — the data image mounted at /scripts that carries
@@ -505,8 +509,12 @@ class TestRunner:
             subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
         repo, tag = self._resolve_load_test_image()
         k6_scripts_values = self._resolve_k6_scripts_image()
-        logger.info("k6 runner image: %s:%s (k6 scripts: %s)", repo, tag, k6_scripts_values)
-        values = {"image.repository": repo, "image.tag": tag, "image.pullPolicy": "IfNotPresent"}
+        logger.info("k6 runner image: %s:%s (k6 scripts: %s)", repo, tag or "<chart default>",
+                    k6_scripts_values)
+        values = {"image.repository": repo, "image.pullPolicy": "IfNotPresent"}
+        # Only set the tag when a caller pinned one; otherwise the chart's pinned version stands.
+        if tag:
+            values["image.tag"] = tag
         values.update(k6_scripts_values)
         if not self.k8s_service.helm_install(
                 chart_path=self.k6_chart_path, release_name="k6-load-test", values=values):

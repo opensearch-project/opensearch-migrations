@@ -5,12 +5,20 @@
 # Neither the operator nor this chart holds any scenario content.
 
 # Runner image — grafana/k6, unmodified, used as both spec.initializer.image and
-# spec.runner.image. Being an upstream artifact it goes through the normal mirroring path
-# (infra/mirror/k6-ecr-manifest.yaml on EKS). For local setup, point it at a mirror, e.g.
-# --set image.repository=mirror.gcr.io/grafana/k6
+# spec.runner.image.
+#
+# `tag` is THE place the k6 version is pinned: it becomes the `runnerImage` parameter default on
+# every WorkflowTemplate, so a run uses it unless a caller overrides it explicitly. Callers that
+# need a different registry (a mirror, a private ECR) should override `image.repository` ONLY and
+# leave the tag alone — otherwise the version is decided in several places at once and drifts.
+# Upgrading k6 is a one-line change here.
+#
+# `repository` defaults to the Docker Hub name. Point it at a mirror when Docker Hub is rate-limited
+# or unreachable — the tags are identical, so the pin still applies:
+#   --set image.repository=mirror.gcr.io/grafana/k6
 image:
   repository: grafana/k6
-  tag: "latest"
+  tag: "2.2.0"
   pullPolicy: IfNotPresent
 
 # Scripts image — migrations/k6_scripts, a `FROM scratch` data image built from
@@ -37,6 +45,17 @@ scriptsImage:
   tag: "latest"
   digest: ""
   pullPolicy: IfNotPresent
+
+# Starter image — a tiny one-shot pod the operator runs to release the runners simultaneously once
+# they are all up. It is the operator's own image, so its version must track the controller, which
+# the subchart pins at `controller-v1.5.0`.
+#
+# The operator otherwise defaults this to the FLOATING `latest-starter` tag, which today resolves to
+# `starter-v1.6.0` — a v1.6.0 starter driving a v1.5.0 controller. Pinning it here keeps the pair in
+# step. Bump this and the subchart version together.
+starterImage:
+  repository: ghcr.io/grafana/k6-operator
+  tag: "starter-v1.5.0"
 
 # k6-operator subchart — installs the TestRun CRD + controller. Disable to install the operator
 # out-of-band and use only this chart's ConfigMaps/RBAC.

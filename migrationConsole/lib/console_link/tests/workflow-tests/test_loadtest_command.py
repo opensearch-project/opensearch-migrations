@@ -36,7 +36,7 @@ def _template(scenario):
                 {"name": "parallelism", "value": "1"},
                 {"name": "separate", "value": "false"},
                 {"name": "arguments", "value": ""},
-                {"name": "runnerImage", "value": "grafana/k6:latest"},
+                {"name": "runnerImage", "value": "grafana/k6:2.2.0"},
                 {"name": "scriptsRef", "value": "migrations/k6_scripts:latest"},
                 {"name": "runnerEnv", "value": json.dumps(env)},
             ]},
@@ -327,7 +327,7 @@ class TestLoadTemplateDefaults:
     def test_defaults_are_read_from_the_template(self, monkeypatch):
         monkeypatch.setattr(ltmod, "get_workflow_template", _fake_get_workflow_template)
         defaults = load_template_defaults("ma", "ingest")
-        assert defaults["runnerImage"] == "grafana/k6:latest"
+        assert defaults["runnerImage"] == "grafana/k6:2.2.0"
         assert defaults["scriptsRef"] == "migrations/k6_scripts:latest"
 
 

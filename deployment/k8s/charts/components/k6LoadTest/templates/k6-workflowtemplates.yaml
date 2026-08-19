@@ -20,6 +20,7 @@
 # k6_cr=<name>` reaches the k6 pods, and deleting the workflow cascades to the TestRun through the
 # owner reference.
 {{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
+{{- $starter := printf "%s:%s" .Values.starterImage.repository .Values.starterImage.tag }}
 {{- $scripts := .Values.scriptsImage }}
 {{- /* A digest pins exact content and wins over the tag — see the values.yaml comment. */ -}}
 {{- $scriptsRef := ternary
@@ -54,6 +55,8 @@ spec:
         value: ""
       - name: runnerImage
         value: {{ $image | quote }}
+      - name: starterImage
+        value: {{ $starter | quote }}
       - name: scriptsRef
         value: {{ $scriptsRef | quote }}
       - name: scriptsPullPolicy
@@ -89,6 +92,11 @@ spec:
             arguments: "{{`{{workflow.parameters.arguments}}`}}"
             script:
               localFile: /scripts/scenarios/{{ $scenario }}.js
+            # Pinned to the controller's version — the operator would otherwise pull a floating
+            # `latest-starter`. It carries no scripts: it only signals the runners to begin.
+            starter:
+              image: "{{`{{workflow.parameters.starterImage}}`}}"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
             # The initializer runs `k6 archive`, so it needs the same scenarios at the same path as
             # the runners. It gets no env: K6_PRESET is resolved at run time, and an unknown preset
             # should fail in the runner with the list the image actually ships.
