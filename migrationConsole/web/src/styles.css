@@ -681,16 +681,30 @@ button {
 
 .submit-mode-control {
   display: grid;
+  width: 190px;
   justify-items: stretch;
   gap: 2px;
 }
 
+.submit-mode-control .submit-mode-button {
+  width: 100%;
+}
+
 .submit-blocked-reason {
-  color: #a33d36;
   font-size: 10px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
   text-align: center;
+}
+
+.submit-blocked-reason.blocked {
+  color: #a33d36;
+}
+
+.submit-blocked-reason.informational {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .health-state {
@@ -4163,6 +4177,15 @@ button {
   }
 
   .edit-mode-button span {
+    display: none;
+  }
+
+  .submit-mode-control,
+  .submit-mode-control .submit-mode-button {
+    width: 34px;
+  }
+
+  .submit-blocked-reason {
     display: none;
   }
 

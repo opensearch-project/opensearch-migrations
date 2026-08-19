@@ -3363,9 +3363,12 @@ test("offers one reset and resubmit action for immutable preflight failures", as
 });
 
 
-test("does not offer submission when the snapshot has no pending config", async () => {
+test("explains why submission is unavailable after validation state changes", async () => {
+  let response = structuredClone(manageSnapshot);
   const currentState = structuredClone(manageSnapshot);
+  currentState.revision = "snapshot-current";
   const capture = currentState.nodes["resource:captureproxies:capture"];
+  capture.revision = "capture-current";
   capture.valueSummary = "Deployed";
   capture.comparisons = capture.comparisons.map((comparison) => ({
     ...comparison,
@@ -3373,16 +3376,112 @@ test("does not offer submission when the snapshot has no pending config", async 
     pendingChanged: false,
   }));
   server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(response)),
+  );
+  const { client } = renderApp();
+
+  expect(await screen.findByText("1 configuration error"))
+    .toBeInTheDocument();
+  response = currentState;
+  await client.invalidateQueries({ queryKey: ["manage-state"] });
+
+  expect(await screen.findByText(
+    "Configuration is current; no resources are missing or failed",
+  )).toBeInTheDocument();
+  const submit = screen.getByRole("button", {
+    name: "Review and submit",
+  });
+  expect(submit).toBeDisabled();
+  expect(submit).toHaveAttribute(
+    "title",
+    "Configuration is current; no resources are missing or failed",
+  );
+});
+
+
+test("offers resubmission when a configured resource is missing", async () => {
+  const currentState = structuredClone(manageSnapshot);
+  const capture = currentState.nodes["resource:captureproxies:capture"];
+  capture.status = "pending";
+  capture.phase = "Pending Config";
+  capture.valueSummary = "Addition in progress";
+  capture.configPresence = {
+    deployed: false,
+    submitted: true,
+    pending: true,
+  };
+  capture.comparisons = [];
+  const validDraft = structuredClone(configDraft);
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(currentState)),
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: validDraft.draftRevision,
+      baseRevision: validDraft.baseRevision,
+      dirty: false,
+      valid: true,
+      validationMessages: [],
+      changes: [],
+    })),
   );
   renderApp();
 
-  expect(await screen.findByRole("button", {
-    name: "Edit configuration",
-  })).toBeInTheDocument();
-  expect(screen.queryByRole("button", {
-    name: "Review and submit",
-  })).toBeNull();
+  const resubmit = await screen.findByRole("button", {
+    name: "Review and resubmit",
+  });
+  await waitFor(() => expect(resubmit).toBeEnabled());
+  expect(screen.getByText("1 configured resource is missing"))
+    .toBeInTheDocument();
+  await userEvent.click(resubmit);
+  const dialog = await screen.findByRole("dialog", {
+    name: "Resubmit configuration?",
+  });
+  expect(within(dialog).getByText(
+    "No configuration differences were reported; resubmission will retry the saved configuration.",
+  )).toBeInTheDocument();
+  await waitFor(() => {
+    expect(within(dialog).getByRole("button", {
+      name: "Confirm resubmit",
+    })).toBeEnabled();
+  });
+});
+
+
+test("offers resubmission when a managed resource has failed", async () => {
+  const currentState = structuredClone(manageSnapshot);
+  const capture = currentState.nodes["resource:captureproxies:capture"];
+  capture.status = "error";
+  capture.phase = "Failed";
+  capture.valueSummary = "Failed";
+  capture.configPresence = {
+    deployed: true,
+    submitted: true,
+    pending: true,
+  };
+  capture.comparisons = [];
+  const validDraft = structuredClone(configDraft);
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(currentState)),
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+  );
+  renderApp();
+
+  const resubmit = await screen.findByRole("button", {
+    name: "Review and resubmit",
+  });
+  await waitFor(() => expect(resubmit).toBeEnabled());
+  expect(screen.getByText("1 managed resource has failed"))
+    .toBeInTheDocument();
 });
 
 
@@ -3415,8 +3514,9 @@ test("blocks pending config submission with a visible validation reason", async 
   const submit = await screen.findByRole("button", {
     name: "Review and submit",
   });
-  await waitFor(() => expect(submit).toBeDisabled());
-  expect(screen.getByText("1 configuration error")).toBeInTheDocument();
+  expect(submit).toBeDisabled();
+  expect(await screen.findByText("1 configuration error"))
+    .toBeInTheDocument();
   expect(submit).toHaveAttribute(
     "title",
     "Resolve 1 configuration error before submitting",

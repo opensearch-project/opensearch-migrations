@@ -64,6 +64,13 @@ interface EditContext {
 }
 
 
+interface SubmissionSignals {
+  pendingConfiguration: boolean;
+  missingResourceCount: number;
+  failedResourceCount: number;
+}
+
+
 function firstSelectableId(snapshot: ManageSnapshot): string | null {
   const resource = Object.values(snapshot.nodes).find(
     (node) => node.kind === "resource",
@@ -99,6 +106,60 @@ function hasPendingConfiguration(snapshot: ManageSnapshot): boolean {
       || /changes? to submit/.test(summary)
     );
   });
+}
+
+
+function configuredResourceIsMissing(
+  node: ManageSnapshot["nodes"][string],
+): boolean {
+  if (node.kind !== "resource") return false;
+  const presence = node.configPresence ?? {};
+  const configured = "pending" in presence
+    ? presence.pending
+    : presence.submitted;
+  return presence.deployed === false && configured === true;
+}
+
+
+function managedResourceHasFailed(
+  node: ManageSnapshot["nodes"][string],
+): boolean {
+  if (node.kind !== "resource") return false;
+  const status = node.status.toLocaleLowerCase();
+  const phase = (node.phase ?? "").toLocaleLowerCase();
+  return ["error", "failed"].includes(status)
+    || ["error", "failed"].includes(phase);
+}
+
+
+function submissionSignals(snapshot?: ManageSnapshot): SubmissionSignals {
+  if (!snapshot) {
+    return {
+      pendingConfiguration: false,
+      missingResourceCount: 0,
+      failedResourceCount: 0,
+    };
+  }
+  const nodes = Object.values(snapshot.nodes);
+  return {
+    pendingConfiguration: hasPendingConfiguration(snapshot),
+    missingResourceCount: nodes.filter(configuredResourceIsMissing).length,
+    failedResourceCount: nodes.filter(managedResourceHasFailed).length,
+  };
+}
+
+
+function submissionSignalText(signals: SubmissionSignals): string {
+  const reasons = signals.pendingConfiguration ? ["Pending configuration"] : [];
+  if (signals.missingResourceCount > 0) {
+    const count = signals.missingResourceCount;
+    reasons.push(`${count} configured resource${count === 1 ? " is" : "s are"} missing`);
+  }
+  if (signals.failedResourceCount > 0) {
+    const count = signals.failedResourceCount;
+    reasons.push(`${count} managed resource${count === 1 ? " has" : "s have"} failed`);
+  }
+  return reasons.join(" · ");
 }
 
 
@@ -169,14 +230,20 @@ export function App() {
   const [pendingResourceRenames, setPendingResourceRenames] =
     useState<PendingResourceRename[]>([]);
   const editExitRef = useRef<(() => void) | null>(null);
-  const pendingConfiguration = useMemo(
-    () => state.data ? hasPendingConfiguration(state.data) : false,
+  const submitSignals = useMemo(
+    () => submissionSignals(state.data),
     [state.data],
   );
+  const pendingConfiguration = submitSignals.pendingConfiguration;
+  const submissionAvailable = pendingConfiguration
+    || submitSignals.missingResourceCount > 0
+    || submitSignals.failedResourceCount > 0;
+  const resubmissionOnly = !pendingConfiguration && submissionAvailable;
+  const submitSignalText = submissionSignalText(submitSignals);
   const configDraft = useQuery({
     queryKey: ["config-draft"],
     queryFn: getConfigDraft,
-    enabled: editContext !== null || pendingConfiguration,
+    enabled: editContext !== null || submissionAvailable,
     staleTime: Infinity,
   });
   const resetTargetIds = useMemo(
@@ -323,20 +390,20 @@ export function App() {
     blockingDiagnosticCount,
   );
   const submitValidationBlocked = (
-    pendingConfiguration
+    submissionAvailable
     && (
       configDraft.isPending
       || configDraft.isError
       || submitValidation?.valid === false
     )
   );
-  const submitBlockedReason = submitActive
+  const submissionBlockedReason = submitActive
     ? "Submission in progress"
-    : configDraft.isPending
+    : submissionAvailable && configDraft.isPending
       ? "Checking configuration"
-      : configDraft.isError
+      : submissionAvailable && configDraft.isError
         ? "Configuration validation unavailable"
-        : submitValidation?.valid === false
+        : submissionAvailable && submitValidation?.valid === false
           ? (
             submitErrorCount > 0
               ? `${submitErrorCount} configuration ${
@@ -345,13 +412,21 @@ export function App() {
               : "Configuration has validation errors"
           )
           : null;
+  const noSubmissionReason = (
+    "Configuration is current; no resources are missing or failed"
+  );
+  const submitStatusText = submissionBlockedReason
+    ?? (submissionAvailable ? submitSignalText : noSubmissionReason);
+  const submitLabel = resubmissionOnly
+    ? "Review and resubmit"
+    : "Review and submit";
   const submitTitle = submitActive
     ? "A configuration submission is already in progress"
-    : configDraft.isPending
+    : submissionAvailable && configDraft.isPending
       ? "Checking configuration before submission"
-      : configDraft.isError
+      : submissionAvailable && configDraft.isError
         ? "Configuration validation is unavailable"
-        : submitValidation?.valid === false
+        : submissionAvailable && submitValidation?.valid === false
           ? (
             submitErrorCount > 0
               ? `Resolve ${submitErrorCount} configuration ${
@@ -359,7 +434,11 @@ export function App() {
               } before submitting`
               : "Resolve configuration errors before submitting"
           )
-          : "Review and submit pending configuration";
+          : !submissionAvailable
+            ? noSubmissionReason
+            : resubmissionOnly
+              ? "Review and resubmit the saved configuration"
+              : "Review and submit pending configuration";
 
   const registerEditExit = useCallback((handler: (() => void) | null) => {
     editExitRef.current = handler;
@@ -607,31 +686,34 @@ export function App() {
               : <Pencil aria-hidden="true" />}
             <span>{editContext ? "Exit editing" : "Edit configuration"}</span>
           </button>
-          {!editContext && pendingConfiguration ? (
+          {!editContext ? (
             <div className="submit-mode-control">
               <button
-                aria-describedby={
-                  submitBlockedReason ? "submit-blocked-reason" : undefined
-                }
-                aria-label="Review and submit"
+                aria-describedby="submit-status-reason"
+                aria-label={submitLabel}
                 className="edit-mode-button submit-mode-button"
-                disabled={submitActive || submitValidationBlocked}
+                disabled={
+                  !submissionAvailable
+                  || submitActive
+                  || submitValidationBlocked
+                }
                 onClick={() => setSubmitOpen(true)}
                 title={submitTitle}
                 type="button"
               >
                 <Send aria-hidden="true" />
-                <span>Review and submit</span>
+                <span>{submitLabel}</span>
               </button>
-              {submitBlockedReason ? (
-                <span
-                  className="submit-blocked-reason"
-                  id="submit-blocked-reason"
-                  role="status"
-                >
-                  {submitBlockedReason}
-                </span>
-              ) : null}
+              <span
+                className={`submit-blocked-reason ${
+                  submissionBlockedReason ? "blocked" : "informational"
+                }`}
+                id="submit-status-reason"
+                role="status"
+                title={submitStatusText}
+              >
+                {submitStatusText}
+              </span>
             </div>
           ) : null}
           <span className="revision" title="Manage state revision">
@@ -689,8 +771,10 @@ export function App() {
       </header>
       {submitOpen ? (
         <SubmitConfigDialog
+          intent={resubmissionOnly ? "resubmit" : "submit"}
           onClose={() => setSubmitOpen(false)}
           onSubmitted={() => setSubmitOpen(false)}
+          reason={resubmissionOnly ? submitSignalText : undefined}
         />
       ) : null}
       {approvalDialogTargetId && approvals.length > 0 ? (

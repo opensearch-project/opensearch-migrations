@@ -21,15 +21,19 @@ import {
 
 interface SubmitConfigDialogProps {
   draftRevision?: string;
+  intent?: "submit" | "resubmit";
   onClose: () => void;
   onSubmitted: () => void;
+  reason?: string;
 }
 
 
 export function SubmitConfigDialog({
   draftRevision,
+  intent = "submit",
   onClose,
   onSubmitted,
+  reason,
 }: SubmitConfigDialogProps) {
   const queryClient = useQueryClient();
   const [sessionKey] = useState(() => Math.random().toString(36).slice(2));
@@ -77,6 +81,7 @@ export function SubmitConfigDialog({
     && (review.isPending || preflight.isPending)
   );
   const loadError = currentDraft.error ?? review.error ?? preflight.error;
+  const resubmitting = intent === "resubmit";
 
   const retry = () => {
     setProblem("");
@@ -144,7 +149,9 @@ export function SubmitConfigDialog({
           <Send aria-hidden="true" />
           <div>
             <span>Workflow submission</span>
-            <h2 id="submit-dialog-title">Submit configuration?</h2>
+            <h2 id="submit-dialog-title">
+              {resubmitting ? "Resubmit configuration?" : "Submit configuration?"}
+            </h2>
           </div>
         </header>
         {loading ? (
@@ -160,10 +167,22 @@ export function SubmitConfigDialog({
           </div>
         ) : review.data ? (
           <div className="submit-review">
-            <p>
-              The current pending configuration will be saved and workflow
-              replacement will continue as a tracked operation.
-            </p>
+            {resubmitting ? (
+              <>
+                <p>
+                  The saved configuration will be submitted again to recreate
+                  missing resources or retry failed workflow work.
+                </p>
+                {reason ? (
+                  <p className="submit-review-empty">{reason}</p>
+                ) : null}
+              </>
+            ) : (
+              <p>
+                The current pending configuration will be saved and workflow
+                replacement will continue as a tracked operation.
+              </p>
+            )}
             {review.data.changes.length > 0 ? (
               <ul className="submit-change-list">
                 {review.data.changes.map((change) => (
@@ -179,7 +198,9 @@ export function SubmitConfigDialog({
               </ul>
             ) : (
               <p className="submit-review-empty">
-                No field-level pending differences were reported.
+                {resubmitting
+                  ? "No configuration differences were reported; resubmission will retry the saved configuration."
+                  : "No field-level pending differences were reported."}
               </p>
             )}
             {!review.data.valid ? (
@@ -294,7 +315,7 @@ export function SubmitConfigDialog({
             </button>
           ) : null}
           <button
-            aria-label="Confirm submit"
+            aria-label={resubmitting ? "Confirm resubmit" : "Confirm submit"}
             className="primary-button"
             disabled={
               submitting
@@ -310,7 +331,9 @@ export function SubmitConfigDialog({
             {submitting
               ? <LoaderCircle className="spin" aria-hidden="true" />
               : <Send aria-hidden="true" />}
-            Submit configuration
+            {resubmitting
+              ? "Resubmit configuration"
+              : "Submit configuration"}
           </button>
         </footer>
       </section>
