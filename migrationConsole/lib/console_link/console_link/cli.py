@@ -900,7 +900,7 @@ def scale_backfill_cmd(ctx, units: int):
     click.echo(message)
 
 
-_PRESENCE = {True: "yes", False: "no", None: "unavailable"}
+_PRESENCE = {True: "yes", False: "no"}
 
 
 @backfill_group.command(name="status")
@@ -935,13 +935,13 @@ def status_backfill_cmd(ctx, deep_check):
 
 
 def _load_failed_document_stream():
-    """Return (config, whether any failure records exist), (cfg, None) if that can't be read,
-    or (None, None) if the failed document stream is not configured."""
+    """Return (config, has_records), or (None, None) when not configured — then it is not
+    consulted. S3 errors propagate: an unreadable stream must not read as "no failures"."""
     try:
         cfg = failed_document_stream_.load_config()
     except failed_document_stream_.FailedDocumentStreamNotConfigured:
         return None, None
-    return cfg, failed_document_stream_.safe_has_records(cfg)
+    return cfg, failed_document_stream_.has_records(cfg)
 
 
 # ##################### failed document stream (Reindex-from-Snapshot Failed Document Stream) ###################

@@ -7,6 +7,7 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -147,6 +148,15 @@ public class CreateSnapshot {
                     + "importing a backup whose layout identifies neither. Supplying it skips inference entirely, "
                     + "which also avoids the Collections API on a permission-restricted source.")
         public String solrTopology;
+
+        @Parameter(
+                names = {"--solr-context-path"},
+                required = false,
+                description = "The path Solr's APIs are served under, appended to --source-host when building Solr "
+                    + "URLs. Defaults to '/solr'; set this when Solr runs with a custom solr.contextPath or sits "
+                    + "behind a reverse proxy that rewrites the prefix. Pass an empty value when Solr is served at "
+                    + "the root of the host.")
+        public String solrContextPath = SolrContextPath.DEFAULT;
     }
 
     public static SnapshotMode getSnapshotMode(Args args) {
@@ -179,6 +189,11 @@ public class CreateSnapshot {
             SnapshotMode.fromString(arguments.mode);
         } catch (IllegalArgumentException e) {
             throw new ParameterException("Invalid --mode value '" + arguments.mode + "'. Must be 'create' or 'import'.");
+        }
+        try {
+            SolrContextPath.normalize(arguments.solrContextPath);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException("Invalid --solr-context-path value: " + e.getMessage());
         }
 
         var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());

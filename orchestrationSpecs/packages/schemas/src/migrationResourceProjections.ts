@@ -150,6 +150,7 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "DataSnapshot", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceSolrContextPath"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceAuthType"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},

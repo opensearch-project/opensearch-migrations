@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 
 import com.beust.jcommander.ParameterException;
@@ -68,8 +69,8 @@ public class SolrTopologyDetectionTest {
 
     @Test
     void collectionsArray_isSolrCloud() throws Exception {
-        assertTrue(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200, CLOUD_BODY)));
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, CLOUD_BODY)),
+        assertTrue(SolrBackupStrategy.isSolrCloud(URL, clientReturning(200, CLOUD_BODY), SolrContextPath.DEFAULT));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, CLOUD_BODY), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
     }
 
@@ -77,14 +78,14 @@ public class SolrTopologyDetectionTest {
     void emptyCollectionsArray_isStillSolrCloud() throws Exception {
         // A cloud instance with no collections yet must not read as standalone.
         var body = "{\"responseHeader\":{\"status\":0},\"collections\":[]}";
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
     }
 
     @Test
     void notRunningInSolrCloudMode_isStandalone() throws Exception {
-        assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(400, STANDALONE_BODY)));
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, STANDALONE_BODY)),
+        assertFalse(SolrBackupStrategy.isSolrCloud(URL, clientReturning(400, STANDALONE_BODY), SolrContextPath.DEFAULT));
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, STANDALONE_BODY), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.STANDALONE));
     }
 
@@ -92,7 +93,7 @@ public class SolrTopologyDetectionTest {
     void usesTheCollectionsEndpoint() throws Exception {
         // Detection must stay on the endpoint discovery already uses, so it needs no extra permission.
         var httpClient = clientReturning(200, CLOUD_BODY);
-        SolrBackupStrategy.detectTopology(URL, httpClient);
+        SolrBackupStrategy.detectTopology(URL, httpClient, SolrContextPath.DEFAULT);
         org.mockito.Mockito.verify(httpClient).getRaw(
             org.mockito.ArgumentMatchers.eq(URL + "/solr/admin/collections?action=LIST&wt=json"),
             any(Duration.class));
@@ -102,27 +103,27 @@ public class SolrTopologyDetectionTest {
     void bareStatus400WithoutTheMarker_isUnknown() throws Exception {
         // A 400 from something else (bad param, proxy) must not be read as standalone.
         var body = "{\"responseHeader\":{\"status\":400},\"error\":{\"msg\":\"unknown parameter\",\"code\":400}}";
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, body)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, body), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "   ", "not json at all", "{\"collections\":", "<html>proxy error</html>"})
     void unusableBody_isUnknown(String body) throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @Test
     void nullBody_isUnknown() throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, null)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, null), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
     @ParameterizedTest
     @ValueSource(ints = {301, 302, 404, 500, 503})
     void reachableButUninformativeStatus_isUnknown(int status) throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
@@ -130,14 +131,14 @@ public class SolrTopologyDetectionTest {
     @ValueSource(ints = {301, 302, 404, 500, 503})
     void unknownTopology_throwsInsteadOfAssumingStandalone(int status) throws Exception {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(status)));
+            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(status), SolrContextPath.DEFAULT));
         assertThat(ex.getMessage(), containsString(URL));
     }
 
     @Test
     void http401_throwsInsteadOfGuessing() throws Exception {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(401)));
+            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(401), SolrContextPath.DEFAULT));
         assertThat(ex.getMessage(), containsString("401"));
         assertThat(ex.getMessage(), containsString("credentials"));
     }
@@ -145,7 +146,7 @@ public class SolrTopologyDetectionTest {
     @Test
     void http403_namesTheRequiredPermission() throws Exception {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(403)));
+            () -> SolrBackupStrategy.isSolrCloud(URL, clientReturning(403), SolrContextPath.DEFAULT));
         assertThat(ex.getMessage(), containsString("403"));
         assertThat(ex.getMessage(), containsString("collection-admin-read"));
     }
@@ -153,7 +154,7 @@ public class SolrTopologyDetectionTest {
     @Test
     void ioException_throwsInsteadOfGuessingStandalone() throws Exception {
         var ex = assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.isSolrCloud(URL, clientThrowing(new IOException("connection refused"))));
+            () -> SolrBackupStrategy.isSolrCloud(URL, clientThrowing(new IOException("connection refused")), SolrContextPath.DEFAULT));
         assertThat(ex.getMessage(), containsString(URL));
         assertThat(ex.getMessage(), containsString("connection refused"));
     }
@@ -163,7 +164,7 @@ public class SolrTopologyDetectionTest {
         var client = clientThrowing(new InterruptedException("interrupted"));
         try {
             assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-                () -> SolrBackupStrategy.isSolrCloud(URL, client));
+                () -> SolrBackupStrategy.isSolrCloud(URL, client, SolrContextPath.DEFAULT));
             assertTrue(Thread.currentThread().isInterrupted(),
                 "InterruptedException must restore the thread's interrupt flag");
         } finally {
@@ -186,7 +187,7 @@ public class SolrTopologyDetectionTest {
         var client = mock(SolrHttpClient.class);
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
-        var discovered = SolrBackupStrategy.discoverCollections(URL, client, Boolean.FALSE);
+        var discovered = SolrBackupStrategy.discoverCollections(URL, client, Boolean.FALSE, SolrContextPath.DEFAULT);
 
         assertThat(discovered.names(), is(java.util.List.of("dummy")));
         assertThat(discovered.topology(), is(SolrBackupStrategy.SolrTopology.STANDALONE));
@@ -201,7 +202,7 @@ public class SolrTopologyDetectionTest {
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
         var ex = assertThrows(ParameterException.class,
-            () -> SolrBackupStrategy.discoverCollections(URL, client, Boolean.TRUE));
+            () -> SolrBackupStrategy.discoverCollections(URL, client, Boolean.TRUE, SolrContextPath.DEFAULT));
 
         assertThat(ex.getMessage(), containsString("--solr-collections"));
         verify(client, never()).getString(anyString(), any(Duration.class));
@@ -211,7 +212,7 @@ public class SolrTopologyDetectionTest {
     void discoveryClassifiesTopologyFromTheSameRequest() throws Exception {
         var client = clientReturning(200, CLOUD_BODY);
 
-        var discovered = SolrBackupStrategy.discoverCollections(URL, client, null);
+        var discovered = SolrBackupStrategy.discoverCollections(URL, client, null, SolrContextPath.DEFAULT);
 
         assertThat(discovered.names(), is(java.util.List.of("movies")));
         assertThat(discovered.topology(), is(SolrBackupStrategy.SolrTopology.SOLR_CLOUD));
@@ -224,7 +225,7 @@ public class SolrTopologyDetectionTest {
         var client = clientReturning(400, STANDALONE_BODY);
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
-        var discovered = SolrBackupStrategy.discoverCollections(URL, client, null);
+        var discovered = SolrBackupStrategy.discoverCollections(URL, client, null, SolrContextPath.DEFAULT);
 
         assertThat(discovered.names(), is(java.util.List.of("dummy")));
         assertThat(discovered.topology(), is(SolrBackupStrategy.SolrTopology.STANDALONE));
@@ -237,7 +238,7 @@ public class SolrTopologyDetectionTest {
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
         assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.discoverCollections(URL, client, null));
+            () -> SolrBackupStrategy.discoverCollections(URL, client, null, SolrContextPath.DEFAULT));
         verify(client, never()).getString(anyString(), any(Duration.class));
     }
 
@@ -408,7 +409,7 @@ public class SolrTopologyDetectionTest {
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
         assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.discoverCollections(URL, client, null));
+            () -> SolrBackupStrategy.discoverCollections(URL, client, null, SolrContextPath.DEFAULT));
         verify(client, never()).getString(anyString(), any(Duration.class));
     }
 
@@ -419,7 +420,7 @@ public class SolrTopologyDetectionTest {
         when(client.getString(anyString(), any(Duration.class))).thenReturn(CORES_BODY);
 
         assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
-            () -> SolrBackupStrategy.discoverCollections(URL, client, null));
+            () -> SolrBackupStrategy.discoverCollections(URL, client, null, SolrContextPath.DEFAULT));
         verify(client, never()).getString(anyString(), any(Duration.class));
     }
 
@@ -429,7 +430,7 @@ public class SolrTopologyDetectionTest {
     @ParameterizedTest
     @ValueSource(ints = {400, 404, 500, 502, 503})
     void collectionsArrayWithNon200Status_isUnknown(int status) throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status, CLOUD_BODY)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status, CLOUD_BODY), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
@@ -437,7 +438,7 @@ public class SolrTopologyDetectionTest {
     @ParameterizedTest
     @ValueSource(ints = {200, 404, 500, 503})
     void standaloneMarkerWithUnexpectedStatus_isUnknown(int status) throws Exception {
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status, STANDALONE_BODY)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(status, STANDALONE_BODY), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
@@ -445,7 +446,7 @@ public class SolrTopologyDetectionTest {
     @Test
     void nonArrayCollectionsField_isUnknown() throws Exception {
         var body = "{\"responseHeader\":{\"status\":0},\"collections\":\"movies\"}";
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(200, body), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 
@@ -454,7 +455,7 @@ public class SolrTopologyDetectionTest {
     void unrelatedErrorMentioningSolrCloud_isUnknown() throws Exception {
         var body = "{\"responseHeader\":{\"status\":400},\"error\":{"
             + "\"msg\":\"SolrCloud backup repository 'my-repo' is not configured\",\"code\":400}}";
-        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, body)),
+        assertThat(SolrBackupStrategy.detectTopology(URL, clientReturning(400, body), SolrContextPath.DEFAULT),
             is(SolrBackupStrategy.SolrTopology.UNKNOWN));
     }
 }
