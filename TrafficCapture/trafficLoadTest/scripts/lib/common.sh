@@ -2,7 +2,7 @@
 # scripts/lib/common.sh — shared helpers for the k6 load-test validation scripts.
 #
 # These validate the k6-operator setup against an ALREADY-RUNNING CDC pipeline (bring it up first
-# with deployment/k8s/deployCdcWorkflow.sh up). k6 runs are submitted as Argo Workflows through
+# with deployment/k8s/deployCdcLoadTestConfig.sh up). k6 runs are submitted as Argo Workflows through
 # the migration console (`workflow loadtest …`); assertions query the in-cluster services via kubectl.
 #
 # The pipeline is the one the migration workflow builds, so the things being asserted on are

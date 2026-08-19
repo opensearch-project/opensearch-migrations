@@ -158,12 +158,12 @@ helm upgrade --install k6-load-test "$CHART" -n ma \
 > (ImageVolume), enabled by default from 1.35 — the chart declares this in `kubeVersion`, so an
 > older cluster fails the install rather than starting runners with an empty `/scripts`.
 
-Or let the CDC deploy script do it for you. It submits a capture-and-replay migration workflow from
-a config and installs this chart alongside it, so the proxy, Kafka and replayer come up the same way
-they do for a real migration:
+Or let the CDC deploy script do it for you. It submits a capture-and-replay migration config and
+installs this chart alongside it, so the proxy, Kafka and replayer come up the same way they do for
+a real migration:
 
 ```bash
-./deployment/k8s/deployCdcWorkflow.sh up      # CDC pipeline + k6 chart
+./deployment/k8s/deployCdcLoadTestConfig.sh up      # CDC pipeline + k6 chart
 ```
 
 Summing up, there are three ways the chart lands on a cluster - pick by context:
@@ -171,11 +171,14 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 | Route | Command | Use when |
 |---|---|---|
 | **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `workflow loadtest` command. |
-| **Local CDC pipeline** | `./deployment/k8s/deployCdcWorkflow.sh up` | Local kind/minikube dev — submits a capture-and-replay workflow and installs k6 alongside it. |
-| **Integration tests** | `pipenv run app --test-ids 0080 …` (the test runner) | Only to run a `008x` load-test case. It wraps the same `helm upgrade --install` after the migration stack is healthy. |
+| **Local CDC pipeline** | `./deployment/k8s/deployCdcLoadTestConfig.sh up` | Local kind/minikube dev — submits a capture-and-replay migration config and installs k6 alongside it. |
+| **Integration tests** | `pipenv run app --test-ids 0080 …` (the test runner) | Only to run a `008x` load-test case. It installs the chart after the migration stack is healthy. |
 
 All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
-general one and the reference for the others.
+general one and the reference for the others. The last two go through
+`deployment/k8s/installK6Chart.sh`, which is the single implementation of that install — it resolves
+the runner and scripts images (mirror repository, digest pins, the ECR flat-repo layout) and vendors
+the k6-operator subchart.
 
 Verify:
 ```bash
@@ -230,7 +233,7 @@ helm upgrade k6-load-test "$CHART" -n ma \
 Notes:
 - **Pull policy matters when the tag doesn't change.** Rebuilding `migrations/k6_scripts:latest`
   only reaches new pods if they actually re-pull it — use `scriptsImage.pullPolicy=Always` while
-  iterating (what `deployCdcWorkflow.sh` and the test runner set), or pin the exact content
+  iterating (what `deployCdcLoadTestConfig.sh` and the test runner set), or pin the exact content
   with `--set scriptsImage.digest=sha256:<hex>`, which wins over the tag.
 - **In-flight runs are not affected.** The image is pulled when the runner/initializer pods start, so
   a run already going keeps the old scripts and presets. (This is also why editing is safe mid-test.)
@@ -260,8 +263,8 @@ PROXY="https://$(kubectl -n ma get captureproxy capture-proxy \
   -o jsonpath='{.status.serviceEndpoint}')"
 # → https://capture-proxy.ma.svc.cluster.local:9201 with the default config
 
-# deployCdcWorkflow.sh prints the same value, and `status` re-prints it later:
-./deployment/k8s/deployCdcWorkflow.sh status
+# deployCdcLoadTestConfig.sh prints the same value, and `status` re-prints it later:
+./deployment/k8s/deployCdcLoadTestConfig.sh status
 ```
 (k6 uses `insecureSkipTLSVerify`, matching the self-signed proxy cert.)
 
@@ -284,8 +287,8 @@ workflow loadtest run --scenario ingest --config ingest-steady --target "$PROXY"
   -e AUTH_USERNAME=admin -e AUTH_PASSWORD=admin
 ```
 
-`deployCdcWorkflow.sh up` prints exactly this command with the flags already filled in when it
-detects an auth-enabled source, so the common path is copy-paste.
+`deployCdcLoadTestConfig.sh up` prints exactly this command with the flags already filled in
+whenever the config it submitted references credential secrets, so the common path is copy-paste.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -310,7 +313,9 @@ helm upgrade --install tc deployment/k8s/charts/aggregates/testClusters \
   -f deployment/k8s/charts/aggregates/testClusters/values.yaml \
   -f deployment/k8s/charts/aggregates/testClusters/valuesNoAuth.yaml -n ma
 ```
-`deployCdcWorkflow.sh` detects that automatically and emits a config with no `authConfig`.
+Then pass `--no-auth` to `deployCdcLoadTestConfig.sh up`. That deletes the fenced `authConfig`
+stanzas from the config and creates no credential secrets — "no auth" has to mean the key is absent,
+since an empty `authConfig: {}` fails schema validation.
 
 The validation scripts authenticate separately — `check_proxy_ready` and `os_query` send
 `CLUSTER_USERNAME`/`CLUSTER_PASSWORD` (default `admin`/`admin`), so `run_test.sh`'s assertions work
@@ -618,7 +623,7 @@ endpoint the dashboard reads.
 ```bash
 helm uninstall k6-load-test -n ma        # removes operator + WorkflowTemplates + RBAC
 # or, if you brought it up via the data-plane script:
-./deployment/k8s/deployCdcWorkflow.sh down
+./deployment/k8s/deployCdcLoadTestConfig.sh down
 ```
 
 ---
@@ -768,4 +773,4 @@ Why the current setup looks the way it does (decision → rationale → alternat
    services with `kubectl` (Kafka/OpenSearch), in-cluster `curl` (proxy, Webdis), and PromQL against
    `kube-prometheus-stack`. The runtime control plane (pause/resume/set-rate) is a distinct
    behavioural test kept separate as `scripts/run_test_chaos.sh`. Setup/teardown is
-   `deployCdcWorkflow.sh up`/`down`.
+   `deployCdcLoadTestConfig.sh up`/`down`.

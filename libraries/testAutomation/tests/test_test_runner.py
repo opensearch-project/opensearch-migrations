@@ -276,65 +276,8 @@ class TestLoadTestChartSelection:
             mock_install.assert_not_called()
 
 
-class TestK6ScriptsImageResolution:
-    """The k6 scripts image is a data-only image, handed over as a complete reference the way the
-    mountable transform images are. Deriving it from a registry prefix stays as the fallback."""
-
-    def _runner(self, **kwargs):
-        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
-        for key, value in kwargs.items():
-            setattr(runner, key, value)
-        return runner
-
-    def test_explicit_tagged_reference_wins_over_registry_prefix(self):
-        runner = self._runner(k6_scripts_image="1234.dkr.ecr.us-east-1.amazonaws.com/repo:"
-                                               "migrations_k6_scripts_latest",
-                              registry_prefix="docker-registry:5001/")
-        assert runner._resolve_k6_scripts_image() == {
-            "scriptsImage.repository": "1234.dkr.ecr.us-east-1.amazonaws.com/repo",
-            "scriptsImage.tag": "migrations_k6_scripts_latest",
-            "scriptsImage.pullPolicy": "Always",
-        }
-
-    def test_digest_reference_sets_digest_and_no_tag(self):
-        digest = "sha256:" + "a" * 64
-        runner = self._runner(k6_scripts_image=f"1234.dkr.ecr.us-east-1.amazonaws.com/repo@{digest}")
-        values = runner._resolve_k6_scripts_image()
-        assert values["scriptsImage.digest"] == digest
-        assert "scriptsImage.tag" not in values
-
-    def test_ecr_registry_prefix_uses_the_flattened_tag(self):
-        runner = self._runner(registry_prefix="1234.dkr.ecr.us-east-1.amazonaws.com/repo/")
-        values = runner._resolve_k6_scripts_image()
-        assert values["scriptsImage.repository"] == "1234.dkr.ecr.us-east-1.amazonaws.com/repo"
-        assert values["scriptsImage.tag"] == "migrations_k6_scripts_latest"
-
-    def test_other_registry_prefix_keeps_the_path_layout(self):
-        runner = self._runner(registry_prefix="docker-registry:5001/")
-        values = runner._resolve_k6_scripts_image()
-        assert values["scriptsImage.repository"] == "docker-registry:5001/migrations/k6_scripts"
-        assert values["scriptsImage.tag"] == "latest"
-
-
-class TestSplitImageRef:
-    def test_tagged_reference(self):
-        assert _split_image_ref("repo/image:1.2") == ("repo/image", "1.2", "")
-
-    def test_digest_reference(self):
-        digest = "sha256:" + "b" * 64
-        assert _split_image_ref(f"repo/image@{digest}") == ("repo/image", "", digest)
-
-    def test_registry_port_is_not_mistaken_for_a_tag(self):
-        assert _split_image_ref("docker-registry:5001/migrations/k6_scripts") == (
-            "docker-registry:5001/migrations/k6_scripts", "latest", "")
-
-    def test_registry_port_with_a_tag(self):
-        assert _split_image_ref("docker-registry:5001/migrations/k6_scripts:latest") == (
-            "docker-registry:5001/migrations/k6_scripts", "latest", "")
-
-
 from test_runner import (get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS,
-                         VALID_TARGET_VERSIONS, _split_image_ref)
+                         VALID_TARGET_VERSIONS)
 
 
 class TestVersionCombinations:

@@ -1,26 +1,18 @@
-# CDC (capture-and-replay) migration config — the default input to deployCdcWorkflow.sh.
+# CDC (capture-and-replay) migration config — the default input to deployCdcLoadTestConfig.sh.
 #
 # An ordinary migration config: the same thing you would write by hand and feed to
-# `workflow configure edit`. Endpoints, versions, ports and names are all literal here — edit them,
-# or pass your own file with -f. The script reads the resource names back out of whatever config it
-# is given, so any CDC topology works without changing the script.
+# `workflow configure edit`. Endpoints, versions, ports and names are all literal — edit them, or
+# pass your own file with -f. The script reads the resource names back out of the cluster, so any
+# CDC topology works without changing the script.
 #
-# Only three placeholders are substituted, and only these are ever touched:
+# The auth-begin / auth-end comment fences below are the ONE thing the script touches: `up
+# --no-auth` deletes the lines between them, for clusters deployed with testClusters/
+# valuesNoAuth.yaml. "No auth" has to mean the authConfig key is ABSENT — it is an optional union in
+# the schema, so an empty `authConfig: {}` fails validation. With the fences left in place this file
+# is valid YAML as it stands, and a config with no fences passes through untouched.
 #
-#   SOURCE_AUTH_BLOCK / TARGET_AUTH_BLOCK
-#       An `authConfig:` stanza, or nothing at all. The script probes each cluster and fills these
-#       in, because whether the test clusters want credentials depends on which values file they
-#       were deployed with. "No auth" has to mean the authConfig key is ABSENT — it is an optional
-#       union in the schema, so an empty `authConfig: {}` fails validation.
-#   PROXY_SERVICE_TYPE
-#       ClusterIP or LoadBalancer — a property of the cluster you are on, not of the migration.
-#
-# A config with no placeholders passes through untouched, which is what -f relies on.
-#
-# NOTE: because those two auth stanzas occupy whole lines, this file does not parse as YAML until
-# rendered. The script validates the RENDERED result before submitting it. Placeholders are named
-# WITHOUT the ${...} syntax in this header on purpose — comments are substituted too, so spelling
-# one out here would expand it into the comment and corrupt the output.
+# The fence words are deliberately NOT written here with their leading '#', because the script
+# matches on that exact text and would treat this comment as the start of a block.
 
 # Capture-and-replay only: no snapshot, no metadata migration, no backfill.
 skipApprovals: true
@@ -32,13 +24,21 @@ sourceClusters:
     endpoint: "https://elasticsearch-master-headless:9200"
     version: "ES 7.10.2"
     allowInsecure: true
-${SOURCE_AUTH_BLOCK}
+    # auth-begin
+    authConfig:
+      basic:
+        secretName: source-creds
+    # auth-end
 
 targetClusters:
   target1:
     endpoint: "https://opensearch-cluster-master-headless:9200"
     allowInsecure: true
-${TARGET_AUTH_BLOCK}
+    # auth-begin
+    authConfig:
+      basic:
+        secretName: target-creds
+    # auth-end
 
 # An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
 kafkaClusterConfiguration:
@@ -55,7 +55,8 @@ traffic:
         podReplicas: 1
         # kind has no load-balancer controller, and the workflow's readiness gate waits for a
         # LoadBalancer to report ingress — so LoadBalancer would hang there until it times out.
-        serviceType: ${PROXY_SERVICE_TYPE}
+        # On a cloud cluster, change this to LoadBalancer (or pass your own config with -f).
+        serviceType: ClusterIP
 
   replayers:
     replay1:

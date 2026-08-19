@@ -10,9 +10,10 @@ import os
 import random
 import re
 import string
+import subprocess
 import sys
 from tabulate import tabulate
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,21 +31,6 @@ ECR_REGISTRY_PATTERN = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
 # submit TestRuns without it. Every other run stays free of k6, which is why this is a range check
 # and not an unconditional install.
 LOAD_TEST_ID_PREFIX = "008"
-
-
-def _split_image_ref(ref: str) -> Tuple[str, str, str]:
-    """Split a fully-qualified image reference into (repository, tag, digest).
-
-    Only one of tag/digest is ever set. Aware of a registry port (host:5001/repo carries no tag)
-    and of digest pins (repo@sha256:...), which is the form the transforms packaging script emits.
-    """
-    repo, at, digest = ref.partition("@")
-    if at:
-        return repo, "", digest
-    colon = ref.rfind(":")
-    if colon > ref.rfind("/"):
-        return ref[:colon], ref[colon + 1:], ""
-    return ref, "latest", ""
 
 
 class TargetType(str, Enum):
@@ -97,7 +83,7 @@ class TestRunner:
                  capture_proxy_service_type: str = "LoadBalancer",
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
                  trace_backend: str = "",
-                 k6_chart_path: str = "", k6_scripts_image: str = "",
+                 k6_chart_path: str = "", k6_install_script: str = "", k6_scripts_image: str = "",
                  load_test_image: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
@@ -117,6 +103,7 @@ class TestRunner:
         self.trace_values_file = trace_values_file
         self.trace_backend = trace_backend
         self.k6_chart_path = k6_chart_path
+        self.k6_install_script = k6_install_script
         self.k6_scripts_image = k6_scripts_image
         self.load_test_image = load_test_image
 
@@ -455,40 +442,6 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def _resolve_load_test_image(self) -> Tuple[str, str]:
-        """(repository, tag) of the k6 runner image — stock grafana/k6, which runs the test.
-
-        Only the repository is chosen here, to reach a Docker Hub mirror; the k6 version is pinned
-        once in the chart's values.yaml and deliberately left alone, so `tag` is empty and the chart
-        default applies. An explicit load_test_image wins and carries both.
-        """
-        if self.load_test_image:
-            repo, _, tag = self.load_test_image.rpartition(":")
-            return repo, tag
-        return "mirror.gcr.io/grafana/k6", ""
-
-    def _resolve_k6_scripts_image(self) -> Dict[str, str]:
-        """Helm values for the k6 scripts image — the data image mounted at /scripts that carries
-        the scenarios and presets.
-
-        An explicit k6_scripts_image is a complete reference and wins, the same way the mountable
-        transforms images are handed over fully resolved (--transform-image-*). Otherwise the
-        reference is derived from the registry prefix, which needs the registry's own layout: ECR
-        flattens every image into one repo, any other registry keeps <prefix>migrations/<image>.
-        """
-        if self.k6_scripts_image:
-            repo, tag, digest = _split_image_ref(self.k6_scripts_image)
-        elif self.registry_prefix and re.match(ECR_REGISTRY_PATTERN, self.registry_prefix):
-            repo, tag, digest = self.registry_prefix.rstrip("/"), "migrations_k6_scripts_latest", ""
-        elif self.registry_prefix:
-            repo, tag, digest = f"{self.registry_prefix}migrations/k6_scripts", "latest", ""
-        else:
-            repo, tag, digest = "migrations/k6_scripts", "latest", ""
-        # A digest pins exact content and wins over the tag in the chart, so send only one of them.
-        values = {"scriptsImage.repository": repo, "scriptsImage.pullPolicy": "Always"}
-        values["scriptsImage.digest" if digest else "scriptsImage.tag"] = digest or tag
-        return values
-
     def _load_test_requested(self) -> bool:
         """True when this run selects a load-test case (008x) and therefore needs the k6LoadTest
         chart. The selected IDs are the only trigger — there is no separate opt-in flag."""
@@ -497,27 +450,22 @@ class TestRunner:
     def _install_load_test_chart(self) -> None:
         """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC).
 
-        The chart depends on the k6-operator subchart, so vendor it first (offline from Chart.lock
-        when already present, else fetch from the grafana repo).
+        The install itself lives in deployment/k8s/installK6Chart.sh, shared with
+        deployCdcLoadTestConfig.sh, so subchart vendoring and image resolution (mirror repository,
+        digest pins, the ECR flat-repo layout) have exactly one implementation.
         """
-        import subprocess
-        logger.info("Installing k6 load-test chart from %s", self.k6_chart_path)
-        subprocess.run(["helm", "repo", "add", "grafana", "https://grafana.github.io/helm-charts"],
-                       check=False, capture_output=True)
-        if subprocess.run(["helm", "dependency", "build", self.k6_chart_path],
-                          capture_output=True, text=True).returncode != 0:
-            subprocess.run(["helm", "dependency", "update", self.k6_chart_path], check=True)
-        repo, tag = self._resolve_load_test_image()
-        k6_scripts_values = self._resolve_k6_scripts_image()
-        logger.info("k6 runner image: %s:%s (k6 scripts: %s)", repo, tag or "<chart default>",
-                    k6_scripts_values)
-        values = {"image.repository": repo, "image.pullPolicy": "IfNotPresent"}
-        # Only set the tag when a caller pinned one; otherwise the chart's pinned version stands.
-        if tag:
-            values["image.tag"] = tag
-        values.update(k6_scripts_values)
-        if not self.k8s_service.helm_install(
-                chart_path=self.k6_chart_path, release_name="k6-load-test", values=values):
+        cmd = [self.k6_install_script, "--chart", self.k6_chart_path,
+               "--namespace", self.k8s_service.namespace]
+        if self.k8s_service.kube_context:
+            cmd += ["--context", self.k8s_service.kube_context]
+        if self.registry_prefix:
+            cmd += ["--registry-prefix", self.registry_prefix]
+        if self.k6_scripts_image:
+            cmd += ["--scripts-image", self.k6_scripts_image]
+        if self.load_test_image:
+            cmd += ["--runner-image", self.load_test_image]
+        logger.info("Installing k6 load-test chart: %s", " ".join(cmd))
+        if subprocess.run(cmd).returncode != 0:
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
@@ -888,6 +836,7 @@ def main() -> None:
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
     k6_chart_path = f"{helm_charts_base_path}/components/k6LoadTest"
+    k6_install_script = f"{helm_k8s_base_path}/installK6Chart.sh"
 
     target_type = TargetType(args.target_type)
     if "all" in args.source_version and len(args.source_version) > 1:
@@ -919,6 +868,7 @@ def main() -> None:
                              trace_values_file=args.trace_values_file,
                              trace_backend=args.trace_backend or "",
                              k6_chart_path=k6_chart_path,
+                             k6_install_script=k6_install_script,
                              k6_scripts_image=args.k6_scripts_image)
 
     if args.delete_only:
