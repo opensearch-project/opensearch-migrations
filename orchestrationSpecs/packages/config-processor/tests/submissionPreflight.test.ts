@@ -1,7 +1,9 @@
 import {describe, expect, it, jest} from "@jest/globals";
 import {parse} from "yaml";
 import {
+    DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY,
     preflightSubmissionResources,
+    SubmissionAdmissionClient,
     SubmissionCommandResult,
     SubmissionPreflightResource,
 } from "../src/submissionPreflight";
@@ -227,5 +229,124 @@ describe("submission preflight", () => {
         expect(report.issues[0]).toEqual(expect.objectContaining({
             classification: "warning",
         }));
+    });
+
+    it("classifies structured Kubernetes API errors", async () => {
+        const client: SubmissionAdmissionClient = {
+            read: async () => ({
+                ...impossibleResource.manifest,
+                metadata: {
+                    name: "p2-topic",
+                    resourceVersion: "12",
+                },
+                spec: {sourceLabel: "old-source"},
+                status: {phase: "Ready"},
+            }),
+            dryRun: async () => {
+                throw {
+                    code: 422,
+                    body: {
+                        message: (
+                            "Impossible: sourceLabel cannot be changed. "
+                            + "Delete and recreate."
+                        ),
+                    },
+                };
+            },
+        };
+
+        const report = await preflightSubmissionResources(
+            [impossibleResource],
+            {namespace: "ma", client},
+        );
+
+        expect(report.allowed).toBe(false);
+        expect(report.issues).toContainEqual(expect.objectContaining({
+            classification: "recreate-required",
+            resetTargetId: "reset:capturedtraffics:p2-topic",
+        }));
+    });
+
+    it("bounds resource concurrency and preserves issue order", async () => {
+        const resources = Array.from(
+            {length: 6},
+            (_, index): SubmissionPreflightResource => ({
+                manifest: {
+                    apiVersion: "migrations.opensearch.org/v1alpha1",
+                    kind: "CapturedTraffic",
+                    metadata: {name: `traffic-${index}`},
+                    spec: {sourceLabel: `source-${index}`},
+                },
+            }),
+        );
+        let active = 0;
+        let maximumActive = 0;
+        const client: SubmissionAdmissionClient = {
+            read: async () => {
+                active += 1;
+                maximumActive = Math.max(maximumActive, active);
+                return undefined;
+            },
+            dryRun: async candidate => {
+                const index = Number(candidate.metadata.name.split("-")[1]);
+                await new Promise(resolve => setTimeout(
+                    resolve,
+                    (resources.length - index) * 2,
+                ));
+                active -= 1;
+                throw new Error(
+                    `spec.sourceLabel: Required value for ${candidate.metadata.name}`,
+                );
+            },
+        };
+
+        const report = await preflightSubmissionResources(
+            resources,
+            {client, concurrency: 2},
+        );
+
+        expect(maximumActive).toBe(2);
+        expect(report.issues.map(item => item.name)).toEqual(
+            resources.map(item => item.manifest.metadata.name),
+        );
+    });
+
+    it("uses the default resource concurrency bound", async () => {
+        const resources = Array.from(
+            {length: DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY + 2},
+            (_, index): SubmissionPreflightResource => ({
+                manifest: {
+                    apiVersion: "migrations.opensearch.org/v1alpha1",
+                    kind: "CapturedTraffic",
+                    metadata: {name: `traffic-${index}`},
+                    spec: {sourceLabel: `source-${index}`},
+                },
+            }),
+        );
+        let active = 0;
+        let maximumActive = 0;
+        let releaseReads: (() => void) | undefined;
+        const readsBlocked = new Promise<void>(resolve => {
+            releaseReads = resolve;
+        });
+        const client: SubmissionAdmissionClient = {
+            read: async () => {
+                active += 1;
+                maximumActive = Math.max(maximumActive, active);
+                if (active === DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY) {
+                    releaseReads?.();
+                }
+                await readsBlocked;
+                return undefined;
+            },
+            dryRun: async () => {
+                active -= 1;
+            },
+        };
+
+        const report = await preflightSubmissionResources(resources, {client});
+
+        expect(maximumActive).toBe(DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY);
+        expect(report.allowed).toBe(true);
     });
 });

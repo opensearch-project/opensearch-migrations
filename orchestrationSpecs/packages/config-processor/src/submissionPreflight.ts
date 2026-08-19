@@ -1,4 +1,3 @@
-import {spawnSync} from "child_process";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {stringify} from "yaml";
@@ -54,6 +53,26 @@ export type SubmissionCommandRunner = (
     input?: string,
 ) => SubmissionCommandResult;
 
+export interface SubmissionAdmissionClient {
+    read(
+        resource: SubmissionPreflightResource,
+        namespace?: string,
+    ): Promise<Record<string, any> | undefined>;
+    dryRun(
+        candidate: SubmissionPreflightResource["manifest"],
+        existing: boolean,
+    ): Promise<void>;
+}
+
+export interface SubmissionPreflightOptions {
+    namespace?: string;
+    run?: SubmissionCommandRunner;
+    client?: SubmissionAdmissionClient;
+    concurrency?: number;
+}
+
+export const DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY = 8;
+
 const KIND_TO_PLURAL: Record<string, string> = {
     ApprovalGate: "approvalgates",
     CaptureProxy: "captureproxies",
@@ -71,16 +90,10 @@ const BLOCKING_CLASSIFICATIONS = new Set<SubmissionPreflightClassification>([
     "invalid",
 ]);
 
-function defaultRunner(args: string[], input?: string): SubmissionCommandResult {
-    const result = spawnSync("kubectl", args, {
-        input,
-        encoding: "utf8",
-    });
-    return {
-        status: result.status ?? 1,
-        stdout: result.stdout ?? "",
-        stderr: result.stderr || result.error?.message || "",
-    };
+class SubmissionCommandError extends Error {
+    constructor(readonly result: SubmissionCommandResult) {
+        super(apiMessage(result));
+    }
 }
 
 function apiMessage(result: SubmissionCommandResult): string {
@@ -96,9 +109,103 @@ function apiMessage(result: SubmissionCommandResult): string {
     return text;
 }
 
+function errorMessage(error: unknown): string {
+    if (error instanceof SubmissionCommandError) {
+        return apiMessage(error.result);
+    }
+    if (error && typeof error === "object") {
+        const candidate = error as {
+            body?: unknown;
+            message?: unknown;
+            reason?: unknown;
+        };
+        const body = candidate.body;
+        if (body && typeof body === "object") {
+            const message = (body as {message?: unknown}).message;
+            if (typeof message === "string" && message.trim()) {
+                return message.trim();
+            }
+        }
+        if (typeof body === "string" && body.trim()) {
+            try {
+                const parsed = JSON.parse(body);
+                if (typeof parsed?.message === "string") {
+                    return parsed.message.trim();
+                }
+            } catch {
+                return body.trim();
+            }
+        }
+        if (typeof candidate.message === "string" && candidate.message.trim()) {
+            return candidate.message.trim();
+        }
+        if (typeof candidate.reason === "string" && candidate.reason.trim()) {
+            return candidate.reason.trim();
+        }
+    }
+    return String(error || "Kubernetes admission check failed").trim();
+}
+
 function isNotFound(result: SubmissionCommandResult): boolean {
     const message = apiMessage(result).toLowerCase();
     return message.includes("notfound") || message.includes("not found");
+}
+
+function commandAdmissionClient(
+    run: SubmissionCommandRunner,
+): SubmissionAdmissionClient {
+    return {
+        async read(resource, namespace) {
+            const namespaceArgs = namespace
+                ? ["--namespace", namespace]
+                : [];
+            const result = run(
+                ["get", "-f", "-", ...namespaceArgs, "-o", "json"],
+                stringify(resource.manifest),
+            );
+            if (result.status === 0) {
+                try {
+                    return JSON.parse(result.stdout);
+                } catch {
+                    throw new Error(
+                        "Kubernetes returned an unreadable resource during admission preflight.",
+                    );
+                }
+            }
+            if (isNotFound(result)) {
+                return undefined;
+            }
+            throw new SubmissionCommandError(result);
+        },
+        async dryRun(candidate, existing) {
+            const namespace = candidate.metadata.namespace;
+            const namespaceArgs = typeof namespace === "string" && namespace
+                ? ["--namespace", namespace]
+                : [];
+            const result = run(
+                [
+                    existing ? "replace" : "create",
+                    "--dry-run=server",
+                    "-f",
+                    "-",
+                    ...namespaceArgs,
+                    "-o",
+                    "json",
+                ],
+                stringify(candidate),
+            );
+            if (result.status !== 0) {
+                throw new SubmissionCommandError(result);
+            }
+        },
+    };
+}
+
+async function kubernetesAdmissionClient(): Promise<SubmissionAdmissionClient> {
+    const {createKubernetesSubmissionAdmissionClient} = await import(
+        "./kubernetesSubmissionClient"
+    );
+    return createKubernetesSubmissionAdmissionClient();
 }
 
 function definiteSchemaFailure(message: string): boolean {
@@ -240,77 +347,108 @@ function projectionIssues(
         ));
 }
 
-export async function preflightSubmissionResources(
-    resources: SubmissionPreflightResource[],
-    options: {
-        namespace?: string;
-        run?: SubmissionCommandRunner;
-    } = {},
-): Promise<SubmissionPreflightReport> {
-    const run = options.run ?? defaultRunner;
-    const issues: SubmissionPreflightIssue[] = [];
+async function preflightResource(
+    resource: SubmissionPreflightResource,
+    client: SubmissionAdmissionClient,
+    namespace?: string,
+): Promise<SubmissionPreflightIssue[]> {
+    let existing: Record<string, any> | undefined;
+    try {
+        existing = await client.read(resource, namespace);
+    } catch (error) {
+        return [issue(
+            resource,
+            "warning",
+            errorMessage(error),
+            "kubernetes",
+        )];
+    }
 
-    for (const resource of resources) {
-        const manifestText = stringify(resource.manifest);
-        const namespaceArgs = options.namespace
-            ? ["--namespace", options.namespace]
-            : [];
-        const getResult = run(
-            ["get", "-f", "-", ...namespaceArgs, "-o", "json"],
-            manifestText,
-        );
-        let existing: Record<string, any> | undefined;
-        if (getResult.status === 0) {
-            try {
-                existing = JSON.parse(getResult.stdout);
-            } catch {
-                issues.push(issue(
-                    resource,
-                    "warning",
-                    "Kubernetes returned an unreadable resource during admission preflight.",
-                    "preflight",
-                ));
-                continue;
-            }
-        } else if (!isNotFound(getResult)) {
-            issues.push(issue(
-                resource,
-                "warning",
-                apiMessage(getResult),
-                "kubernetes",
-            ));
-            continue;
-        }
-
-        const candidate = candidateForAdmission(resource, existing, options.namespace);
-        const admissionResult = run(
-            [
-                existing ? "replace" : "create",
-                "--dry-run=server",
-                "-f",
-                "-",
-                ...namespaceArgs,
-                "-o",
-                "json",
-            ],
-            stringify(candidate),
-        );
-        if (admissionResult.status === 0) {
-            continue;
-        }
-
-        const message = apiMessage(admissionResult);
+    const candidate = candidateForAdmission(resource, existing, namespace);
+    try {
+        await client.dryRun(candidate, existing !== undefined);
+        return [];
+    } catch (error) {
+        const message = errorMessage(error);
         const classification = classifyFailure(message);
         if (classification === "warning" && existing) {
             const projected = projectionIssues(resource, existing);
             if (projected.length > 0) {
-                issues.push(...projected);
-                continue;
+                return projected;
             }
         }
-        issues.push(issue(resource, classification, message, "kubernetes"));
+        return [issue(resource, classification, message, "kubernetes")];
+    }
+}
+
+async function mapWithConcurrency<T, U>(
+    items: T[],
+    concurrency: number,
+    operation: (item: T, index: number) => Promise<U>,
+): Promise<U[]> {
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
+        throw new Error("Submission preflight concurrency must be a positive integer");
+    }
+    const output = new Array<U>(items.length);
+    let nextIndex = 0;
+    const worker = async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex++;
+            output[index] = await operation(items[index], index);
+        }
+    };
+    await Promise.all(
+        Array.from(
+            {length: Math.min(concurrency, items.length)},
+            worker,
+        ),
+    );
+    return output;
+}
+
+export async function preflightSubmissionResources(
+    resources: SubmissionPreflightResource[],
+    options: SubmissionPreflightOptions = {},
+): Promise<SubmissionPreflightReport> {
+    if (resources.length === 0) {
+        return {
+            formatVersion: 1,
+            allowed: true,
+            checkedResources: 0,
+            issues: [],
+        };
     }
 
+    let client: SubmissionAdmissionClient;
+    try {
+        client = options.client
+            ?? (
+                options.run
+                    ? commandAdmissionClient(options.run)
+                    : await kubernetesAdmissionClient()
+            );
+    } catch (error) {
+        const message = errorMessage(error);
+        const issues = resources.map(resource => issue(
+            resource,
+            "warning",
+            message,
+            "preflight",
+        ));
+        return {
+            formatVersion: 1,
+            allowed: true,
+            checkedResources: resources.length,
+            issues,
+        };
+    }
+
+    const issueGroups = await mapWithConcurrency(
+        resources,
+        options.concurrency ?? DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY,
+        resource => preflightResource(resource, client, options.namespace),
+    );
+    const issues = issueGroups.flat();
     return {
         formatVersion: 1,
         allowed: !issues.some(item => item.blocking),
@@ -321,7 +459,7 @@ export async function preflightSubmissionResources(
 
 export async function preflightSubmissionBundle(
     bundleDir: string,
-    options: {namespace?: string; run?: SubmissionCommandRunner} = {},
+    options: SubmissionPreflightOptions = {},
 ): Promise<SubmissionPreflightReport> {
     const resources = JSON.parse(await fs.readFile(
         path.join(bundleDir, "submissionPreflightResources.json"),
@@ -334,6 +472,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     let bundleDir: string | undefined;
     let outputFile: string | undefined;
     let namespace: string | undefined;
+    let concurrency: number | undefined;
     for (let index = 0; index < args.length; index++) {
         if (args[index] === "--bundle-dir") {
             bundleDir = args[++index];
@@ -341,6 +480,11 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
             outputFile = args[++index];
         } else if (args[index] === "--namespace") {
             namespace = args[++index];
+        } else if (args[index] === "--concurrency") {
+            concurrency = Number(args[++index]);
+            if (!Number.isInteger(concurrency) || concurrency < 1) {
+                throw new Error("--concurrency requires a positive integer");
+            }
         } else {
             throw new Error(`Unknown submission preflight argument: ${args[index]}`);
         }
@@ -348,7 +492,10 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     if (!bundleDir) {
         throw new Error("--bundle-dir is required");
     }
-    const report = await preflightSubmissionBundle(bundleDir, {namespace});
+    const report = await preflightSubmissionBundle(
+        bundleDir,
+        {namespace, concurrency},
+    );
     const output = `${JSON.stringify(report, null, 2)}\n`;
     if (outputFile) {
         await fs.writeFile(outputFile, output);

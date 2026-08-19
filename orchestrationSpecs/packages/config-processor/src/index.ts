@@ -5,14 +5,17 @@ export * from './runMigrationInitializer';
 export * from './consoleResources';
 export * from './resolvedMigrationResources';
 export {
+    DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY,
     preflightSubmissionBundle,
     preflightSubmissionResources,
 } from './submissionPreflight';
 export type {
+    SubmissionAdmissionClient,
     SubmissionCommandResult,
     SubmissionCommandRunner,
     SubmissionPreflightClassification,
     SubmissionPreflightIssue,
+    SubmissionPreflightOptions,
     SubmissionPreflightReport,
     SubmissionPreflightResource,
 } from './submissionPreflight';
