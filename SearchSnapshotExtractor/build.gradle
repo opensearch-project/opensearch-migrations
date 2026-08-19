@@ -1,3 +1,5 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
@@ -39,28 +41,28 @@ tasks.named('processLucene10Resources').configure {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
-tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene5', ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene5]
     archiveClassifier.set('lucene5-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene5.org.apache.lucene'
 }
 
-tasks.register('shadowLucene6', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene6', ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene6]
     archiveClassifier.set('lucene6-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene6.org.apache.lucene'
 }
 
-tasks.register('shadowLucene7', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene7', ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene7]
     archiveClassifier.set('lucene7-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
 }
 
-tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene9', ShadowJar) {
     dependsOn compileLucene9Java, processLucene9Resources
     mergeServiceFiles()
     archiveClassifier.set('lucene9-shadow')
@@ -72,7 +74,7 @@ tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks
     }
 }
 
-tasks.register('shadowLucene10', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene10', ShadowJar) {
     dependsOn processLucene10Resources
     mergeServiceFiles()
     archiveClassifier.set('lucene10-shadow')

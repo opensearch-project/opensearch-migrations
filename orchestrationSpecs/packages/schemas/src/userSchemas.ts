@@ -793,6 +793,19 @@ export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional(
         "transformer from the user-facing collectionAllowlist. When empty, CreateSnapshot auto-discovers all " +
         "live Solr collections/cores. Not user-configurable.");
 
+// A source-connection property, like endpoint — not a per-backup option.
+// The refinement mirrors SolrContextPath.normalize (Java) and normalize_solr_context_path (console),
+// so a value any of the three would reject is caught here first.
+export const SOLR_CONTEXT_PATH_OPTION = z.string()
+    .refine(v => !v.includes("://") && !v.includes("?") && !v.includes("#"),
+        "solrContextPath must be a path such as '/solr' (or empty when Solr is served at the root), " +
+        "not a URL or query string")
+    .default("/solr").optional()
+    .describe("The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr " +
+        "URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a " +
+        "reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the " +
+        "host. Only valid on Solr sources.");
+
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
 
@@ -1035,17 +1048,16 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream. When omitted, the config processor resolves the " +
-            "deployment-provisioned default bucket before workflow submission so the effective bucket is explicit " +
-            "in run history. Set this to use a separate bucket for failed document stream records."),
+        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
+            "document failures are not recorded; there is no separate enable flag and no default bucket."),
     failedDocumentStreamS3Region: z.string().optional()
         .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
-            "submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the " +
-            "deployment default) so it is explicit in run history rather than discovered at runtime."),
+            "submission (user value, else the snapshot repo's region, else the deployment default). " +
+            "Ignored without a bucket."),
     failedDocumentStreamS3Endpoint: z.string().optional()
         .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
-            "the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, " +
-            "else the deployment default)."),
+            "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
+            "Ignored without a bucket."),
     failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
         .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
             "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
@@ -1068,12 +1080,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
 /**
  * Deployment-level S3 defaults read from the cluster (the migrations-default-s3-config ConfigMap) by the
  * submitter/initializer and passed to the config processor as an explicit input. This lets the processor
- * resolve the effective failed-document-stream bucket/region/endpoint before MigrationRun.spec is created,
+ * resolve the effective failed-document-stream region/endpoint before MigrationRun.spec is created,
  * instead of RFS discovering them from pod env at runtime.
  */
 export const DEPLOYMENT_DEFAULTS_CONFIG = z.object({
     defaultS3Bucket: z.string().optional()
-        .describe("Deployment-provisioned default S3 bucket (migrations-default-s3-config BUCKET_NAME)."),
+        .describe("Deployment-provisioned default S3 bucket (migrations-default-s3-config BUCKET_NAME). " +
+            "Not a fallback for the failed document stream — that bucket must be named explicitly."),
     defaultS3Region: z.string().optional()
         .describe("Deployment-provisioned default AWS region (migrations-default-s3-config AWS_REGION)."),
     defaultS3Endpoint: z.string().optional()
@@ -1503,6 +1516,7 @@ const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
+    solrContextPath: SOLR_CONTEXT_PATH_OPTION,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
@@ -1510,6 +1524,16 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     const repos = snapshotInfoRepoNames(data.snapshotInfo);
     const snapshots = snapshotInfoEntries(data.snapshotInfo);
     const snapshotInfoItemKey = snapshotVariant?.itemKey ?? "snapshots";
+
+    // Compared against the default, not checked for presence: the field is defaulted, so an unset
+    // ES/OS source is indistinguishable here from one that set "/solr".
+    if (data.solrContextPath !== undefined && data.solrContextPath !== "/solr" && !isSolrVersion(data.version)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `solrContextPath is only supported for Solr sources, but source version is '${data.version ?? "<unset>"}'`,
+            path: ['solrContextPath']
+        });
+    }
     if (data.snapshotInfo && snapshotVariant && !snapshotVariant.matchesSourceVersion(data.version)) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,

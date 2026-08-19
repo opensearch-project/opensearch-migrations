@@ -7,11 +7,13 @@ when terminal document failures occur. Records for a given backfill live under
 has its own prefix and records are never mixed.
 
 Bucket/region/endpoint/prefix come from a single source of truth: the config processor resolves them
-(including the deployment default) before workflow submission and projects them onto the owning
-``SnapshotMigration``'s spec. The console reads those resolved fields, and the session id, directly
-from the ``SnapshotMigration`` it is reporting on (via the Kubernetes custom-objects API) — so it
-always agrees with what RFS wrote. There is intentionally no namespace-global ConfigMap (which could
-not represent multiple/parallel backfills).
+before workflow submission and projects them onto the owning ``SnapshotMigration``'s spec. The console
+reads those resolved fields, and the session id, directly from the ``SnapshotMigration`` it is reporting
+on (via the Kubernetes custom-objects API) — so it always agrees with what RFS wrote. There is
+intentionally no namespace-global ConfigMap (which could not represent multiple/parallel backfills).
+
+The bucket is the stream's on/off switch and has no default: a migration that named none reports as not
+configured here.
 
 ``--migration <name>`` selects which ``SnapshotMigration`` to inspect when several exist.
 
@@ -29,7 +31,6 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -298,13 +299,3 @@ def delete_session(cfg: FailedDocumentStreamConfig) -> int:
         client.delete_objects(Bucket=cfg.bucket, Delete={"Objects": batch})
         deleted += len(batch)
     return deleted
-
-
-def safe_has_records(cfg: FailedDocumentStreamConfig) -> Optional[bool]:
-    """Like ``has_records`` but swallows S3 errors so a status command never breaks
-    on a misconfigured failed document stream. Returns ``None`` if it can't be determined."""
-    try:
-        return has_records(cfg)
-    except (BotoCoreError, ClientError) as e:
-        logger.warning("Failed to read failed document stream records: %s", e)
-        return None

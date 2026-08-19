@@ -29,7 +29,8 @@ def _make_runner(combinations, skip_install=True):
     )
 
 
-def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.19", expected=None):
+def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.19", expected=None,
+                 uncollectable=None):
     """Create a TestReport with given summary values."""
     if tests is None:
         tests = []
@@ -39,7 +40,7 @@ def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.
             tests.append(TestEntry(name=f"fail_{i}", description="", result="failed", duration=0.1))
     return TestReport(
         summary=TestSummary(passed=passed, failed=failed, source_version=source, target_version=target,
-                            expected=expected),
+                            expected=expected, uncollectable=uncollectable or []),
         tests=tests,
     )
 
@@ -122,6 +123,22 @@ class TestFailureDetection:
         report = _make_report(passed=0, failed=0, expected=0)
         report.exit_code = 2
         with patch.object(runner, "run_tests", return_value=report):
+            with pytest.raises(TestsFailed, match="test failures"):
+                runner.run()
+
+    def test_uncollectable_test_cases_raise_even_when_pytest_exits_clean(self):
+        """A test class skipped at collection time must not be mistaken for an empty pair.
+
+        conftest now isolates a broken constructor instead of letting it abort the
+        session, so pytest exits 0 and the exit_code check cannot catch this. The
+        report is otherwise byte-identical to a legitimately-empty version pair
+        (expected=0, passed=0, failed=0) — the case directly above, which must still
+        pass. Only 'uncollectable' distinguishes them.
+        """
+        runner = _make_runner(combinations=[("ES_7.10", "OS_3.1")])
+        with patch.object(runner, "run_tests", return_value=_make_report(
+                passed=0, failed=0, expected=0,
+                uncollectable=["Test0010ExternalSnapshotMigration"])):
             with pytest.raises(TestsFailed, match="test failures"):
                 runner.run()
 

@@ -429,29 +429,22 @@ function trimToUndefined(value: unknown): string | undefined {
 }
 
 /**
- * Resolve the failed-document-stream S3 bucket/region/endpoint to explicit values before the workflow
- * (and MigrationRun.spec) is created, so the effective destination is recorded in run history instead of
- * being discovered from pod env at runtime inside RFS.
+ * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
+ * destination is recorded in run history rather than discovered from pod env at runtime.
  *
- * Bucket and region/endpoint are resolved as a coupled unit: when the bucket falls through to the
- * deployment default we use the deployment region/endpoint (never the snapshot repo's), so a
- * deployment-default bucket can't be paired with the snapshot repo's region. The snapshot repo's
- * region/endpoint are only inherited when the user explicitly chose the bucket. All inputs are trimmed
- * so an empty string (e.g. from an absent ConfigMap key) is treated as absent.
+ * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
  */
 export function resolveFailedDocumentStreamS3(
     rest: Record<string, unknown>,
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
 ): Record<string, string | undefined> {
-    const userBucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
+    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
     const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
     const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
 
-    const bucket = userBucket ?? trimToUndefined(deploymentDefaults.defaultS3Bucket);
     if (!bucket) {
-        // No bucket resolvable -> failed document stream disabled. Clear any orphan region/endpoint
-        // so they don't land in resolved config without a bucket.
+        // Stream off; clear orphan region/endpoint.
         return {
             failedDocumentStreamS3Bucket: undefined,
             failedDocumentStreamS3Region: undefined,
@@ -459,17 +452,16 @@ export function resolveFailedDocumentStreamS3(
         };
     }
 
-    const userChoseBucket = userBucket !== undefined;
     const region = userRegion
-        ?? (userChoseBucket ? trimToUndefined(repoConfig?.awsRegion) : undefined)
+        ?? trimToUndefined(repoConfig?.awsRegion)
         ?? trimToUndefined(deploymentDefaults.defaultS3Region);
     const endpoint = userEndpoint
-        ?? (userChoseBucket ? trimToUndefined(repoConfig?.endpoint) : undefined)
+        ?? trimToUndefined(repoConfig?.endpoint)
         ?? trimToUndefined(deploymentDefaults.defaultS3Endpoint);
 
     if (!region) {
         throw new Error(
-            `failed document stream S3 bucket '${bucket}' was resolved but no region could be determined. ` +
+            `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
             `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
             `or the deployment default region.`
         );
@@ -1010,8 +1002,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
                     sourceConnectionIdentity,
-                    m.metadataMigrationConfig ?? {},
-                    m.documentBackfillConfig ?? {},
+                    m.metadataMigrationConfig,
+                    m.documentBackfillConfig,
                     targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
@@ -1555,6 +1547,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
         };
     }
