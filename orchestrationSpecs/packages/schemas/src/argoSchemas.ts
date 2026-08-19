@@ -159,6 +159,8 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     version: z.string(),
     endpoint: z.string(),
     allowInsecure: z.boolean(),
+    // Solr sources only; "" elsewhere.
+    solrContextPath: z.string(),
     authType: z.string(),
     authBasicSecretName: z.string(),
     authSigv4Region: z.string(),

@@ -207,6 +207,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "sourceAuthType": "none",
       "sourceEndpoint": "https://source.example.com",
       "sourceLabel": "source",
+      "sourceSolrContextPath": "/solr",
       "sourceVersion": "ES 7.10.2",
     },
   },

@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
 from typing import Any, Dict, List, Optional, TypeAlias
 
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
+from console_link.models.cluster import (AuthMethod, Cluster, DEFAULT_SOLR_CONTEXT_PATH, HttpMethod,
+                                         NoSourceClusterDefinedError)
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
@@ -18,9 +19,13 @@ from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 logger = logging.getLogger(__name__)
 
 SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available."
-SOLR_LIST_COLLECTIONS_API = "/solr/admin/collections?action=LIST&wt=json"
+SOLR_LIST_COLLECTIONS_PATH = "/admin/collections?action=LIST&wt=json"
 SOLR_NO_SNAPSHOT_REPO_MSG = "Solr does not use snapshot repositories."
 CREATE_SNAPSHOT_COMMAND = "/root/createSnapshot/bin/CreateSnapshot"
+
+
+def solr_list_collections_api(context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> str:
+    return f"{context_path}{SOLR_LIST_COLLECTIONS_PATH}"
 
 
 # Define the models first to avoid forward reference issues
@@ -129,14 +134,14 @@ class Snapshot(ABC):
     def _get_solr_collections(self) -> list:
         """Fetch collection/core names. Tries SolrCloud first, falls back to standalone."""
         try:
-            r = self.source_cluster.call_api(SOLR_LIST_COLLECTIONS_API)
+            r = self.source_cluster.call_api(solr_list_collections_api(self.source_cluster.solr_context_path))
             if r.status_code == 200:
                 collections = r.json().get("collections", [])
                 if collections:
                     return collections
         except Exception:
             pass
-        r = self.source_cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        r = self.source_cluster.call_api(f"{self.source_cluster.solr_context_path}/admin/cores?action=STATUS&wt=json")
         return list(r.json().get("status", {}).keys())
 
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
@@ -182,6 +187,7 @@ class Snapshot(ABC):
             # Always pass --mode for Solr sources; both standalone and SolrCloud
             # go through CreateSnapshot with the mode flag controlling behavior.
             command_args["--mode"] = self.config.get("mode", "create")
+            command_args["--solr-context-path"] = self.source_cluster.solr_context_path
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -264,7 +270,8 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -330,7 +337,8 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -402,7 +410,8 @@ class GcsSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
+                                       context_path=self.source_cluster.solr_context_path)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -720,10 +729,11 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     return SnapshotStateAndDetails(state, snapshot_info)
 
 
-def _solr_backup_status(cluster: Cluster, snapshot_name: str, deep_check: bool = False) -> CommandResult:
+def _solr_backup_status(cluster: Cluster, snapshot_name: str, deep_check: bool = False,
+                        context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> CommandResult:
     """Check SolrCloud backup status via Collections API REQUESTSTATUS."""
     try:
-        status_obj = _get_solr_snapshot_status(cluster, snapshot_name)
+        status_obj = _get_solr_snapshot_status(cluster, snapshot_name, context_path)
 
         if not deep_check:
             # Return SUCCESS/IN_PROGRESS/FAILED to match ES snapshot status format
@@ -786,12 +796,13 @@ def _parse_collection_response(resp: dict) -> dict:
     }
 
 
-def _poll_collection_status(cluster: Cluster, snapshot_name: str, coll: str) -> Optional[dict]:
+def _poll_collection_status(cluster: Cluster, snapshot_name: str, coll: str,
+                            context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> Optional[dict]:
     """Poll a single collection's async backup status. Returns None if not found or on error."""
     async_id = f"{snapshot_name}-{coll}"
     try:
         r = cluster.call_api(
-            f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json",
+            f"{context_path}/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json",
             timeout=30
         )
         resp = r.json()
@@ -849,25 +860,26 @@ def _accumulate_collection_result(result: dict, accum: dict) -> None:
         accum["completed_shards"] += success_count
 
 
-def _is_solr_standalone(cluster: Cluster) -> bool:
+def _is_solr_standalone(cluster: Cluster, context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> bool:
     """Return True if Solr is running in standalone (non-SolrCloud) mode."""
     try:
-        r = cluster.call_api(SOLR_LIST_COLLECTIONS_API, timeout=10)
+        r = cluster.call_api(solr_list_collections_api(context_path), timeout=10)
         return r.status_code != 200
     except Exception:
         return True
 
 
-def _get_solr_cores(cluster: Cluster) -> list:
+def _get_solr_cores(cluster: Cluster, context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> list:
     """Get core names from standalone Solr via the CoreAdmin API."""
-    r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json", timeout=30)
+    r = cluster.call_api(f"{context_path}/admin/cores?action=STATUS&wt=json", timeout=30)
     return list(r.json().get("status", {}).keys())
 
 
-def _poll_standalone_core_status(cluster: Cluster, core: str) -> Optional[dict]:
+def _poll_standalone_core_status(cluster: Cluster, core: str,
+                                 context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> Optional[dict]:
     """Check backup status for a standalone Solr core via the replication handler."""
     try:
-        r = cluster.call_api(f"/solr/{core}/replication?command=details&wt=json", timeout=30)
+        r = cluster.call_api(f"{context_path}/{core}/replication?command=details&wt=json", timeout=30)
         details = r.json().get("details", {})
         backup = details.get("backup")
         if backup is None:
@@ -883,9 +895,10 @@ def _poll_standalone_core_status(cluster: Cluster, core: str) -> Optional[dict]:
         return {"status": "error"}
 
 
-def _get_solr_standalone_snapshot_status(cluster: Cluster) -> SnapshotStatus:
+def _get_solr_standalone_snapshot_status(cluster: Cluster,
+                                         context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> SnapshotStatus:
     """Build a SnapshotStatus from standalone Solr replication API responses."""
-    cores = _get_solr_cores(cluster)
+    cores = _get_solr_cores(cluster, context_path)
     if not cores:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0, shard_total=0, shard_complete=0)
 
@@ -894,7 +907,7 @@ def _get_solr_standalone_snapshot_status(cluster: Cluster) -> SnapshotStatus:
     any_failed = False
 
     for core in cores:
-        result = _poll_standalone_core_status(cluster, core)
+        result = _poll_standalone_core_status(cluster, core, context_path)
         if result is None:
             continue
         status = result["status"]
@@ -916,13 +929,14 @@ def _get_solr_standalone_snapshot_status(cluster: Cluster) -> SnapshotStatus:
     )
 
 
-def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
+def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str,
+                              context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> SnapshotStatus:
     """Build a SnapshotStatus — auto-detects standalone vs SolrCloud."""
-    if _is_solr_standalone(cluster):
-        return _get_solr_standalone_snapshot_status(cluster)
+    if _is_solr_standalone(cluster, context_path):
+        return _get_solr_standalone_snapshot_status(cluster, context_path)
 
     # SolrCloud path: use Collections API REQUESTSTATUS
-    r = cluster.call_api(SOLR_LIST_COLLECTIONS_API, timeout=30)
+    r = cluster.call_api(solr_list_collections_api(context_path), timeout=30)
     collections = r.json().get("collections", [])
 
     accum = {
@@ -931,7 +945,7 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
     }
 
     for coll in collections:
-        result = _poll_collection_status(cluster, snapshot_name, coll)
+        result = _poll_collection_status(cluster, snapshot_name, coll, context_path)
         if result is None:
             continue
         if result["state"] == "error":
