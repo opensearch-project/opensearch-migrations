@@ -52,6 +52,124 @@ Only proven permanent failures block. Deleting resources, transient API
 failures, generic state-dependent VAP failures, and approval-gated changes do
 not block because a later workflow step may still converge.
 
+### Why Admission Is Checked Again
+
+Strict config validation and Kubernetes admission answer different questions.
+Strict validation proves that the user config and generated workflow artifacts
+match the schemas known to this repository. Admission preflight asks the live
+cluster whether it would accept each final generated resource now.
+
+The live check is required for safety because local validation cannot fully
+account for:
+
+- the CRDs, ValidatingAdmissionPolicies, bindings, and admission webhooks
+  currently installed in the target cluster;
+- immutable, sealed, or approval-gated changes that depend on the existing
+  resource's spec and status;
+- cluster or resource changes made after an earlier edit-time preflight; or
+- run-specific values added while generating the exact submission bundle.
+
+The UI or CLI may run an earlier preflight to give the user prompt feedback,
+but submit must check again. Reusing an earlier result would create a
+time-of-check/time-of-use gap in which the cluster or generated candidate could
+change. The repeated check is non-mutating and runs before the existing Argo
+Workflow is replaced or any generated resource is applied.
+
+After the submit-time preflight succeeds, the submission path commits the same
+prepared bundle. It does not regenerate resources between the check and the
+write. This limits the remaining gap and ensures that admission evaluated the
+objects the submit path intends to apply.
+
+### How The Live Check Works
+
+For each generated resource, preflight:
+
+1. reads the live object to determine whether the candidate is a create or an
+   update and to obtain required server metadata such as `resourceVersion`;
+2. combines that live metadata with the final desired manifest while removing
+   stale generated server fields;
+3. sends a Kubernetes `create` or `replace` request with `dryRun=All`, causing
+   the API server to execute normal schema and admission checks without
+   persisting the object; and
+4. classifies any response and adds it to the report.
+
+The read and dry-run must remain ordered for an individual resource because the
+second operation depends on the first. Independent resources are checked
+concurrently through one reusable Kubernetes client. The default concurrency
+is eight and does not affect deterministic report ordering. The low-level
+`preflightSubmission` command accepts `--concurrency` when a different bound is
+needed.
+
+### Report Contract
+
+The versioned report is deliberately small and shared unchanged by direct CLI,
+Python, FastAPI, and web callers. A report containing one permanent blocker and
+one normal approval requirement looks like:
+
+```json
+{
+  "formatVersion": 1,
+  "allowed": false,
+  "checkedResources": 3,
+  "issues": [
+    {
+      "kind": "CapturedTraffic",
+      "name": "p2-topic",
+      "plural": "capturedtraffics",
+      "classification": "recreate-required",
+      "blocking": true,
+      "message": "Impossible: sourceLabel cannot be changed. Delete and recreate.",
+      "source": "kubernetes",
+      "resourceId": "resource:capturedtraffics:p2-topic",
+      "resetTargetId": "reset:capturedtraffics:p2-topic"
+    },
+    {
+      "kind": "TrafficReplay",
+      "name": "replay",
+      "plural": "trafficreplays",
+      "classification": "approval-required",
+      "blocking": false,
+      "message": "Gated changes detected. Create an ApprovalGate to approve this update.",
+      "source": "kubernetes",
+      "resourceId": "resource:trafficreplays:replay"
+    }
+  ]
+}
+```
+
+`allowed` is false when any issue has `blocking: true`.
+`checkedResources` counts every generated resource, including resources with no
+issue; successful checks do not produce entries. `resourceId` lets a caller
+associate an issue with its workflow resource, while `resetTargetId` identifies
+the reset action for recreate-required resources. `source` distinguishes a
+direct Kubernetes result from a projected-policy fallback or a failure to
+initialize preflight itself.
+
+For users, a blocked report prevents submission before mutation and provides a
+specific reset target or validation message. Approval requirements and
+uncertain warnings remain visible but do not create an impossible submission
+loop. If the Kubernetes client or API server is unavailable, preflight returns
+non-blocking warnings rather than claiming that the candidate is invalid.
+
+### Performance Impact
+
+Preflight performs up to two API operations per generated resource: one read
+and one server-side dry-run. Reusing a Kubernetes client avoids starting two
+`kubectl` processes for every resource, and bounded concurrency keeps latency
+from growing linearly while avoiding an unbounded burst against the API server.
+Measured against a local kind cluster:
+
+| Generated resources | Sequential `kubectl` | Reused client, concurrency 8 |
+| ---: | ---: | ---: |
+| 16 | 1.77 s | 0.28 s |
+| 36 | 3.78 s | 0.33 s |
+| 61 | 6.29 s | 0.41 s |
+| 111 | 11.37 s | 0.66 s |
+
+These measurements cover admission preflight, not initialization or mutation.
+The safety check remains part of every submit even though its cost is now a
+small fraction of the complete submission preparation path.
+
 `packages/config-processor/src/submissionPreflight.ts` owns the report contract,
 Kubernetes classification, and projected-policy fallback. The submission shell
 script owns prepare/commit. Python Click, FastAPI, and Textual code adapts the
