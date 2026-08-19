@@ -111,13 +111,25 @@ other `migrations/*` images):
 ./gradlew :buildImages:buildImagesToRegistry     # builds migrations/k6_scripts with everything else
 ```
 
-> **`migrations/k6_scripts` is build-it-yourself — it is not a released artifact.** Load testing is
-> a development/testing capability, so the image is deliberately **not** published to
-> `public.ecr.aws`/Docker Hub and is **not** mirrored by `aws-bootstrap.sh` (whose image list covers
-> only the four migration images). A cluster built purely from released artifacts therefore has no
-> scenarios — and no k6 chart either, since nothing in the EKS bootstrap installs it. The *runner*
-> image is unaffected: it is stock `grafana/k6`, an upstream artifact that mirrors normally. To
-> load-test a remote cluster, push the ~25 KB scripts image somewhere it can pull from:
+> **`migrations/k6_scripts` is not a released artifact.** Load testing is a development/testing
+> capability, so the image is deliberately **not** published to `public.ecr.aws`/Docker Hub. How the
+> image reaches a remote cluster therefore depends on which `aws-bootstrap.sh` path you use:
+>
+> - **`--build` (build from source) already pushes it** to your private ECR with the other images,
+>   as `migrations_k6_scripts_latest`. It is a normal build target, not a test-only one, so
+>   `--skip-test-images` keeps it. This is how the EKS integration test gets the image — no extra
+>   step is needed.
+> - **The released-artifact path does not.** That path mirrors only the four migration images from
+>   `public.ecr.aws` (`capture_proxy`, `traffic_replayer`, `reindex_from_snapshot`,
+>   `migration_console`). The scripts image is absent from that list because there is no public copy
+>   to mirror, so build and push the ~25 KB image yourself.
+>
+> Either way the k6 chart is a separate opt-in: nothing in the EKS bootstrap installs it, so a
+> cluster has no operator, no WorkflowTemplates and no RBAC until you install the chart — which is
+> why publishing the image alone would enable nothing. The *runner* image is unaffected: it is stock
+> `grafana/k6`, an upstream artifact that mirrors normally.
+>
+> To push the scripts image somewhere a remote cluster can pull from:
 > ```bash
 > # ECR flattens images into one repo, tagged per image:
 > ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint=<acct>.dkr.ecr.<region>.amazonaws.com/<repo>
@@ -126,9 +138,7 @@ other `migrations/*` images):
 >   --set scriptsImage.tag=migrations_k6_scripts_latest
 > ```
 > The test runner does exactly this for you when given `--k6-scripts-image` (or, as a fallback,
-> `--registry-prefix`) — see [Integration test](#integration-test). The EKS bootstrap `--build` path
-> already pushes `migrations/k6_scripts` to the private ECR registry along with the other images — it
-> is a normal build target, not a test-only one, so `--skip-test-images` keeps it.
+> `--registry-prefix`) — see [Integration test](#integration-test).
 
 The chart depends on the `k6-operator` subchart, so vendor that once, then install into the
 migration namespace (`ma`), pointing `scriptsImage.repository` at wherever the image landed and
@@ -739,9 +749,12 @@ Why the current setup looks the way it does (decision → rationale → alternat
    (`infra/mirror/k6-ecr-manifest.yaml`, kept separate from the migration's manifest so k6 mirroring
    is also opt-in). `migrations/k6_scripts` is deliberately **not** published as a release artifact
    — load testing is a dev/test capability, so it is absent from `publishedRepoByImageName` and from
-   `aws-bootstrap.sh`'s image list. Whoever load-tests a cluster builds and pushes those 25 KB
-   themselves. *Rejected:* publishing a public k6 image, which would make a load generator part of
-   the released surface for every customer.
+   the list `aws-bootstrap.sh` mirrors out of `public.ecr.aws`. It is still an ordinary build target,
+   so `aws-bootstrap.sh --build` pushes it to the private ECR registry with everything else; only a
+   deployment made purely from released artifacts has to build and push those 25 KB itself.
+   *Rejected:* publishing a public k6 image, which would make a load generator part of the released
+   surface for every customer — and would enable nothing on its own, since the bootstrap never
+   installs the k6 chart.
 
 8. **Validation scripts assume a running data plane.** A single parameterized
    `scripts/run_test.sh --scenario ingest|search|mixed|sequences [--shape steady|ramp|burst] [--run]`
