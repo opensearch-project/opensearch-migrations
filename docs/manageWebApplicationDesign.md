@@ -9,11 +9,12 @@ specification or a complete UX design.
 The detailed, phase-gated implementation runbook is
 [Workflow Manage Native Web Conversion Plan](manageWebConversionPlan.md).
 
-The existing TUI, its code, and `manageConfig.cast` are references for understanding the
-workflow and the functionality users need. They are not a behavioral specification for the
-new application. Surprising interactions in the recording should not be preserved merely
-for parity, and apparent input loss may be a recording artifact rather than an application
-defect.
+The existing TUI and its code are references for understanding the workflow and the
+functionality users need. The original `manageConfig.cast.gz` recording is archived on
+the `workflow-manage-web-design-spikes` branch. These artifacts are not a behavioral
+specification for the new application. Surprising interactions in the recording should not
+be preserved merely for parity, and apparent input loss may be a recording artifact rather
+than an application defect.
 
 ## Product Direction
 

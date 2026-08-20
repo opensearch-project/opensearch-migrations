@@ -1,6 +1,0 @@
-node_modules/
-dist/
-.angular/
-coverage/
-playwright-report/
-test-results/

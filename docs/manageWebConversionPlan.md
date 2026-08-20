@@ -15,17 +15,12 @@ Read these related documents before changing code:
   current schema-driven edit and projection boundaries.
 - [Manage External Configuration References](manageExternalConfigurationReferencesDesign.md)
   defines Secret, ConfigMap, image, and issuer selection behavior.
-- [Framework Spike Evaluation](../spikes/manage-web/EVALUATION.md) defines the interaction
-  properties demonstrated by the framework spikes.
-- [Framework Spike Comparison](../spikes/manage-web/COMPARISON.md) records why React was
-  selected.
-- [React UI System Comparison](../spikes/manage-web/UI_SYSTEM_COMPARISON.md) compares
-  Cloudscape with React Aria Components and application-owned styling.
 - [Workflow Manage Parity Inventory](manageWebParityInventory.md) records capability
   ownership, extraction targets, baseline tests, and explicit exclusions.
 
-The framework spikes and `manageConfig.cast.gz` are design evidence. They are not the
-production application and are not behavioral specifications.
+The framework prototypes, detailed evaluations, and `manageConfig.cast.gz` are archived on
+the `workflow-manage-web-design-spikes` branch. They are design evidence, not production
+code or behavioral specifications.
 
 ## Objective
 
@@ -68,9 +63,18 @@ current browser serve mode.
 React is the selected frontend framework. This decision does not imply Next.js or an AWS
 visual component library. The application needs a static bundle, not server-side rendering.
 
-The Cloudscape spike is retained as design evidence but Cloudscape is not a production
-dependency. Its application-shell and visual-system constraints do not fit this
-specialized workflow closely enough to justify adopting them as the frontend foundation.
+The Angular, React, and Vue prototypes all demonstrated partial tree updates while
+preserving stable row identity, selection, expansion, and keyboard focus. The rendering
+framework was therefore not the limiting factor; stable semantic IDs and patch-oriented
+application state were the important requirements. React was selected for its specialized
+widget ecosystem, direct TypeScript narrowing in TSX, predictable keyed reconciliation,
+and contributor familiarity. Angular offered stronger integrated conventions at the cost
+of more framework surface, while Vue offered concise reactivity and transitions with a
+smaller ecosystem for unusual operational widgets.
+
+Cloudscape is not a production dependency. Its application-shell and visual-system
+constraints, AWS-console identity, package weight, and layout coupling do not fit this
+specialized workflow closely enough to justify adopting it as the frontend foundation.
 Use application-owned layout and styling, and select focused libraries by capability.
 React Aria Components is a candidate for accessible control behavior where it fits, not a
 requirement to use one library for every control. Domain DTOs, feature state, and
@@ -239,9 +243,9 @@ migrationConsole/
       static.py
 ```
 
-Keep `spikes/manage-web` unchanged except for corrections to its own documentation. The
-production React application starts from the React spike's proven interaction patterns but
-does not import fixtures or code from the spike workspace.
+The archived `workflow-manage-web-design-spikes` branch preserves the prototype workspace
+and its build evidence. The production React application uses the interaction conclusions
+but does not import prototype fixtures or code.
 
 ### Dependency Rules
 
