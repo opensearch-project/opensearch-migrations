@@ -11,8 +11,6 @@ Read these related documents before changing code:
 
 - [Workflow Manage Native Web Application](manageWebApplicationDesign.md) defines the
   product and architecture direction.
-- [Manage Resource Editing and Resubmission](manageResourceEditingDesign.md) defines the
-  current schema-driven edit and projection boundaries.
 - [Manage External Configuration References](manageExternalConfigurationReferencesDesign.md)
   defines Secret, ConfigMap, image, and issuer selection behavior.
 - [Workflow Manage Parity Inventory](manageWebParityInventory.md) records capability

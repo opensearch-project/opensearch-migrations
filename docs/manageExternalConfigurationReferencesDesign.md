@@ -5,7 +5,7 @@
 The important split stays the same as the rest of manage:
 
 - TypeScript owns workflow schema semantics, concrete reference planning, and path-specific diagnostics.
-- Python owns Textual presentation, Kubernetes reads/writes, and command orchestration.
+- React owns browser presentation; Python owns Kubernetes reads/writes and command orchestration.
 - Image and Kubernetes existence checks are standalone validation steps. They are not hidden inside Zod parsing and they are not tied only to the interactive UI.
 
 There is no Node.js daemon in this design. Manage uses one-shot TS commands at committed interaction boundaries, plus cancellable Python-side validation jobs for cluster/image checks.
@@ -121,7 +121,7 @@ type ExternalContentValidationId =
 
 The hint is exported into JSON Schema as `x-external-ref` and copied into `EditStateV1` nodes as `externalRef`. For generic `FILE_REF` fields, the hint must be attached at the use site, not only to `FILE_REF`, because a JavaScript transform file, Python transform file, Log4j ConfigMap, and CA certificate all have different filters and create forms.
 
-The create descriptor is intentionally declarative. Python renders the field list with generic controls, creates the described Kubernetes Secret or ConfigMap, and applies the described edit operation back to YAML. Purpose-specific behavior should come from named validation IDs, not from Python branching on YAML paths. `sensitive` marks fields that must not be displayed after creation; it defaults to true for `password` and `secretMultilineText` inputs, and false otherwise. Existing Secret values are treated as sensitive unless they map back to a descriptor field that explicitly marks them non-sensitive.
+The create descriptor is intentionally declarative. React renders the field list with generic controls; Python creates the described Kubernetes Secret or ConfigMap and applies the described edit operation back to YAML. Purpose-specific behavior should come from named validation IDs, not from Python branching on YAML paths. `sensitive` marks fields that must not be displayed after creation; it defaults to true for `password` and `secretMultilineText` inputs, and false otherwise. Existing Secret values are treated as sensitive unless they map back to a descriptor field that explicitly marks them non-sensitive.
 
 Examples:
 
@@ -198,7 +198,7 @@ trustedClientCaFile: FILE_REF.optional()
 Validation IDs are not arbitrary strings. They are part of the schema metadata contract:
 
 - TypeScript defines the allowed IDs and exports them through JSON Schema metadata.
-- Python implements the runtime validator registry used by Textual forms, Kubernetes resource inspection, and image-file inspection.
+- Python implements the runtime validator registry used by browser forms, Kubernetes resource inspection, and image-file inspection.
 - Tests must fail if an exported validation ID has no Python implementation or if Python implements an ID that is not in the TS metadata type.
 
 `validationIds` on create-form fields run while the user edits a create form and again immediately before any Kubernetes write. They validate user-provided form values, such as a Secret name or pasted PEM.
@@ -209,7 +209,7 @@ Validation IDs are not arbitrary strings. They are part of the schema metadata c
 - Secret values may be decoded for validation but must never be rendered back into the picker or tree.
 - Image file contents can be inspected only when validation is running at `pull-and-path`; lower image-check levels can validate only reference syntax and path presence in YAML.
 
-`confirm` is not a validator. It is form behavior for sensitive fields: Textual renders a second hidden input and requires the two values to match before `validationIds` and the create operation run.
+`confirm` is not a validator. It is form behavior for sensitive fields: the browser renders a second hidden input and requires the two values to match before `validationIds` and the create operation run.
 
 Validator semantics:
 
@@ -307,12 +307,12 @@ Python maintains a short-lived inventory cache per namespace while manage is ope
 - Secrets: name, type, keys only. Values are not decoded for list rendering.
 - Issuers and ClusterIssuers: name, kind, readiness condition if the cert-manager CRDs are installed and readable.
 
-Pickers stay compact by default. They show matching resources and the current YAML value first, sorted by fit and name, and keep near misses behind an explicit `a All` command. This keeps namespaces with many Secrets or ConfigMaps usable while still making questionable resources available when the user needs to inspect stale inventory, RBAC gaps, or near misses. The picker paginates the visible rows with `n` and `p`; pagination is local to the already fetched inventory and does not re-query Kubernetes.
+Pickers stay compact by default. They show matching resources and the current YAML value first, sorted by fit and name, and keep near misses behind an explicit **Show all** control. This keeps namespaces with many Secrets or ConfigMaps usable while still making questionable resources available when the user needs to inspect stale inventory, RBAC gaps, or near misses. The picker uses ordinary pagination controls over the already fetched inventory and does not re-query Kubernetes when the user changes pages.
 
 - `matching`: resource type and required keys match the field.
 - `warn`: the resource is missing, incomplete, unreadable, has a questionable type, has extra keys, or only weakly matches the expected format.
 
-If the current YAML value names a resource that is not in inventory, the picker includes a synthetic `warn` row for that value and keeps it visible in the default view so the user can keep, replace, or inspect the problem in context. Manual entry remains available from the picker footer so users are not blocked by stale inventory or limited RBAC.
+If the current YAML value names a resource that is not in inventory, the picker includes a synthetic `warn` row for that value and keeps it visible in the default view so the user can keep, replace, or inspect the problem in context. Manual entry remains an explicit picker action so users are not blocked by stale inventory or limited RBAC.
 
 ConfigMap values and descriptor-owned non-sensitive Secret fields can be viewed and updated from the picker. Sensitive Secret fields are never shown. Updating a Secret preloads only non-sensitive fields; sensitive fields start blank and mean "leave unchanged" when the key already exists, or become required when the key is missing.
 
@@ -322,12 +322,12 @@ Creating or updating an external Secret or ConfigMap from manage writes that Kub
 
 The create/update sequence is:
 
-1. Render the descriptor-driven form in place of the picker table.
+1. Render the descriptor-driven form in the picker dialog.
 2. Validate form fields and content checks that can run locally.
 3. Create or patch the Secret or ConfigMap in Kubernetes.
 4. Refresh inventory for that resource kind.
 5. Apply the selected name or file reference to pending YAML.
-6. Close the modal and return to the edit tree.
+6. Close the dialog and return focus to the edited configuration field.
 
 If the Kubernetes write fails, the YAML reference is not changed. If the Kubernetes write succeeds but the YAML edit fails, manage leaves the external resource in place, reports the failed edit, and lets the user select the newly created resource from the refreshed picker.
 
@@ -365,7 +365,7 @@ Manage starts image validation asynchronously and attaches a cancellation token 
 
 ## UI Model
 
-External references render as normal edit tree rows with an additional resource status segment:
+External references render as normal configuration rows with an additional resource status segment:
 
 ```text
 authConfig: < basic > [REQ 1]
@@ -384,7 +384,7 @@ Live Traffic Migration [ERR 1]
                     +-- consoleClientSecretName: proxy-client-cert  [Secret missing tls.key]
 ```
 
-Pressing `Enter` on an external-reference row opens the field-specific picker or editor.
+Activating an external-reference field opens its field-specific picker or editor. The control must work with pointer input and standard keyboard activation.
 
 The screens below are render-target examples, not bespoke widget specifications. They are the expected output of generic renderers fed by `externalRef`, inventory rows, and create descriptors:
 
@@ -393,23 +393,23 @@ The screens below are render-target examples, not bespoke widget specifications.
 - image editor renderer: consumes the image half of `ExternalRefHint` plus current `FILE_REF` values;
 - issuer picker renderer: consumes the same picker model, with resource labels formatted as `Kind/name`.
 
-Python should not branch on YAML paths to choose these screens. It should branch only on generic descriptor shape: Secret/ConfigMap name reference, ConfigMap-backed file ref, image-backed file ref, issuer reference, or create descriptor. A new external reference should require no Python code when it uses existing descriptor shapes and validation IDs.
+Python should not branch on YAML paths to choose these controls. It should return inventory and validation data based only on generic descriptor shape: Secret/ConfigMap name reference, ConfigMap-backed file ref, image-backed file ref, issuer reference, or create descriptor. React chooses the corresponding control. A new external reference should require no Python or React code when it uses existing descriptor shapes and validation IDs.
 
 Tests should assert both descriptor-to-model and model-to-rendered-target behavior:
 
 - exported schema metadata contains the expected `externalRef` and create descriptor;
 - TS edit/reference DTO includes the descriptor at the edited path;
 - Python converts inventory into `matching` or `warn` picker rows from descriptor rules;
-- the rendered Textual screen contains the target labels/actions shown by the model;
+- the rendered browser control contains the target labels/actions shown by the model;
 - selecting a row or submitting a form sends the expected generic edit operation back to TS.
 
-Picker actions use single-key shortcuts. The footer should include the available subset of:
+Picker actions use visible buttons and standard browser keyboard behavior. Depending on the descriptor and selected resource, the available actions are:
 
 ```text
-[Enter Select] [c Create] [m Manual] [v View] [u Update] [p Prev] [n Next] [a All/Matches] [Esc Cancel]
+[Select] [Create] [Enter manually] [View] [Update] [Previous] [Next] [Show all/Matches only] [Cancel]
 ```
 
-`c` replaces the picker table with the descriptor-driven create form inside the same modal. `v` and `u` similarly replace the table with a view or update pane. A successful create/update closes the modal and returns directly to the edit tree after the Kubernetes write, inventory refresh, and YAML edit have completed. Cancel from a create/update pane returns to the picker when no write occurred.
+**Create** replaces the picker table with the descriptor-driven create form inside the same dialog. **View** and **Update** similarly replace the table with a detail or update pane. A successful create/update closes the dialog and returns directly to the edited field after the Kubernetes write, inventory refresh, and YAML edit have completed. Cancel from a create/update pane returns to the picker when no write occurred.
 
 ### Example: Secret Picker
 
@@ -420,9 +420,9 @@ Select HTTP Basic Auth Secret
   legacy-creds (current)
 
 Keys: username, password.
-1-2/2 shown. 2 hidden (a all).
+1-2/2 shown. 2 hidden (Show all).
 
-[Select] [c Create] [m Manual] [v View] [u Update] [p Prev] [n Next] [a All] [Cancel]
+[Select] [Create] [Enter manually] [View] [Update] [Previous] [Next] [Show all] [Cancel]
 ```
 
 Rows are one line: resource name plus `(current)` when applicable. All mode also annotates incomplete resources inline, for example `admin-creds (missing password)`. Match/warn details, required keys, and pagination state live in the bottom hint and update as the user moves through the list. Missing keys are shown on their own hint line for the selected row. Kubernetes Secret type names such as `Opaque` are inventory metadata, not picker row labels; they remain available in the view pane when they are useful for inspection. Selecting a `matching` row applies the name into YAML. Selecting a `warn` row opens a confirmation with the diagnostic and still lets the user choose it. Creating a Secret creates the Kubernetes Secret first, refreshes inventory, then applies the chosen name to the YAML only after the create succeeds.
@@ -437,7 +437,7 @@ Type: kubernetes.io/basic-auth
   username: admin
   password: <hidden>
 
-[u Update] [Esc Back]
+[Update] [Back]
 ```
 
 The view pane is generated from the create descriptor and current inventory. ConfigMap data is viewable by default. Secret data is hidden unless the descriptor says the specific field is non-sensitive.
@@ -633,7 +633,7 @@ Select cert-manager Issuer
   matching  ClusterIssuer/private-ca         Ready
   matching  Issuer/namespace-ca              Ready
 
-[Enter Select] [m Manual] [Esc Cancel]
+[Select] [Enter manually] [Cancel]
 ```
 
 This picker is used only when `proxyConfig.tls.mode` is `certManager`. Manage does not create Issuers in this design because issuer setup is environment-specific and usually controlled by platform teams.
@@ -647,7 +647,7 @@ The reference inventory should be derived from schema metadata, not maintained b
 3. the declarative create descriptor, when manage can create the referenced resource;
 4. named validators for content checks that cannot be expressed by JSON Schema alone.
 
-Python should not contain a table of YAML paths. It notices `externalRef` in the edit DTO, asks the inventory service for matching Kubernetes resources, renders the picker/form from the descriptor, creates the described resource if requested, and sends the described edit operation back to TS.
+Python should not contain a table of YAML paths. It notices `externalRef` in the edit DTO, asks the inventory service for matching Kubernetes resources, and returns a descriptor-driven picker model. React renders that model and sends the described edit or create operation through the API.
 
 The tables below are a schema coverage checklist for review. They should either be generated from the schema during tests or checked by a test that walks the exported JSON Schema and fails when a new `externalRef` is undocumented.
 
@@ -749,7 +749,7 @@ They are expert raw container paths. Manage should not list ConfigMaps, Secrets,
 | Image directory | reference set; image pull succeeds at requested validation level; path is a directory | mutable tag without digest |
 | cert-manager issuer | Issuer/ClusterIssuer exists when CRDs are readable | issuer is not Ready |
 
-Validation reports use the same severity priority as the edit tree:
+Validation reports use the same severity priority as the configuration editor:
 
 1. `error` for unusable existing references.
 2. `required` for missing referenced resources or missing keys.
@@ -761,7 +761,7 @@ On save from manage:
 
 1. TS applies the edit operation and validates schema/refinement rules.
 2. Python optionally refreshes external reference inventory for changed reference paths.
-3. External diagnostics are applied to the edit tree and resource view.
+3. External diagnostics are applied to the configuration editor and resource view.
 4. Pending YAML is saved even when external references are incomplete, matching the current incomplete-config workflow.
 
 On submit:
@@ -780,12 +780,12 @@ On submit:
 3. Add a TS reference-plan helper using strict first and loose fallback, parallel to resource projection.
 4. Add Python `ExternalResourceInventory` and `ExternalResourceValidator` services for K8s object listing and shape checks.
 5. Call the shared external-resource preflight from `configure`, `submit`, and manage.
-6. Add generic Textual renderers for reference pickers, declarative create/update forms, descriptor-driven view panes, image editors, and confirmation flows.
+6. Add generic React controls for reference pickers, declarative create/update forms, descriptor-driven view panes, image editors, and confirmation flows.
 7. Add descriptor fixtures for HTTP Basic Auth Secrets, TLS Secrets, Kafka SCRAM password Secrets, Kafka CA Secrets, single-file ConfigMaps, and ConfigMap directories.
 8. Wire create/update forms to immediate Kubernetes writes, inventory refresh, and then the normal TS edit operation.
 9. Add cancellable image validation from manage using the same validator backend as submit preflight.
 10. Add schema coverage tests that walk exported `x-external-ref` metadata and verify each reference has the selection, validation, and create descriptors expected by its purpose.
-11. Add renderer tests that feed descriptor fixtures into Python and assert the rendered targets, actions, and emitted generic edit operations.
+11. Add model tests that feed descriptor fixtures into Python and React tests that assert the rendered targets, actions, and emitted generic edit operations.
 12. Replace the existing basic-auth-only secret scrape path with the general external-reference validation path once equivalent HTTP Basic coverage is in place.
 
 ## Maintainability Expectations
@@ -795,6 +795,6 @@ Adding a new external-reference field should require:
 1. Add the field or use-site `externalRef` hint in `userSchemas.ts`.
 2. Add a content validator only if the existing generic validators do not fit.
 3. Add or reuse a declarative create descriptor if manage should create that resource shape.
-4. Add a TS reference-plan test and, when a descriptor shape is new, one Python renderer/filter test.
+4. Add a TS reference-plan test and, when a descriptor shape is new, Python model/filter coverage plus a React control test.
 
-Python should not need to learn the new YAML path by hand. It should render the field from the edit DTO, use `externalRef` to select the generic picker/create/editor renderer, and send normal edit operations back to TS. If a new reference uses existing descriptor shapes and validation IDs, adding it should be a schema-only change plus schema coverage tests.
+Python should not need to learn the new YAML path by hand. It should use `externalRef` to build the generic picker/create/editor model, and React should render the field and send normal edit operations back through the API. If a new reference uses existing descriptor shapes and validation IDs, adding it should be a schema-only change plus schema coverage tests.
