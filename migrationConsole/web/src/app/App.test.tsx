@@ -3347,6 +3347,9 @@ test("offers one reset and resubmit action for immutable preflight failures", as
   expect(within(dialog).getByText(
     "Impossible: sourceLabel cannot be changed.",
   )).toBeInTheDocument();
+  expect(within(dialog).queryByText(
+    "No field-level pending differences were reported.",
+  )).toBeNull();
   expect(within(dialog).getByRole("button", {
     name: "Confirm submit",
   })).toBeDisabled();
@@ -3444,9 +3447,9 @@ test("offers resubmission when a configured resource is missing", async () => {
   const dialog = await screen.findByRole("dialog", {
     name: "Resubmit configuration?",
   });
-  expect(within(dialog).getByText(
+  expect(within(dialog).queryByText(
     "No configuration differences were reported; resubmission will retry the saved configuration.",
-  )).toBeInTheDocument();
+  )).toBeNull();
   await waitFor(() => {
     expect(within(dialog).getByRole("button", {
       name: "Confirm resubmit",

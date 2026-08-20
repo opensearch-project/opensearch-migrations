@@ -196,13 +196,7 @@ export function SubmitConfigDialog({
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="submit-review-empty">
-                {resubmitting
-                  ? "No configuration differences were reported; resubmission will retry the saved configuration."
-                  : "No field-level pending differences were reported."}
-              </p>
-            )}
+            ) : null}
             {!review.data.valid ? (
               <div className="submit-review-invalid" role="alert">
                 <AlertTriangle aria-hidden="true" />
