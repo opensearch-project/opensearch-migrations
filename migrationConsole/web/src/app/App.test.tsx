@@ -1451,6 +1451,75 @@ test("taints validation errors and their configuration and navigation parents", 
 });
 
 
+test("highlights unsaved resources and fields with previous values", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = snapshot.nodes["resource:captureproxies:capture"];
+  source.label = "legacy";
+  source.resourcePlural = "sourceconfigs";
+  source.resourceName = "legacy";
+  source.diagnostics = [];
+  source.parentId = "group:Sources:Sources";
+  source.capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:sourceClusters.legacy",
+    label: "Edit legacy",
+    disabledReason: null,
+  }];
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  snapshot.nodes["group:Live Traffic Migration:Capture"].childIds = [];
+
+  const dirtyDraft = structuredClone(configDraft);
+  const sourceCollection = dirtyDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const sourceEdit = sourceCollection?.children?.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  const endpoint = sourceEdit?.children?.find(
+    (node) => node.id === "edit:sourceClusters.legacy.endpoint",
+  );
+  if (!sourceEdit || !endpoint) throw new Error("Missing source fixture");
+  dirtyDraft.dirty = true;
+  dirtyDraft.draftRevision = "dirty-highlight";
+  sourceEdit.draftChangeCount = 1;
+  endpoint.value = "https://next.example.com:9200";
+  endpoint.label = "Endpoint: https://next.example.com:9200";
+  endpoint.draftChangeCount = 1;
+  endpoint.draftChange = {
+    kind: "modified",
+    previousValue: "https://legacy.example.com:9200",
+    previousValuePresent: true,
+  };
+
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(dirtyDraft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const sourceSection = within(tree).getAllByRole("treeitem", {
+    name: /^Sources,/,
+  }).find((item) => item.getAttribute("aria-level") === "1");
+  const sourceRow = within(tree).getByRole("treeitem", {
+    name: /^legacy, Ready$/,
+  });
+  expect(sourceSection).toHaveClass("draft-change-ancestor");
+  expect(sourceRow).toHaveClass("draft-change-item");
+  expect(within(sourceRow).getByText("1 unsaved change")).toBeInTheDocument();
+
+  const config = screen.getByRole("table", { name: "Configuration fields" });
+  const endpointRow = within(config).getByRole("row", { name: /^Endpoint/ });
+  const expectedTitle = "Changed in this edit. Previous value: https://legacy.example.com:9200.";
+  expect(endpointRow).toHaveClass("draft-change-item");
+  expect(endpointRow.querySelector(".property-label"))
+    .toHaveAttribute("title", expectedTitle);
+  expect(within(endpointRow).getByText("Changed"))
+    .toHaveAttribute("title", expectedTitle);
+});
+
+
 test("identifies resources within a mixed-type navigation group", async () => {
   const snapshot = structuredClone(manageSnapshot);
   const section = snapshot.nodes["section:Live Traffic Migration"];
@@ -2994,7 +3063,7 @@ test("saves and discards explicit dirty drafts", async () => {
 });
 
 
-test("exiting closes the dirty session and reopening reloads saved values", async () => {
+test("exit offers continue or discard and reopening reloads saved values", async () => {
   let getCalls = 0;
   const closeRequests: unknown[] = [];
   const reopenedDraft = structuredClone(configDraft);
@@ -3015,18 +3084,29 @@ test("exiting closes the dirty session and reopening reloads saved values", asyn
       return new HttpResponse(null, { status: 204 });
     }),
   );
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   const { client } = renderApp();
   await enterEditMode();
 
   await userEvent.click(
     screen.getByRole("button", { name: "Exit editing" }),
   );
+  const firstPrompt = screen.getByRole("dialog", { name: "Leave editing?" });
+  expect(closeRequests).toEqual([]);
+  await userEvent.click(within(firstPrompt).getByRole("button", {
+    name: "Continue editing",
+  }));
+  expect(screen.getByText("Editing configuration")).toBeInTheDocument();
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Exit editing" }),
+  );
+  await userEvent.click(screen.getByRole("button", {
+    name: "Discard and exit",
+  }));
 
   expect(closeRequests).toEqual([{
     expectedDraftRevision: "dirty-close",
   }]);
-  expect(confirm).toHaveBeenCalledOnce();
   expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
 
@@ -3046,8 +3126,47 @@ test("exiting closes the dirty session and reopening reloads saved values", asyn
   }, {
     expectedDraftRevision: "reopened-after-close",
   }]);
-  expect(confirm).toHaveBeenCalledOnce();
-  confirm.mockRestore();
+});
+
+
+test("save and exit persists before closing the edit session", async () => {
+  let saveRequest: unknown;
+  let closeRequest: unknown;
+  const savedDraft = {
+    ...configDraft,
+    baseRevision: "saved-on-exit",
+    draftRevision: "saved-on-exit",
+    dirty: false,
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json({
+      ...configDraft,
+      dirty: true,
+      draftRevision: "dirty-save-exit",
+    })),
+    http.post("*/api/v1/config/save", async ({ request }) => {
+      saveRequest = await request.json();
+      return HttpResponse.json(savedDraft);
+    }),
+    http.post("*/api/v1/config/close", async ({ request }) => {
+      closeRequest = await request.json();
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  await userEvent.click(screen.getByRole("button", { name: "Exit editing" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save and exit" }));
+
+  expect(saveRequest).toEqual({
+    expectedDraftRevision: "dirty-save-exit",
+  });
+  expect(closeRequest).toEqual({
+    expectedDraftRevision: "saved-on-exit",
+  });
+  expect(await screen.findByRole("button", { name: "Edit configuration" }))
+    .toBeInTheDocument();
 });
 
 

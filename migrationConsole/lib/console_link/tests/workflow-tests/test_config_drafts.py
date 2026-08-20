@@ -176,18 +176,27 @@ class _FakeEditService:
         return {"name": name, "message": f"{create['output']['kind']} saved: {name}"}
 
 
-def test_open_reuses_one_process_local_draft_and_does_not_return_raw_yaml():
+def test_open_starts_from_saved_config_and_does_not_return_raw_yaml():
     edit_service = _FakeEditService()
     drafts = ConfigDraftService(edit_service)
 
     first = drafts.open()
-    second = drafts.open()
+    edited = drafts.apply(
+        first.draft_revision,
+        {"op": "set", "path": ["value"], "value": "draft"},
+    )
+    assert edited.dirty is True
 
-    assert first == second
-    assert first.dirty is False
-    assert first.base_revision == first.draft_revision
-    assert first.edit_state["nodes"][0]["label"] == "Traffic"
-    assert not hasattr(first, "raw_yaml")
+    edit_service.saved_yaml = "value: changed-outside-draft\n"
+    reopened = drafts.open()
+
+    assert reopened.dirty is False
+    assert reopened.base_revision == reopened.draft_revision
+    assert (
+        reopened.edit_state["nodes"][0]["children"][0]["value"]
+        == "changed-outside-draft"
+    )
+    assert not hasattr(reopened, "raw_yaml")
 
 
 @pytest.mark.parametrize(
@@ -215,6 +224,30 @@ def test_apply_routes_every_operation_through_config_processor(operation):
     assert updated.dirty is True
     assert updated.base_revision == opened.base_revision
     assert updated.draft_revision != opened.draft_revision
+
+
+def test_draft_reports_changed_fields_and_previous_values_until_saved():
+    edit_service = _FakeEditService()
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+
+    changed = drafts.apply(
+        opened.draft_revision,
+        {"op": "set", "path": ["value"], "value": "next"},
+    )
+
+    traffic = changed.edit_state["nodes"][0]
+    field = traffic["children"][0]
+    assert traffic["draftChangeCount"] == 1
+    assert field["draftChange"] == {
+        "kind": "modified",
+        "previousValue": "saved",
+        "previousValuePresent": True,
+    }
+
+    saved = drafts.save(changed.draft_revision)
+    assert "draftChangeCount" not in saved.edit_state["nodes"][0]
+    assert "draftChange" not in saved.edit_state["nodes"][0]["children"][0]
 
 
 def test_mutation_rejects_a_stale_draft_revision_without_applying():

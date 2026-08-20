@@ -35,6 +35,7 @@ import { ConfigEditor } from "../features/configuration/ConfigEditor";
 import {
   editTarget,
   projectEditSnapshot,
+  resourceDraftChangeStates,
   resourceValidationStates,
 } from "../features/configuration/editProjection";
 import type {
@@ -349,6 +350,14 @@ export function App() {
         : null
     ),
     [displayedState, selectedId],
+  );
+  const resourceDraftChanges = useMemo(
+    () => (
+      displayedState && editContext
+        ? resourceDraftChangeStates(displayedState, configDraft.data)
+        : {}
+    ),
+    [configDraft.data, displayedState, editContext],
   );
   const resourceValidations = useMemo(
     () => (
@@ -684,7 +693,7 @@ export function App() {
               }
             }}
             title={editContext
-              ? "Discard unsaved changes and leave editing"
+              ? "Review unsaved changes and leave editing"
               : "Edit workflow configuration"}
             type="button"
           >
@@ -885,6 +894,7 @@ export function App() {
                   </div>
                 </header>
                 <ResourceTree
+                  changeStates={resourceDraftChanges}
                   onSelect={selectNode}
                   resourceAdds={editContext ? resourceAdds : null}
                   selectedId={selectedId}

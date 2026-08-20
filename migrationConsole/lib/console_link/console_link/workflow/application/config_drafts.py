@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from threading import RLock
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
@@ -136,12 +137,14 @@ class ConfigDraftService:
         self._lock = RLock()
         self._raw_yaml: Optional[str] = None
         self._base_revision: Optional[str] = None
+        self._base_edit_state: Optional[Dict[str, Any]] = None
         self._edit_state: Optional[Dict[str, Any]] = None
 
     def open(self) -> ConfigDraft:
         with self._lock:
-            if self._raw_yaml is None:
-                self._reload()
+            # A GET starts a new browser edit session. Reloading the page must
+            # never revive an abandoned process-local draft.
+            self._reload()
             return self._snapshot()
 
     def apply(
@@ -163,6 +166,7 @@ class ConfigDraftService:
                 raise SavedConfigConflict(self._snapshot(), persisted_revision)
             self._edit_service.save_raw_yaml(self._raw_yaml or "")
             self._base_revision = _revision(self._raw_yaml or "")
+            self._base_edit_state = deepcopy(self._edit_state or {})
             return self._snapshot()
 
     def discard(self, expected_revision: str) -> ConfigDraft:
@@ -449,11 +453,13 @@ class ConfigDraftService:
         session = self._edit_service.load_edit_session()
         self._raw_yaml = session.raw_yaml
         self._base_revision = _revision(session.raw_yaml)
+        self._base_edit_state = deepcopy(session.edit_state)
         self._edit_state = session.edit_state
 
     def _clear(self) -> None:
         self._raw_yaml = None
         self._base_revision = None
+        self._base_edit_state = None
         self._edit_state = None
 
     def _require_revision(self, expected_revision: str) -> None:
@@ -472,7 +478,10 @@ class ConfigDraftService:
             base_revision=self._base_revision,
             draft_revision=self._draft_revision(),
             dirty=self._base_revision != self._draft_revision(),
-            edit_state=self._edit_state or {},
+            edit_state=_annotate_draft_changes(
+                self._edit_state or {},
+                self._base_edit_state or {},
+            ),
         )
 
     def _external_node(self, node_id: str) -> Dict[str, Any]:
@@ -482,6 +491,94 @@ class ConfigDraftService:
         if not node.get("externalRef"):
             raise ValueError(f"Edit node '{node_id}' is not an external reference.")
         return node
+
+
+def _edit_nodes_by_path(edit_state: Mapping[str, Any]) -> Dict[tuple[str, ...], Mapping[str, Any]]:
+    result: Dict[tuple[str, ...], Mapping[str, Any]] = {}
+
+    def visit(nodes: Iterable[Mapping[str, Any]]) -> None:
+        for node in nodes:
+            if node.get("valueKind") != "command":
+                path = tuple(str(part) for part in node.get("path") or [])
+                result[path] = node
+            visit(node.get("children") or [])
+
+    visit(edit_state.get("nodes") or [])
+    return result
+
+
+def _annotate_draft_changes(
+    edit_state: Mapping[str, Any],
+    base_edit_state: Mapping[str, Any],
+) -> Dict[str, Any]:
+    annotated = deepcopy(dict(edit_state))
+    base_nodes = _edit_nodes_by_path(base_edit_state)
+
+    def visit(node: Dict[str, Any]) -> int:
+        children = [
+            child for child in node.get("children") or []
+            if isinstance(child, dict)
+        ]
+        child_count = sum(visit(child) for child in children)
+        if node.get("valueKind") == "command":
+            return child_count
+
+        path = tuple(str(part) for part in node.get("path") or [])
+        base_node = base_nodes.get(path)
+        comparable = (
+            node.get("valueKind") in {"scalar", "boolean", "union"}
+            or (not children and "value" in node)
+        )
+        change: Optional[Dict[str, Any]] = None
+        if comparable and base_node is None:
+            change = {
+                "kind": "added",
+                "previousValuePresent": False,
+            }
+        elif comparable and base_node is not None:
+            current_present = "value" in node
+            previous_present = "value" in base_node
+            if (
+                current_present != previous_present
+                or node.get("value") != base_node.get("value")
+            ):
+                change = {
+                    "kind": "modified",
+                    "previousValuePresent": previous_present,
+                }
+                if previous_present:
+                    change["previousValue"] = deepcopy(base_node.get("value"))
+
+        removed_children = 0
+        if base_node is not None:
+            current_paths = {
+                tuple(str(part) for part in child.get("path") or [])
+                for child in children
+                if child.get("valueKind") != "command"
+            }
+            removed_children = sum(
+                1
+                for child in base_node.get("children") or []
+                if child.get("valueKind") != "command"
+                and tuple(str(part) for part in child.get("path") or [])
+                not in current_paths
+            )
+
+        if change:
+            node["draftChange"] = change
+        else:
+            node.pop("draftChange", None)
+        change_count = child_count + removed_children + (1 if change else 0)
+        if change_count:
+            node["draftChangeCount"] = change_count
+        else:
+            node.pop("draftChangeCount", None)
+        return change_count
+
+    for root in annotated.get("nodes") or []:
+        if isinstance(root, dict):
+            visit(root)
+    return annotated
 
 
 def _validation_messages(

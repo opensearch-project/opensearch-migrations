@@ -127,6 +127,56 @@ export function resourceValidationStates(
 }
 
 
+export interface ResourceDraftChangeState {
+  count: number;
+  label: string;
+}
+
+
+function draftChangeState(node: EditNode): ResourceDraftChangeState | null {
+  const count = node.draftChangeCount
+    || (node.draftChange ? 1 : 0);
+  if (!count) return null;
+  return {
+    count,
+    label: `${count} unsaved ${count === 1 ? "change" : "changes"}`,
+  };
+}
+
+
+export function resourceDraftChangeStates(
+  snapshot: ManageSnapshot,
+  draft: ConfigDraft | undefined,
+): Record<string, ResourceDraftChangeState> {
+  if (!draft?.dirty) return {};
+  const editNodes = flattenEditNodes(draft.editState.nodes);
+  const result: Record<string, ResourceDraftChangeState> = {};
+  Object.values(snapshot.nodes).forEach((node) => {
+    if (node.kind !== "resource") return;
+    const targetId = editTarget(node);
+    const target = targetId ? editNodes.get(targetId) : undefined;
+    const change = target ? draftChangeState(target) : null;
+    if (change) result[node.id] = change;
+  });
+  resourceAddPlacements().forEach((placement) => {
+    const collection = collectionNode(editNodes, placement);
+    if (!collection) return;
+    const pathLength = placement.collectionPath.split(".").length;
+    (collection.children ?? [])
+      .filter((child) => child.valueKind !== "command")
+      .forEach((child, index) => {
+        const name = child.path[pathLength] ?? "";
+        const identity = resourceAdditionIdentity(placement, name, index);
+        const change = draftChangeState(child);
+        if (snapshot.nodes[identity.id] && change && !result[identity.id]) {
+          result[identity.id] = change;
+        }
+      });
+  });
+  return result;
+}
+
+
 function isConfigResourceTarget(targetId: string): boolean {
   const path = targetId.startsWith("edit:")
     ? targetId.slice("edit:".length)

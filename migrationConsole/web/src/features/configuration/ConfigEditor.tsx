@@ -241,6 +241,35 @@ function fieldName(node: EditNode): string {
 }
 
 
+function previousValueLabel(value: unknown): string {
+  if (typeof value === "string") return value || "(empty string)";
+  if (value === null) return "null";
+  if (value === undefined) return "unset";
+  try {
+    return JSON.stringify(value) ?? "(value unavailable)";
+  } catch {
+    return "(value unavailable)";
+  }
+}
+
+
+function draftChangeTitle(node: EditNode): string {
+  const change = node.draftChange;
+  if (change?.kind === "added") return "Added in this edit. Previously unset.";
+  if (change) {
+    return change.previousValuePresent
+      ? `Changed in this edit. Previous value: ${previousValueLabel(change.previousValue)}.`
+      : "Changed in this edit. Previously unset.";
+  }
+  if (node.draftChangeCount) {
+    return `${node.draftChangeCount} changed ${
+      node.draftChangeCount === 1 ? "field" : "fields"
+    } in this section.`;
+  }
+  return "";
+}
+
+
 function nodeHasIssue(node: EditNode): boolean {
   return ["required", "error", "warning", "gated", "blocked"]
     .includes(node.status ?? "");
@@ -971,6 +1000,7 @@ function ConfigPropertyRow({
     || (selected && (Boolean(node.externalRef) || structured));
   const name = fieldName(node);
   const errorEmphasis = validationErrorEmphasis(node);
+  const changeTitle = draftChangeTitle(node);
   const effectiveDefaultLabel = typeof node.effectiveDefault?.label === "string"
     ? node.effectiveDefault.label
     : "";
@@ -1047,7 +1077,11 @@ function ConfigPropertyRow({
         className={[
           "config-property-row",
           `status-${node.status ?? "ok"}`,
-          errorEmphasis ? `validation-error-${errorEmphasis}` : "",
+          errorEmphasis ? "validation-error-" + errorEmphasis : "",
+          node.draftChange ? "draft-change-item" : "",
+          !node.draftChange && node.draftChangeCount
+            ? "draft-change-ancestor"
+            : "",
           selected ? "selected" : "",
           inserted ? "inserted" : "",
           removing ? "removing" : "",
@@ -1085,10 +1119,18 @@ function ConfigPropertyRow({
             <div className="property-heading-content">
               <span
                 className="property-label"
-                title={!showDocumentation ? fieldDescription : undefined}
+                title={[
+                  changeTitle,
+                  !showDocumentation ? fieldDescription : "",
+                ].filter(Boolean).join(" ") || undefined}
               >
                 <strong>{name}</strong>
                 <span className="property-flags">
+                  {node.draftChange ? (
+                    <span title={changeTitle}>
+                      {node.draftChange.kind === "added" ? "Added" : "Changed"}
+                    </span>
+                  ) : null}
                   {node.valueAuthored ? (
                     <span title="Explicitly set in the pending configuration.">
                       Authored
@@ -1384,6 +1426,7 @@ export function ConfigEditor({
   const [pendingRemoval, setPendingRemoval] =
     useState<PendingRemoval | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [exitPromptOpen, setExitPromptOpen] = useState(false);
   const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
   const configTablePanelRef = useRef<HTMLElement>(null);
   const pinUpdateFrame = useRef<number | null>(null);
@@ -2117,33 +2160,44 @@ export function ConfigEditor({
     });
   };
 
-  const close = async () => {
+  const finishExit = async (saveChanges: boolean) => {
     setActionPending(true);
     try {
       if (!await waitForPendingCommit()) return;
-      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      let current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
       if (!current) return;
-      if (
-        (current.dirty || hasLocalEdits)
-        && !window.confirm("Discard this unsaved browser draft and close configuration?")
-      ) {
-        return;
-      }
       try {
+        if (saveChanges && current.dirty) {
+          current = await saveConfigDraft(current.draftRevision);
+          queryClient.setQueryData(["config-draft"], current);
+        }
         await closeConfigDraft(current.draftRevision);
       } catch (error) {
         if (error instanceof ConfigApiError && error.current) {
           queryClient.setQueryData(["config-draft"], error.current);
         }
+        setExitPromptOpen(false);
         setProblem(error instanceof Error ? error.message : String(error));
         return;
       }
       queryClient.removeQueries({ queryKey: ["config-draft"] });
       setLocallyEditedIds(new Set());
+      setExitPromptOpen(false);
       onClose();
     } finally {
       setActionPending(false);
     }
+  };
+
+  const close = async () => {
+    if (!await waitForPendingCommit()) return;
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current) return;
+    if (current.dirty || hasLocalEdits) {
+      setExitPromptOpen(true);
+      return;
+    }
+    await finishExit(false);
   };
 
   useEffect(() => {
@@ -2491,6 +2545,58 @@ export function ConfigEditor({
           />
         </section>
       </div>)}
+      {exitPromptOpen ? (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="exit-edit-dialog-title"
+            aria-modal="true"
+            className="confirmation-dialog"
+            role="dialog"
+          >
+            <header>
+              <AlertTriangle aria-hidden="true" />
+              <div>
+                <span>Unsaved configuration</span>
+                <h2 id="exit-edit-dialog-title">Leave editing?</h2>
+              </div>
+            </header>
+            <p>
+              Save these changes before leaving, or discard them and reread
+              the saved configuration next time you edit.
+            </p>
+            <footer>
+              <button
+                disabled={actionPending}
+                onClick={() => setExitPromptOpen(false)}
+                type="button"
+              >
+                <Pencil aria-hidden="true" />
+                Continue editing
+              </button>
+              <button
+                className="danger-confirm"
+                disabled={actionPending}
+                onClick={() => void finishExit(false)}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" />
+                Discard and exit
+              </button>
+              <button
+                className="primary-button"
+                disabled={actionPending}
+                onClick={() => void finishExit(true)}
+                type="button"
+              >
+                {actionPending
+                  ? <LoaderCircle className="spin" aria-hidden="true" />
+                  : <Save aria-hidden="true" />}
+                Save and exit
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
       {pendingRemoval ? (
         <div className="modal-backdrop">
           <section

@@ -801,6 +801,21 @@ export interface components {
              */
             severity: "required" | "error" | "warning" | "gated" | "blocked";
         };
+        /** EditDraftChangeV1 */
+        EditDraftChangeV1: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "added" | "modified";
+            /** Previousvalue */
+            previousValue?: unknown;
+            /**
+             * Previousvaluepresent
+             * @default false
+             */
+            previousValuePresent: boolean;
+        };
         /** EditNodeV1 */
         EditNodeV1: {
             /** Children */
@@ -812,6 +827,9 @@ export interface components {
             description?: string | null;
             /** Diagnostics */
             diagnostics?: components["schemas"]["EditDiagnosticV1"][];
+            draftChange?: components["schemas"]["EditDraftChangeV1"] | null;
+            /** Draftchangecount */
+            draftChangeCount?: number | null;
             /** Effectivedefault */
             effectiveDefault?: {
                 [key: string]: unknown;

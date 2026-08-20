@@ -239,6 +239,12 @@ class EditVariantV1(WebModel):
     child_schema: List["EditNodeV1"] = Field(default_factory=list)
 
 
+class EditDraftChangeV1(WebModel):
+    kind: Literal["added", "modified"]
+    previous_value: Any = None
+    previous_value_present: bool = False
+
+
 class EditNodeV1(WebModel):
     id: str
     path: List[str]
@@ -266,6 +272,8 @@ class EditNodeV1(WebModel):
         Literal["ok", "required", "error", "warning", "changed", "gated", "blocked"]
     ] = None
     status_counts: Optional[EditStatusCountsV1] = None
+    draft_change: Optional[EditDraftChangeV1] = None
+    draft_change_count: Optional[int] = None
     input_hint: Optional[Dict[str, Any]] = None
     external_ref: Optional[Dict[str, Any]] = None
     effective_default: Optional[Dict[str, Any]] = None

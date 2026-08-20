@@ -31,6 +31,7 @@ import type {
   ResourceRenameOption,
 } from "../configuration/resourceAdds";
 import type {
+  ResourceDraftChangeState,
   ResourceValidationState,
 } from "../configuration/editProjection";
 
@@ -46,6 +47,7 @@ interface ResourceTreeProps {
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
   resourceAdds: ResourceAddController | null;
+  changeStates: Record<string, ResourceDraftChangeState>;
   validationStates: Record<string, ResourceValidationState>;
 }
 
@@ -121,6 +123,8 @@ interface TreeRowProps {
   renameOption?: ResourceRenameOption;
   resourceType?: string;
   validation?: ResourceValidationState;
+  draftChange?: ResourceDraftChangeState;
+  draftChangeAncestor: boolean;
   validationErrorAncestor: boolean;
   validationErrorItem: boolean;
   renaming: boolean;
@@ -169,6 +173,8 @@ const TreeRow = memo(function TreeRow({
   renameOption,
   resourceType,
   validation,
+  draftChange,
+  draftChangeAncestor,
   validationErrorAncestor,
   validationErrorItem,
   renaming,
@@ -292,6 +298,8 @@ const TreeRow = memo(function TreeRow({
         validationErrorAncestor ? "validation-error-ancestor" : "",
         selected ? "selected" : "",
         inserted ? "inserted" : "",
+        draftChange ? "draft-change-item" : "",
+        draftChangeAncestor ? "draft-change-ancestor" : "",
         activeRequirement ? "has-dependency-hint" : "",
         approvalAttention ? "has-approval-hint" : "",
       ].join(" ")}
@@ -398,6 +406,14 @@ const TreeRow = memo(function TreeRow({
               {attentionState && !approvalAttention ? (
                 <span className={`tree-attention-state attention-${node.status}`}>
                   {attentionState}
+                </span>
+              ) : null}
+              {draftChange ? (
+                <span
+                  className="tree-draft-state"
+                  title={draftChange.label + ". Save or discard before leaving edit mode."}
+                >
+                  {draftChange.label}
                 </span>
               ) : null}
               {configurationState ? (
@@ -660,6 +676,7 @@ export function ResourceTree({
   selectedId,
   onSelect,
   resourceAdds,
+  changeStates,
   validationStates,
 }: ResourceTreeProps) {
   const [filter, setFilter] = useState("");
@@ -727,6 +744,20 @@ export function ResourceTree({
     });
     return { ancestors, items };
   }, [snapshot.nodes, validationStates]);
+  const draftChangePaths = useMemo(() => {
+    const items = new Set<string>();
+    const ancestors = new Set<string>();
+    Object.keys(changeStates).forEach((nodeId) => {
+      if (!snapshot.nodes[nodeId]) return;
+      items.add(nodeId);
+      let parentId = snapshot.nodes[nodeId].parentId;
+      while (parentId) {
+        ancestors.add(parentId);
+        parentId = snapshot.nodes[parentId]?.parentId ?? null;
+      }
+    });
+    return { ancestors, items };
+  }, [changeStates, snapshot.nodes]);
   const inlineCreatePosition = (() => {
     if (!inlineCreate) return null;
     const groupIndex = rows.findIndex(
@@ -1080,6 +1111,10 @@ export function ResourceTree({
                 renameOption={renameOptionsByResource.get(row.node.id)}
                 resourceType={resourceTypesByNode.get(row.node.id)}
                 validation={validationStates[row.node.id]}
+                draftChange={changeStates[row.node.id]}
+                draftChangeAncestor={
+                  draftChangePaths.ancestors.has(row.node.id)
+                }
                 validationErrorAncestor={
                   validationErrorPaths.ancestors.has(row.node.id)
                 }

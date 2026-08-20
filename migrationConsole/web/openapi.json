@@ -812,6 +812,32 @@
         "title": "EditDiagnosticV1",
         "type": "object"
       },
+      "EditDraftChangeV1": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "added",
+              "modified"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "previousValue": {
+            "title": "Previousvalue"
+          },
+          "previousValuePresent": {
+            "default": false,
+            "title": "Previousvaluepresent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "EditDraftChangeV1",
+        "type": "object"
+      },
       "EditNodeV1": {
         "additionalProperties": false,
         "properties": {
@@ -860,6 +886,27 @@
             },
             "title": "Diagnostics",
             "type": "array"
+          },
+          "draftChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditDraftChangeV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draftChangeCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draftchangecount"
           },
           "effectiveDefault": {
             "anyOf": [

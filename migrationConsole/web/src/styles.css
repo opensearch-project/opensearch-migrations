@@ -1011,6 +1011,30 @@ button {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.tree-row.draft-change-ancestor {
+  border-color: #c8dfe2;
+  background: #f5fafb;
+}
+
+.tree-row.draft-change-ancestor:hover {
+  background: #edf6f7;
+}
+
+.tree-row.draft-change-item {
+  border-color: #8ebfc5;
+  background: #eaf5f6;
+}
+
+.tree-row.draft-change-item:hover,
+.tree-row.draft-change-item.selected {
+  border-color: #69a8b0;
+  background: #dff0f2;
+}
+
+.tree-row.draft-change-item.selected {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
 .tree-row.validation-error-ancestor {
   border-color: #efd0cd;
   background: #fff8f7;
@@ -1164,6 +1188,13 @@ button {
 .tree-row-state .tree-attention-state.attention-error {
   color: var(--danger);
   font-weight: 650;
+}
+
+.tree-row-state .tree-draft-state {
+  min-width: 0;
+  color: #316f77;
+  font-weight: 650;
+  text-overflow: ellipsis;
 }
 
 .tree-dependency-hint {
@@ -3232,6 +3263,41 @@ button {
 .config-property-row.selected {
   box-shadow: inset 3px 0 var(--accent);
   background: #f3f8fa;
+}
+
+.config-property-row.draft-change-ancestor > th,
+.config-property-row.draft-change-ancestor > td {
+  border-top: 1px solid #c8dfe2;
+  border-bottom-color: #c8dfe2;
+  background: #f5fafb;
+}
+
+.config-property-row.draft-change-item > th,
+.config-property-row.draft-change-item > td {
+  border-top: 1px solid #8ebfc5;
+  border-bottom-color: #8ebfc5;
+  background: #eaf5f6;
+}
+
+.config-property-row.draft-change-ancestor > :first-child,
+.config-property-row.draft-change-item > :first-child {
+  border-left: 1px solid #8ebfc5;
+}
+
+.config-property-row.draft-change-ancestor > :last-child,
+.config-property-row.draft-change-item > :last-child {
+  border-right: 1px solid #8ebfc5;
+}
+
+.config-property-row.draft-change-ancestor:hover > th,
+.config-property-row.draft-change-ancestor:hover > td,
+.config-property-row.draft-change-item:hover > th,
+.config-property-row.draft-change-item:hover > td {
+  background: #e4f1f3;
+}
+
+.config-property-row.draft-change-item.selected {
+  box-shadow: inset 3px 0 var(--accent);
 }
 
 .config-property-row.validation-error-ancestor > th,
