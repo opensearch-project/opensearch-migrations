@@ -232,6 +232,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
+                    },
                     "snapshotInfo": {
                       "anyOf": [
                         {
@@ -645,6 +649,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -669,6 +676,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -1569,6 +1577,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "allowInsecure": {
                             "type": "boolean"
                           },
+                          "solrContextPath": {
+                            "type": "string"
+                          },
                           "authType": {
                             "type": "string"
                           },
@@ -1593,6 +1604,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "version",
                           "endpoint",
                           "allowInsecure",
+                          "solrContextPath",
                           "authType",
                           "authBasicSecretName",
                           "authSigv4Region",
@@ -1863,6 +1875,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+                    },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
                     },
                     "label": {
                       "type": "string"
@@ -2390,15 +2406,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                      "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
                     },
                     "failedDocumentStreamS3Region": {
                       "type": "string",
-                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
                     },
                     "failedDocumentStreamS3Endpoint": {
                       "type": "string",
-                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
                     },
                     "failedDocumentStreamMaxBufferBytes": {
                       "type": "number",
@@ -2528,6 +2544,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -2552,6 +2571,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -2575,6 +2595,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -2599,6 +2622,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -3422,6 +3446,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -3446,6 +3473,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -3754,6 +3782,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "string",
             "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
             "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+          },
+          "solrContextPath": {
+            "type": "string",
+            "default": "/solr",
+            "description": "The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host. Only valid on Solr sources."
           },
           "snapshotInfo": {
             "anyOf": [
@@ -5315,15 +5348,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the failed document stream. When omitted, the config processor resolves the deployment-provisioned default bucket before workflow submission so the effective bucket is explicit in run history. Set this to use a separate bucket for failed document stream records."
+                        "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
                       },
                       "failedDocumentStreamS3Region": {
                         "type": "string",
-                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region when the bucket was user-chosen, else the deployment default) so it is explicit in run history rather than discovered at runtime."
+                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
                       },
                       "failedDocumentStreamS3Endpoint": {
                         "type": "string",
-                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint when the bucket was user-chosen, else the deployment default)."
+                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
                       },
                       "failedDocumentStreamMaxBufferBytes": {
                         "type": "number",

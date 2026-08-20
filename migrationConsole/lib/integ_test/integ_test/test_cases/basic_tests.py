@@ -3,15 +3,47 @@ import json
 import subprocess
 import time
 import uuid
+from kubernetes import client
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS, RFS_MIGRATION_COMBINATIONS
 from ..integration_test_argo_service import ENDING_ARGO_PHASES
-from .cdc_base import wait_for_proxy_ready
+from .cdc_base import load_k8s_config, wait_for_proxy_ready
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
+# The workflow `workflow submit` creates, from DEFAULT_WORKFLOW_NAME in
+# console_link.workflow.commands.autocomplete_workflows. Fixed, not generated, so only
+# one can exist at a time and each extra run must delete it before the next submits.
+INNER_WORKFLOW_NAME = "migration-workflow"
 
-# This test case is subject to removal, as its value looks limited
+# Helm-managed ConfigMap holding the deployment-provisioned bucket the workflow also takes its
+# snapshot repo URI from (LocalStack locally, real S3 in AWS).
+DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
+
+SNAPSHOT_MIGRATION_PLURAL = "snapshotmigrations"
+
+
+def run_console(args: list, timeout: int = 180) -> subprocess.CompletedProcess:
+    """Run the console CLI. The caller decides whether a non-zero exit is a failure."""
+    return subprocess.run(["console"] + args, capture_output=True, text=True, timeout=timeout)
+
+
+def run_console_json(args: list, timeout: int = 180) -> dict | list:
+    """Run `console --json <args>`, requiring success, and parse its stdout."""
+    result = run_console(["--json"] + args, timeout=timeout)
+    printable = " ".join(["console", "--json"] + args)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"`{printable}` failed (rc={result.returncode}). "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise AssertionError(f"`{printable}` emitted non-JSON: {e}. stdout={result.stdout!r}") from e
+
+
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
@@ -52,33 +84,499 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # Validate single document exists on target
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self._verify_failed_document_stream_disabled()
+
+    def _verify_failed_document_stream_disabled(self):
+        """The mirror of Test0002: this backfill names no bucket, so the stream must stay off.
+
+        The deployment does provide a default S3 bucket (Test0002 reads it from
+        DEFAULT_S3_CONFIG_MAP), so this is where a reintroduced fallback would show up — the
+        config-processor test that guards the same rule only sees a synthetic default.
+
+        Asserted through the stream commands rather than `backfill status`: the latter needs
+        `env.backfill`, which Environment.from_k8s_resource_catalog never populates, so it only
+        works when pointed at a services.yaml with --config-file.
+        """
+        result = run_console(["failed-document-stream", "list", "--limit", "1"])
+        if result.returncode == 0:
+            raise AssertionError(
+                f"`console failed-document-stream list` succeeded with no stream configured: "
+                f"stdout={result.stdout!r}"
+            )
+        if "bucket" not in result.stderr:
+            raise AssertionError(
+                f"Expected the failure to name the missing bucket, got stderr={result.stderr!r}"
+            )
 
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
+    """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document."""
+
+    # Mapped `long` on the target so a non-numeric value fails to parse.
+    FAILING_FIELD = "quantity"
+
     def __init__(self, user_args: MATestUserArguments):
         migrations_required = [MigrationType.BACKFILL]
-        description = "Performs backfill migration for a single document (default coordinator)."
+        description = ("Performs backfill migration for one valid and one terminally failing document "
+                       "(default coordinator).")
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
                          allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0002_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0002_doc"
+        self.failing_doc_id = "test_0002_failing_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
         self.target_cluster = None
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        # Base default minus metadataMigrationConfig, which would replace the incompatible target
+        # mapping. Backfill sizing and resources are kept as-is so EKS scheduling is unchanged.
+        super().prepare_workflow_snapshot_and_migration_config()
+        bucket = self._deployment_default_s3_bucket()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration.pop("metadataMigrationConfig", None)
+            # The bucket is the failed document stream's on/off switch — there is no default, so
+            # without it nothing records the failing document. Region and endpoint are inherited
+            # from the snapshot repo config.
+            migration["documentBackfillConfig"]["failedDocumentStreamS3Bucket"] = bucket
+
+    def _deployment_default_s3_bucket(self) -> str:
+        load_k8s_config()
+        config_map = client.CoreV1Api().read_namespaced_config_map(
+            name=DEFAULT_S3_CONFIG_MAP, namespace=self.argo_service.namespace)
+        bucket = ((config_map.data or {}).get("BUCKET_NAME") or "").strip()
+        if not bucket:
+            raise AssertionError(
+                f"ConfigMap {DEFAULT_S3_CONFIG_MAP} has no BUCKET_NAME; cannot enable the "
+                f"failed document stream. Data: {config_map.data}"
+            )
+        return bucket
+
     def prepare_clusters(self):
-        # Create single document
+        # Failing document first: dynamic mapping pins the field to the version's string type from
+        # the first doc. Numeric-looking first would pin it to `long` and the source would reject this.
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
-                                               doc_id=self.doc_id, doc_type=self.doc_type)
+                                               doc_id=self.failing_doc_id, doc_type=self.doc_type,
+                                               data={"title": "Fails to parse on the target",
+                                                     self.FAILING_FIELD: "not-a-number"})
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id, doc_type=self.doc_type,
+                                               data={"title": "Migrates cleanly",
+                                                     self.FAILING_FIELD: "123"})
         self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id,
                                             doc_type=self.doc_type)
+        self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, doc_type=self.doc_type)
+
+        # Seed only this index; auto-creation stays enabled globally.
+        properties = {self.FAILING_FIELD: {"type": "long"}}
+        doc_type = self.target_operations.resolve_doc_type(self.doc_type)
+        mappings = {doc_type: {"properties": properties}} if self.target_operations.uses_typed_mappings() \
+            else {"properties": properties}
+        self.target_operations.create_index(index_name=self.index_name, cluster=self.target_cluster,
+                                            data=json.dumps({"mappings": mappings}))
 
     def verify_clusters(self):
-        # Validate single document exists on target
+        # The valid document migrates; the failing one must never land on the target.
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.failing_doc_id, expected_status_code=404,
+                                            max_attempts=3, delay=2.0)
+
+        # The stream's session is the owning SnapshotMigration's UID, not the workflow's.
+        session_uid = self._snapshot_migration_uid()
+
+        record = self._await_failed_document_record()
+        self._assert_field(record, "documentId", self.failing_doc_id)
+        self._assert_field(record, "failureType", "mapper_parsing_exception")
+        self._assert_field(record, "failureClass", "NON_RETRYABLE")
+        self._assert_field(record, "targetIndex", self.index_name)
+        self._assert_field(record, "sessionId", session_uid)
+
+        self._assert_session_location(session_uid)
+        self._assert_backfill_completed_with_errors()
+        logger.info("Failed document observed through the console: %s", record)
+
+    def _snapshot_migration_uid(self) -> str:
+        """UID of this run's SnapshotMigration, which is what RFS stamps as the stream session."""
+        migration = self._snapshot_migration()
+        uid = (migration.get("metadata", {}) or {}).get("uid")
+        if not uid:
+            raise AssertionError(f"SnapshotMigration has no metadata.uid: {migration}")
+        return uid
+
+    def _snapshot_migration(self) -> dict:
+        """The single SnapshotMigration this test's workflow created. Several would make the
+        console ambiguous too — it requires --migration to choose."""
+        load_k8s_config()
+        items = client.CustomObjectsApi().list_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION, namespace=self.argo_service.namespace,
+            plural=SNAPSHOT_MIGRATION_PLURAL).get("items", []) or []
+        if len(items) != 1:
+            names = sorted((it.get("metadata", {}) or {}).get("name", "?") for it in items)
+            raise AssertionError(f"Expected exactly one SnapshotMigration, found {len(items)}: {names}")
+        return items[0]
+
+    @staticmethod
+    def _assert_field(payload: dict, field: str, expected):
+        actual = payload.get(field)
+        if actual != expected:
+            raise AssertionError(f"Expected {field}={expected!r}, got {actual!r}: {payload}")
+
+    @staticmethod
+    def _assert_session_location(session_uid: str):
+        """The location the console reports must belong to this run's session."""
+        location = run_console(["failed-document-stream", "location"])
+        if location.returncode != 0:
+            raise AssertionError(
+                f"`console failed-document-stream location` failed (rc={location.returncode}). "
+                f"stdout={location.stdout!r} stderr={location.stderr!r}"
+            )
+        if f"session={session_uid}" not in location.stdout:
+            raise AssertionError(
+                f"Failed document stream location {location.stdout!r} does not belong to "
+                f"session {session_uid!r}"
+            )
+
+    def _await_failed_document_record(self, max_attempts: int = 20, delay: float = 6.0) -> dict:
+        """Poll: the workflow can report finished before the S3 object is listable."""
+        records = []
+        for _ in range(max_attempts):
+            records = run_console_json(["failed-document-stream", "list", "--limit", "100"])
+            for record in records:
+                if record.get("documentId") == self.failing_doc_id:
+                    return record
+            time.sleep(delay)
+        raise AssertionError(
+            f"Document {self.failing_doc_id!r} never appeared in the failed document stream. "
+            f"Last read {len(records)} record(s): {records}"
+        )
+
+    def _assert_backfill_completed_with_errors(self, max_attempts: int = 20, delay: float = 6.0):
+        """Read the backfill outcome from SnapshotMigration.status, which the RFS monitor patches
+        from `console backfill status --deep-check`.
+
+        Not run here directly: that command needs env.backfill, which Environment.from_k8s_resource_catalog
+        never populates, so it only works against a services.yaml (--config-file) like the monitor uses.
+        """
+        backfill = {}
+        for _ in range(max_attempts):
+            backfill = (self._snapshot_migration().get("status", {}) or {}).get("documentBackfill", {}) or {}
+            if backfill.get("phase") == "CompletedWithErrors":
+                break
+            time.sleep(delay)
+        else:
+            raise AssertionError(f"Backfill never reported CompletedWithErrors. Last status: {backfill}")
+
+        summary = backfill.get("summary", {}) or {}
+        self._assert_field(summary, "percentageCompleted", 100)
+        migrated, total = summary.get("shardsMigrated"), summary.get("shardsTotal")
+        if migrated != total:
+            raise AssertionError(
+                f"Backfill reported CompletedWithErrors with shardsMigrated={migrated} != "
+                f"shardsTotal={total}: {summary}"
+            )
+
+
+class Test0008OptionalSnapshotStages(MATestBase):
+    """Verifies that omitting metadataMigrationConfig or documentBackfillConfig skips the
+    corresponding workflow step rather than running it.
+
+    Regression coverage for the `when` gate on the metadataMigrate / bulkLoadDocuments
+    steps. Before the fix, an absent config was defaulted to `{}`, which serialized to
+    the non-empty string "{}" and so always evaluated truthy — every stage ran
+    regardless of whether the user asked for it.
+
+    After the baseline run (both stages, verified end-to-end), two more workflows are
+    submitted against the same provisioned clusters. Each seeds its own fresh index and
+    is scoped with indexAllowlist so the runs cannot interfere with each other. The
+    baseline is scoped too — see prepare_workflow_snapshot_and_migration_config, without
+    which it migrates the metadata-only run's document and invalidates that run's central
+    assertion. Each extra run takes its own snapshot: the repo path is suffixed with
+    the workflow uid (see fullMigrationImportedClusters.yaml), so a snapshot from one
+    workflow is not readable by another and reuse is not an option.
+
+    Because the repo path differs per workflow, each run must also carry its own snapshot
+    label — the label is what names the DataSnapshot / SnapshotMigration CRs, whose repo
+    paths are immutable. See _extra_run_parameters.
+
+    - metadata-only run: metadataMigrationConfig present, documentBackfillConfig absent.
+      metadataMigrate Succeeds, bulkLoadDocuments is Skipped. The index mappings land on
+      the target but the document does not — the functional proof that backfill was
+      genuinely skipped rather than merely reported as such.
+
+    - backfill-only run: documentBackfillConfig present, metadataMigrationConfig absent.
+      metadataMigrate is Skipped, bulkLoadDocuments Succeeds.
+
+    Both extra runs are expected to succeed overall, so a Skipped phase is unambiguous
+    evidence the gate fired rather than a side effect of some upstream failure.
+    """
+
+    def __init__(self, user_args: MATestUserArguments):
+        description = (
+            "Verifies that omitting metadataMigrationConfig or documentBackfillConfig "
+            "skips the corresponding workflow step."
+        )
+        super().__init__(
+            user_args=user_args,
+            description=description,
+            migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
+            allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS,
+        )
+        run_suffix = uuid.uuid4().hex[:4]
+        self.index_name = f"test_0008_{self.unique_id}-{run_suffix}"
+        # Each extra run gets its own index so the runs stay independent of one another
+        # and of the baseline (metadata migration fails on an already-existing index).
+        self.metadata_only_index = f"test_0008_meta_{self.unique_id}-{run_suffix}"
+        self.backfill_only_index = f"test_0008_backfill_{self.unique_id}-{run_suffix}"
+        # ...and its own snapshot label, which is what keeps the runs on distinct
+        # DataSnapshot/SnapshotMigration CRs. See _extra_run_parameters.
+        self.metadata_only_snapshot_label = f"meta-{run_suffix}"
+        self.backfill_only_snapshot_label = f"backfill-{run_suffix}"
+        self.doc_id = "test_0008_doc"
+        self.doc_type = "sample_type"
+        self.source_cluster = None
+        self.target_cluster = None
+        self._extra_workflow_names: list[str] = []
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        """Scope the baseline run to its own index.
+
+        The default config carries no indexAllowlist, so the baseline migrates every index
+        on the source — including the two this test seeds for the extra runs. That put the
+        document into metadata_only_index on the target before the metadata-only run ever
+        started, so its "backfill was skipped, so the document must be absent" assertion
+        saw a 200 and failed. Scoping the baseline is what makes that assertion measure the
+        metadata-only run instead of the baseline.
+        """
+        super().prepare_workflow_snapshot_and_migration_config()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration["metadataMigrationConfig"]["indexAllowlist"] = [self.index_name]
+            migration["documentBackfillConfig"]["indexAllowlist"] = [self.index_name]
+
+    def prepare_clusters(self):
+        for index_name in (self.index_name, self.metadata_only_index, self.backfill_only_index):
+            self.source_operations.create_document(
+                cluster=self.source_cluster, index_name=index_name,
+                doc_id=self.doc_id, doc_type=self.doc_type,
+            )
+
+    def verify_clusters(self):
+        # Baseline: both stages ran and the document arrived on target.
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.index_name,
+            doc_id=self.doc_id, max_attempts=10, delay=3.0,
+        )
+
+        # The baseline is allowlisted to self.index_name, so the extra runs' indices must
+        # not be on the target yet. Asserting it here localizes a regression in that
+        # scoping to the baseline, instead of surfacing it as a confusing 200-vs-404
+        # failure inside the metadata-only run below.
+        for index_name in (self.metadata_only_index, self.backfill_only_index):
+            self.target_operations.get_index(
+                cluster=self.target_cluster, index_name=index_name,
+                expected_status_code=404, max_attempts=3, delay=2.0,
+            )
+
+        self._run_and_assert_metadata_only()
+        self._run_and_assert_backfill_only()
+
+    def cleanup(self):
+        # keepMigrationWorkflow=true means the wrapper left the inner workflow behind for
+        # us to read, so this test owns deleting it.
+        self._delete_inner_workflow()
+        for wf_name in self._extra_workflow_names:
+            try:
+                self.argo_service.delete_workflow(workflow_name=wf_name)
+            except Exception as e:
+                logger.warning("Failed to delete extra workflow %s: %s", wf_name, e)
+        self._extra_workflow_names.clear()
+
+    def _delete_inner_workflow(self):
+        """Delete the inner workflow, which each run recreates under the same fixed name.
+
+        Best-effort: it may already be gone (an early failure, or the run that created it
+        never got that far), and a failure to clean up should not mask the real assertion.
+        """
+        try:
+            self.argo_service.delete_workflow(workflow_name=INNER_WORKFLOW_NAME)
+        except Exception as e:
+            logger.warning("Failed to delete inner workflow %s: %s", INNER_WORKFLOW_NAME, e)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _extra_run_parameters(self, migration_config: dict, snapshot_label: str) -> dict:
+        """Build parameters for an extra run against the already-provisioned clusters.
+
+        Uses imported-clusters mode so no new clusters are stood up. The run creates its
+        own snapshot (the repo path is per-workflow, so the baseline's snapshot is not
+        reachable from here).
+
+        snapshot_label must be unique per workflow. It names the DataSnapshot CR
+        (source1-<label>) and the SnapshotMigration CR (source1-target1-<label>-migration-N),
+        and those CRs' repoPathUri / snapshotRepoPathUri are immutable per the
+        ValidatingAdmissionPolicies. Since the repo path carries the workflow uid, a second
+        run reusing the baseline's default "testsnapshot" label resolves to the baseline's
+        CRs and its apply is rejected outright ("cannot be changed. Delete and recreate.").
+        """
+        return {
+            "source-configs": [{
+                "source": self.source_cluster.config,
+                "snapshot-and-migration-configs": [{
+                    "snapshotConfig": {"snapshotLabel": snapshot_label},
+                    "migrations": [migration_config],
+                }],
+            }],
+            "target-config": self.target_cluster.config,
+            # The stage phases this test asserts on live in the inner workflow, which
+            # full-migration-with-workflow-cli's last step deletes unless this is set.
+            # Keeping it means we own the deletion; cleanup() does that.
+            "keepMigrationWorkflow": "true",
+        }
+
+    def _submit_and_wait(self, parameters: dict, label: str) -> dict:
+        """Submit a full-migration-imported-clusters workflow and wait for it to end.
+
+        Returns the *inner* workflow's status JSON, which is where the stage phases are.
+        The submitted workflow is only an outer wrapper: its own steps are
+        generate-migration-configs / configureAndSubmitWorkflow / monitorWorkflow /
+        evaluateWorkflowResult / deleteMigrationWorkflow (see testMigrationWithWorkflowCli.ts).
+        configureAndSubmitWorkflow.sh runs `workflow submit`, which creates a separate
+        workflow named INNER_WORKFLOW_NAME holding metadataMigrate and bulkLoadDocuments.
+        """
+        start_result = self.argo_service.start_workflow(
+            workflow_template_name="full-migration-imported-clusters",
+            parameters=parameters,
+        )
+        assert start_result.success, f"{label}: failed to start workflow: {start_result}"
+        wf_name = start_result.value
+        self._extra_workflow_names.append(wf_name)
+        logger.info("%s: submitted workflow %s", label, wf_name)
+        self.argo_service.wait_for_ending_phase(
+            workflow_name=wf_name,
+            timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+        )
+        outer_json = self.argo_service._get_workflow_status_json(wf_name)
+        outer_phase = outer_json.get("status", {}).get("phase")
+        # Log both workflows' node phases before asserting so a failure here is
+        # diagnosable from the Jenkins console alone, without a live cluster.
+        logger.info("%s: outer workflow %s ended in phase=%s; node phases: %s",
+                    label, wf_name, outer_phase,
+                    json.dumps(self._node_phases_by_display_name(outer_json), indent=2, sort_keys=True))
+        assert outer_phase == "Succeeded", (
+            f"{label}: workflow {wf_name} ended in phase {outer_phase!r}, expected 'Succeeded'. "
+            f"A non-Succeeded run makes 'Skipped' assertions meaningless, since a step can "
+            f"also be skipped as a consequence of an upstream failure."
+        )
+
+        # keepMigrationWorkflow=true keeps the inner workflow alive past the wrapper, so
+        # its phases are still readable here.
+        inner_json = self.argo_service._get_workflow_status_json(INNER_WORKFLOW_NAME)
+        inner_phase = inner_json.get("status", {}).get("phase")
+        logger.info("%s: inner workflow %s ended in phase=%s; node phases: %s",
+                    label, INNER_WORKFLOW_NAME, inner_phase,
+                    json.dumps(self._node_phases_by_display_name(inner_json), indent=2, sort_keys=True))
+        # INNER_WORKFLOW_NAME is fixed, so the baseline and both extra runs all use it in
+        # turn. Reading a leftover from an earlier run would assert against the wrong
+        # stages and could pass for the wrong reason, so pin it to this wrapper.
+        self._assert_inner_workflow_is_not_stale(outer_json, inner_json, label)
+        assert inner_phase == "Succeeded", (
+            f"{label}: inner workflow {INNER_WORKFLOW_NAME} ended in phase {inner_phase!r}, "
+            f"expected 'Succeeded'."
+        )
+        return inner_json
+
+    @staticmethod
+    def _assert_inner_workflow_is_not_stale(outer_json: dict, inner_json: dict, label: str):
+        """Assert the inner workflow was created by this wrapper, not an earlier run.
+
+        The wrapper's configureAndSubmitWorkflow step is what runs `workflow submit`, so
+        this run's inner workflow is always created after the wrapper itself.
+        """
+        outer_created = outer_json.get("metadata", {}).get("creationTimestamp")
+        inner_created = inner_json.get("metadata", {}).get("creationTimestamp")
+        assert outer_created and inner_created, (
+            f"{label}: missing creationTimestamp (outer={outer_created!r}, inner={inner_created!r}); "
+            f"cannot confirm the inner workflow belongs to this run"
+        )
+        # RFC 3339 with a fixed 'Z' offset, so lexicographic order is chronological.
+        assert inner_created >= outer_created, (
+            f"{label}: inner workflow {INNER_WORKFLOW_NAME} was created at {inner_created}, before "
+            f"this run's wrapper at {outer_created} — it is a leftover from an earlier run, so its "
+            f"stage phases say nothing about this one."
+        )
+
+    @staticmethod
+    def _node_phases_by_display_name(workflow_json: dict) -> dict[str, str]:
+        """Return {displayName: phase} for every node in the workflow."""
+        nodes = workflow_json.get("status", {}).get("nodes", {})
+        return {
+            node.get("displayName", node_id): node.get("phase", "")
+            for node_id, node in nodes.items()
+        }
+
+    @staticmethod
+    def _assert_node_phase(phases: dict[str, str], step_name: str, expected: str, label: str):
+        matching = {name: phase for name, phase in phases.items() if step_name in name}
+        if not matching:
+            raise AssertionError(
+                f"{label}: no workflow node whose displayName contains '{step_name}'. "
+                f"Available names: {sorted(phases)}"
+            )
+        for name, phase in matching.items():
+            if phase != expected:
+                raise AssertionError(
+                    f"{label}: node '{name}' phase={phase!r}, expected {expected!r}. "
+                    f"All node phases: {phases}"
+                )
+        logger.info("%s: node(s) matching '%s' all have phase=%s", label, step_name, expected)
+
+    def _run_and_assert_metadata_only(self):
+        label = "metadata-only"
+        allowlist = [self.metadata_only_index]
+        params = self._extra_run_parameters({
+            "metadataMigrationConfig": {"indexAllowlist": allowlist},
+        }, snapshot_label=self.metadata_only_snapshot_label)
+        wf = self._submit_and_wait(params, label)
+        phases = self._node_phases_by_display_name(wf)
+        self._assert_node_phase(phases, "metadataMigrate", "Succeeded", label)
+        self._assert_node_phase(phases, "bulkLoadDocuments", "Skipped", label)
+
+        # Functional confirmation: metadata created the index on the target, but with
+        # backfill skipped the document itself must not have been copied.
+        self.target_operations.get_index(
+            cluster=self.target_cluster, index_name=self.metadata_only_index,
+            max_attempts=10, delay=3.0,
+        )
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.metadata_only_index,
+            doc_id=self.doc_id, doc_type=self.doc_type,
+            expected_status_code=404, max_attempts=3, delay=2.0,
+        )
+        logger.info("%s: target index exists with no documents backfilled", label)
+
+    def _run_and_assert_backfill_only(self):
+        label = "backfill-only"
+        allowlist = [self.backfill_only_index]
+        params = self._extra_run_parameters({
+            "documentBackfillConfig": {
+                "indexAllowlist": allowlist,
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                    "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                    "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"},
+                },
+            }
+        }, snapshot_label=self.backfill_only_snapshot_label)
+        wf = self._submit_and_wait(params, label)
+        phases = self._node_phases_by_display_name(wf)
+        self._assert_node_phase(phases, "metadataMigrate", "Skipped", label)
+        self._assert_node_phase(phases, "bulkLoadDocuments", "Succeeded", label)
 
 
 class Test0003ApprovalGateIntegration(MATestBase):
@@ -102,6 +600,11 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.doc_id = "test_0003_doc"
         self.doc_type = "sample_type"
         self.snapshot_migration_name = "source1-target1-testsnapshot-migration-0"
+        # Unlike every other test, this one runs with skipApprovals=false and means
+        # to block at each of these gates until it approves them by hand, so the
+        # wait loops must not treat them as a workflow stuck on an approval nobody
+        # will give. Any gate outside this list still fails the test.
+        self.argo_service.expected_parked_gate_names = self._approval_gate_names()
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
@@ -328,6 +831,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
     def _wait_until_suspended_or_ended(self, timeout_seconds: int):
         """Wait until the workflow suspends for verification or ends."""
         deadline = time.time() + timeout_seconds
+        parked_gate_watcher = self.argo_service.parked_gate_watcher_for(self.workflow_name)
         while time.time() < deadline:
             status_result = self.argo_service.get_workflow_status(self.workflow_name)
             if status_result.success:
@@ -339,6 +843,9 @@ class Test0003ApprovalGateIntegration(MATestBase):
                 if phase in ENDING_ARGO_PHASES:
                     logger.info("Workflow reached ending phase: %s", phase)
                     return
+            # A workflow parked on a VAP-denial approval gate stays 'Running'
+            # forever; without this the only exit is the full timeout.
+            parked_gate_watcher.check()
             time.sleep(10)
         raise TimeoutError(
             f"Workflow did not reach suspend or ending phase within {timeout_seconds}s "

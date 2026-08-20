@@ -252,6 +252,18 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized keys.*solrCollections/);
     });
 
+    it('should reject solrContextPath on a user-facing ES/OS createSnapshotConfig', () => {
+        // Solr-only as well: ES/OS snapshots have no context path to configure.
+        const configWithContextPath = cloneBaseConfig();
+        configWithContextPath.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrContextPath: "/tenant-a/solr"
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithContextPath);
+        }).toThrow(/Unrecognized keys.*solrContextPath/);
+    });
+
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
         const result = await transformer.processFromObject(baseConfig);
         const m = result.snapshotMigrations[0];
@@ -843,6 +855,25 @@ describe('MigrationConfigTransformer validation', () => {
         expect(changedMigration.targetConfig.label).toBe(baselineMigration.targetConfig.label);
         expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
         expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should produce distinct checksums when a migration stage config is added or removed', async () => {
+        const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
+
+        const withBoth = cloneBaseConfig();
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const withBackfillOnly = cloneBaseConfig();
+        delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
+        const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
+        const backfillOnly = (await transformer.processFromObject(withBackfillOnly)).snapshotMigrations[0];
+
+        expect(metadataOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(backfillOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(metadataOnly.configChecksum).not.toEqual(backfillOnly.configChecksum);
     });
 
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {

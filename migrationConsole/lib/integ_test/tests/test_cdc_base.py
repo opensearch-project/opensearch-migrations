@@ -85,8 +85,8 @@ def test_wait_for_replayer_consuming_passes_workflow_name_to_dependency_check(mo
     def fake_wait_for_pod_ready(namespace, label_selector, timeout_seconds, dependency_error_check=None):
         dependency_error_check()
 
-    def fake_dependency_check(namespace, workflow_names=None):
-        dependency_calls.append((namespace, workflow_names))
+    def fake_dependency_check(namespace, workflow_names=None, parked_gate_watcher=None):
+        dependency_calls.append((namespace, workflow_names, parked_gate_watcher))
 
     class FakeCompletedProcess:
         stdout = "KafkaHeartbeat partitions=[0]\n"
@@ -97,7 +97,12 @@ def test_wait_for_replayer_consuming_passes_workflow_name_to_dependency_check(mo
 
     cdc_base.wait_for_replayer_consuming(namespace="ma", timeout_seconds=1, workflow_name="outer-workflow")
 
-    assert ("ma", ["outer-workflow"]) in dependency_calls
+    assert ("ma", ["outer-workflow"]) in [(namespace, names) for namespace, names, _ in dependency_calls]
+    # A parked capture proxy / replayer leaves the workflow Running, so the
+    # dependency check needs the watcher to notice it.
+    watcher = dependency_calls[0][2]
+    assert watcher is not None
+    assert watcher.workflow_names == ["outer-workflow", cdc_base.INNER_WORKFLOW_NAME]
 
 
 def test_cdc_dependency_check_fails_on_failed_inner_migration_workflow(monkeypatch):

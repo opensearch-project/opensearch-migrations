@@ -5,6 +5,7 @@ import os
 import time
 import pytest
 import requests_mock
+from botocore.exceptions import ClientError
 from click.testing import CliRunner
 from types import SimpleNamespace
 from subprocess import CompletedProcess
@@ -2056,7 +2057,7 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=True)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
@@ -2066,19 +2067,19 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
     assert "Failed documents present: yes" in result.output
 
 
-def test_backfill_status_failed_document_stream_presence_unavailable_renders_placeholder(runner, mocker):
+def test_backfill_status_surfaces_unreadable_failed_document_stream(runner, mocker):
+    # A configured stream we cannot read must fail, not report a clean status.
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    # None means S3 was unreachable — we mustn't crash.
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
+    err = ClientError({"Error": {"Code": "AccessDenied", "Message": "x"}}, "ListObjects")
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", side_effect=err)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-                                 'backfill', 'status'],
-                           catch_exceptions=False)
-    assert result.exit_code == 0
-    assert "Failed documents present: unavailable" in result.output
+                                 'backfill', 'status'])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ClientError)
 
 
 def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
@@ -2117,7 +2118,7 @@ def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runn
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=True)
 
     result = runner.invoke(
         cli,
@@ -2137,7 +2138,7 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=False)
 
     result = runner.invoke(
         cli,
@@ -2151,24 +2152,22 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
     assert payload["failed_documents_present"] is False
 
 
-def test_backfill_status_json_deep_check_threads_unavailable_presence(runner, mocker):
-    # None => S3 unreachable; passed through as-is.
-    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
-                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+def test_backfill_status_json_deep_check_surfaces_unreadable_stream(runner, mocker):
+    # A configured stream we cannot read must fail rather than emit a clean payload.
+    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                        return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
+    err = ClientError({"Error": {"Code": "AccessDenied", "Message": "x"}}, "ListObjects")
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", side_effect=err)
 
     result = runner.invoke(
         cli,
         ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
-        catch_exceptions=False,
     )
-    assert result.exit_code == 0
-    assert mock_build.call_args.kwargs["has_failed_documents"] is None
-    payload = json.loads(result.output)
-    assert payload["failed_documents_present"] is None
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ClientError)
 
 
 def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):
@@ -2202,7 +2201,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
                         side_effect=DeepStatusNotYetAvailable("not yet"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=False)
 
     result = runner.invoke(
         cli,
