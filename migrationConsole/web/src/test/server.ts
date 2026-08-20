@@ -55,6 +55,9 @@ export const server = setupServer(
   http.get("*/api/v1/config", () =>
     HttpResponse.json(configDraft),
   ),
+  http.post("*/api/v1/config/close", () =>
+    new HttpResponse(null, { status: 204 }),
+  ),
   http.post("*/api/v1/config/review", () =>
     HttpResponse.json({
       draftRevision: configDraft.draftRevision,

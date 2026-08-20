@@ -278,6 +278,27 @@ def test_save_and_discard_advance_the_base_from_persisted_configuration():
     assert discarded.edit_state["nodes"][0]["children"][0]["value"] == "operation-1"
 
 
+def test_close_discards_session_and_next_open_reloads_saved_config():
+    edit_service = _FakeEditService()
+    drafts = ConfigDraftService(edit_service)
+    opened = drafts.open()
+    edited = drafts.apply(
+        opened.draft_revision,
+        {"op": "set", "path": ["value"], "value": "draft"},
+    )
+
+    drafts.close(edited.draft_revision)
+    edit_service.saved_yaml = "value: changed-after-close\n"
+    reopened = drafts.open()
+
+    assert edit_service.saved == []
+    assert reopened.dirty is False
+    assert (
+        reopened.edit_state["nodes"][0]["children"][0]["value"]
+        == "changed-after-close"
+    )
+
+
 def test_submit_validates_saves_dirty_draft_and_submits_the_saved_config():
     edit_service = _FakeEditService()
     drafts = ConfigDraftService(edit_service)
@@ -294,6 +315,13 @@ def test_submit_validates_saves_dirty_draft_and_submits_the_saved_config():
     assert submitted.message == "Workflow submitted: migration"
     assert edit_service.saved == ["value: operation-1\n"]
     assert edit_service.submitted == ["migration"]
+
+    edit_service.saved_yaml = "value: changed-after-submit\n"
+    reopened = drafts.open()
+    assert (
+        reopened.edit_state["nodes"][0]["children"][0]["value"]
+        == "changed-after-submit"
+    )
 
 
 def test_submit_rejects_invalid_draft_without_saving_or_submitting():

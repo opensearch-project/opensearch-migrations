@@ -2994,33 +2994,59 @@ test("saves and discards explicit dirty drafts", async () => {
 });
 
 
-test("exiting a dirty edit session discards the draft before leaving", async () => {
-  let discardCalls = 0;
+test("exiting closes the dirty session and reopening reloads saved values", async () => {
+  let getCalls = 0;
+  const closeRequests: unknown[] = [];
+  const reopenedDraft = structuredClone(configDraft);
+  reopenedDraft.baseRevision = "saved-after-close";
+  reopenedDraft.draftRevision = "reopened-after-close";
+  reopenedDraft.dirty = false;
   server.use(
-    http.get("*/api/v1/config", () =>
-      HttpResponse.json({
+    http.get("*/api/v1/config", () => {
+      getCalls += 1;
+      return HttpResponse.json(getCalls === 1 ? {
         ...configDraft,
         dirty: true,
         draftRevision: "dirty-close",
-      }),
-    ),
-    http.post("*/api/v1/config/discard", () => {
-      discardCalls += 1;
-      return HttpResponse.json(configDraft);
+      } : reopenedDraft);
+    }),
+    http.post("*/api/v1/config/close", async ({ request }) => {
+      closeRequests.push(await request.json());
+      return new HttpResponse(null, { status: 204 });
     }),
   );
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-  renderApp();
+  const { client } = renderApp();
   await enterEditMode();
 
   await userEvent.click(
     screen.getByRole("button", { name: "Exit editing" }),
   );
 
-  expect(discardCalls).toBe(1);
+  expect(closeRequests).toEqual([{
+    expectedDraftRevision: "dirty-close",
+  }]);
   expect(confirm).toHaveBeenCalledOnce();
   expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
+
+  await enterEditMode();
+  await waitFor(() => expect(getCalls).toBe(2));
+  expect(client.getQueryData(["config-draft"])).toMatchObject({
+    baseRevision: "saved-after-close",
+    draftRevision: "reopened-after-close",
+    dirty: false,
+  });
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Exit editing" }),
+  );
+  expect(closeRequests).toEqual([{
+    expectedDraftRevision: "dirty-close",
+  }, {
+    expectedDraftRevision: "reopened-after-close",
+  }]);
+  expect(confirm).toHaveBeenCalledOnce();
   confirm.mockRestore();
 });
 
@@ -3312,6 +3338,13 @@ test("offers one reset and resubmit action for immutable preflight failures", as
         path: "capturedtraffic.capture-topic",
         phase: "Ready",
         dependsOn: [],
+      }, {
+        plural: "captureproxies",
+        type: "captureproxy",
+        name: "p2",
+        path: "captureproxy.p2",
+        phase: "Ready",
+        dependsOn: ["capturedtraffic.capture-topic"],
       }],
       messages: [],
       warnings: [],
@@ -3350,12 +3383,25 @@ test("offers one reset and resubmit action for immutable preflight failures", as
   expect(within(dialog).queryByText(
     "No field-level pending differences were reported.",
   )).toBeNull();
-  expect(within(dialog).getByRole("button", {
+  const blockedSubmit = within(dialog).getByRole("button", {
     name: "Confirm submit",
-  })).toBeDisabled();
-  await userEvent.click(await within(dialog).findByRole("button", {
-    name: "Reset & resubmit (1)",
-  }));
+  });
+  expect(blockedSubmit).toBeDisabled();
+  expect(blockedSubmit).toHaveAttribute(
+    "title",
+    "No workflow will be submitted while reset-required admission errors "
+      + "remain. The affected resources and their dependencies will stay "
+      + "blocked. Use Reset & resubmit.",
+  );
+  const resetAndResubmit = await within(dialog).findByRole("button", {
+    name: "Reset & resubmit (2)",
+  });
+  expect(resetAndResubmit).toHaveAttribute(
+    "title",
+    "Delete 2 resources before submitting a new workflow: "
+      + "capturedtraffic.capture-topic; captureproxy.p2.",
+  );
+  await userEvent.click(resetAndResubmit);
 
   await waitFor(() => expect(resetRequest).toEqual({
     planToken: "preflight-reset-token",

@@ -3189,6 +3189,40 @@
         ]
       }
     },
+    "/api/v1/config/close": {
+      "post": {
+        "operationId": "close_config_api_v1_config_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRevisionRequestV1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close Config",
+        "tags": [
+          "configuration"
+        ]
+      }
+    },
     "/api/v1/config/discard": {
       "post": {
         "operationId": "discard_config_api_v1_config_discard_post",

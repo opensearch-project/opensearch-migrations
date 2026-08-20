@@ -82,6 +82,23 @@ export function SubmitConfigDialog({
   );
   const loadError = currentDraft.error ?? review.error ?? preflight.error;
   const resubmitting = intent === "resubmit";
+  const resetActionCount = resetPlan.data?.targets.length
+    ?? resetTargetIds.length;
+  const directSubmitTitle = resetTargetIds.length > 0
+    && preflight.data?.allowed === false
+    ? (
+      "No workflow will be submitted while reset-required admission errors "
+      + "remain. The affected resources and their dependencies will stay "
+      + "blocked. Use Reset & resubmit."
+    )
+    : undefined;
+  const resetAndResubmitTitle = resetPlan.data
+    ? `Delete ${resetPlan.data.targets.length} ${
+      resetPlan.data.targets.length === 1 ? "resource" : "resources"
+    } before submitting a new workflow: ${
+      resetPlan.data.targets.map((target) => target.path).join("; ")
+    }.`
+    : "Building the dependency-safe reset plan.";
 
   const retry = () => {
     setProblem("");
@@ -300,12 +317,13 @@ export function SubmitConfigDialog({
               className="danger-confirm"
               disabled={submitting || !resetPlan.data}
               onClick={() => void resetAndResubmit()}
+              title={resetAndResubmitTitle}
               type="button"
             >
               {submitting
                 ? <LoaderCircle className="spin" aria-hidden="true" />
                 : <RotateCcw aria-hidden="true" />}
-              Reset &amp; resubmit ({resetTargetIds.length})
+              Reset &amp; resubmit ({resetActionCount})
             </button>
           ) : null}
           <button
@@ -320,6 +338,7 @@ export function SubmitConfigDialog({
               || !preflight.data.allowed
             }
             onClick={() => void submit()}
+            title={directSubmitTitle}
             type="button"
           >
             {submitting

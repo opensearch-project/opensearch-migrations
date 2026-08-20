@@ -172,6 +172,9 @@ async function mockManageApi(page: Page) {
       body: JSON.stringify(draft),
     });
   });
+  await page.route("**/api/v1/config/close", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
   await page.route("**/api/v1/config/review", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -188,6 +191,16 @@ async function mockManageApi(page: Page) {
           label: "Service type",
           kind: "field",
         }],
+      }),
+    });
+  });
+  await page.route("**/api/v1/config/preflight", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        checkedResources: 0,
+        allowed: true,
+        issues: [],
       }),
     });
   });

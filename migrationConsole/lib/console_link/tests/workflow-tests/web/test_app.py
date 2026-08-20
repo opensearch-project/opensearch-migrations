@@ -809,6 +809,10 @@ class _Drafts:
         self.discarded = True
         return self.current
 
+    def close(self, expected_revision):
+        self.expected_revision = expected_revision
+        self.closed = True
+
     def submit(self, expected_revision, workflow_name):
         self.expected_revision = expected_revision
         self.submitted = True
@@ -1010,7 +1014,7 @@ def test_config_operation_contract_is_discriminated_and_passed_to_the_service(tm
     }
 
 
-def test_config_save_and_discard_use_expected_revision(tmp_path):
+def test_config_save_discard_and_close_use_expected_revision(tmp_path):
     drafts = _Drafts()
     app = create_app(
         static_dir=_static_bundle(tmp_path),
@@ -1026,11 +1030,17 @@ def test_config_save_and_discard_use_expected_revision(tmp_path):
             "/api/v1/config/discard",
             json={"expectedDraftRevision": "draft-1"},
         )
+        closed = client.post(
+            "/api/v1/config/close",
+            json={"expectedDraftRevision": "draft-1"},
+        )
 
     assert saved.status_code == 200
     assert discarded.status_code == 200
+    assert closed.status_code == 204
     assert drafts.saved is True
     assert drafts.discarded is True
+    assert drafts.closed is True
 
 
 class _Operations:

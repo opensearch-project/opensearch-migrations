@@ -504,6 +504,19 @@ def create_app(
         return ConfigDraftV1.from_domain(draft)
 
     @app.post(
+        "/api/v1/config/close",
+        status_code=204,
+        response_class=Response,
+        tags=["configuration"],
+    )
+    def close_config(request_body: DraftRevisionRequestV1) -> Response:
+        try:
+            draft_service().close(request_body.expected_draft_revision)
+        except ConfigDraftConflict as error:
+            raise _draft_conflict(error) from error
+        return Response(status_code=204)
+
+    @app.post(
         "/api/v1/config/removal-impact",
         response_model=ConfigRemovalImpactV1,
         response_model_exclude_none=True,

@@ -25,6 +25,7 @@ import {
 import {
   ConfigApiError,
   applyEditOperation,
+  closeConfigDraft,
   discardConfigDraft,
   getConfigDraft,
   getConfigRemovalImpact,
@@ -2121,13 +2122,24 @@ export function ConfigEditor({
     try {
       if (!await waitForPendingCommit()) return;
       const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      if (!current) return;
       if (
-        (current?.dirty || hasLocalEdits)
+        (current.dirty || hasLocalEdits)
         && !window.confirm("Discard this unsaved browser draft and close configuration?")
       ) {
         return;
       }
-      if (current?.dirty && !await revert()) return;
+      try {
+        await closeConfigDraft(current.draftRevision);
+      } catch (error) {
+        if (error instanceof ConfigApiError && error.current) {
+          queryClient.setQueryData(["config-draft"], error.current);
+        }
+        setProblem(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      queryClient.removeQueries({ queryKey: ["config-draft"] });
+      setLocallyEditedIds(new Set());
       onClose();
     } finally {
       setActionPending(false);

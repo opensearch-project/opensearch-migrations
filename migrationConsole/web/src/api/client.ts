@@ -174,6 +174,23 @@ export async function discardConfigDraft(
 }
 
 
+export async function closeConfigDraft(
+  draftRevision: string,
+): Promise<void> {
+  const { error, response } = await client.POST(
+    "/api/v1/config/close",
+    { body: { expectedDraftRevision: draftRevision } },
+  );
+  if (!response.ok || error) {
+    throw new ConfigApiError(
+      response.status,
+      "The configuration edit session could not be closed",
+      error,
+    );
+  }
+}
+
+
 export async function getConfigRemovalImpact(
   draftRevision: string,
   path: string[],

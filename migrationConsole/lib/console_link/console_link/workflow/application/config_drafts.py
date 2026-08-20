@@ -171,6 +171,12 @@ class ConfigDraftService:
             self._reload()
             return self._snapshot()
 
+    def close(self, expected_revision: str) -> None:
+        """Discard and release the process-local edit session."""
+        with self._lock:
+            self._require_revision(expected_revision)
+            self._clear()
+
     def submit(
         self,
         expected_revision: str,
@@ -219,7 +225,9 @@ class ConfigDraftService:
                 raise ValueError(
                     f"Configuration cannot be submitted: {detail}"
                 )
-            return self.save(expected_revision)
+            saved = self.save(expected_revision)
+            self._clear()
+            return saved
 
     def preflight(
         self,
@@ -442,6 +450,11 @@ class ConfigDraftService:
         self._raw_yaml = session.raw_yaml
         self._base_revision = _revision(session.raw_yaml)
         self._edit_state = session.edit_state
+
+    def _clear(self) -> None:
+        self._raw_yaml = None
+        self._base_revision = None
+        self._edit_state = None
 
     def _require_revision(self, expected_revision: str) -> None:
         if self._raw_yaml is None:
