@@ -252,15 +252,20 @@ jobs:
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
           - ./orchestrationSpecs
+          - ./migrationConsole/web
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
+      - name: Install workflow web Python dependencies
+        if: matrix.npm-project == './migrationConsole/web'
+        working-directory: ./migrationConsole/lib/console_link
+        run: pipenv install --deploy
       - name: Install NPM dependencies
         run: npm ci
-      - name: Run CDK Jest Tests (using mocked images)
+      - name: Run NPM tests
         run: npm run test
       - name: Run orchestration CRD integration tests
         if: matrix.npm-project == './orchestrationSpecs'

@@ -1102,6 +1102,11 @@ Create tasks with clear inputs and outputs for:
 - copying `dist` into `build/dockerContext`;
 - Python API tests.
 
+The OpenAPI document and generated TypeScript API contract are ignored local build outputs.
+Gradle tracks the FastAPI route and contract sources as inputs, regenerates stale outputs, and
+retains current outputs locally so repeated builds do not pay the generation cost. A clean
+checkout must be able to generate both files before frontend tests or compilation.
+
 The Docker image contains:
 
 - the compiled React assets;

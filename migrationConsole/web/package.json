@@ -7,13 +7,23 @@
     "node": ">=22.14"
   },
   "scripts": {
+    "predev": "npm run ensure:api",
     "dev": "vite",
+    "prebuild": "npm run ensure:api",
     "build": "npm run typecheck && vite build",
-    "generate:api": "openapi-typescript openapi.json -o src/api/schema.generated.ts",
+    "generate:openapi": "bash scripts/generated-api.sh openapi",
+    "generate:client": "openapi-typescript openapi.json -o src/api/schema.generated.ts",
+    "generate:api": "npm run generate:openapi && npm run generate:client",
+    "ensure:api": "bash scripts/generated-api.sh ensure",
+    "prelint": "npm run ensure:api",
     "lint": "eslint .",
+    "pretest": "npm run ensure:api",
     "test": "vitest run",
+    "pretest:watch": "npm run ensure:api",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run ensure:api",
     "test:e2e": "playwright test",
+    "pretypecheck": "npm run ensure:api",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

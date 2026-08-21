@@ -4,3 +4,5 @@ coverage/
 playwright-report/
 test-results/
 .openapi.tmp.json
+openapi.json
+src/api/schema.generated.ts

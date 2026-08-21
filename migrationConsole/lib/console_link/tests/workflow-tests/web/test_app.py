@@ -1,7 +1,5 @@
 import json
 from datetime import datetime, timezone
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from console_link.workflow.application.config_drafts import (
@@ -54,6 +52,7 @@ from console_link.workflow.application.resets import (
     ResetTarget,
 )
 from console_link.workflow.web.app import create_app
+from console_link.workflow.web.openapi import main as generate_openapi
 
 
 def _static_bundle(tmp_path):
@@ -152,11 +151,12 @@ def test_openapi_exposes_the_versioned_manage_snapshot_contract(tmp_path):
     assert schemas["ManageSnapshotV1"]["properties"]["formatVersion"]["const"] == 1
 
 
-def test_checked_in_openapi_document_matches_the_application():
-    web_dir = Path(__file__).parents[5] / "web"
-    checked_in = json.loads((web_dir / "openapi.json").read_text(encoding="utf-8"))
+def test_openapi_generator_writes_current_application_contract(tmp_path):
+    output = tmp_path / "openapi.json"
 
-    assert checked_in == create_app().openapi()
+    generate_openapi(["--output", str(output)])
+
+    assert json.loads(output.read_text(encoding="utf-8")) == create_app().openapi()
 
 
 class _Coordinator:

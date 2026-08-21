@@ -28,6 +28,7 @@ def migrationResourcesStagingP =
 def manageWebP = layout.projectDirectory.dir("web")
 def manageWebBundleStagingP =
         layout.buildDirectory.dir("manageWebStatic")
+def manageWebOpenApiP = manageWebP.file("openapi.json")
 
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
@@ -129,13 +130,29 @@ tasks.register('installManageWebDependencies', NpmTask) {
     outputs.dir(manageWebP.dir("node_modules"))
 }
 
+tasks.register('generateManageWebOpenApi', NpmTask) {
+    description = 'Generate the workflow manage OpenAPI contract from FastAPI'
+    workingDir = manageWebP.asFile
+    args = ['run', 'generate:openapi']
+
+    inputs.files(
+            manageWebP.file("scripts/generated-api.sh"),
+            manageWebP.file("package.json"),
+            project.file("lib/console_link/Pipfile.lock"),
+            project.file("lib/console_link/console_link/workflow/web/app.py"),
+            project.file("lib/console_link/console_link/workflow/web/contracts.py"),
+            project.file("lib/console_link/console_link/workflow/web/openapi.py"))
+    outputs.file(manageWebOpenApiP)
+}
+
 tasks.register('generateManageWebClient', NpmTask) {
     description = 'Generate the workflow manage TypeScript API contract from OpenAPI'
     workingDir = manageWebP.asFile
-    args = ['run', 'generate:api']
+    args = ['run', 'generate:client']
     dependsOn installManageWebDependencies
+    dependsOn generateManageWebOpenApi
 
-    inputs.file(manageWebP.file("openapi.json"))
+    inputs.file(manageWebOpenApiP)
     inputs.file(manageWebP.file("package.json"))
     outputs.file(manageWebP.file("src/api/schema.generated.ts"))
 }
