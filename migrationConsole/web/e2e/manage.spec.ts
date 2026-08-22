@@ -7,6 +7,7 @@ interface BrowserAnimation {
   id: string;
   effect: {
     getKeyframes: () => Array<Record<string, unknown>>;
+    getTiming: () => { fill: string };
   } | null;
 }
 
@@ -1076,9 +1077,26 @@ test("animates resource filters and entry into configuration mode", async ({ pag
   await page.goto("/");
 
   const tree = page.getByRole("tree", { name: "Workflow resources" });
+  const treeScroller = page.getByTestId("tree-scroller");
+  const resourceViews = page.getByRole("group", {
+    name: "Resource state view",
+  });
+  const filterInput = page.getByRole("searchbox", {
+    name: "Filter resources",
+  });
   await expect(tree.getByRole("treeitem", {
     name: /^replay, Running$/,
   })).toBeVisible();
+  const [scrollerBox, resourceViewsBox] = await Promise.all([
+    treeScroller.boundingBox(),
+    resourceViews.boundingBox(),
+  ]);
+  expect(scrollerBox).not.toBeNull();
+  expect(resourceViewsBox).not.toBeNull();
+  expect(resourceViewsBox!.y).toBeGreaterThanOrEqual(
+    scrollerBox!.y + scrollerBox!.height - 1,
+  );
+  const filterY = (await filterInput.boundingBox())!.y;
   const initialIds = await tree.locator(".tree-row").evaluateAll(
     (elements: unknown[]) => (
       (elements as BrowserAnimatedElement[]).flatMap((row) => {
@@ -1102,25 +1120,55 @@ test("animates resource filters and entry into configuration mode", async ({ pag
 
   await page.getByRole("button", { name: "Submitted" }).click();
   await expect.poll(movingRows).not.toEqual([]);
+  await expect(tree.locator(".tree-row.layout-moving").first()).toBeVisible();
   const filterAnchors = await movingRows();
   expect(filterAnchors.every((nodeId) => initialIds.includes(nodeId))).toBe(true);
-  const usesOpacity = await tree.locator(".tree-row").evaluateAll(
+  const transitionDetails = await tree.locator(".tree-row").evaluateAll(
     (elements: unknown[]) => (
-      (elements as BrowserAnimatedElement[]).some(
-        (row) => row.getAnimations().some((animation) => (
-          animation.id === "tree-layout-transition"
-          && animation.effect?.getKeyframes().some(
-            (keyframe) => keyframe["opacity"] !== undefined,
-          )
-        )),
-      )
+      (elements as BrowserAnimatedElement[]).flatMap((row) => (
+        row.getAnimations().flatMap((animation) => {
+          if (animation.id !== "tree-layout-transition") return [];
+          const keyframes = animation.effect?.getKeyframes() ?? [];
+          const transform = keyframes[0]?.["transform"];
+          const verticalOffset = typeof transform === "string"
+            ? transform.match(
+              /^translate\([^,]+,\s*(-?[\d.]+)px\)$/,
+            )?.[1]
+            : undefined;
+          const yDistance = verticalOffset
+            ? Math.abs(Number(verticalOffset))
+            : 0;
+          return [{
+            fill: animation.effect?.getTiming().fill,
+            usesOpacity: keyframes.some(
+              (keyframe) => keyframe["opacity"] !== undefined,
+            ),
+            yDistance,
+          }];
+        })
+      ))
     ),
   );
-  expect(usesOpacity).toBe(false);
+  expect(transitionDetails.length).toBeGreaterThan(0);
+  expect(transitionDetails.every(({ fill }) => fill === "both")).toBe(true);
+  expect(transitionDetails.some(({ usesOpacity }) => usesOpacity)).toBe(false);
+  expect(Math.max(...transitionDetails.map(({ yDistance }) => yDistance)))
+    .toBeGreaterThan(20);
+  const movingUnselectedRows = tree.locator(
+    ".tree-row.layout-moving:not(.selected)",
+  );
+  await expect(movingUnselectedRows.first()).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("resource-layout-transition.png"),
+  });
   await page.waitForTimeout(550);
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
   await expect.poll(movingRows).not.toEqual([]);
+  expect((await filterInput.boundingBox())!.y).toBeCloseTo(filterY, 0);
 });
 
 

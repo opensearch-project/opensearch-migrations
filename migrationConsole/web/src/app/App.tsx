@@ -914,6 +914,20 @@ export function App() {
                     </span>
                   </div>
                 </header>
+                <ResourceTree
+                  changeStates={resourceDraftChanges}
+                  onSelect={selectNode}
+                  presentation={editContext ? "configuration" : "runtime"}
+                  resourceAdds={editContext ? resourceAdds : null}
+                  selectedId={selectedId}
+                  snapshot={displayedState}
+                  validationStates={resourceValidations}
+                  viewTransitionKey={
+                    editContext
+                      ? "configuration"
+                      : `overview:${resourceViewMode}`
+                  }
+                />
                 {!editContext ? (
                   <div
                     aria-label="Resource state view"
@@ -933,20 +947,6 @@ export function App() {
                     ))}
                   </div>
                 ) : null}
-                <ResourceTree
-                  changeStates={resourceDraftChanges}
-                  onSelect={selectNode}
-                  presentation={editContext ? "configuration" : "runtime"}
-                  resourceAdds={editContext ? resourceAdds : null}
-                  selectedId={selectedId}
-                  snapshot={displayedState}
-                  validationStates={resourceValidations}
-                  viewTransitionKey={
-                    editContext
-                      ? "configuration"
-                      : `overview:${resourceViewMode}`
-                  }
-                />
               </section>
               {editContext ? (
                 <ConfigEditor

@@ -800,7 +800,7 @@ export function ResourceTree({
       const layoutAnimationActive = element.getAnimations?.().some(
         (animation) => (
           animation.id === "tree-layout-transition"
-          && animation.playState === "running"
+          && ["paused", "pending", "running"].includes(animation.playState)
         ),
       ) ?? false;
       const previousTarget = layoutRects.current.get(nodeId);
@@ -832,14 +832,40 @@ export function ResourceTree({
         element.getAnimations?.().forEach((animation) => {
           if (animation.id === "tree-layout-transition") animation.cancel();
         });
+        element.classList.add("layout-moving");
         const animation = element.animate([
           { transform: `translate(${x}px, ${y}px)` },
           { transform: "translate(0, 0)" },
         ], {
           duration: 520,
           easing: "cubic-bezier(0.2, 0.75, 0.25, 1)",
+          fill: "both",
         });
         animation.id = "tree-layout-transition";
+        animation.pause();
+        animation.currentTime = 0;
+        const playFrame = globalThis.requestAnimationFrame(() => {
+          if (animation.playState === "paused") animation.play();
+        });
+        const releaseMovingStyle = () => {
+          globalThis.cancelAnimationFrame(playFrame);
+          const replacementActive = element.getAnimations?.().some(
+            (candidate) => (
+              candidate !== animation
+              && candidate.id === "tree-layout-transition"
+              && ["paused", "pending", "running"].includes(
+                candidate.playState,
+              )
+            ),
+          ) ?? false;
+          if (!replacementActive) element.classList.remove("layout-moving");
+        };
+        animation.oncancel = releaseMovingStyle;
+        animation.onfinish = () => {
+          animation.oncancel = null;
+          animation.cancel();
+          releaseMovingStyle();
+        };
       });
     }
 

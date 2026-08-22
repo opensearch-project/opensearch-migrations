@@ -922,7 +922,7 @@ button {
   display: grid;
   flex: 0 0 auto;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 10px 11px 0;
+  margin: 0 11px 10px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1011,7 +1011,13 @@ button {
   border: 1px solid transparent;
   border-radius: 4px;
   outline: none;
+  background: var(--surface);
   cursor: default;
+}
+
+.tree-row.layout-moving {
+  z-index: 2;
+  will-change: transform;
 }
 
 .tree-row.has-dependency-hint {
