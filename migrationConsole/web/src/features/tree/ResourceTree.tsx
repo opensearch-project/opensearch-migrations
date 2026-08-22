@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -119,7 +120,6 @@ function visibleRows(
 
 interface TreeRowProps {
   row: VisibleRow;
-  rowOrder: number;
   presentation: ResourceTreeProps["presentation"];
   expanded: boolean;
   inserted: boolean;
@@ -171,7 +171,6 @@ interface InlineRename {
 
 const TreeRow = memo(function TreeRow({
   row,
-  rowOrder,
   presentation,
   expanded,
   inserted,
@@ -336,10 +335,7 @@ const TreeRow = memo(function TreeRow({
       onKeyDown={(event) => onKeyDown(event, node.id)}
       ref={(element) => rowRef(node.id, element)}
       role="treeitem"
-      style={{
-        "--tree-depth": depth,
-        "--tree-order": Math.min(rowOrder, 14),
-      } as React.CSSProperties}
+      style={{ "--tree-depth": depth } as React.CSSProperties}
       tabIndex={focused ? 0 : -1}
     >
       {expandable ? (
@@ -736,14 +732,16 @@ export function ResourceTree({
   );
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
-  const [viewTransition, setViewTransition] =
-    useState<"edit" | "filter" | null>(null);
   const [addMenuGroupId, setAddMenuGroupId] = useState<string | null>(null);
   const [inlineCreate, setInlineCreate] = useState<InlineCreate | null>(null);
   const [inlineRename, setInlineRename] = useState<InlineRename | null>(null);
   const knownIds = useRef<Set<string> | null>(null);
   const knownIdsViewKey = useRef(viewTransitionKey);
-  const animatedViewKey = useRef(viewTransitionKey);
+  const layoutViewKey = useRef(viewTransitionKey);
+  const layoutRects = useRef(new Map<string, {
+    left: number;
+    top: number;
+  }>());
   const rowElements = useRef(new Map<string, HTMLDivElement>());
   const inlineCreateElement = useRef<HTMLFormElement>(null);
   const focusAfterMutation = useRef(false);
@@ -790,20 +788,64 @@ export function ResourceTree({
     knownIds.current = nextIds;
   }, [snapshot, viewTransitionKey]);
 
-  useEffect(() => {
-    if (animatedViewKey.current === viewTransitionKey) return;
-    animatedViewKey.current = viewTransitionKey;
-    setViewTransition(
-      viewTransitionKey === "configuration" ? "edit" : "filter",
-    );
-    const timer = globalThis.setTimeout(() => setViewTransition(null), 900);
-    return () => globalThis.clearTimeout(timer);
-  }, [viewTransitionKey]);
-
   const rows = useMemo(
     () => visibleRows(snapshot, expanded, filter, presentation),
     [snapshot, expanded, filter, presentation],
   );
+
+  useLayoutEffect(() => {
+    const viewChanged = layoutViewKey.current !== viewTransitionKey;
+    const nextRects = new Map<string, { left: number; top: number }>();
+    rowElements.current.forEach((element, nodeId) => {
+      const layoutAnimationActive = element.getAnimations?.().some(
+        (animation) => (
+          animation.id === "tree-layout-transition"
+          && animation.playState === "running"
+        ),
+      ) ?? false;
+      const previousTarget = layoutRects.current.get(nodeId);
+      if (!viewChanged && layoutAnimationActive && previousTarget) {
+        nextRects.set(nodeId, previousTarget);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      nextRects.set(nodeId, { left: rect.left, top: rect.top });
+    });
+
+    const reduceMotion = globalThis.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    ).matches ?? false;
+    if (viewChanged && !reduceMotion) {
+      nextRects.forEach((nextRect, nodeId) => {
+        const previousRect = layoutRects.current.get(nodeId);
+        const element = rowElements.current.get(nodeId);
+        if (!previousRect || !element) return;
+        const x = previousRect.left - nextRect.left;
+        const y = previousRect.top - nextRect.top;
+        if (
+          (Math.abs(x) < 0.5 && Math.abs(y) < 0.5)
+          || typeof element.animate !== "function"
+        ) {
+          return;
+        }
+
+        element.getAnimations?.().forEach((animation) => {
+          if (animation.id === "tree-layout-transition") animation.cancel();
+        });
+        const animation = element.animate([
+          { transform: `translate(${x}px, ${y}px)` },
+          { transform: "translate(0, 0)" },
+        ], {
+          duration: 520,
+          easing: "cubic-bezier(0.2, 0.75, 0.25, 1)",
+        });
+        animation.id = "tree-layout-transition";
+      });
+    }
+
+    layoutRects.current = nextRects;
+    layoutViewKey.current = viewTransitionKey;
+  }, [rows, viewTransitionKey]);
   const validationErrorPaths = useMemo(() => {
     const items = new Set<string>();
     const ancestors = new Set<string>();
@@ -1172,15 +1214,8 @@ export function ResourceTree({
         />
       </label>
       <div className="tree-scroll" data-testid="tree-scroller">
-        <div
-          aria-label="Workflow resources"
-          className={[
-            "resource-tree",
-            viewTransition ? `tree-view-transition-${viewTransition}` : "",
-          ].join(" ")}
-          role="tree"
-        >
-          {rows.map((row, rowOrder) => (
+        <div aria-label="Workflow resources" className="resource-tree" role="tree">
+          {rows.map((row) => (
             <Fragment key={row.node.id}>
               <TreeRow
                 expanded={expanded.has(row.node.id) || filter.length > 0}
@@ -1226,7 +1261,6 @@ export function ResourceTree({
                   current === nodeId ? null : nodeId
                 ))}
                 row={row}
-                rowOrder={rowOrder}
                 rowRef={rowRef}
                 selected={
                   inlineCreate

@@ -899,10 +899,7 @@ export function App() {
               <h2>No migration resources found</h2>
             </main>
           ) : (
-            <main className={[
-              "manage-layout",
-              editContext ? "editing" : "",
-            ].join(" ")}>
+            <main className="manage-layout">
               <section
                 aria-label="Resource navigation"
                 className={`tree-panel ${treeOpen ? "open" : ""}`}

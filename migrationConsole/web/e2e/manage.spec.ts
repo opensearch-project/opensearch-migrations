@@ -3,6 +3,20 @@ import { expect, test, type Page } from "@playwright/test";
 import { configDraft, manageSnapshot } from "../src/test/fixtures";
 
 
+interface BrowserAnimation {
+  id: string;
+  effect: {
+    getKeyframes: () => Array<Record<string, unknown>>;
+  } | null;
+}
+
+
+interface BrowserAnimatedElement {
+  getAnimations: () => BrowserAnimation[];
+  getAttribute: (name: string) => string | null;
+}
+
+
 async function mockManageApi(page: Page) {
   let snapshot = structuredClone(manageSnapshot);
   let draft = structuredClone(configDraft);
@@ -504,6 +518,18 @@ async function mockManageApi(page: Page) {
         valid: true,
         errors: [],
         diagnostics: [],
+      };
+    },
+    configureRolloutViews() {
+      snapshot.nodes["resource:captureproxies:capture"].configPresence = {
+        deployed: true,
+        submitted: false,
+        pending: false,
+      };
+      snapshot.nodes["resource:trafficreplays:replay"].configPresence = {
+        deployed: false,
+        submitted: true,
+        pending: true,
       };
     },
     makeSourceInvalid() {
@@ -1046,16 +1072,55 @@ test("animates resource filters and entry into configuration mode", async ({ pag
   test.skip(testInfo.project.name !== "desktop", "desktop motion coverage");
   const api = await mockManageApi(page);
   api.makeConfigValid();
+  api.configureRolloutViews();
   await page.goto("/");
 
   const tree = page.getByRole("tree", { name: "Workflow resources" });
-  await page.getByRole("button", { name: "Deployed" }).click();
-  await expect(tree.locator(".tree-row").first())
-    .toHaveCSS("animation-name", "tree-filter-settle");
+  await expect(tree.getByRole("treeitem", {
+    name: /^replay, Running$/,
+  })).toBeVisible();
+  const initialIds = await tree.locator(".tree-row").evaluateAll(
+    (elements: unknown[]) => (
+      (elements as BrowserAnimatedElement[]).flatMap((row) => {
+        const nodeId = row.getAttribute("data-node-id");
+        return nodeId ? [nodeId] : [];
+      })
+    ),
+  );
+  const movingRows = () => tree.locator(".tree-row").evaluateAll(
+    (elements: unknown[]) => (
+      (elements as BrowserAnimatedElement[]).flatMap((row) => {
+        const nodeId = row.getAttribute("data-node-id");
+        return nodeId && row.getAnimations().some(
+          (animation) => animation.id === "tree-layout-transition",
+        )
+          ? [nodeId]
+          : []
+      })
+    ),
+  );
+
+  await page.getByRole("button", { name: "Submitted" }).click();
+  await expect.poll(movingRows).not.toEqual([]);
+  const filterAnchors = await movingRows();
+  expect(filterAnchors.every((nodeId) => initialIds.includes(nodeId))).toBe(true);
+  const usesOpacity = await tree.locator(".tree-row").evaluateAll(
+    (elements: unknown[]) => (
+      (elements as BrowserAnimatedElement[]).some(
+        (row) => row.getAnimations().some((animation) => (
+          animation.id === "tree-layout-transition"
+          && animation.effect?.getKeyframes().some(
+            (keyframe) => keyframe["opacity"] !== undefined,
+          )
+        )),
+      )
+    ),
+  );
+  expect(usesOpacity).toBe(false);
+  await page.waitForTimeout(550);
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
-  await expect(tree.locator(".tree-row").first())
-    .toHaveCSS("animation-name", "tree-edit-settle");
+  await expect.poll(movingRows).not.toEqual([]);
 });
 
 
@@ -1205,6 +1270,7 @@ test("disables insertion motion when reduced motion is requested", async ({ page
   test.skip(testInfo.project.name !== "desktop", "one browser is sufficient");
   await page.emulateMedia({ reducedMotion: "reduce" });
   const api = await mockManageApi(page);
+  api.configureRolloutViews();
   await page.goto("/");
 
   api.insertCapture();
@@ -1216,12 +1282,21 @@ test("disables insertion motion when reduced motion is requested", async ({ page
   await expect(inserted).toBeVisible();
   await expect(inserted).toHaveCSS("animation-name", "none");
 
-  await page.getByRole("button", { name: "Deployed" }).click();
-  const firstRow = page.getByRole("tree", {
+  const tree = page.getByRole("tree", {
     name: "Workflow resources",
-  }).locator(".tree-row").first();
-  await expect(firstRow).toHaveCSS("animation-name", "none");
+  });
+  const layoutAnimationCount = () => tree.locator(".tree-row").evaluateAll(
+    (elements: unknown[]) => (
+      (elements as BrowserAnimatedElement[]).reduce((count, row) => (
+        count + row.getAnimations().filter(
+          (animation) => animation.id === "tree-layout-transition",
+        ).length
+      ), 0)
+    ),
+  );
 
+  await page.getByRole("button", { name: "Submitted" }).click();
+  expect(await layoutAnimationCount()).toBe(0);
   await page.getByRole("button", { name: "Edit configuration" }).click();
-  await expect(firstRow).toHaveCSS("animation-name", "none");
+  expect(await layoutAnimationCount()).toBe(0);
 });
