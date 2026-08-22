@@ -749,16 +749,6 @@ button {
   background: var(--danger);
 }
 
-.revision {
-  max-width: 90px;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .icon-button {
   display: inline-grid;
   width: 34px;
@@ -928,6 +918,45 @@ button {
   font-size: 11px;
 }
 
+.resource-view-switcher {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 10px 11px 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.resource-view-switcher button {
+  min-width: 0;
+  height: 36px;
+  padding: 0 4px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.resource-view-switcher button:last-child {
+  border-right: 0;
+}
+
+.resource-view-switcher button:hover {
+  color: var(--text);
+  background: var(--surface-subtle);
+}
+
+.resource-view-switcher button[aria-pressed="true"] {
+  color: #104c57;
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px var(--accent);
+  font-weight: 700;
+}
+
 .tree-filter {
   position: relative;
   display: flex;
@@ -1009,6 +1038,11 @@ button {
 .tree-row:focus-visible {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tree-status-spacer {
+  width: 15px;
+  height: 15px;
 }
 
 .tree-row.draft-change-ancestor {
@@ -2323,6 +2357,157 @@ button {
   color: var(--accent);
 }
 
+.dependency-graph {
+  padding: 12px 14px 20px;
+}
+
+.dependency-level {
+  display: grid;
+  gap: 5px;
+}
+
+.dependency-level-label,
+.dependency-run h3,
+.activity-steps h3 {
+  margin: 0 0 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dependency-node {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  text-align: left;
+  background: var(--surface);
+}
+
+button.dependency-node:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+button.dependency-node:disabled {
+  color: var(--text);
+  opacity: 0.72;
+}
+
+.dependency-node > span {
+  min-width: 0;
+}
+
+.dependency-node strong,
+.dependency-node small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-node strong {
+  font-size: 11px;
+}
+
+.dependency-node small {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.dependency-node em {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+  color: #7b5309;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dependency-node em svg {
+  width: 11px;
+  height: 11px;
+}
+
+.dependency-selected {
+  border-color: #9fc9ce;
+  background: var(--accent-soft);
+}
+
+.dependency-selected > span > small:first-child {
+  color: #176b78;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dependency-selected > span > button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 25px;
+  margin-top: 5px;
+  padding: 0 6px;
+  border: 1px solid #bd8b31;
+  border-radius: 3px;
+  color: #6d4a09;
+  background: #fff;
+  font-size: 9px;
+}
+
+.dependency-selected > span > button svg {
+  width: 11px;
+}
+
+.dependency-connector {
+  position: relative;
+  display: grid;
+  height: 26px;
+  place-items: center;
+  color: #77878e;
+}
+
+.dependency-connector::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: #c5cfd3;
+  content: "";
+}
+
+.dependency-connector svg {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.dependency-run {
+  margin: 8px 0 2px 8px;
+  padding: 7px 0 1px 14px;
+  border-left: 1px solid #b8c9cd;
+}
+
+.dependency-run .activity-step {
+  min-height: 42px;
+}
+
+.dependency-run .activity-step:last-child {
+  border-bottom: 0;
+}
+
 .approval-activity {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
@@ -2452,6 +2637,10 @@ button {
 
 .activity-steps {
   padding: 4px 14px 20px;
+}
+
+.activity-steps h3 {
+  padding-top: 8px;
 }
 
 .activity-step {
@@ -4225,8 +4414,7 @@ button {
     padding: 9px 11px;
   }
 
-  .workflow-state,
-  .revision {
+  .workflow-state {
     display: none;
   }
 

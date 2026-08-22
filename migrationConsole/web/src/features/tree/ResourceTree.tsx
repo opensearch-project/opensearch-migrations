@@ -46,6 +46,7 @@ interface ResourceTreeProps {
   snapshot: ManageSnapshot;
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
+  presentation: "configuration" | "runtime";
   resourceAdds: ResourceAddController | null;
   changeStates: Record<string, ResourceDraftChangeState>;
   validationStates: Record<string, ResourceValidationState>;
@@ -64,7 +65,11 @@ function descendants(
 }
 
 
-function filterIds(snapshot: ManageSnapshot, query: string): Set<string> | null {
+function filterIds(
+  snapshot: ManageSnapshot,
+  query: string,
+  presentation: ResourceTreeProps["presentation"],
+): Set<string> | null {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return null;
   const visible = new Set<string>();
@@ -72,8 +77,7 @@ function filterIds(snapshot: ManageSnapshot, query: string): Set<string> | null 
     const searchable = [
       node.label,
       node.description,
-      node.phase,
-      node.status,
+      ...(presentation === "runtime" ? [node.phase, node.status] : []),
       node.valueSummary,
     ]
       .filter(Boolean)
@@ -95,8 +99,9 @@ function visibleRows(
   snapshot: ManageSnapshot,
   expanded: ReadonlySet<string>,
   query: string,
+  presentation: ResourceTreeProps["presentation"],
 ): VisibleRow[] {
-  const included = filterIds(snapshot, query);
+  const included = filterIds(snapshot, query, presentation);
   const rows: VisibleRow[] = [];
   const visit = (nodeId: string, depth: number) => {
     const node = snapshot.nodes[nodeId];
@@ -113,6 +118,7 @@ function visibleRows(
 
 interface TreeRowProps {
   row: VisibleRow;
+  presentation: ResourceTreeProps["presentation"];
   expanded: boolean;
   inserted: boolean;
   focused: boolean;
@@ -163,6 +169,7 @@ interface InlineRename {
 
 const TreeRow = memo(function TreeRow({
   row,
+  presentation,
   expanded,
   inserted,
   focused,
@@ -192,6 +199,7 @@ const TreeRow = memo(function TreeRow({
   rowRef,
 }: TreeRowProps) {
   const { node, depth } = row;
+  const configurationOnly = presentation === "configuration";
   const expandable = node.childIds.length > 0;
   const runtimeState = node.phase ?? statusLabel(node.status);
   const configurationState = (
@@ -207,6 +215,9 @@ const TreeRow = memo(function TreeRow({
     "Removal pending submission",
     "Will be orphaned by new configuration",
     "Orphaned; cleanup required",
+    "Marked for removal",
+    "Syncing",
+    "Syncing configuration",
     "Removing",
   ].includes(node.valueSummary ?? "");
   const spokenState = node.status === "removed"
@@ -216,7 +227,7 @@ const TreeRow = memo(function TreeRow({
       : explicitConfigurationState
         ? node.valueSummary
         : node.phase ?? node.status;
-  const attentionState = (
+  const attentionState = !configurationOnly && (
     node.phase
     && ["warning", "required", "gated", "blocked", "error"].includes(node.status)
     && !(
@@ -232,7 +243,9 @@ const TreeRow = memo(function TreeRow({
         : statusLabel(node.status)
     )
     : null;
-  const activeRequirements = (node.relationships ?? []).filter(
+  const activeRequirements = configurationOnly ? [] : (
+    node.relationships ?? []
+  ).filter(
     (relationship) => (
       relationship.direction === "requires"
       && relationship.targetStatus !== "ok"
@@ -253,10 +266,10 @@ const TreeRow = memo(function TreeRow({
     : activeRequirement?.targetStatus === "unknown"
       ? "Depends on"
       : "Waiting for";
-  const approvalCapability = node.capabilities.find(
+  const approvalCapability = configurationOnly ? undefined : node.capabilities.find(
     (capability) => capability.kind === "approve",
   );
-  const approvalDiagnostic = node.diagnostics.find(
+  const approvalDiagnostic = configurationOnly ? undefined : node.diagnostics.find(
     (diagnostic) => diagnostic.source === "workflow-apply",
   );
   const approvalAttention = approvalCapability || approvalDiagnostic
@@ -287,13 +300,22 @@ const TreeRow = memo(function TreeRow({
       aria-label={[
         node.label,
         resourceType,
-        spokenState,
+        configurationOnly
+          ? draftChange?.label
+            ?? (explicitConfigurationState ? configurationState : null)
+          : spokenState,
       ].filter(Boolean).join(", ")}
       aria-level={depth}
       aria-selected={selected}
       className={[
         "tree-row",
-        `status-${node.status}`,
+        (
+          !configurationOnly
+          || ["changed", "removed", "syncing"].includes(node.status)
+        )
+          ? `status-${node.status}`
+          : "",
+        configurationOnly ? "configuration-tree-row" : "",
         validationErrorItem ? "validation-error-item" : "",
         validationErrorAncestor ? "validation-error-ancestor" : "",
         selected ? "selected" : "",
@@ -330,7 +352,13 @@ const TreeRow = memo(function TreeRow({
       ) : (
         <span className="tree-expander-spacer" />
       )}
-      <StatusIndicator status={indicatorState} />
+      {!configurationOnly || ["changed", "removed", "syncing"].includes(
+        node.status,
+      ) ? (
+        <StatusIndicator status={indicatorState} />
+      ) : (
+        <span className="tree-status-spacer" />
+      )}
       {renaming && renameOption ? (
         <form
           className="tree-inline-name"
@@ -406,7 +434,7 @@ const TreeRow = memo(function TreeRow({
               {resourceType ? (
                 <span className="tree-resource-type">{resourceType}</span>
               ) : null}
-              <span>{runtimeState}</span>
+              {!configurationOnly ? <span>{runtimeState}</span> : null}
               {attentionState && !approvalAttention ? (
                 <span className={`tree-attention-state attention-${node.status}`}>
                   {attentionState}
@@ -420,7 +448,9 @@ const TreeRow = memo(function TreeRow({
                   {draftChange.label}
                 </span>
               ) : null}
-              {configurationState ? (
+              {configurationState && (
+                !configurationOnly || explicitConfigurationState
+              ) ? (
                 <span className={[
                   "tree-config-state",
                   (
@@ -576,7 +606,7 @@ const TreeRow = memo(function TreeRow({
               <span>{validation.issueCount}</span>
             ) : null}
           </span>
-        ) : node.diagnostics.length > 0 ? (
+        ) : !configurationOnly && node.diagnostics.length > 0 ? (
           <span
             aria-label={`${node.diagnostics.length} diagnostics`}
             className="diagnostic-count"
@@ -688,6 +718,7 @@ export function ResourceTree({
   snapshot,
   selectedId,
   onSelect,
+  presentation,
   resourceAdds,
   changeStates,
   validationStates,
@@ -743,8 +774,8 @@ export function ResourceTree({
   }, [snapshot]);
 
   const rows = useMemo(
-    () => visibleRows(snapshot, expanded, filter),
-    [snapshot, expanded, filter],
+    () => visibleRows(snapshot, expanded, filter, presentation),
+    [snapshot, expanded, filter, presentation],
   );
   const validationErrorPaths = useMemo(() => {
     const items = new Set<string>();
@@ -1121,6 +1152,7 @@ export function ResourceTree({
                 expanded={expanded.has(row.node.id) || filter.length > 0}
                 focused={focusedId === row.node.id}
                 inserted={insertedIds.has(row.node.id)}
+                presentation={presentation}
                 addMenuOpen={addMenuGroupId === row.node.id}
                 addOptions={addOptionsByGroup.get(row.node.id) ?? []}
                 addPending={resourceAdds?.busy ?? false}

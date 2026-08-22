@@ -788,10 +788,17 @@ test("keeps the resource overview visible during scoped editing", async ({ page 
   await page.getByRole("button", { name: "Edit configuration" }).click();
 
   await expect(resources).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+  await expect(page.getByRole("heading", {
+    name: "Run & dependencies",
+  })).toBeVisible();
   await expect(
     page.getByRole("table", { name: "Configuration fields" }),
   ).toBeVisible();
+  await expect(resources.getByText("Deploy replay")).toHaveCount(0);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("configuration-only-navigation.png"),
+  });
 });
 
 
@@ -803,7 +810,7 @@ test("keeps valid status compact in navigation without an editor footer", async 
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
-  const legacy = page.getByRole("treeitem", { name: /^legacy, Ready$/ });
+  const legacy = page.getByRole("treeitem", { name: /^legacy$/ });
   const valid = legacy.getByLabel("Configuration valid");
   await expect(valid).toBeVisible();
   const validBox = await valid.boundingBox();
@@ -863,10 +870,10 @@ test("taints validation errors and their parent paths", async ({ page }, testInf
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
-  const legacy = page.getByRole("treeitem", { name: /^legacy, Ready$/ });
-  const captureGroup = page.getByRole("treeitem", { name: /^Capture,/ });
+  const legacy = page.getByRole("treeitem", { name: /^legacy$/ });
+  const captureGroup = page.getByRole("treeitem", { name: /^Capture$/ });
   const migrationSection = page.getByRole("treeitem", {
-    name: /^Live Traffic Migration,/,
+    name: /^Live Traffic Migration$/,
   });
   await expect(legacy).toHaveClass(/validation-error-item/);
   await expect(captureGroup).toHaveClass(/validation-error-ancestor/);
@@ -960,8 +967,26 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   await page.goto("/");
 
   const tree = page.getByRole("tree", { name: "Workflow resources" });
+  const resourceViews = page.getByRole("group", {
+    name: "Resource state view",
+  });
+  await expect(resourceViews.getByRole("button", { name: "All" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(resourceViews.getByRole("button", { name: "Deployed" }))
+    .toBeVisible();
+  await expect(resourceViews.getByRole("button", { name: "Submitted" }))
+    .toBeVisible();
+  await expect(resourceViews.getByRole("button", { name: "Saved config" }))
+    .toBeVisible();
   const capture = tree.getByRole("treeitem", { name: /^capture, Ready$/ });
   await expect(capture).toBeVisible();
+  await expect(page.getByRole("region", {
+    name: "Dependency graph for capture",
+  })).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("resource-state-and-dependencies.png"),
+  });
   await capture.click();
   await expect(page.getByRole("heading", { name: "capture" })).toBeVisible();
   await expect(page.getByText("Load balancer is unavailable in this cluster"))
@@ -1100,8 +1125,15 @@ test("keeps tree and activity reachable at narrow width", async ({ page }, testI
 
   const activity = page.getByRole("complementary");
   await expect(activity).toBeInViewport();
-  await expect(activity.getByRole("heading", { name: "Activity" })).toBeVisible();
+  await expect(activity.getByRole("heading", {
+    name: "Run & dependencies",
+  })).toBeVisible();
   await expect(activity.getByText("Deploy replay")).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("narrow-run-and-dependencies.png"),
+  });
 
   const scrollWidth = await page.evaluate<number>(
     "document.documentElement.scrollWidth",

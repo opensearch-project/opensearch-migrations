@@ -353,23 +353,56 @@ function projectPendingRename(
 }
 
 
+function configurationOnlySnapshot(
+  snapshot: ManageSnapshot,
+): ManageSnapshot {
+  const workflowStepIds = new Set(
+    Object.values(snapshot.nodes)
+      .filter((node) => node.kind === "workflow-step")
+      .map((node) => node.id),
+  );
+  if (workflowStepIds.size === 0) return snapshot;
+  const nodes = Object.fromEntries(
+    Object.entries(snapshot.nodes).flatMap(([nodeId, node]) => (
+      workflowStepIds.has(nodeId)
+        ? []
+        : [[nodeId, {
+          ...node,
+          childIds: node.childIds.filter(
+            (childId) => !workflowStepIds.has(childId),
+          ),
+        }]]
+    )),
+  );
+  return {
+    ...snapshot,
+    nodes,
+    rootIds: snapshot.rootIds.filter(
+      (rootId) => !workflowStepIds.has(rootId),
+    ),
+  };
+}
+
+
 export function projectEditSnapshot(
   snapshot: ManageSnapshot,
   draft: ConfigDraft | undefined,
   pendingAdditions: PendingResourceAddition[] = [],
   pendingRenames: PendingResourceRename[] = [],
 ): ManageSnapshot {
+  const configurationSnapshot = configurationOnlySnapshot(snapshot);
   if (
     !draft
     && pendingAdditions.length === 0
     && pendingRenames.length === 0
   ) {
-    return snapshot;
+    return configurationSnapshot;
   }
   const editNodes = flattenEditNodes(draft?.editState.nodes ?? []);
   const nodes: Record<string, ManageNode> = draft
-    ? Object.fromEntries(Object.entries(snapshot.nodes).map(([nodeId, node]) => {
-      if (node.kind === "workflow-step") return [nodeId, node];
+    ? Object.fromEntries(Object.entries(configurationSnapshot.nodes).map((
+      [nodeId, node],
+    ) => {
       const targetId = editTarget(node);
       const pendingRemoval = (
         node.configPresence?.pending === false
@@ -399,7 +432,7 @@ export function projectEditSnapshot(
         },
       ];
     }))
-    : { ...snapshot.nodes };
+    : { ...configurationSnapshot.nodes };
   if (draft) projectDraftAdditions(nodes, editNodes, draft);
   pendingAdditions.forEach((addition) => appendAddition(
     nodes,
@@ -410,7 +443,7 @@ export function projectEditSnapshot(
   ));
   pendingRenames.forEach((rename) => projectPendingRename(nodes, rename));
   return {
-    ...snapshot,
+    ...configurationSnapshot,
     revision: `${snapshot.revision}:${draft?.draftRevision ?? "loading"}:editing`,
     nodes,
   };
