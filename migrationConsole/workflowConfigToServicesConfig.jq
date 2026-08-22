@@ -28,6 +28,13 @@ def normalizeAllowInsecure:
     .
   end;
 
+def normalizeSolrContextPath:
+  if has("solrContextPath") then
+    .solr_context_path = .solrContextPath | del(.solrContextPath)
+  else
+    .
+  end;
+
 def normalizeSnapshotName:
   if has("snapshotName") then
     .snapshot_name = .snapshotName | del(.snapshotName)
@@ -87,7 +94,7 @@ def normalizeRepoConfig:
 
 # Normalize cluster config (only for source_cluster and target_cluster)
 def normalizeCluster:
-  normalizeClusterAuthConfig | normalizeAllowInsecure;
+  normalizeClusterAuthConfig | normalizeAllowInsecure | normalizeSolrContextPath;
 
 # Normalize snapshot config
 def normalizeSnapshot:

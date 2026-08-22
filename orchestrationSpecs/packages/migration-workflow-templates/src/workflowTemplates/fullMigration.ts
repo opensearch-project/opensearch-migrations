@@ -592,6 +592,8 @@ export const FullMigration = WorkflowBuilder.create({
                             version: expr.get(snapshotMigrationConfig, "sourceVersion"),
                             endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                             allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
+                            solrContextPath: expr.dig(
+                                snapshotMigrationConfig, ["sourceConnectionIdentity", "solrContextPath"], ""),
                             authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
                         })),
                         snapshotConfig: expr.serialize(expr.makeDict({

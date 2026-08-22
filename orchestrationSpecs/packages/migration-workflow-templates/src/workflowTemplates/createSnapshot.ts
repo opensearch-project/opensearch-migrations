@@ -63,7 +63,9 @@ function makeParamsDict(
         expr.mergeDicts(
             expr.makeDict({
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                "snapshotRepoName": expr.jsonPathStrict(snapshotConfig, "repoConfig", "repoName")
+                "snapshotRepoName": expr.jsonPathStrict(snapshotConfig, "repoConfig", "repoName"),
+                "solrContextPath": expr.dig(
+                    expr.deserializeRecord(sourceConfig), ["solrContextPath"], expr.literal("/solr"))
             }),
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), false)
         )
