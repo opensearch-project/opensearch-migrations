@@ -34,7 +34,7 @@ export function SubmitConfigDialog({
   onClose,
   onSubmitted,
   reason,
-}: SubmitConfigDialogProps) {
+}: Readonly<SubmitConfigDialogProps>) {
   const queryClient = useQueryClient();
   const [sessionKey] = useState(() => Math.random().toString(36).slice(2));
   const [submitting, setSubmitting] = useState(false);
@@ -332,10 +332,8 @@ export function SubmitConfigDialog({
             disabled={
               submitting
               || loading
-              || !review.data
-              || !review.data.valid
-              || !preflight.data
-              || !preflight.data.allowed
+              || !review.data?.valid
+              || !preflight.data?.allowed
             }
             onClick={() => void submit()}
             title={directSubmitTitle}

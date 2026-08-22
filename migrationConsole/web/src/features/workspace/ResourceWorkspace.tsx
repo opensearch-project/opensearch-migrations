@@ -51,7 +51,7 @@ function ResourceActions({
   onReset,
   cleanupRequired,
   resetInProgress,
-}: {
+}: Readonly<{
   node: ManageNode;
   onOutput: (targetId: string) => void;
   onLogs: (targetId: string) => void;
@@ -59,7 +59,7 @@ function ResourceActions({
   onReset: (targetId: string) => void;
   cleanupRequired: boolean;
   resetInProgress: boolean;
-}) {
+}>) {
   const capabilities = node.capabilities.filter(
     (capability) => capability.kind !== "edit",
   );
@@ -155,11 +155,11 @@ function ResourceIssues({
   node,
   onEdit,
   onReviewApproval,
-}: {
+}: Readonly<{
   node: ManageNode;
   onEdit?: () => void;
   onReviewApproval?: (targetId: string) => void;
-}) {
+}>) {
   const issues = node.diagnostics.filter((diagnostic) => (
     diagnostic.source === "workflow-apply"
     || diagnostic.source === "workflow-step"
@@ -254,7 +254,7 @@ function ResourceIssues({
 }
 
 
-function Diagnostics({ node }: { node: ManageNode }) {
+function Diagnostics({ node }: Readonly<{ node: ManageNode }>) {
   const diagnostics = node.diagnostics.filter((diagnostic) => (
     diagnostic.source !== "workflow-apply"
     && diagnostic.source !== "workflow-step"
@@ -292,7 +292,7 @@ function Diagnostics({ node }: { node: ManageNode }) {
 }
 
 
-function Comparisons({ node }: { node: ManageNode }) {
+function Comparisons({ node }: Readonly<{ node: ManageNode }>) {
   if (node.comparisons.length === 0) return null;
   return (
     <section className="workspace-section">
@@ -332,11 +332,11 @@ function RelationshipList({
   direction,
   onSelect,
   relationships,
-}: {
+}: Readonly<{
   direction: ManageRelationship["direction"];
   onSelect: (nodeId: string) => void;
   relationships: ManageRelationship[];
-}) {
+}>) {
   if (relationships.length === 0) return null;
   const prerequisite = direction === "requires";
   return (
@@ -381,10 +381,10 @@ function RelationshipList({
 function Relationships({
   node,
   onSelect,
-}: {
+}: Readonly<{
   node: ManageNode;
   onSelect: (nodeId: string) => void;
-}) {
+}>) {
   const relationships = node.relationships ?? [];
   const requires = relationships.filter(
     (relationship) => relationship.direction === "requires",
@@ -419,13 +419,13 @@ export function ResourceWorkspace({
   onEdit,
   onRequestApproval,
   resetInProgress = false,
-}: {
+}: Readonly<{
   node: ManageNode;
   onSelect: (nodeId: string) => void;
   onEdit?: () => void;
   onRequestApproval?: (targetId: string) => void;
   resetInProgress?: boolean;
-}) {
+}>) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
   const [logTarget, setLogTarget] = useState<string | null>(null);
   const [pendingAction, setPendingAction] =

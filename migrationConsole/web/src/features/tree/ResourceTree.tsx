@@ -334,14 +334,6 @@ const TreeRow = memo(function TreeRow({
       {renaming && renameOption ? (
         <form
           className="tree-inline-name"
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onCancelRename();
-            }
-          }}
           onSubmit={(event) => {
             event.preventDefault();
             onSubmitRename();
@@ -354,6 +346,7 @@ const TreeRow = memo(function TreeRow({
               event.currentTarget.setCustomValidity("");
               onChangeRename(event.target.value);
             }}
+            onClick={(event) => event.stopPropagation()}
             onInvalid={(event) => {
               if (
                 event.currentTarget.validity.patternMismatch
@@ -362,6 +355,13 @@ const TreeRow = memo(function TreeRow({
                 event.currentTarget.setCustomValidity(
                   renameOption.validationMessage,
                 );
+              }
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancelRename();
               }
             }}
             pattern={renameOption.pattern}
@@ -379,6 +379,7 @@ const TreeRow = memo(function TreeRow({
               || !renameValue.trim()
               || renameValue.trim() === renameOption.currentName
             }
+            onClick={(event) => event.stopPropagation()}
             title="Apply rename"
             type="submit"
           >
@@ -387,7 +388,10 @@ const TreeRow = memo(function TreeRow({
           <button
             aria-label="Cancel rename"
             disabled={addPending}
-            onClick={onCancelRename}
+            onClick={(event) => {
+              event.stopPropagation();
+              onCancelRename();
+            }}
             title="Cancel rename"
             type="button"
           >
@@ -477,16 +481,16 @@ const TreeRow = memo(function TreeRow({
               </button>
             ) : null}
           </span>
-          <span
-            className="tree-row-tools"
-            onClick={(event) => event.stopPropagation()}
-          >
+          <span className="tree-row-tools">
         {addOptions.length === 1 ? (
           <button
             aria-label={`Add ${addOptions[0].label}`}
             className="tree-group-add"
             disabled={addPending || addOptions[0].disabled}
-            onClick={() => onAddResource(addOptions[0].id)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAddResource(addOptions[0].id);
+            }}
             title={
               addOptions[0].disabledReason
               ?? `Add ${addOptions[0].label} to ${node.label}`
@@ -506,7 +510,10 @@ const TreeRow = memo(function TreeRow({
                 addPending
                 || addOptions.every((option) => option.disabled)
               }
-              onClick={() => onToggleAddMenu(node.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleAddMenu(node.id);
+              }}
               title={`Add resource to ${node.label}`}
               type="button"
             >
@@ -522,7 +529,10 @@ const TreeRow = memo(function TreeRow({
                   <button
                     disabled={addPending || option.disabled}
                     key={option.id}
-                    onClick={() => onAddResource(option.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onAddResource(option.id);
+                    }}
                     role="menuitem"
                     title={option.disabledReason ?? `Add ${option.label}`}
                     type="button"
@@ -540,7 +550,10 @@ const TreeRow = memo(function TreeRow({
             aria-label={`Rename ${node.label}`}
             className="tree-resource-rename"
             disabled={addPending}
-            onClick={() => onStartRename(node.id)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onStartRename(node.id);
+            }}
             title={`Rename ${node.label} and update dependent workflow references`}
             type="button"
           >
@@ -588,7 +601,7 @@ function InlineCreateRow({
   onFormRef,
   onLeave,
   onSubmit,
-}: {
+}: Readonly<{
   create: InlineCreate;
   depth: number;
   pending: boolean;
@@ -597,7 +610,7 @@ function InlineCreateRow({
   onFormRef: (element: HTMLFormElement | null) => void;
   onLeave: () => void;
   onSubmit: () => void;
-}) {
+}>) {
   return (
     <form
       aria-label={`New ${create.option.label}`}
@@ -678,7 +691,7 @@ export function ResourceTree({
   resourceAdds,
   changeStates,
   validationStates,
-}: ResourceTreeProps) {
+}: Readonly<ResourceTreeProps>) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(),
@@ -718,9 +731,12 @@ export function ResourceTree({
       );
       if (inserted.size > 0) {
         setInsertedIds(inserted);
-        const timer = window.setTimeout(() => setInsertedIds(new Set()), 450);
+        const timer = globalThis.setTimeout(
+          () => setInsertedIds(new Set()),
+          450,
+        );
         knownIds.current = nextIds;
-        return () => window.clearTimeout(timer);
+        return () => globalThis.clearTimeout(timer);
       }
     }
     knownIds.current = nextIds;
