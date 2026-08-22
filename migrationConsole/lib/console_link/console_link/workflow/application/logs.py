@@ -366,25 +366,13 @@ class KubernetesLogSource:
                 if stop.is_set():
                     break
                 timestamp, message = _split_timestamp(line)
-                emit(LogRecord(
-                    timestamp=timestamp,
-                    pod_name=selection.pod_name or "",
-                    pod_uid=selection.pod_uid or "",
-                    container=selection.container or "",
-                    restart_count=selection.restart_count or 0,
-                    previous=False,
-                    message=message,
-                ))
+                emit(_selection_record(selection, timestamp, message))
         except Exception as error:
             if not stop.is_set():
-                emit(LogRecord(
-                    timestamp=None,
-                    pod_name=selection.pod_name or "",
-                    pod_uid=selection.pod_uid or "",
-                    container=selection.container or "",
-                    restart_count=selection.restart_count or 0,
-                    previous=False,
-                    message=str(error) or type(error).__name__,
+                emit(_selection_record(
+                    selection,
+                    None,
+                    str(error) or type(error).__name__,
                     kind="error",
                 ))
         finally:
@@ -916,3 +904,22 @@ def _decode_cursor(cursor: str) -> int:
         return max(0, int(value))
     except ValueError as error:
         raise LogUnavailable("The log cursor is invalid.") from error
+
+
+def _selection_record(
+    selection: LogSelection,
+    timestamp: Optional[str],
+    message: str,
+    *,
+    kind: str = "log",
+) -> LogRecord:
+    return LogRecord(
+        timestamp=timestamp,
+        pod_name=selection.pod_name or "",
+        pod_uid=selection.pod_uid or "",
+        container=selection.container or "",
+        restart_count=selection.restart_count or 0,
+        previous=False,
+        message=message,
+        kind=kind,
+    )

@@ -30,10 +30,10 @@ function displayContent(content: string, contentType: string): string {
 export function OutputPanel({
   targetId,
   onClose,
-}: {
+}: Readonly<{
   targetId: string;
   onClose: () => void;
-}) {
+}>) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const inventory = useQuery({
@@ -76,7 +76,7 @@ export function OutputPanel({
     if (rendered === null) return;
     await navigator.clipboard.writeText(rendered);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1400);
+    globalThis.setTimeout(() => setCopied(false), 1400);
   };
 
   return (

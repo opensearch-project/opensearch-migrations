@@ -40,14 +40,14 @@ export function ActivityPanel({
   onSelectNode,
   approvals,
   onReviewApproval,
-}: {
+}: Readonly<{
   snapshot: ManageSnapshot;
   selectedNode: ManageNode | null;
   operations: Operation[];
   onSelectNode: (nodeId: string) => void;
   approvals: ApprovalCandidate[];
   onReviewApproval: (targetId: string) => void;
-}) {
+}>) {
   const steps = workflowSteps(snapshot, selectedNode);
   const resources = Object.values(snapshot.nodes).filter(
     (node) => node.kind === "resource",

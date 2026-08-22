@@ -121,12 +121,12 @@ function ManualExternalResourceForm({
   node,
   onBack,
   replaceDraft,
-}: {
+}: Readonly<{
   draft: ConfigDraft;
   node: EditNode;
   onBack: () => void;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
-}) {
+}>) {
   const resourceTypes = kubernetesResourceTypes(node);
   const selection = record(record(node.externalRef).selection);
   const selectsKey = selection.target === "fileRefConfigMap";
@@ -257,10 +257,10 @@ function sensitive(field: ExternalField): boolean {
 
 function inputPattern(field: ExternalField): string | undefined {
   if (field.validationIds?.includes("k8s-name")) {
-    return "[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*";
+    return String.raw`[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*`;
   }
   if (field.validationIds?.includes("configmap-key")) {
-    return "(?!\\.{1,2}$)(?!\\.\\.)([A-Za-z0-9._-]+)";
+    return String.raw`(?!\.{1,2}$)(?!\.\.)([A-Za-z0-9._-]+)`;
   }
   return undefined;
 }
@@ -274,7 +274,7 @@ function ExternalResourceForm({
   onBack,
   replaceDraft,
   reportError,
-}: {
+}: Readonly<{
   descriptor: CreateDescriptor;
   details?: ExternalResourceDetails;
   draft: ConfigDraft;
@@ -282,7 +282,7 @@ function ExternalResourceForm({
   onBack: () => void;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
-}) {
+}>) {
   const updating = Boolean(details && !details.missing);
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(descriptor.fields.map((field) => [
@@ -435,12 +435,12 @@ function ExternalResourceView({
   details,
   onBack,
   onUpdate,
-}: {
+}: Readonly<{
   descriptor: CreateDescriptor;
   details: ExternalResourceDetails;
   onBack: () => void;
   onUpdate: () => void;
-}) {
+}>) {
   return (
     <section className="external-resource-view">
       <header>
@@ -490,13 +490,13 @@ export function ExternalResourceEditor({
   busy,
   replaceDraft,
   reportError,
-}: {
+}: Readonly<{
   draft: ConfigDraft;
   node: EditNode;
   busy: boolean;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
-}) {
+}>) {
   const [inventory, setInventory] = useState<ExternalResourceInventory | null>(
     null,
   );

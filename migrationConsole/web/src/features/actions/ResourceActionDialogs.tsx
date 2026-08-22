@@ -428,10 +428,10 @@ export function ApprovalDialog({
 export function ResetDialog({
   targetId,
   onClose,
-}: {
+}: Readonly<{
   targetId: string;
   onClose: () => void;
-}) {
+}>) {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
   const [problem, setProblem] = useState("");

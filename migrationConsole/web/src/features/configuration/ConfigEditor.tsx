@@ -164,7 +164,7 @@ function renameableConfigPath(path: readonly string[]): boolean {
 
 
 const KUBERNETES_NAME_PATTERN =
-  "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$";
+  String.raw`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`;
 const KUBERNETES_NAME_MESSAGE =
   "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.";
 
@@ -511,13 +511,13 @@ function ScalarEditor({
   busy,
   onLocalDirtyChange,
   showDocumentation,
-}: {
+}: Readonly<{
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
   onLocalDirtyChange: (dirty: boolean) => void;
   showDocumentation: boolean;
-}) {
+}>) {
   const name = fieldName(node);
   const authoredValue = scalarString(node.value);
   const options = hintOptions(node);
@@ -685,13 +685,13 @@ function UnionEditor({
   busy,
   onRevealChildren,
   showDocumentation,
-}: {
+}: Readonly<{
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
   onRevealChildren: () => void;
   showDocumentation: boolean;
-}) {
+}>) {
   const name = fieldName(node);
   const variants = node.variants ?? [];
   const [value, setValue] = useState(scalarString(node.value));
@@ -743,11 +743,11 @@ function BooleanEditor({
   node,
   commit,
   busy,
-}: {
+}: Readonly<{
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
-}) {
+}>) {
   const [checked, setChecked] = useState(node.value === true);
   const [applying, setApplying] = useState(false);
   return (
@@ -786,7 +786,7 @@ function CommandEditor({
   onAdded,
   onCancel,
   onComplete,
-}: {
+}: Readonly<{
   node: EditNode;
   parent: EditNode | null;
   commit: (operation: EditOperation) => Promise<boolean>;
@@ -795,7 +795,7 @@ function CommandEditor({
   onAdded: (nodeId: string, parentId: string | null) => void;
   onCancel: () => void;
   onComplete: () => void;
-}) {
+}>) {
   const requiresName = node.command?.requiresName !== false;
   const label = fieldName(node);
   const [name, setName] = useState("");
@@ -887,11 +887,11 @@ function StructuredEditor({
   node,
   commit,
   busy,
-}: {
+}: Readonly<{
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
-}) {
+}>) {
   const [value, setValue] = useState(
     JSON.stringify(node.value ?? (node.valueKind === "array" ? [] : {}), null, 2),
   );
@@ -948,7 +948,7 @@ function ConfigPropertyRow({
   onToggle,
   rowRef,
   contextProgress,
-}: {
+}: Readonly<{
   draft: ConfigDraft;
   node: EditNode;
   parent: EditNode | null;
@@ -970,7 +970,7 @@ function ConfigPropertyRow({
   onToggle: () => void;
   rowRef: (element: HTMLTableRowElement | null) => void;
   contextProgress: number;
-}) {
+}>) {
   const [renaming, setRenaming] = useState(false);
   const [addingCommandId, setAddingCommandId] = useState<string | null>(null);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
@@ -1390,7 +1390,7 @@ export function ConfigEditor({
   removalState,
   resourceLabel,
   resourceSyncing = false,
-}: ConfigEditorProps) {
+}: Readonly<ConfigEditorProps>) {
   const queryClient = useQueryClient();
   const draftQuery = useQuery({
     queryKey: ["config-draft"],
@@ -1606,8 +1606,8 @@ export function ConfigEditor({
       event.preventDefault();
       event.returnValue = "";
     };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    globalThis.addEventListener("beforeunload", warn);
+    return () => globalThis.removeEventListener("beforeunload", warn);
   }, [draft?.dirty, hasLocalEdits]);
 
   const rows = useMemo(
@@ -1653,7 +1653,7 @@ export function ConfigEditor({
       );
     });
     setRemovingIds((current) => new Set([...current, ...rowIds]));
-    const timer = window.setTimeout(() => {
+    const timer = globalThis.setTimeout(() => {
       transitionTimers.current.delete(timer);
       complete();
       clearRemovingRows(rowIds);
@@ -1665,7 +1665,7 @@ export function ConfigEditor({
     transition: { timer: number; rowIds: Set<string> } | null,
   ) => {
     if (!transition) return;
-    window.clearTimeout(transition.timer);
+    globalThis.clearTimeout(transition.timer);
     transitionTimers.current.delete(transition.timer);
     clearRemovingRows(transition.rowIds);
   }, [clearRemovingRows]);
@@ -1807,9 +1807,9 @@ export function ConfigEditor({
   }, [removingIds, rows]);
   useEffect(() => () => {
     if (insertedTimer.current !== null) {
-      window.clearTimeout(insertedTimer.current);
+      globalThis.clearTimeout(insertedTimer.current);
     }
-    transitionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    transitionTimers.current.forEach((timer) => globalThis.clearTimeout(timer));
     transitionTimers.current.clear();
     removingClaims.current.clear();
   }, []);
@@ -1889,7 +1889,7 @@ export function ConfigEditor({
   );
   const schedulePinnedContextUpdate = useCallback(() => {
     if (pinUpdateFrame.current !== null) return;
-    pinUpdateFrame.current = window.requestAnimationFrame(() => {
+    pinUpdateFrame.current = globalThis.requestAnimationFrame(() => {
       pinUpdateFrame.current = null;
       updatePinnedContext();
     });
@@ -1916,11 +1916,11 @@ export function ConfigEditor({
   }, [rowAncestors, rows, scope?.id]);
   useEffect(() => {
     updatePinnedContext();
-    window.addEventListener("resize", schedulePinnedContextUpdate);
+    globalThis.addEventListener("resize", schedulePinnedContextUpdate);
     return () => {
-      window.removeEventListener("resize", schedulePinnedContextUpdate);
+      globalThis.removeEventListener("resize", schedulePinnedContextUpdate);
       if (pinUpdateFrame.current !== null) {
-        window.cancelAnimationFrame(pinUpdateFrame.current);
+        globalThis.cancelAnimationFrame(pinUpdateFrame.current);
         pinUpdateFrame.current = null;
       }
     };
@@ -1942,9 +1942,9 @@ export function ConfigEditor({
     if (inserted.size === 0) return;
     setInsertedIds(inserted);
     if (insertedTimer.current !== null) {
-      window.clearTimeout(insertedTimer.current);
+      globalThis.clearTimeout(insertedTimer.current);
     }
-    insertedTimer.current = window.setTimeout(() => {
+    insertedTimer.current = globalThis.setTimeout(() => {
       insertedTimer.current = null;
       setInsertedIds(new Set());
     }, 420);
@@ -2009,7 +2009,7 @@ export function ConfigEditor({
 
   const waitForPendingCommit = async () => {
     const pending = pendingCommit.current;
-    return pending ? pending : true;
+    return pending ?? true;
   };
 
   const save = async () => {
@@ -2271,7 +2271,7 @@ export function ConfigEditor({
                 changeOptionalVisibility(event.target.checked)}
               type="checkbox"
             />
-            Show optional fields
+            <span>Show optional fields</span>
           </label>
           <label>
             <input
@@ -2280,7 +2280,7 @@ export function ConfigEditor({
                 changeExpertVisibility(event.target.checked)}
               type="checkbox"
             />
-            Show expert fields
+            <span>Show expert fields</span>
           </label>
           <label>
             <input
@@ -2289,7 +2289,7 @@ export function ConfigEditor({
                 setShowDocumentation(event.target.checked)}
               type="checkbox"
             />
-            Show field documentation
+            <span>Show field documentation</span>
           </label>
         </div> : null}
         <div className="config-toolbar-actions">

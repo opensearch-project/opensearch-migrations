@@ -60,8 +60,8 @@ async def test_coordinator_polls_once_for_all_consumers_and_invalidates_on_chang
 
     await coordinator.start()
     try:
-        first = await coordinator.get_observation(timeout=1)
-        second = await coordinator.get_observation(timeout=1)
+        first = await coordinator.get_observation()
+        second = await coordinator.get_observation()
         assert first.snapshot is second.snapshot
 
         service.set_result(_snapshot("revision-2"))
@@ -92,13 +92,13 @@ async def test_coordinator_keeps_last_success_and_marks_it_stale_after_failure()
 
     await coordinator.start()
     try:
-        await coordinator.get_observation(timeout=1)
+        await coordinator.get_observation()
         service.set_result(RuntimeError("cluster unavailable"))
         await _wait_until(
             lambda: coordinator.current_observation.stale,
         )
 
-        observation = await coordinator.get_observation(timeout=1)
+        observation = await coordinator.get_observation()
         assert observation.snapshot.revision == "revision-1"
         assert observation.stale is True
         assert observation.refresh_error is not None
@@ -121,7 +121,7 @@ async def test_coordinator_reports_initial_failure_without_hanging():
     await coordinator.start()
     try:
         with pytest.raises(RuntimeError, match="cluster unavailable"):
-            await coordinator.get_observation(timeout=1)
+            await coordinator.get_observation()
     finally:
         await coordinator.stop()
 
@@ -152,7 +152,7 @@ async def test_event_stream_converts_history_gap_to_state_invalidation():
 
     await coordinator.start()
     try:
-        await coordinator.get_observation(timeout=1)
+        await coordinator.get_observation()
         coordinator.events.publish("heartbeat", {"sequence": 1})
         coordinator.events.publish("heartbeat", {"sequence": 2})
         coordinator.events.publish("heartbeat", {"sequence": 3})

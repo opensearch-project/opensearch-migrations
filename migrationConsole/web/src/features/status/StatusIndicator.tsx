@@ -15,10 +15,10 @@ import { normalizedStatus } from "./status";
 export function StatusIndicator({
   status,
   className = "",
-}: {
+}: Readonly<{
   status: string | null | undefined;
   className?: string;
-}) {
+}>) {
   const normalized = normalizedStatus(status);
   const classes = [
     "state-icon",

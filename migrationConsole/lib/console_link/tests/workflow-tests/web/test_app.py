@@ -173,7 +173,7 @@ class _Coordinator:
     async def stop(self):
         self.stopped = True
 
-    async def get_observation(self, timeout=None):
+    async def get_observation(self):
         if isinstance(self.observation, Exception):
             raise self.observation
         return self.observation

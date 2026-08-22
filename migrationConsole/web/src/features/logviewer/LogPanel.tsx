@@ -58,10 +58,10 @@ function eventText(event: LogEvent): string {
 export function LogPanel({
   nodeId,
   onClose,
-}: {
+}: Readonly<{
   nodeId: string;
   onClose: () => void;
-}) {
+}>) {
   const inventory = useQuery({
     queryKey: ["log-targets", nodeId],
     queryFn: () => getLogTargets(nodeId),
@@ -231,7 +231,7 @@ export function LogPanel({
   const copy = async () => {
     await navigator.clipboard.writeText(rendered);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1400);
+    globalThis.setTimeout(() => setCopied(false), 1400);
   };
 
   const download = () => {
