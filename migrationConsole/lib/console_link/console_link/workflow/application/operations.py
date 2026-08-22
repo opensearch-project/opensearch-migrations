@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Executor, ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
@@ -273,13 +273,17 @@ class OperationManager:
     ) -> Operation:
         with self._lock:
             current = self._operations[operation_id]
-            operation = replace(
-                current,
+            operation = Operation(
+                id=current.id,
+                kind=current.kind,
+                label=current.label,
                 status=status,
+                target_ids=current.target_ids,
+                created_at=current.created_at,
+                updated_at=self._timestamp(),
                 message=message,
                 detail=detail,
                 result=current.result if result is None else dict(result),
-                updated_at=self._timestamp(),
             )
             self._operations[operation_id] = operation
             self._emit(operation)

@@ -26,10 +26,10 @@ import type { ApprovalCandidate } from "./approvals";
 function DialogError({
   error,
   retry,
-}: {
+}: Readonly<{
   error: Error;
   retry: () => void;
-}) {
+}>) {
   return (
     <div className="action-dialog-error" role="alert">
       <AlertTriangle aria-hidden="true" />
@@ -46,13 +46,13 @@ export function ApprovalDialog({
   onClose,
   onEdit,
   onStarted,
-}: {
+}: Readonly<{
   candidates: ApprovalCandidate[];
   initialTargetId: string;
   onClose: () => void;
   onEdit: (candidate: ApprovalCandidate) => void;
   onStarted?: (targetId: string) => void;
-}) {
+}>) {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<Set<string>>(new Set());
@@ -78,11 +78,11 @@ export function ApprovalDialog({
   });
   useEffect(() => {
     if (processing.size === 0) return;
-    const timer = window.setInterval(() => {
+    const timer = globalThis.setInterval(() => {
       void queryClient.invalidateQueries({ queryKey: ["manage-state"] });
       void queryClient.invalidateQueries({ queryKey: ["operations"] });
-    }, 2_000);
-    return () => window.clearInterval(timer);
+    }, 2000);
+    return () => globalThis.clearInterval(timer);
   }, [processing.size, queryClient]);
   const reviewFor = (targetId: string) => (
     reviews[candidates.findIndex(
@@ -153,11 +153,14 @@ export function ApprovalDialog({
     setTargetsSubmitting(targetIds, true);
     clearProblems(targetIds);
     try {
-      const plan = planToken
-        ? { token: planToken }
-        : resetIds.length === 1
-          ? await getResetPlan(resetIds[0])
-          : await getCombinedResetPlan(resetIds);
+      let plan;
+      if (planToken) {
+        plan = { token: planToken };
+      } else if (resetIds.length === 1) {
+        plan = await getResetPlan(resetIds[0]);
+      } else {
+        plan = await getCombinedResetPlan(resetIds);
+      }
       await executeReset(plan.token, { resubmit: true });
       await finishStarted(targetIds);
     } catch (error) {

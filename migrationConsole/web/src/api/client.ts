@@ -41,7 +41,7 @@ export type ExternalResourceMutation =
 
 
 const client = createClient<paths>({
-  baseUrl: window.location.origin,
+  baseUrl: globalThis.location.origin,
   fetch: (...args) => globalThis.fetch(...args),
 });
 

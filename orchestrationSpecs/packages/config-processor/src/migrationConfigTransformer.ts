@@ -101,26 +101,40 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 
 async function rewriteRepoEndpointIfLocalStack(
     snapshotRepo: z.infer<typeof REPO_CONFIG>,
-    repoName: string
+    repoName: string,
+    resolveLocalStackDns: boolean
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
     // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
     // for gs:// URIs and the resulting useLocalStack stays false.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
-        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
+        snapshotRepo.endpoint = resolveLocalStackDns
+            ? await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint)
+            : snapshotRepo.endpoint.replace(
+                /^localstack:\/\//i,
+                "http://"
+            ).replace(
+                /^localstacks:\/\//i,
+                "https://"
+            );
     }
     return { ...snapshotRepo, useLocalStack, repoName };
 }
 
 async function rewriteRepoRecordEndpointIfLocalStack(
-    snapshotRepos: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>
+    snapshotRepos: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>,
+    resolveLocalStackDns: boolean
 ): Promise<z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>>
 {
     const entries = Object.entries(snapshotRepos);
     const rewrittenEntries = await Promise.all(
         entries.map(async ([repoName, repoConfig]) => {
-            const rewritten = await rewriteRepoEndpointIfLocalStack(repoConfig, repoName);
+            const rewritten = await rewriteRepoEndpointIfLocalStack(
+                repoConfig,
+                repoName,
+                resolveLocalStackDns
+            );
             return [repoName, rewritten] as const;
         })
     );
@@ -887,11 +901,18 @@ function applySolrCollectionAllowlist<T extends {indexAllowlist?: string[]} | un
     } as T;
 }
 
+export interface MigrationConfigTransformerOptions {
+    resolveLocalStackDns?: boolean;
+}
+
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
     typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
 > {
-    constructor(private readonly deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG> = {}) {
+    constructor(
+        private readonly deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG> = {},
+        private readonly options: MigrationConfigTransformerOptions = {}
+    ) {
         super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG_PRE_ENRICH);
     }
 
@@ -924,7 +945,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...cluster,
                     snapshotInfo: {
                         ...cluster.snapshotInfo,
-                        repos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotInfo.repos)
+                        repos: await rewriteRepoRecordEndpointIfLocalStack(
+                            cluster.snapshotInfo.repos,
+                            this.options.resolveLocalStackDns ?? true
+                        )
                     }
                 };
             }

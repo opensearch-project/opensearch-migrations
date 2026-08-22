@@ -471,6 +471,41 @@ describe("editConfig state", () => {
         });
     });
 
+    it("validates LocalStack repositories without resolving cluster DNS", async () => {
+        const state = await buildEditStateFromObjectForSubmit({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {
+                                repoPathUri: "s3://bucket/path",
+                                endpoint: "localstack://not-resolvable.invalid:4566",
+                                awsRegion: "us-east-1",
+                            },
+                        },
+                        snapshots: {
+                            s1: {
+                                repoName: "repo",
+                                config: {createSnapshotConfig: {}},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(state.validation).toEqual({
+            valid: true,
+            errors: [],
+        });
+    });
+
     it("returns regex validation metadata and marks invalid scalar values", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {

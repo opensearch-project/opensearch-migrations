@@ -179,7 +179,7 @@ function isExpectedWorkflowReplacementProblem(
 function promptedApprovalKeys(): Set<string> {
   try {
     const stored: unknown = JSON.parse(
-      window.sessionStorage.getItem(PROMPTED_APPROVALS_KEY) ?? "[]",
+      globalThis.sessionStorage.getItem(PROMPTED_APPROVALS_KEY) ?? "[]",
     ) as unknown;
     return new Set(Array.isArray(stored) ? stored.map(String) : []);
   } catch {
@@ -213,7 +213,7 @@ export function App() {
         || operation.status === "running"
         || operation.status === "waiting"
       ))
-        ? 2_000
+        ? 2000
         : false
     ),
   });
@@ -260,44 +260,45 @@ export function App() {
 
   useEffect(() => {
     const currentState = (
-      typeof window.history.state === "object" && window.history.state !== null
-        ? window.history.state as Record<string, unknown>
+      typeof globalThis.history.state === "object"
+      && globalThis.history.state !== null
+        ? globalThis.history.state as Record<string, unknown>
         : {}
     );
     if (currentState[HISTORY_GUARD_KEY] !== "sentinel") {
-      window.history.replaceState(
+      globalThis.history.replaceState(
         { ...currentState, [HISTORY_GUARD_KEY]: "base" },
         "",
-        window.location.href,
+        globalThis.location.href,
       );
-      window.history.pushState(
+      globalThis.history.pushState(
         { ...currentState, [HISTORY_GUARD_KEY]: "sentinel" },
         "",
-        window.location.href,
+        globalThis.location.href,
       );
     }
 
     const guardBackNavigation = () => {
-      if (!window.confirm(HISTORY_GUARD_MESSAGE)) {
+      if (!globalThis.confirm(HISTORY_GUARD_MESSAGE)) {
         const state = (
-          typeof window.history.state === "object"
-          && window.history.state !== null
-            ? window.history.state as Record<string, unknown>
+          typeof globalThis.history.state === "object"
+          && globalThis.history.state !== null
+            ? globalThis.history.state as Record<string, unknown>
             : {}
         );
-        window.history.pushState(
+        globalThis.history.pushState(
           { ...state, [HISTORY_GUARD_KEY]: "sentinel" },
           "",
-          window.location.href,
+          globalThis.location.href,
         );
         return;
       }
-      window.removeEventListener("popstate", guardBackNavigation);
-      window.history.back();
+      globalThis.removeEventListener("popstate", guardBackNavigation);
+      globalThis.history.back();
     };
 
-    window.addEventListener("popstate", guardBackNavigation);
-    return () => window.removeEventListener(
+    globalThis.addEventListener("popstate", guardBackNavigation);
+    return () => globalThis.removeEventListener(
       "popstate",
       guardBackNavigation,
     );
@@ -606,7 +607,7 @@ export function App() {
   };
   const persistPromptedApprovals = useCallback(() => {
     try {
-      window.sessionStorage.setItem(
+      globalThis.sessionStorage.setItem(
         PROMPTED_APPROVALS_KEY,
         JSON.stringify([...promptedApprovals]),
       );
@@ -720,13 +721,12 @@ export function App() {
                 <Send aria-hidden="true" />
                 <span>{submitLabel}</span>
               </button>
-              <span
+              <output
                 className="sr-only"
                 id="submit-status-reason"
-                role="status"
               >
                 {submitStatusText}
-              </span>
+              </output>
             </>
           ) : null}
           <span className="revision" title="Manage state revision">
@@ -776,8 +776,7 @@ export function App() {
             </>
           ) : (
             <>
-              <span className="live-dot" aria-hidden="true" />
-              Server ready
+              <span className="live-dot" aria-hidden="true" />{"Server ready"}
             </>
           )}
         </div>
@@ -817,18 +816,21 @@ export function App() {
       ) : state.data ? (
         <>
           {state.data.stale ? (
-            <div className="state-banner stale-banner" role="status">
+            <output className="state-banner stale-banner">
               <CircleAlert aria-hidden="true" />
               <strong>Showing last known cluster state</strong>
               <span>{state.data.refreshError?.message}</span>
-            </div>
+            </output>
           ) : null}
           {visibleProblems.map((problem) => (
-            <div className="state-banner problem-banner" key={`${problem.source}-${problem.message}`} role="status">
+            <output
+              className="state-banner problem-banner"
+              key={`${problem.source}-${problem.message}`}
+            >
               <CircleAlert aria-hidden="true" />
               <strong>{problem.source}</strong>
               <span>{problem.message}</span>
-            </div>
+            </output>
           ))}
           {firstApproval ? (
             <section

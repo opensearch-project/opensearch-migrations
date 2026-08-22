@@ -102,11 +102,7 @@ class ApprovalService:
         node_id = _approval_node_id(target_id)
         workflow = self._workflow_loader()
         node = _workflow_nodes(workflow).get(node_id)
-        if (
-            not node
-            or not is_approval_node(dict(node))
-            or str(node.get("phase")) != "Running"
-        ):
+        if not _is_waiting_approval(node):
             raise ApprovalUnavailable(
                 "The selected approval target is no longer waiting."
             )
@@ -263,3 +259,11 @@ def _approval_reason(
 
 def _optional(value: Any) -> Optional[str]:
     return str(value) if value not in (None, "") else None
+
+
+def _is_waiting_approval(node: Optional[Mapping[str, Any]]) -> bool:
+    return bool(
+        node
+        and is_approval_node(dict(node))
+        and str(node.get("phase")) == "Running"
+    )

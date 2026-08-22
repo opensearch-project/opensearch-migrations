@@ -16,18 +16,35 @@ generate_openapi() {
     local -a python_command
     if [[ -n "${MANAGE_WEB_PYTHON:-}" ]]; then
         python_command=("${MANAGE_WEB_PYTHON}")
-    elif [[ -x "${CONSOLE_LINK_DIR}/.venv/bin/python" ]]; then
+        if ! can_import_web_app "${python_command[@]}"; then
+            echo "MANAGE_WEB_PYTHON cannot import console_link.workflow.web.app:" >&2
+            echo "  ${MANAGE_WEB_PYTHON}" >&2
+            return 1
+        fi
+    elif [[ -x "${CONSOLE_LINK_DIR}/.venv/bin/python" ]] &&
+            can_import_web_app "${CONSOLE_LINK_DIR}/.venv/bin/python"; then
         python_command=("${CONSOLE_LINK_DIR}/.venv/bin/python")
-    elif [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    elif [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]] &&
+            can_import_web_app "${VIRTUAL_ENV}/bin/python"; then
         python_command=("${VIRTUAL_ENV}/bin/python")
     elif command -v python3 >/dev/null && can_import_web_app python3; then
         python_command=(python3)
     elif command -v python >/dev/null && can_import_web_app python; then
         python_command=(python)
-    elif command -v pipenv >/dev/null && can_import_web_app pipenv run python; then
-        python_command=(pipenv run python)
+    elif command -v pipenv >/dev/null; then
+        echo "Installing locked console-link dependencies for OpenAPI generation..."
+        (
+            cd "${CONSOLE_LINK_DIR}"
+            PIPENV_IGNORE_VIRTUALENVS=1 PIPENV_VENV_IN_PROJECT=1 \
+                pipenv install --deploy
+        )
+        python_command=("${CONSOLE_LINK_DIR}/.venv/bin/python")
+        if ! can_import_web_app "${python_command[@]}"; then
+            echo "The locked console-link environment cannot import the web app." >&2
+            return 1
+        fi
     else
-        echo "Unable to generate OpenAPI. Install console-link dependencies with:" >&2
+        echo "Unable to generate OpenAPI. Install Python 3.11 and pipenv, then run:" >&2
         echo "  cd migrationConsole/lib/console_link && pipenv install --deploy" >&2
         echo "or set MANAGE_WEB_PYTHON to a configured Python interpreter." >&2
         return 1

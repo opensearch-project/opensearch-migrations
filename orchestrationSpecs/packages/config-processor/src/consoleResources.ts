@@ -437,9 +437,41 @@ export function buildConsoleResourcesFromResolvedConfig(
     if (!resolvedConfig.workflowConfig) {
         throw new Error("Resolved config does not include a strict workflowConfig.");
     }
+    const workflowConfig = normalizeHistoricalWorkflowConfig(resolvedConfig.workflowConfig);
     return buildConsoleResources(
-        ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(resolvedConfig.workflowConfig),
+        ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(workflowConfig),
         resolvedConfig.workflowName,
         "migrationRun"
     );
+}
+
+function normalizeHistoricalWorkflowConfig(workflowConfig: unknown): unknown {
+    const normalize = (value: unknown, parentKey?: string): unknown => {
+        if (Array.isArray(value)) {
+            return value.map(child => normalize(child));
+        }
+        if (typeof value !== "object" || value === null) {
+            return value;
+        }
+        const normalized = Object.fromEntries(
+            Object.entries(value).map(([key, child]) => [key, normalize(child, key)])
+        );
+        if (
+            parentKey?.endsWith("ConnectionIdentity")
+            && normalized.solrContextPath === undefined
+        ) {
+            normalized.solrContextPath = "";
+        }
+        return normalized;
+    };
+
+    const normalized = normalize(workflowConfig);
+    if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized)) {
+        return normalized;
+    }
+    const normalizedObject = normalized as Record<string, unknown>;
+    return {
+        ...normalizedObject,
+        requireBeginApproval: normalizedObject.requireBeginApproval ?? false,
+    };
 }

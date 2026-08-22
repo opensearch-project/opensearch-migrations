@@ -29,7 +29,6 @@ from ..application.operations import (
 )
 from ..application.actions import ApprovalStale, ApprovalUnavailable
 from ..application.resets import (
-    ResetExecutionFailed,
     ResetPlanStale,
     ResetUnavailable,
 )
@@ -68,6 +67,8 @@ from .contracts import (
 
 
 DEFAULT_STATIC_DIR = Path(__file__).with_name("static")
+OBSERVATION_NOT_CONFIGURED = "Workflow observation is not configured"
+SSE_MEDIA_TYPE = "text/event-stream"
 logger = logging.getLogger(__name__)
 
 
@@ -121,7 +122,7 @@ def create_app(
         if coordinator is None:
             raise HTTPException(
                 status_code=503,
-                detail="Workflow observation is not configured",
+                detail=OBSERVATION_NOT_CONFIGURED,
             )
         try:
             observation = await coordinator.get_observation()
@@ -268,7 +269,7 @@ def create_app(
         if coordinator is None:
             raise HTTPException(
                 status_code=503,
-                detail="Workflow observation is not configured",
+                detail=OBSERVATION_NOT_CONFIGURED,
             )
         observation = await coordinator.get_observation()
         node = observation.snapshot.nodes.get(node_id)
@@ -354,7 +355,7 @@ def create_app(
         tags=["logs"],
         responses={
             200: {
-                "content": {"text/event-stream": {}},
+                "content": {SSE_MEDIA_TYPE: {}},
                 "description": "Cancellable log event stream",
             },
         },
@@ -395,7 +396,7 @@ def create_app(
 
         return StreamingResponse(
             event_stream(),
-            media_type="text/event-stream",
+            media_type=SSE_MEDIA_TYPE,
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
@@ -897,7 +898,7 @@ def create_app(
         tags=["operations"],
         responses={
             200: {
-                "content": {"text/event-stream": {}},
+                "content": {SSE_MEDIA_TYPE: {}},
                 "description": "Tracked operation event stream",
             },
         },
@@ -920,7 +921,7 @@ def create_app(
 
         return StreamingResponse(
             event_stream(),
-            media_type="text/event-stream",
+            media_type=SSE_MEDIA_TYPE,
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
@@ -1039,7 +1040,7 @@ def create_app(
         tags=["manage"],
         responses={
             200: {
-                "content": {"text/event-stream": {}},
+                "content": {SSE_MEDIA_TYPE: {}},
                 "description": "Workflow state invalidation event stream",
             },
         },
@@ -1051,7 +1052,7 @@ def create_app(
         if coordinator is None:
             raise HTTPException(
                 status_code=503,
-                detail="Workflow observation is not configured",
+                detail=OBSERVATION_NOT_CONFIGURED,
             )
         cursor = _event_id(last_event_id)
 
@@ -1063,7 +1064,7 @@ def create_app(
 
         return StreamingResponse(
             event_stream(),
-            media_type="text/event-stream",
+            media_type=SSE_MEDIA_TYPE,
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",

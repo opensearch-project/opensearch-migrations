@@ -79,7 +79,8 @@ class EventHistory:
             batch = self.events_after(last_event_id)
             if batch.events or batch.history_gap:
                 return batch
-            await asyncio.wait_for(self._changed.wait(), timeout=timeout)
+            async with asyncio.timeout(timeout):
+                await self._changed.wait()
 
 
 class ObservationCoordinator:
@@ -141,6 +142,7 @@ class ObservationCoordinator:
             self._heartbeat_loop(),
             name="manage-heartbeat-loop",
         )
+        await asyncio.sleep(0)
 
     async def stop(self) -> None:
         tasks = [
@@ -163,7 +165,8 @@ class ObservationCoordinator:
     ) -> Observation:
         if self._observation is not None:
             return self._observation
-        await asyncio.wait_for(self._initial_complete.wait(), timeout=timeout)
+        async with asyncio.timeout(timeout):
+            await self._initial_complete.wait()
         if self._observation is not None:
             return self._observation
         if self._initial_error is not None:

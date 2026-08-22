@@ -16,7 +16,6 @@ from ..manage_tree_status import same_value_state
 from ..resource_tree import (
     PENDING_CONFIG_PHASE,
     SPEC_DISPLAY_FIELDS,
-    ResourceGroup,
     ResourceNode,
     ResourceSection,
     active_approval_node,
@@ -329,7 +328,7 @@ class ManageStateService:
                 }
                 resources = sorted(
                     group.resources,
-                    key=lambda resource: (
+                    key=lambda resource, plural_order=plural_order: (
                         resource.tree_sort_index
                         if resource.tree_sort_index is not None
                         else 10_000,
@@ -646,6 +645,37 @@ def _approval_failure_diagnostic(
         resource.phase != PENDING_CONFIG_PHASE,
     )
     reset_required = immutable_update and deployed
+    if external_target:
+        title = f"Blocked by {target_name} apply failure"
+    elif immutable_update and not deployed:
+        title = "Replacement workflow required"
+    elif reset_required:
+        title = "Apply failed; reset required"
+    else:
+        title = "Apply failed; approval required"
+
+    if reset_required:
+        if external_target:
+            remedy = (
+                f"Open {target_name}, reset it to delete and recreate it, "
+                "then submit a replacement workflow."
+            )
+        else:
+            remedy = (
+                f"Reset {target_name} to delete and recreate it, then "
+                "submit a replacement workflow."
+            )
+    elif immutable_update:
+        remedy = (
+            f"{target_name} is already absent. Submit a replacement "
+            "workflow to recreate it from the saved configuration."
+        )
+    else:
+        remedy = (
+            "Review the denied change, then approve the change when it "
+            "is safe to continue."
+        )
+
     return ManageDiagnostic(
         severity="error",
         message=_with_terminal_period(reason),
@@ -655,32 +685,8 @@ def _approval_failure_diagnostic(
             if immutable_update
             else "apply-approval-required"
         ),
-        title=(
-            f"Blocked by {target_name} apply failure"
-            if external_target
-            else "Replacement workflow required"
-            if immutable_update and not deployed
-            else "Apply failed; reset required"
-            if reset_required
-            else "Apply failed; approval required"
-        ),
-        remedy=(
-            (
-                f"Open {target_name}, reset it to delete and recreate it, "
-                "then submit a replacement workflow."
-                if external_target
-                else f"Reset {target_name} to delete and recreate it, then "
-                "submit a replacement workflow."
-            )
-            if reset_required
-            else (
-                f"{target_name} is already absent. Submit a replacement "
-                "workflow to recreate it from the saved configuration."
-            )
-            if immutable_update
-            else "Review the denied change, then approve the change when it "
-            "is safe to continue."
-        ),
+        title=title,
+        remedy=remedy,
         technical_detail=(
             str(approval.get("message")).strip()
             if approval.get("message")

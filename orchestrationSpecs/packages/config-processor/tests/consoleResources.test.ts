@@ -300,6 +300,37 @@ describe("console resources", () => {
         expect(resources.kafkas[0].source).toBe("migrationRun");
     });
 
+    it("projects historical resolved configs that predate new workflow defaults", async () => {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(multiResourceConfig());
+        const resolvedConfig = buildResolvedMigrationResources(workflowConfig, "workflow-a") as any;
+        delete resolvedConfig.workflowConfig.requireBeginApproval;
+        const removeSolrContextPath = (value: unknown): void => {
+            if (Array.isArray(value)) {
+                value.forEach(removeSolrContextPath);
+                return;
+            }
+            if (typeof value !== "object" || value === null) {
+                return;
+            }
+            for (const [key, child] of Object.entries(value)) {
+                if (
+                    key.endsWith("ConnectionIdentity")
+                    && typeof child === "object"
+                    && child !== null
+                ) {
+                    delete (child as Record<string, unknown>).solrContextPath;
+                }
+                removeSolrContextPath(child);
+            }
+        };
+        removeSolrContextPath(resolvedConfig.workflowConfig);
+
+        const resources = buildConsoleResourcesFromResolvedConfig(resolvedConfig);
+
+        expect(resources.workflowName).toBe("workflow-a");
+        expect(resources.sources.map(source => source.refName)).toEqual(["sourceA", "sourceB"]);
+    });
+
     it("projects externally managed SCRAM Kafka credential metadata", async () => {
         const config = multiResourceConfig();
         config.traffic.kafkaClusters = {

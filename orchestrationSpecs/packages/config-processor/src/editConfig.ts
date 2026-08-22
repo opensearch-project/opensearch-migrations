@@ -1000,7 +1000,10 @@ export function validationForConfig(config: unknown): EditStateV1["validation"] 
 
 export async function submitValidationForConfig(config: unknown): Promise<EditStateV1["validation"]> {
     try {
-        await new MigrationConfigTransformer().processFromObject(config);
+        await new MigrationConfigTransformer(
+            {},
+            {resolveLocalStackDns: false}
+        ).processFromObject(config);
         return validationSuccess();
     } catch (error) {
         return validationFromError(error);

@@ -1624,7 +1624,8 @@ test("offers top-level add actions in navigation during scoped editing", async (
     .getAllByRole("treeitem", { name: /^Sources,/ })
     .find((item) => item.getAttribute("aria-level") === "2");
   expect(sourceGroup).toBeDefined();
-  await userEvent.click(await within(sourceGroup!).findByRole("button", {
+  if (!sourceGroup) throw new Error("Source group was not rendered");
+  await userEvent.click(await within(sourceGroup).findByRole("button", {
     name: "Add source cluster",
   }));
   await userEvent.type(
@@ -2074,11 +2075,11 @@ test("shows the server reason when configuration cannot be opened", async () => 
 
 
 test("guards browser back navigation before leaving workflow manage", async () => {
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  const confirm = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
   renderApp();
   await screen.findByRole("tree", { name: "Workflow resources" });
 
-  fireEvent.popState(window);
+  fireEvent.popState(globalThis);
 
   await waitFor(() => expect(confirm).toHaveBeenCalledWith(
     "Leave Workflow Manage? Active operations will continue in the cluster.",
@@ -2274,7 +2275,7 @@ test("saves a focused text edit as one resource-level action", async () => {
   server.use(
     http.post("*/api/v1/config/operations", async () => {
       calls.push("update-draft");
-      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 20));
       return HttpResponse.json({
         ...configDraft,
         dirty: true,
@@ -2655,10 +2656,11 @@ test("shows a newly added resource while the server operation is pending", async
     name: /^Sources,/,
   }).find((item) => item.getAttribute("aria-level") === "2");
   expect(sourceGroup).toBeDefined();
+  if (!sourceGroup) throw new Error("Source group was not rendered");
   const previousSelection = screen.getByRole("treeitem", {
     name: /^capture, Ready$/,
   });
-  await userEvent.click(await within(sourceGroup!).findByRole("button", {
+  await userEvent.click(await within(sourceGroup).findByRole("button", {
     name: "Add source cluster",
   }));
   const nameInput = within(tree).getByRole("textbox", {
@@ -2705,8 +2707,9 @@ test("cancels inline resource naming and restores tree selection and focus", asy
     name: /^Sources,/,
   }).find((item) => item.getAttribute("aria-level") === "2");
   expect(sourceGroup).toBeDefined();
+  if (!sourceGroup) throw new Error("Source group was not rendered");
 
-  await userEvent.click(within(sourceGroup!).getByRole("button", {
+  await userEvent.click(within(sourceGroup).getByRole("button", {
     name: "Add source cluster",
   }));
   const nameInput = within(tree).getByRole("textbox", {
@@ -2735,7 +2738,7 @@ test("cancels inline resource naming and restores tree selection and focus", asy
 
 test("abandons inline resource naming when focus moves elsewhere", async () => {
   const operations: unknown[] = [];
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  const confirm = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
   server.use(
     http.post("*/api/v1/config/operations", async ({ request }) => {
       const body = await request.json() as { operation: unknown };
@@ -2751,8 +2754,9 @@ test("abandons inline resource naming when focus moves elsewhere", async () => {
     name: /^Sources,/,
   }).find((item) => item.getAttribute("aria-level") === "2");
   expect(sourceGroup).toBeDefined();
+  if (!sourceGroup) throw new Error("Source group was not rendered");
 
-  await userEvent.click(within(sourceGroup!).getByRole("button", {
+  await userEvent.click(within(sourceGroup).getByRole("button", {
     name: "Add source cluster",
   }));
   await userEvent.type(within(tree).getByRole("textbox", {
@@ -2769,7 +2773,7 @@ test("abandons inline resource naming when focus moves elsewhere", async () => {
   })).toBeNull();
   expect(operations).toEqual([]);
 
-  await userEvent.click(within(sourceGroup!).getByRole("button", {
+  await userEvent.click(within(sourceGroup).getByRole("button", {
     name: "Add source cluster",
   }));
   await userEvent.type(within(tree).getByRole("textbox", {
@@ -2816,7 +2820,7 @@ test("renames a named resource from the tree and follows its new identity", asyn
     http.post("*/api/v1/config/operations", async ({ request }) => {
       const body = await request.json() as { operation: unknown };
       operation = body.operation;
-      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 20));
       return HttpResponse.json(renamedDraft);
     }),
   );
