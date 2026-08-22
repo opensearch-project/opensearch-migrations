@@ -18,6 +18,7 @@ public class SolrSnapshotCreator {
     private static final String STATUS_FIELD = "status";
 
     private final String solrBaseUrl;
+    private final String contextPath;
     private final SolrHttpClient httpClient;
     @Getter
     private final String backupName;
@@ -43,8 +44,24 @@ public class SolrSnapshotCreator {
         ConnectionContext connectionContext,
         String repositoryName
     ) {
+        this(solrBaseUrl, backupName, backupLocation, collections, connectionContext, repositoryName, null);
+    }
+
+    /**
+     * @param contextPath the path Solr is served under, or null for {@link SolrContextPath#DEFAULT}
+     */
+    public SolrSnapshotCreator(
+        String solrBaseUrl,
+        String backupName,
+        String backupLocation,
+        List<String> collections,
+        ConnectionContext connectionContext,
+        String repositoryName,
+        String contextPath
+    ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
+        this.contextPath = SolrContextPath.normalize(contextPath);
         this.backupName = backupName;
         this.backupLocation = backupLocation;
         this.collections = collections;
@@ -70,8 +87,8 @@ public class SolrSnapshotCreator {
             // Exception
             var asyncId = asyncIdFor(collection);
             var urlBuilder = new StringBuilder(String.format(
-                "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
-                solrBaseUrl, collection, collection, asyncId
+                "%s%s/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
+                solrBaseUrl, contextPath, collection, collection, asyncId
             ));
             var perCollectionLocation = buildPerCollectionLocation(backupLocation, backupName);
             if (backupLocation != null && isCloudRepoUri(backupLocation) && repositoryName != null) {
@@ -145,8 +162,8 @@ public class SolrSnapshotCreator {
         for (var collection : collections) {
             var asyncId = asyncIdFor(collection);
             var url = String.format(
-                "%s/solr/admin/collections?action=REQUESTSTATUS&requestid=%s&wt=json",
-                solrBaseUrl, asyncId
+                "%s%s/admin/collections?action=REQUESTSTATUS&requestid=%s&wt=json",
+                solrBaseUrl, contextPath, asyncId
             );
             var response = httpClient.getJson(url);
             var state = response.path(STATUS_FIELD).path("state").asText("");

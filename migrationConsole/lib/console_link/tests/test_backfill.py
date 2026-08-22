@@ -431,8 +431,8 @@ class TestComputeDerivedValues:
         )
         assert status == StepStateWithPause.COMPLETED
 
-    def test_completed_with_unavailable_failed_documents(self):
-        """An unavailable (None) reading must not be guessed as an error."""
+    def test_completed_without_failed_document_stream(self):
+        """No stream configured (None) must not be guessed as an error."""
         _, _, _, status = compute_dervived_values(
             self.mock_cluster, self.test_index, 10, 10, None, False, has_failed_documents=None
         )
