@@ -20,6 +20,7 @@ import {
   getCombinedResetPlan,
   getResetPlan,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 import type { ApprovalCandidate } from "./approvals";
 
 
@@ -76,6 +77,7 @@ export function ApprovalDialog({
     enabled: resetTargetIds.length > 0,
     retry: false,
   });
+  const dialogRef = useEscapeCancel<HTMLElement>(onClose);
   useEffect(() => {
     if (processing.size === 0) return;
     const timer = globalThis.setInterval(() => {
@@ -183,6 +185,8 @@ export function ApprovalDialog({
         aria-labelledby="approval-dialog-title"
         aria-modal="true"
         className="confirmation-dialog action-review-dialog approval-list-dialog"
+        data-escape-cancel-layer
+        ref={dialogRef}
         role="dialog"
       >
         <header>
@@ -440,6 +444,7 @@ export function ResetDialog({
     queryFn: () => getResetPlan(targetId),
     retry: false,
   });
+  const dialogRef = useEscapeCancel<HTMLElement>(onClose, submitting);
   const reset = async () => {
     if (!plan.data) return;
     setSubmitting(true);
@@ -467,6 +472,8 @@ export function ResetDialog({
         aria-labelledby="reset-dialog-title"
         aria-modal="true"
         className="confirmation-dialog action-review-dialog reset-review-dialog"
+        data-escape-cancel-layer
+        ref={dialogRef}
         role="dialog"
       >
         <header>

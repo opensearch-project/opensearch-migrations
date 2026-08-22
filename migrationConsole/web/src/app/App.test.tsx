@@ -3826,3 +3826,117 @@ test("exposes a blocking validation reason through the submit tooltip", async ()
     "Resolve 1 configuration error before submitting",
   );
 });
+
+
+test("Escape invokes the active edit confirmation cancel action", async () => {
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json({
+      ...configDraft,
+      dirty: true,
+      draftRevision: "dirty-escape",
+    })),
+  );
+  renderApp();
+  await enterEditMode();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Exit editing",
+  }));
+  expect(screen.getByRole("dialog", { name: "Leave editing?" }))
+    .toBeInTheDocument();
+
+  await userEvent.keyboard("{Escape}");
+
+  expect(screen.queryByRole("dialog", { name: "Leave editing?" })).toBeNull();
+  expect(screen.getByText("Editing configuration")).toBeInTheDocument();
+});
+
+
+test("Escape closes only the topmost submit dialog while editing", async () => {
+  const dirtyDraft = structuredClone(configDraft);
+  dirtyDraft.dirty = true;
+  dirtyDraft.draftRevision = "dirty-submit-escape";
+  dirtyDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(dirtyDraft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Save and submit",
+  }));
+  expect(await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  })).toBeInTheDocument();
+
+  await userEvent.keyboard("{Escape}");
+
+  expect(screen.queryByRole("dialog", {
+    name: "Submit configuration?",
+  })).toBeNull();
+  expect(screen.getByText("Editing configuration")).toBeInTheDocument();
+});
+
+
+test("Escape invokes the reset dialog Cancel action", async () => {
+  renderApp();
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(within(tree).getByRole("treeitem", {
+    name: /^capture, Ready$/,
+  }));
+  await userEvent.click(screen.getByRole("button", {
+    name: "Reset capture",
+  }));
+  expect(await screen.findByRole("dialog", {
+    name: "Review reset plan",
+  })).toBeInTheDocument();
+
+  await userEvent.keyboard("{Escape}");
+
+  expect(screen.queryByRole("dialog", {
+    name: "Review reset plan",
+  })).toBeNull();
+  expect(screen.getByRole("heading", { name: "capture" }))
+    .toBeInTheDocument();
+});
+
+
+test("shows structured admission preflight preparation failures", async () => {
+  const validDraft = structuredClone(configDraft);
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
+    http.post("*/api/v1/config/preflight", () => HttpResponse.json({
+      detail: {
+        code: "admission_preflight_unavailable",
+        message: (
+          "Admission preflight could not prepare the workflow: "
+          + "getaddrinfo ENOTFOUND localstack"
+        ),
+      },
+    }, { status: 502 })),
+  );
+  renderApp();
+
+  const submit = await screen.findByRole("button", {
+    name: "Review and submit",
+  });
+  await waitFor(() => expect(submit).toBeEnabled());
+  await userEvent.click(submit);
+
+  expect(await screen.findByText(
+    "Admission preflight could not prepare the workflow: "
+      + "getaddrinfo ENOTFOUND localstack",
+  )).toBeInTheDocument();
+});

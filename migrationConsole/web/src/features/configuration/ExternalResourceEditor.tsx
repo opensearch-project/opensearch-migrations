@@ -21,6 +21,7 @@ import {
   type ExternalResourceInventory,
   type ExternalResourceSelection,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 
 
 interface ExternalField {
@@ -135,6 +136,7 @@ function ManualExternalResourceForm({
   const [key, setKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const resourceType = resourceTypes[resourceTypeIndex];
+  const formRef = useEscapeCancel<HTMLFormElement>(onBack, submitting);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -159,7 +161,9 @@ function ManualExternalResourceForm({
   return (
     <form
       className="external-resource-form"
+      data-escape-cancel-layer
       onSubmit={(event) => void submit(event)}
+      ref={formRef}
     >
       <header>
         <div>
@@ -293,6 +297,7 @@ function ExternalResourceForm({
   const [confirmations, setConfirmations] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [formProblem, setFormProblem] = useState("");
+  const formRef = useEscapeCancel<HTMLFormElement>(onBack, saving);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -326,7 +331,12 @@ function ExternalResourceForm({
   };
 
   return (
-    <form className="external-resource-form" onSubmit={(event) => void submit(event)}>
+    <form
+      className="external-resource-form"
+      data-escape-cancel-layer
+      onSubmit={(event) => void submit(event)}
+      ref={formRef}
+    >
       <header>
         <div>
           <strong>{updating ? "Update" : "Create"} {descriptor.label}</strong>
@@ -510,6 +520,10 @@ export function ExternalResourceEditor({
   const selectionDescriptor = record(record(node.externalRef).selection);
   const selectsKey = selectionDescriptor.target === "fileRefConfigMap";
   const description = record(node.externalRef).description;
+  const warningRef = useEscapeCancel<HTMLDivElement>(
+    () => setWarning(null),
+    warning === null,
+  );
 
   const load = async () => {
     setLoading(true);
@@ -669,7 +683,12 @@ export function ExternalResourceEditor({
         </div>
       </header>
       {warning ? (
-        <div className="selection-warning" role="alert">
+        <div
+          className="selection-warning"
+          data-escape-cancel-layer
+          ref={warningRef}
+          role="alert"
+        >
           <span>{warning.message || "This resource does not match all requirements."}</span>
           <button
             disabled={busy}

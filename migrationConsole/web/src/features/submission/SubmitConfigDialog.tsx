@@ -17,6 +17,7 @@ import {
   getConfigReview,
   submitConfigDraft,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 
 
 interface SubmitConfigDialogProps {
@@ -99,6 +100,7 @@ export function SubmitConfigDialog({
       resetPlan.data.targets.map((target) => target.path).join("; ")
     }.`
     : "Building the dependency-safe reset plan.";
+  const dialogRef = useEscapeCancel<HTMLElement>(onClose, submitting);
 
   const retry = () => {
     setProblem("");
@@ -160,6 +162,8 @@ export function SubmitConfigDialog({
         aria-labelledby="submit-dialog-title"
         aria-modal="true"
         className="confirmation-dialog"
+        data-escape-cancel-layer
+        ref={dialogRef}
         role="dialog"
       >
         <header>

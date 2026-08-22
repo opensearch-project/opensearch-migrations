@@ -899,7 +899,10 @@ export function App() {
               <h2>No migration resources found</h2>
             </main>
           ) : (
-            <main className="manage-layout">
+            <main className={[
+              "manage-layout",
+              editContext ? "editing" : "",
+            ].join(" ")}>
               <section
                 aria-label="Resource navigation"
                 className={`tree-panel ${treeOpen ? "open" : ""}`}
@@ -941,6 +944,11 @@ export function App() {
                   selectedId={selectedId}
                   snapshot={displayedState}
                   validationStates={resourceValidations}
+                  viewTransitionKey={
+                    editContext
+                      ? "configuration"
+                      : `overview:${resourceViewMode}`
+                  }
                 />
               </section>
               {editContext ? (

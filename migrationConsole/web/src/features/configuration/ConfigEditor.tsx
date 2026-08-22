@@ -35,6 +35,7 @@ import {
   type EditNode,
   type EditOperation,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 import { SubmitConfigDialog } from "../submission/SubmitConfigDialog";
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
 import {
@@ -804,6 +805,12 @@ function CommandEditor({
   return (
     <form
       className="field-form inline-command-form"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || busy) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         const trimmedName = name.trim();
@@ -1306,6 +1313,12 @@ function ConfigPropertyRow({
               {renaming ? (
                 <form
                   className="rename-form"
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRenaming(false);
+                  }}
                   onSubmit={(event: FormEvent) => {
                     event.preventDefault();
                     void commit({
@@ -1428,6 +1441,14 @@ export function ConfigEditor({
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [exitPromptOpen, setExitPromptOpen] = useState(false);
   const [pinnedContext, setPinnedContext] = useState<PinnedContext[]>([]);
+  const exitDialogRef = useEscapeCancel<HTMLElement>(
+    () => setExitPromptOpen(false),
+    actionPending || !exitPromptOpen,
+  );
+  const removalDialogRef = useEscapeCancel<HTMLElement>(
+    () => setPendingRemoval(null),
+    busy || !pendingRemoval,
+  );
   const configTablePanelRef = useRef<HTMLElement>(null);
   const pinUpdateFrame = useRef<number | null>(null);
   const rowElements = useRef(new Map<string, HTMLTableRowElement>());
@@ -2551,6 +2572,8 @@ export function ConfigEditor({
             aria-labelledby="exit-edit-dialog-title"
             aria-modal="true"
             className="confirmation-dialog"
+            data-escape-cancel-layer
+            ref={exitDialogRef}
             role="dialog"
           >
             <header>
@@ -2603,6 +2626,8 @@ export function ConfigEditor({
             aria-labelledby="removal-dialog-title"
             aria-modal="true"
             className="confirmation-dialog"
+            data-escape-cancel-layer
+            ref={removalDialogRef}
             role="dialog"
           >
             <header>

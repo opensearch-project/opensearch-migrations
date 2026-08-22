@@ -15,6 +15,7 @@ import {
   getOutputs,
   outputDownloadUrl,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 
 
 function displayContent(content: string, contentType: string): string {
@@ -71,6 +72,7 @@ export function OutputPanel({
       ? displayContent(content.data.content, selected.contentType)
       : null
   );
+  const panelRef = useEscapeCancel<HTMLElement>(onClose);
 
   const copy = async () => {
     if (rendered === null) return;
@@ -80,7 +82,12 @@ export function OutputPanel({
   };
 
   return (
-    <section className="output-panel workspace-section" aria-label="Managed output">
+    <section
+      aria-label="Managed output"
+      className="output-panel workspace-section"
+      data-escape-cancel-layer
+      ref={panelRef}
+    >
       <header className="output-panel-header">
         <div>
           <FileOutput aria-hidden="true" />

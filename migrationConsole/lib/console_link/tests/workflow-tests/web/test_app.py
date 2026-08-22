@@ -1158,6 +1158,43 @@ def test_config_preflight_reports_blocking_and_nonblocking_admission_results(
     }
 
 
+def test_config_preflight_reports_preparation_failures_without_plain_500(
+    tmp_path,
+):
+    drafts = _Drafts()
+
+    def fail_preflight(expected_revision, workflow_name):
+        raise RuntimeError(
+            "Workflow submission preparation failed with exit code 1\n"
+            "Error: getaddrinfo ENOTFOUND localstack"
+        )
+
+    drafts.preflight = fail_preflight
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+        workflow_name="migration-test",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/config/preflight",
+            json={"expectedDraftRevision": "draft-1"},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": {
+            "code": "admission_preflight_unavailable",
+            "message": (
+                "Admission preflight could not prepare the workflow: "
+                "Workflow submission preparation failed with exit code 1\n"
+                "Error: getaddrinfo ENOTFOUND localstack"
+            ),
+        },
+    }
+
+
 def test_config_removal_impact_returns_exact_dependent_paths(tmp_path):
     drafts = _Drafts()
     app = create_app(

@@ -1042,6 +1042,23 @@ test("submits pending config without entering edit mode", async ({ page }, testI
 });
 
 
+test("animates resource filters and entry into configuration mode", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop motion coverage");
+  const api = await mockManageApi(page);
+  api.makeConfigValid();
+  await page.goto("/");
+
+  const tree = page.getByRole("tree", { name: "Workflow resources" });
+  await page.getByRole("button", { name: "Deployed" }).click();
+  await expect(tree.locator(".tree-row").first())
+    .toHaveCSS("animation-name", "tree-filter-settle");
+
+  await page.getByRole("button", { name: "Edit configuration" }).click();
+  await expect(tree.locator(".tree-row").first())
+    .toHaveCSS("animation-name", "tree-edit-settle");
+});
+
+
 test("blocks invalid pending config before review", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop submission coverage");
   await mockManageApi(page);
@@ -1198,4 +1215,13 @@ test("disables insertion motion when reduced motion is requested", async ({ page
   );
   await expect(inserted).toBeVisible();
   await expect(inserted).toHaveCSS("animation-name", "none");
+
+  await page.getByRole("button", { name: "Deployed" }).click();
+  const firstRow = page.getByRole("tree", {
+    name: "Workflow resources",
+  }).locator(".tree-row").first();
+  await expect(firstRow).toHaveCSS("animation-name", "none");
+
+  await page.getByRole("button", { name: "Edit configuration" }).click();
+  await expect(firstRow).toHaveCSS("animation-name", "none");
 });

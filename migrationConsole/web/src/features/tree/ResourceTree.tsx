@@ -47,6 +47,7 @@ interface ResourceTreeProps {
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
   presentation: "configuration" | "runtime";
+  viewTransitionKey: string;
   resourceAdds: ResourceAddController | null;
   changeStates: Record<string, ResourceDraftChangeState>;
   validationStates: Record<string, ResourceValidationState>;
@@ -118,6 +119,7 @@ function visibleRows(
 
 interface TreeRowProps {
   row: VisibleRow;
+  rowOrder: number;
   presentation: ResourceTreeProps["presentation"];
   expanded: boolean;
   inserted: boolean;
@@ -169,6 +171,7 @@ interface InlineRename {
 
 const TreeRow = memo(function TreeRow({
   row,
+  rowOrder,
   presentation,
   expanded,
   inserted,
@@ -333,7 +336,10 @@ const TreeRow = memo(function TreeRow({
       onKeyDown={(event) => onKeyDown(event, node.id)}
       ref={(element) => rowRef(node.id, element)}
       role="treeitem"
-      style={{ "--tree-depth": depth } as React.CSSProperties}
+      style={{
+        "--tree-depth": depth,
+        "--tree-order": Math.min(rowOrder, 14),
+      } as React.CSSProperties}
       tabIndex={focused ? 0 : -1}
     >
       {expandable ? (
@@ -387,7 +393,7 @@ const TreeRow = memo(function TreeRow({
             }}
             onKeyDown={(event) => {
               event.stopPropagation();
-              if (event.key === "Escape") {
+              if (event.key === "Escape" && !addPending) {
                 event.preventDefault();
                 onCancelRename();
               }
@@ -652,7 +658,7 @@ function InlineCreateRow({
       }}
       onKeyDown={(event) => {
         event.stopPropagation();
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !pending) {
           event.preventDefault();
           onCancel();
         }
@@ -719,6 +725,7 @@ export function ResourceTree({
   selectedId,
   onSelect,
   presentation,
+  viewTransitionKey,
   resourceAdds,
   changeStates,
   validationStates,
@@ -729,10 +736,14 @@ export function ResourceTree({
   );
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
+  const [viewTransition, setViewTransition] =
+    useState<"edit" | "filter" | null>(null);
   const [addMenuGroupId, setAddMenuGroupId] = useState<string | null>(null);
   const [inlineCreate, setInlineCreate] = useState<InlineCreate | null>(null);
   const [inlineRename, setInlineRename] = useState<InlineRename | null>(null);
   const knownIds = useRef<Set<string> | null>(null);
+  const knownIdsViewKey = useRef(viewTransitionKey);
+  const animatedViewKey = useRef(viewTransitionKey);
   const rowElements = useRef(new Map<string, HTMLDivElement>());
   const inlineCreateElement = useRef<HTMLFormElement>(null);
   const focusAfterMutation = useRef(false);
@@ -756,6 +767,12 @@ export function ResourceTree({
 
   useEffect(() => {
     const nextIds = new Set(Object.keys(snapshot.nodes));
+    if (knownIdsViewKey.current !== viewTransitionKey) {
+      knownIdsViewKey.current = viewTransitionKey;
+      knownIds.current = nextIds;
+      setInsertedIds(new Set());
+      return;
+    }
     if (knownIds.current) {
       const inserted = new Set(
         [...nextIds].filter((nodeId) => !knownIds.current?.has(nodeId)),
@@ -771,7 +788,17 @@ export function ResourceTree({
       }
     }
     knownIds.current = nextIds;
-  }, [snapshot]);
+  }, [snapshot, viewTransitionKey]);
+
+  useEffect(() => {
+    if (animatedViewKey.current === viewTransitionKey) return;
+    animatedViewKey.current = viewTransitionKey;
+    setViewTransition(
+      viewTransitionKey === "configuration" ? "edit" : "filter",
+    );
+    const timer = globalThis.setTimeout(() => setViewTransition(null), 900);
+    return () => globalThis.clearTimeout(timer);
+  }, [viewTransitionKey]);
 
   const rows = useMemo(
     () => visibleRows(snapshot, expanded, filter, presentation),
@@ -1145,8 +1172,15 @@ export function ResourceTree({
         />
       </label>
       <div className="tree-scroll" data-testid="tree-scroller">
-        <div aria-label="Workflow resources" className="resource-tree" role="tree">
-          {rows.map((row) => (
+        <div
+          aria-label="Workflow resources"
+          className={[
+            "resource-tree",
+            viewTransition ? `tree-view-transition-${viewTransition}` : "",
+          ].join(" ")}
+          role="tree"
+        >
+          {rows.map((row, rowOrder) => (
             <Fragment key={row.node.id}>
               <TreeRow
                 expanded={expanded.has(row.node.id) || filter.length > 0}
@@ -1192,6 +1226,7 @@ export function ResourceTree({
                   current === nodeId ? null : nodeId
                 ))}
                 row={row}
+                rowOrder={rowOrder}
                 rowRef={rowRef}
                 selected={
                   inlineCreate

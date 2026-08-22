@@ -82,7 +82,7 @@ export type NormalizedUserConfig = Omit<InputConfig, "sourceClusters" | "traffic
 
 export {KAFKA_VERSION} from "./kafkaConfigResolution";
 
-async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
+async function rewriteLocalStackEndpointForRuntime(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
     const isSecure = /^localstacks:\/\//i.test(s3Endpoint);
     const protocol = isSecure ? 'https://' : 'http://';
@@ -91,7 +91,25 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
     const normalizedEndpoint = s3Endpoint.replace(/^localstacks?:\/\//i, protocol);
     const url = new URL(normalizedEndpoint);
     const port = url.port ? `:${url.port}` : '';
-    const result = await dns.lookup(url.hostname);
+    let result;
+    try {
+        result = await dns.lookup(url.hostname);
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (![
+            "EAI_AGAIN",
+            "ENODATA",
+            "ENOTFOUND",
+            "EREFUSED",
+            "ESERVFAIL",
+            "ETIMEOUT",
+        ].includes(code ?? "")) {
+            throw error;
+        }
+        // The CLI may run outside Kubernetes while this hostname is intended
+        // for workload DNS. Keep it resolvable in the eventual pod.
+        return `${protocol}${url.hostname}${port}`;
+    }
     let s3Ip = result.address;
     if (result.family === 6) {
         s3Ip = `[${s3Ip}]`;
@@ -110,7 +128,7 @@ async function rewriteRepoEndpointIfLocalStack(
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = resolveLocalStackDns
-            ? await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint)
+            ? await rewriteLocalStackEndpointForRuntime(snapshotRepo.endpoint)
             : snapshotRepo.endpoint.replace(
                 /^localstack:\/\//i,
                 "http://"

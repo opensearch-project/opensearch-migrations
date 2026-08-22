@@ -432,6 +432,33 @@ describe('MigrationConfigTransformer validation', () => {
         }));
     });
 
+    it('should preserve a cluster-only LocalStack hostname when host DNS cannot resolve it', async () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.snapshotInfo.repos.default.endpoint =
+            "localstack://not-resolvable.invalid:4566";
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.snapshots[0].createSnapshotConfig[0].repo.endpoint)
+            .toBe("http://not-resolvable.invalid:4566");
+        expect(result.snapshotMigrations[0].snapshotConfig.repoConfig.endpoint)
+            .toBe("http://not-resolvable.invalid:4566");
+    });
+
+    it('should still resolve a host-visible LocalStack hostname to an IP', async () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.snapshotInfo.repos.default.endpoint =
+            "localstacks://localhost:4566";
+
+        const result = await transformer.processFromObject(config);
+        const endpoint =
+            result.snapshots[0].createSnapshotConfig[0].repo.endpoint;
+
+        expect(endpoint).toMatch(
+            /^https:\/\/(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:]+\]):4566$/i
+        );
+    });
+
     it('should lower transform pipelines into provider configs with file-source mounts', async () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [

@@ -647,6 +647,18 @@ def create_app(
             raise _draft_conflict(error) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except RuntimeError as error:
+            logger.warning("Admission preflight preparation failed: %s", error)
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "admission_preflight_unavailable",
+                    "message": (
+                        "Admission preflight could not prepare the workflow: "
+                        f"{error}"
+                    ),
+                },
+            ) from error
         return AdmissionPreflightV1.from_domain(report)
 
     @app.get(

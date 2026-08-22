@@ -29,6 +29,7 @@ import {
   type LogStream,
   type LogStreamStatus,
 } from "../../api/client";
+import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 
 
 type ConnectionState =
@@ -251,9 +252,15 @@ export function LogPanel({
     }
     void stop().finally(onClose);
   };
+  const panelRef = useEscapeCancel<HTMLElement>(close);
 
   return (
-    <section className="log-panel workspace-section" aria-label="Managed logs">
+    <section
+      aria-label="Managed logs"
+      className="log-panel workspace-section"
+      data-escape-cancel-layer
+      ref={panelRef}
+    >
       <header className="output-panel-header">
         <div>
           <Logs aria-hidden="true" />
