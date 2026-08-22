@@ -1020,6 +1020,10 @@ button {
   will-change: transform;
 }
 
+.tree-row.single-line-tree-row {
+  height: 34px;
+}
+
 .tree-row.has-dependency-hint {
   height: 60px;
 }
@@ -1046,9 +1050,16 @@ button {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.tree-status-slot,
 .tree-status-spacer {
+  display: grid;
   width: 15px;
   height: 15px;
+  place-items: center;
+}
+
+.configuration-tree-row .tree-status-slot:not(.configuration-status-visible) {
+  opacity: 0;
 }
 
 .tree-row.draft-change-ancestor {
@@ -1369,6 +1380,19 @@ button {
   justify-content: flex-end;
   gap: 3px;
   min-width: 20px;
+}
+
+.configuration-tree-row .tree-row-tools > * {
+  animation: tree-icon-enter 240ms ease both;
+}
+
+@keyframes tree-icon-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .tree-group-add,
@@ -4634,6 +4658,7 @@ button.dependency-node:disabled {
 
   .spin,
   .tree-row.inserted,
+  .configuration-tree-row .tree-row-tools > *,
   .config-property-row.inserted,
   .config-property-row.removing,
   .config-property-detail.removing {

@@ -1,10 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { configDraft, manageSnapshot } from "../src/test/fixtures";
 
 
 interface BrowserAnimation {
   id: string;
+  playState: string;
   effect: {
     getKeyframes: () => Array<Record<string, unknown>>;
     getTiming: () => { fill: string };
@@ -15,6 +16,71 @@ interface BrowserAnimation {
 interface BrowserAnimatedElement {
   getAnimations: () => BrowserAnimation[];
   getAttribute: (name: string) => string | null;
+}
+
+
+interface BrowserPositionedElement {
+  getBoundingClientRect: () => { top: number };
+}
+
+
+interface BrowserMotionWindow {
+  __treeMotionSamples?: number[];
+  performance: { now: () => number };
+  requestAnimationFrame: (callback: () => void) => number;
+}
+
+
+interface BrowserControlledMotionWindow extends BrowserMotionWindow {
+  __nativeTreeRequestAnimationFrame?: (callback: () => void) => number;
+  __queuedTreeAnimationFrames?: Array<() => void>;
+}
+
+
+interface BrowserButtonElement {
+  click: () => void;
+  ownerDocument: {
+    querySelector: (selector: string) => BrowserAnimatedElement | null;
+  };
+}
+
+
+async function beginTreeMotionSampling(row: Locator) {
+  await row.evaluate((element: BrowserPositionedElement) => {
+    const motion = globalThis as unknown as BrowserMotionWindow;
+    motion.__treeMotionSamples = [];
+    const startedAt = motion.performance.now();
+    const sample = () => {
+      motion.__treeMotionSamples?.push(
+        element.getBoundingClientRect().top,
+      );
+      if (motion.performance.now() - startedAt < 700) {
+        motion.requestAnimationFrame(sample);
+      }
+    };
+    motion.requestAnimationFrame(sample);
+  });
+}
+
+
+async function readTreeMotionSamples(page: Page) {
+  await page.waitForTimeout(725);
+  return page.evaluate(() => (
+    (globalThis as typeof globalThis & {
+      __treeMotionSamples?: number[];
+    }).__treeMotionSamples ?? []
+  ));
+}
+
+
+function largestFrameDelta(samples: number[]) {
+  return samples.slice(1).reduce(
+    (largest, position, index) => Math.max(
+      largest,
+      Math.abs(position - samples[index]),
+    ),
+    0,
+  );
 }
 
 
@@ -669,6 +735,16 @@ test("updates variant fields in place beneath their selector", async ({ page }, 
   await page.goto("/");
 
   await page.getByRole("button", { name: "Edit configuration" }).click();
+  const addSource = page.getByRole("region", {
+    name: "Resource navigation",
+  }).getByRole("button", { name: "Add source cluster" });
+  await expect(
+    addSource,
+  ).toBeVisible();
+  await expect(addSource).toHaveCSS(
+    "animation-name",
+    "tree-icon-enter",
+  );
   await expect(
     page.getByRole("region", { name: "Resource navigation" })
       .getByRole("button", { name: "Add source cluster" }),
@@ -1166,9 +1242,136 @@ test("animates resource filters and entry into configuration mode", async ({ pag
   });
   await page.waitForTimeout(550);
 
-  await page.getByRole("button", { name: "Edit configuration" }).click();
+  const replayRow = tree.locator(
+    '[data-node-id="resource:trafficreplays:replay"]',
+  );
+  const replayLabel = replayRow.locator(".tree-row-copy > strong");
+  const runtimeRowBox = await replayRow.boundingBox();
+  expect(runtimeRowBox).not.toBeNull();
+  expect(runtimeRowBox!.height).toBe(42);
+  await page.evaluate(() => {
+    const motion = globalThis as unknown as BrowserControlledMotionWindow;
+    motion.__nativeTreeRequestAnimationFrame =
+      motion.requestAnimationFrame.bind(globalThis);
+    motion.__queuedTreeAnimationFrames = [];
+    motion.requestAnimationFrame = (callback) => {
+      motion.__queuedTreeAnimationFrames?.push(callback);
+      return 10_000 + (motion.__queuedTreeAnimationFrames?.length ?? 0);
+    };
+  });
+  const immediateAnimationStates = await page.getByRole(
+    "button",
+    { name: "Edit configuration" },
+  ).evaluate(async (button: BrowserButtonElement) => {
+    button.click();
+    await Promise.resolve();
+    const row = button.ownerDocument.querySelector(
+      '[data-node-id="resource:trafficreplays:replay"]',
+    );
+    return row?.getAnimations().flatMap((animation) => (
+      [
+        "tree-layout-transition",
+        "tree-size-transition",
+      ].includes(animation.id)
+        ? [{ id: animation.id, state: animation.playState }]
+        : []
+    )) ?? [];
+  });
+  await page.evaluate(() => {
+    const motion = globalThis as unknown as BrowserControlledMotionWindow;
+    const nativeFrame = motion.__nativeTreeRequestAnimationFrame;
+    const queuedFrames = motion.__queuedTreeAnimationFrames ?? [];
+    if (!nativeFrame) return;
+    motion.requestAnimationFrame = nativeFrame;
+    queuedFrames.forEach((callback) => nativeFrame(callback));
+  });
+  expect(immediateAnimationStates.map(({ id }) => id)).toEqual(
+    expect.arrayContaining([
+      "tree-layout-transition",
+      "tree-size-transition",
+    ]),
+  );
+  expect(immediateAnimationStates.every(({ state }) => state !== "paused"))
+    .toBe(true);
   await expect.poll(movingRows).not.toEqual([]);
   expect((await filterInput.boundingBox())!.y).toBeCloseTo(filterY, 0);
+  const rowAnimationDetails = await replayRow.evaluate(
+    (element: BrowserAnimatedElement) => (
+      element.getAnimations().flatMap((animation) => {
+        if (![
+          "tree-layout-transition",
+          "tree-size-transition",
+        ].includes(animation.id)) {
+          return [];
+        }
+        return [{
+          id: animation.id,
+          keyframes: animation.effect?.getKeyframes() ?? [],
+        }];
+      })
+    ),
+  );
+  expect(rowAnimationDetails.map(({ id }) => id)).toEqual(
+    expect.arrayContaining([
+      "tree-layout-transition",
+      "tree-size-transition",
+    ]),
+  );
+  const sizeFrames = rowAnimationDetails.find(
+    ({ id }) => id === "tree-size-transition",
+  )?.keyframes;
+  expect(sizeFrames?.[0]?.["height"]).toBe("42px");
+  expect(sizeFrames?.at(-1)?.["height"]).toBe("34px");
+
+  const labelFrames = await replayLabel.evaluate(
+    (element: BrowserAnimatedElement) => (
+      element.getAnimations().find(
+        (animation) => animation.id === "tree-label-transition",
+      )?.effect?.getKeyframes() ?? []
+    ),
+  );
+  const labelTransform = labelFrames[0]?.["transform"];
+  expect(typeof labelTransform).toBe("string");
+  expect(labelTransform).not.toBe("translate(0px, 0px)");
+
+  const statusOpacityFrames = await replayRow.locator(
+    ".tree-status-slot",
+  ).evaluate((element: BrowserAnimatedElement) => (
+    element.getAnimations().find(
+      (animation) => animation.id === "tree-icon-transition",
+    )?.effect?.getKeyframes() ?? []
+  ));
+  expect(statusOpacityFrames[0]?.["opacity"]).toBe("1");
+  expect(statusOpacityFrames.at(-1)?.["opacity"]).toBe("0");
+
+  await beginTreeMotionSampling(replayRow);
+  api.insertCapture();
+  await page.getByRole("button", { name: "Refresh state" }).click();
+  await expect(tree.getByRole("treeitem", {
+    name: /^capture-next/,
+  })).toBeVisible();
+  const motionSamples = await readTreeMotionSamples(page);
+  expect(motionSamples.length).toBeGreaterThan(10);
+  expect(
+    largestFrameDelta(motionSamples),
+    JSON.stringify(motionSamples),
+  ).toBeLessThan(20);
+
+  await page.screenshot({
+    path: testInfo.outputPath("configuration-layout-transition.png"),
+  });
+  expect((await replayRow.boundingBox())!.height).toBe(34);
+
+  await beginTreeMotionSampling(replayRow);
+  await page.getByRole("button", { name: "Exit editing" }).click();
+  await page.getByRole("button", { name: "Saved config" }).click();
+  const exitMotionSamples = await readTreeMotionSamples(page);
+  expect(exitMotionSamples.length).toBeGreaterThan(10);
+  expect(
+    largestFrameDelta(exitMotionSamples),
+    JSON.stringify(exitMotionSamples),
+  ).toBeLessThan(20);
+  expect((await replayRow.boundingBox())!.height).toBe(42);
 });
 
 
