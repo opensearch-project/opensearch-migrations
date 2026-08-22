@@ -36,7 +36,7 @@ generate_openapi() {
         (
             cd "${CONSOLE_LINK_DIR}"
             PIPENV_IGNORE_VIRTUALENVS=1 PIPENV_VENV_IN_PROJECT=1 \
-                pipenv install --deploy
+                pipenv sync
         )
         python_command=("${CONSOLE_LINK_DIR}/.venv/bin/python")
         if ! can_import_web_app "${python_command[@]}"; then
