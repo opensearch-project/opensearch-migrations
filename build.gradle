@@ -1,10 +1,11 @@
 import com.google.cloud.tools.jib.gradle.JibTask
 import groovy.json.JsonOutput
+import groovy.xml.XmlParser
 
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '8.7.0'
+    id "com.diffplug.spotless" version '8.9.0'
     id 'io.freefair.lombok' version '9.5.0' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
@@ -73,7 +74,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
 
     }
@@ -83,7 +84,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
     }
     json {
@@ -140,18 +141,18 @@ subprojects {
                         'org.opensearch',
                         '',
                         '\\#')
-                indentWithSpaces()
+                leadingTabsToSpaces()
                 endWithNewline()
                 removeUnusedImports()
             }
         }
 
-        tasks.withType(Test) {
+        tasks.withType(Test).configureEach {
             // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
             dependsOn project.javadoc
         }
         if (!sourceSets.test.allSource.files.isEmpty()) {
-            tasks.withType(Test) {
+            tasks.withType(Test).configureEach {
                 testLogging {
                     events = ["passed", "skipped", "failed"]
                     exceptionFormat = "full"
@@ -247,7 +248,7 @@ subprojects {
                 dependsOn isolatedTest
             }
         } else {
-            tasks.withType(Test) {
+            tasks.withType(Test).configureEach {
                 jacoco {
                     enabled = false
                 }
@@ -403,9 +404,9 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
 
     reports {
         xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        xml.outputLocation = layout.buildDirectory.file("reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
+        html.outputLocation = layout.buildDirectory.dir("reports/jacoco/mergedReport/html")
     }
 
     doLast {
@@ -525,12 +526,12 @@ tasks.register('gatherJacocoExecForMerging', Sync) {
     description = 'Local troubleshooting, gathers coverage all exec files in build/jacocoMerged/*.exec into to be consumed by jacocoAggregateReport'
 
     from subprojects.collect { proj ->
-        fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
+        fileTree(dir: proj.layout.buildDirectory, include: 'jacoco/*.exec')
     }
-    into "$buildDir/jacocoMerged"
+    into layout.buildDirectory.dir("jacocoMerged")
 
     // Explicit outputs for incremental build support
-    outputs.dir("$buildDir/jacocoMerged")
+    outputs.dir(layout.buildDirectory.dir("jacocoMerged"))
 }
 
 tasks.register('mergeJacocoReports') {

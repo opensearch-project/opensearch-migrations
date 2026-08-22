@@ -56,7 +56,7 @@ class FailedRequestsLoggerTest {
             var capturedEvent = logs.getCapturedLogEvents().get(0);
             
             // Verify the log message
-            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to DLQ"));
+            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to failed document stream"));
             
             // Verify MDC context data contains all expected keys and values
             Map<String, String> mdc = capturedEvent.getContextData();
@@ -97,10 +97,10 @@ class FailedRequestsLoggerTest {
             logger.logBulkFailure(indexName, () -> failedItemCount, () -> requestBody, 
                 new RuntimeException("Connection timeout"));
 
-            // Verify detailed log in named logger (DLQ) with MDC data
+            // Verify detailed log in named logger (failed document stream) with MDC data
             assertEquals(1, namedLogs.getCapturedLogEvents().size());
             var capturedEvent = namedLogs.getCapturedLogEvents().get(0);
-            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to DLQ"));
+            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to failed document stream"));
             
             Map<String, String> mdc = capturedEvent.getContextData();
             assertEquals(indexName, mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.INDEX_NAME));
@@ -114,7 +114,7 @@ class FailedRequestsLoggerTest {
                 allOf(
                     containsString(indexName),
                     containsString("1"),
-                    containsString("DLQ"),
+                    containsString("failed document stream"),
                     containsString("manual investigation and retry")
                 )
             );

@@ -1,4 +1,13 @@
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
+# Pinned Kafka image the tools are copied from. Declared in the global scope so it
+# can be used in a FROM below; BuildKit forbids variable expansion in COPY --from,
+# so we alias the image as a named stage and copy from that. Overridden by the
+# build to the cache-rewritten ref; see buildImages/build.gradle.
+ARG KAFKA_IMAGE="docker.io/apache/kafka:3.9.2"
+
+# Kafka tools source: alias the pinned image as a stage so COPY --from can
+# reference it by a literal stage name.
+FROM ${KAFKA_IMAGE} AS kafka-dist
 
 # Stage 1: Download and install tools (kafka, kubectl, helm)
 FROM ${BASE_IMAGE} AS migration-console-tools
@@ -12,19 +21,15 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
-ARG KAFKA_VERSION="3.9.2"
 ARG STERN_VERSION="1.33.1"
 
-# Get kafka distribution and unpack to 'kafka'
-RUN mkdir -p /root/kafka-tools/kafka && \
-    url_cdn="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
-    url_archive="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
-    curl --retry 2 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || \
-        curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
-    tar -xzf /tmp/kafka.tgz -C /root/kafka-tools/kafka --strip-components=1 && \
-    rm -f /tmp/kafka.tgz && \
-    mkdir -p /root/kafka-tools/aws && \
-    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+# Kafka distribution: copy the tools tree from the pinned kafka-dist stage
+# (deterministic, no Apache-mirror download/retry), then drop in the AWS MSK IAM
+# auth jar (single fetch, no retries — a failure fails the build so it can be
+# re-run against the layer cache rather than silently varying).
+COPY --from=kafka-dist /opt/kafka /root/kafka-tools/kafka
+RUN mkdir -p /root/kafka-tools/aws && \
+    curl -fSL \
         https://github.com/aws/aws-msk-iam-auth/releases/download/v2.3.4/aws-msk-iam-auth-2.3.4-all.jar \
         -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
 

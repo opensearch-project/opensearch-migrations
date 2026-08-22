@@ -17,6 +17,7 @@ except (AttributeError, ValueError):
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
 import console_link.middleware.backfill as backfill_
+import console_link.middleware.failed_document_stream as failed_document_stream_
 import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
@@ -899,25 +900,143 @@ def scale_backfill_cmd(ctx, units: int):
     click.echo(message)
 
 
+_PRESENCE = {True: "yes", False: "no"}
+
+
 @backfill_group.command(name="status")
 @click.option('--deep-check', is_flag=True, help='Perform a deep status check of the backfill')
 @click.pass_obj
 def status_backfill_cmd(ctx, deep_check):
     logger.info(f"Called `console backfill status`, with {deep_check=}")
+    # Resolve once; threaded into both output formats.
+    cfg, has_failures = _load_failed_document_stream()
     if ctx.json and deep_check:
         try:
-            message = json.dumps(ctx.env.backfill.build_backfill_status().model_dump(mode="json"))
+            payload = ctx.env.backfill.build_backfill_status(
+                has_failed_documents=has_failures).model_dump(mode="json")
         except DeepStatusNotYetAvailable:
-            message = json.dumps(BackfillOverallStatus(
+            payload = BackfillOverallStatus(
                 status=StepStateWithPause.PENDING,
                 percentage_completed=0.0,
-            ).model_dump(mode="json"))
-        click.echo(message)
+            ).model_dump(mode="json")
+        if cfg is not None:
+            payload["failed_document_stream_location"] = cfg.location_uri
+            payload["failed_documents_present"] = has_failures
+        click.echo(json.dumps(payload))
         return
-    exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
+    exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check, has_failed_documents=has_failures)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
+    # Presence only; counting reads every record. `failed-document-stream count` gives the number.
+    if cfg is not None:
+        click.echo(f"failed document stream location: {cfg.location_uri}")
+        click.echo(f"Failed documents present: {_PRESENCE[has_failures]}")
+
+
+def _load_failed_document_stream():
+    """Return (config, has_records), or (None, None) when not configured — then it is not
+    consulted. S3 errors propagate: an unreadable stream must not read as "no failures"."""
+    try:
+        cfg = failed_document_stream_.load_config()
+    except failed_document_stream_.FailedDocumentStreamNotConfigured:
+        return None, None
+    return cfg, failed_document_stream_.has_records(cfg)
+
+
+# ##################### failed document stream (Reindex-from-Snapshot Failed Document Stream) ###################
+
+
+@click.group(name="failed-document-stream",
+             help="Inspect or manage RFS terminal-failure failed document stream records.")
+def failed_document_stream_group():
+    """All actions related to the durable RFS failed document stream for the current session."""
+
+
+@failed_document_stream_group.command(name="location",
+                                      help="Print the S3 URI of the failed document stream for the current session.")
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+def backfill_failed_document_stream_location_cmd(migration):
+    try:
+        cfg = failed_document_stream_.load_config(migration_override=migration)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        raise click.ClickException(str(e))
+    click.echo(cfg.location_uri)
+
+
+@failed_document_stream_group.command(
+    name="count",
+    help="Count distinct failed documents in the current session's failed document stream "
+         "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+def backfill_failed_document_stream_count_cmd(migration):
+    try:
+        cfg = failed_document_stream_.load_config(migration_override=migration)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        raise click.ClickException(str(e))
+    click.echo(str(failed_document_stream_.count(cfg)))
+
+
+@failed_document_stream_group.command(name="list", help="List failed document records in stable order.")
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+@click.option('--limit', default=100, show_default=True, type=int, help='Maximum records to print.')
+@click.pass_obj
+def backfill_failed_document_stream_list_cmd(ctx, migration, limit):
+    try:
+        cfg = failed_document_stream_.load_config(migration_override=migration)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        raise click.ClickException(str(e))
+    records = failed_document_stream_.list_records(cfg, limit=limit)
+    if ctx.json:
+        click.echo(json.dumps(records))
+        return
+    if not records:
+        click.echo("(no failed document stream records for this session)")
+        return
+    for r in records:
+        click.echo(f"{r.get('timestamp', '-')}\t{r.get('targetIndex', '-')}\t"
+                   f"{r.get('documentId', '-')}\t{r.get('failureClass', '-')}\t"
+                   f"{r.get('failureType', '-')}")
+
+
+@backfill_group.command(
+    name="reset",
+    help="Delete backfill metadata for this session. By default failed document stream records are kept.")
+@click.option('--include-failed-document-stream', is_flag=True, default=False,
+              help='Also delete the durable failed document stream for this session. Irreversible.')
+@click.option('--yes', is_flag=True, default=False, help='Skip the confirmation prompt.')
+@click.pass_obj
+def reset_backfill_cmd(ctx, include_failed_document_stream, yes):
+    # The existing 'stop' command already archives backfill working state; 'reset' wraps
+    # that and (optionally) also deletes the failed document stream records for this run.
+    click.echo("Archiving the working state of the backfill operation...")
+    exitcode, message = backfill_.archive(ctx.env.backfill)
+    if isinstance(message, WorkingIndexDoesntExist):
+        click.echo("Working state index doesn't exist, skipping archive operation.")
+    else:
+        while isinstance(message, RfsWorkersInProgress):
+            click.echo("RFS Workers are still running, waiting for them to complete...")
+            time.sleep(5)
+            exitcode, message = backfill_.archive(ctx.env.backfill)
+        if exitcode != ExitCode.SUCCESS:
+            raise click.ClickException(message)
+        click.echo(f"Backfill working state archived to: {message}")
+
+    if not include_failed_document_stream:
+        click.echo("failed document stream records preserved. "
+                   "Re-run with --include-failed-document-stream to delete them.")
+        return
+
+    try:
+        cfg = failed_document_stream_.load_config()
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        click.echo(f"failed document stream not configured; nothing to delete ({e})")
+        return
+    if not yes:
+        click.confirm(f"About to delete ALL failed document stream objects under {cfg.location_uri}. Proceed?",
+                      abort=True)
+    deleted = failed_document_stream_.delete_session(cfg)
+    click.echo(f"Deleted {deleted} failed document stream object(s) under {cfg.location_uri}")
 
 
 # ##################### REPLAY ###################
@@ -1344,6 +1463,7 @@ def show(inputfile, outputfile):
 cli.add_command(cluster_group)
 cli.add_command(completion)
 cli.add_command(kafka_group)
+cli.add_command(failed_document_stream_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)

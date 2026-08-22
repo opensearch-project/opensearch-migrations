@@ -71,6 +71,51 @@ def test_clear_indices(requests_mock):
     assert mock.call_count == 1
 
 
+DESTRUCTIVE_GUARD_RESPONSE = {
+    "error": {
+        "root_cause": [{
+            "type": "illegal_argument_exception",
+            "reason": "Wildcard expressions or all indices are not allowed"
+        }],
+        "type": "illegal_argument_exception",
+        "reason": "Wildcard expressions or all indices are not allowed"
+    },
+    "status": 400
+}
+
+
+def test_clear_indices_wildcard_rejected_by_destructive_guard(requests_mock):
+    # A target with action.destructive_requires_name=true rejects the wildcard delete form.
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    requests_mock.delete(
+        f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state*",
+        status_code=400,
+        json=DESTRUCTIVE_GUARD_RESPONSE
+    )
+
+    result = clusters_.clear_indices(cluster)
+
+    assert "action.destructive_requires_name" in result
+    assert "by name" in result
+    # The raw requests error alone is not actionable.
+    assert result != "Error encountered when clearing indices: 400 Client Error: Bad Request"
+
+
+def test_clear_indices_unrelated_400_is_not_blamed_on_the_guard(requests_mock):
+    # Only the destructive-guard rejection should get the specialised message.
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    requests_mock.delete(
+        f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state*",
+        status_code=400,
+        json={"error": {"type": "parse_exception", "reason": "something else entirely"}, "status": 400}
+    )
+
+    result = clusters_.clear_indices(cluster)
+
+    assert "action.destructive_requires_name" not in result
+    assert "Error encountered when clearing indices" in result
+
+
 def test_call_api_via_middleware(requests_mock):
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})

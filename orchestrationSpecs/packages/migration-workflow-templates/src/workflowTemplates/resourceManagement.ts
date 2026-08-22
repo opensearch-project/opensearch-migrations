@@ -667,6 +667,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                         sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
                         sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),
                         sourceAllowInsecure: makeDirectTypeProxy(expr.dig(sourceIdentity, ["allowInsecure"], false)),
+                        sourceSolrContextPath: makeStringTypeProxy(
+                            expr.dig(sourceIdentity, ["solrContextPath"], expr.literal(""))
+                        ),
                         sourceAuthType: makeStringTypeProxy(expr.dig(sourceIdentity, ["authType"], expr.literal("none"))),
                         sourceAuthBasicSecretName: makeStringTypeProxy(
                             expr.dig(sourceIdentity, ["authBasicSecretName"], expr.literal(""))

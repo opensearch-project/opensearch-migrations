@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: provider-config
+  labels:
+    # Necessary label for Argo to pull values from a configmap
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  # The target cloud provider, used by workflow templates to select
+  # cloud-specific behavior at runtime (e.g. the capture proxy's internal
+  # load-balancer annotation). Rendered unconditionally with the key always
+  # present: Argo v4 does not honor optional:true on configMapKeyRef input
+  # parameters and fails resolution if the key is absent. Empty defaults to
+  # "aws" in the workflow parameter definition.
+  cloudProvider: {{ .Values.cloudProvider | default "aws" | quote }}

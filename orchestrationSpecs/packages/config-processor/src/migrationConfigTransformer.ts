@@ -18,6 +18,7 @@ import {
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
     unwrapSchema as unwrapSchemaWithPipes,
+    DEPLOYMENT_DEFAULTS_CONFIG,
 } from '@opensearch-migrations/schemas';
 import {InputValidationElement, InputValidationError, StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -461,8 +462,61 @@ function prepareMetadataConfig(
     });
 }
 
+function trimToUndefined(value: unknown): string | undefined {
+    const trimmed = typeof value === "string" ? value.trim() : undefined;
+    return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
+ * destination is recorded in run history rather than discovered from pod env at runtime.
+ *
+ * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
+ */
+export function resolveFailedDocumentStreamS3(
+    rest: Record<string, unknown>,
+    repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
+    deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
+): Record<string, string | undefined> {
+    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
+    const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
+    const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
+
+    if (!bucket) {
+        // Stream off; clear orphan region/endpoint.
+        return {
+            failedDocumentStreamS3Bucket: undefined,
+            failedDocumentStreamS3Region: undefined,
+            failedDocumentStreamS3Endpoint: undefined,
+        };
+    }
+
+    const region = userRegion
+        ?? trimToUndefined(repoConfig?.awsRegion)
+        ?? trimToUndefined(deploymentDefaults.defaultS3Region);
+    const endpoint = userEndpoint
+        ?? trimToUndefined(repoConfig?.endpoint)
+        ?? trimToUndefined(deploymentDefaults.defaultS3Endpoint);
+
+    if (!region) {
+        throw new Error(
+            `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
+            `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
+            `or the deployment default region.`
+        );
+    }
+
+    return {
+        failedDocumentStreamS3Bucket: bucket,
+        failedDocumentStreamS3Region: region,
+        failedDocumentStreamS3Endpoint: endpoint,
+    };
+}
+
 function prepareDocumentBackfillConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
+    deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>,
     skipApprovals: boolean
 ) {
     if (config === undefined) {
@@ -474,6 +528,7 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
@@ -836,7 +891,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
     typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
 > {
-    constructor() {
+    constructor(private readonly deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG> = {}) {
         super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG_PRE_ENRICH);
     }
 
@@ -1010,8 +1065,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
                     sourceConnectionIdentity,
-                    m.metadataMigrationConfig ?? {},
-                    m.documentBackfillConfig ?? {},
+                    m.metadataMigrationConfig,
+                    m.documentBackfillConfig,
                     targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
@@ -1077,6 +1132,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }));
 
         const output = {
+            requireBeginApproval: userConfig.requireBeginApproval ?? false,
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
             ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
@@ -1355,6 +1411,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
+                        repoConfig,
+                        this.deploymentDefaults,
                         skipApprovals
                     );
                     results.push({
@@ -1555,6 +1613,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
         };
     }

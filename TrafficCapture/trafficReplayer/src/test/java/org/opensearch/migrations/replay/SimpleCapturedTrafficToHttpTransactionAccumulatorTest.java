@@ -83,6 +83,43 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                     ObservationDirective.write(MAX_COMMANDS_IN_CONNECTION)
                 ),
                 List.of(MAX_COMMANDS_IN_CONNECTION, MAX_COMMANDS_IN_CONNECTION)
+            ),
+            // F1 trigger: multi-record request terminated by connectionException.
+            // Explicit flush() directives force the serializer to produce separate
+            // TrafficStream records for the same request. The connectionException then
+            // terminates the connection. The accumulator must report all TrafficStream
+            // indices as processed (committed/ignored).
+            Arguments.of(
+                "connectionExceptionAfterMultiRecordReadCommitsAllIndices",
+                1024 * 1024, // large buffer — only explicit flushes produce new records
+                0,
+                List.of(
+                    ObservationDirective.read(128),
+                    ObservationDirective.flush(), // forces record boundary
+                    ObservationDirective.read(128),
+                    ObservationDirective.flush(), // forces another record boundary
+                    ObservationDirective.connectionException()
+                ),
+                List.of() // no completed transactions expected
+            ),
+            // F1 variant: exception after a completed request on a keep-alive connection.
+            // Request 1 completes normally, then request 2 starts and is interrupted
+            // after spanning multiple records.
+            Arguments.of(
+                "connectionExceptionMidSecondRequestOnKeepAlive",
+                1024 * 1024, // large buffer
+                0,
+                List.of(
+                    ObservationDirective.read(32),
+                    ObservationDirective.eom(),
+                    ObservationDirective.write(32),
+                    ObservationDirective.flush(), // record boundary
+                    ObservationDirective.read(128),
+                    ObservationDirective.flush(), // record boundary
+                    ObservationDirective.read(64),
+                    ObservationDirective.connectionException()
+                ),
+                List.of(32, 32) // only request 1 completes
             ) };
     }
 

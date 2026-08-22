@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -11,12 +10,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -42,12 +39,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
-import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
-import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
-import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -63,6 +57,8 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -81,12 +77,13 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class RfsMigrateDocuments {
@@ -305,7 +302,7 @@ public class RfsMigrateDocuments {
         private VersionStrictness versionStrictness = new VersionStrictness();
 
         @ParametersDelegate
-        private ExperimentalArgs experimental = new ExperimentalArgs();
+        ExperimentalArgs experimental = new ExperimentalArgs();
 
         @Parameter(required = false,
             names = { "--allowed-doc-exception-types", "--allowedDocExceptionTypes" },
@@ -315,6 +312,50 @@ public class RfsMigrateDocuments {
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
 
+        @ParametersDelegate
+        public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
+
+    }
+
+    /**
+     * Configuration for the durable failed document stream. The S3 bucket is the on/off switch: no bucket,
+     * no stream. There is no enable flag and no default bucket.
+     */
+    public static class FailedDocumentStreamArgs {
+        @Parameter(required = false,
+            names = { "--failed-document-stream-s3-bucket" },
+            description = "S3 bucket for durable failed document stream records, and the switch that enables the " +
+                "stream. When unset, terminal failures are not recorded.")
+        public String failedDocumentStreamS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--failed-document-stream-s3-prefix" },
+            description = "S3 key prefix under the failed document stream bucket. Records are written to " +
+                "<prefix>/session=<sessionId>/worker=<workerId>/... Default: \"rfs-failed-document-stream/\".")
+        public String failedDocumentStreamS3Prefix = "rfs-failed-document-stream/";
+
+        @Parameter(required = false,
+            names = { "--failed-document-stream-s3-region" },
+            description = "AWS region for the failed document stream bucket. Defaults to the same region as --s3-region when present.")
+        public String failedDocumentStreamS3Region = null;
+
+        @Parameter(required = false,
+            names = { "--failed-document-stream-s3-endpoint" },
+            description = "Optional S3 endpoint override for failed document stream uploads (e.g. for localstack in tests).")
+        public String failedDocumentStreamS3Endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--failed-document-stream-session-id" },
+            description = "Identifier for this RFS run; used as the S3 prefix that isolates this run's " +
+                "failed document stream records from prior runs. Defaults to the Argo workflow UID when available.")
+        public String failedDocumentStreamSessionId = null;
+
+        @Parameter(required = false,
+            names = { "--failed-document-stream-max-buffer-bytes" },
+            description = "Maximum uncompressed bytes buffered in memory per target index before the failed document stream " +
+                "rotates to a new S3 object. Bounds heap use when a shard produces a very large number of " +
+                "terminal failures. Default 67108864 (64 MiB).")
+        public long failedDocumentStreamMaxBufferBytes = S3FailedDocumentStreamSink.DEFAULT_MAX_BUFFER_BYTES;
     }
 
     public static class ExperimentalArgs {
@@ -548,6 +589,14 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
 
+        // Build the failed document stream sink and attach it to the target client. The sink is closed in
+        // the shutdown hook below; intermediate flushes happen per-shard in
+        // DocumentMigrationBootstrap before completeWorkItem.
+        var resolvedSessionId = resolveSessionId(arguments, workerId);
+        var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
+        targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
+        logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
+
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
             case ALWAYS -> true;
             case NEVER -> false;
@@ -585,7 +634,7 @@ public class RfsMigrateDocuments {
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory);
+        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink);
     }
 
     private static void runMigration(
@@ -593,7 +642,8 @@ public class RfsMigrateDocuments {
         Args arguments,
         CoordinatorInfo coordinatorInfo,
         RootDocumentMigrationContext context,
-        MigrationSourceFactory sourceFactory
+        MigrationSourceFactory sourceFactory,
+        FailedDocumentStreamSink failedDocumentStreamSink
     ) throws Exception {
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -621,7 +671,8 @@ public class RfsMigrateDocuments {
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                        context.getWorkCoordinationContext()::createReleaseWorkItemContext),
+                        context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                        failedDocumentStreamSink),
                 Clock.systemUTC());) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
@@ -629,7 +680,8 @@ public class RfsMigrateDocuments {
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                            context.getWorkCoordinationContext()::createReleaseWorkItemContext);
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                            failedDocumentStreamSink);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -637,6 +689,15 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
+                    // Close the failed document stream sink so any buffered records get flushed to S3 before
+                    // the JVM exits. Safe to call even if completeWorkItem was never reached.
+                    if (failedDocumentStreamSink != null) {
+                        try {
+                            failedDocumentStreamSink.close();
+                        } catch (Exception e) {
+                            log.atError().setCause(e).setMessage("Error closing failed document stream sink during shutdown").log();
+                        }
+                    }
                     LogManager.shutdown();
                 }
             }));
@@ -646,6 +707,18 @@ public class RfsMigrateDocuments {
             var status = sourceFactory.buildAndRun(
                 workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider);
             cleanShutdownCompleted.set(true);
+            // Close the failed document stream sink on the normal (WORK_COMPLETED) path too. This flushes
+            // any buffered records and shuts down the sink's worker thread. The shutdown hook also closes
+            // it, but only fires on JVM termination signals; the WORK_COMPLETED path returns from main()
+            // without System.exit and relies on natural JVM shutdown, so we must release the sink here so
+            // it can't delay exit (the sink worker is a daemon as a backstop, but closing is cleaner).
+            if (failedDocumentStreamSink != null) {
+                try {
+                    failedDocumentStreamSink.close();
+                } catch (Exception e) {
+                    log.atWarn().setCause(e).setMessage("Error closing failed document stream sink after work completion").log();
+                }
+            }
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
                 System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
@@ -809,7 +882,7 @@ public class RfsMigrateDocuments {
      * Does not include request execution time or network latency.
      * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
      */
-    private static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
+    static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
         long delay = config.initialDelayMs();
         for (int i = 0; i < config.maxRetries(); i++) {
@@ -829,7 +902,7 @@ public class RfsMigrateDocuments {
      * Build the coordinator completion-retry configuration from CLI args and log its summary.
      * Shared between the ES and Solr backfill paths.
      */
-    private static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
+    static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
         var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
             arguments.coordinatorRetryMaxRetries,
             arguments.coordinatorRetryInitialDelayMs,
@@ -841,6 +914,96 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Resolve the failed document stream session id, preferring an explicit CLI/env override, then the
+     * Argo workflow UID, then a worker-scoped fallback. The result drives the S3
+     * prefix that isolates this run's failed document stream entries from prior runs.
+     */
+    static String resolveSessionId(Args arguments, String workerId) {
+        if (arguments.failedDocumentStreamArgs.failedDocumentStreamSessionId != null && !arguments.failedDocumentStreamArgs.failedDocumentStreamSessionId.isBlank()) {
+            return arguments.failedDocumentStreamArgs.failedDocumentStreamSessionId;
+        }
+        var fromEnv = System.getenv("ARGO_WORKFLOW_UID");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        return "worker-" + workerId;
+    }
+
+    static final String FAILED_DOCUMENT_STREAM_DISABLED_REASON =
+        "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
+
+    static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, String sessionId) {
+        if (sink == null) {
+            log.atWarn().setMessage(FAILED_DOCUMENT_STREAM_DISABLED_REASON).log();
+            return;
+        }
+        log.atInfo().setMessage("failed document stream enabled: sessionId={} location={}")
+            .addArgument(sessionId)
+            .addArgument(sink.getLocation())
+            .log();
+    }
+
+    /**
+     * Build the S3 failed document stream sink, or null when no bucket is configured. Bucket, region and
+     * endpoint come from the --failed-document-stream-s3-* args, resolved by the config processor.
+     */
+    static FailedDocumentStreamSink buildFailedDocumentStreamSink(Args arguments, String workerId, String sessionId) {
+        String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
+        if (bucket == null || bucket.isBlank()) {
+            return null;
+        }
+        var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
+            : arguments.s3Region;
+        if (region == null) {
+            throw new ParameterException("--failed-document-stream-s3-region (or --s3-region) is required when --failed-document-stream-s3-bucket is set");
+        }
+        log.atInfo().setMessage("failed document stream config: region={} bucket={}")
+            .addArgument(region).addArgument(bucket).log();
+
+        var s3ClientBuilder = S3AsyncClient.builder()
+            .region(Region.of(region));
+        // Mirror the region fallback above: if no failed-document-stream-specific endpoint was resolved,
+        // fall back to the snapshot's --s3-endpoint so custom-S3 (LocalStack/MinIO) uploads don't silently
+        // go to the default AWS endpoint while snapshot reads use the override.
+        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
+            : arguments.endpoint;
+        if (endpoint != null && !endpoint.isBlank()) {
+            s3ClientBuilder.endpointOverride(URI.create(endpoint));
+        }
+        var s3Client = s3ClientBuilder.build();
+
+        return S3FailedDocumentStreamSink.builder()
+            .bucket(bucket)
+            .prefix(arguments.failedDocumentStreamArgs.failedDocumentStreamS3Prefix)
+            .sessionId(sessionId)
+            .workerId(workerId)
+            .region(region)
+            .uploader(S3FailedDocumentStreamSink.s3ClientUploader(s3Client))
+            .maxBufferBytes(arguments.failedDocumentStreamArgs.failedDocumentStreamMaxBufferBytes)
+            .build();
+    }
+
+    /**
+     * Returns true only when the coordinator confirms there are no pending work items.
+     * Any exception (typically the coordination index not existing yet on first run)
+     * is swallowed and treated as "not done" so the caller falls through to the normal
+     * flow, which creates the index and seeds work items via ShardWorkPreparer.
+     */
+    static boolean isCoordinatorWorkAlreadyDone(
+            IWorkCoordinator workCoordinator,
+            RootDocumentMigrationContext context) {
+        try {
+            return !workCoordinator.workItemsNotYetComplete(
+                context.getWorkCoordinationContext()::createItemsPendingContext);
+        } catch (Exception e) {
+            log.atDebug().setCause(e)
+                .setMessage("Pre-check of coordinator pending work failed; proceeding with normal flow").log();
+            return false;
+        }
     }
 
     /**
@@ -872,7 +1035,7 @@ public class RfsMigrateDocuments {
      * Build the document-exception allowlist from CLI args and log when non-empty.
      * Shared between the ES and Solr backfill paths.
      */
-    private static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
+    static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
         var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
         var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
         if (!allowedExceptionTypesSet.isEmpty()) {
@@ -914,7 +1077,8 @@ public class RfsMigrateDocuments {
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            FailedDocumentStreamSink failedDocumentStreamSink
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
             log.atInfo().setMessage("Clean shutdown already completed").log();
@@ -934,13 +1098,57 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             return;
         }
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
+        var workItemId = workItemAndDuration.getWorkItem().toString();
+        log.atInfo().setMessage("Marking progress: " + workItemId + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+
+        // Don't checkmark the work item as done until the failed document stream stuff is written/flushed.
+        // If the flush fails, refuse to mark complete so the lease naturally expires and a
+        // successor worker re-processes from a known-good state — preserving evidence of
+        // any terminal failures we accumulated but couldn't persist.
+        if (!flushFailedDocumentStreamBeforeComplete(failedDocumentStreamSink, workItemId)) {
+            return;
+        }
+
+        // The flush succeeded, so every document processed through the current cursor is now
+        // durable in the failed document stream. That cursor is our failed document stream watermark — checkpoint the successor to it
+        // so we never advance the work item past what we've durably persisted. (Under the
+        // current flush-before-complete gate the watermark equals the progress cursor; capturing
+        // it after the flush makes that invariant explicit.)
+        var failedDocumentStreamWatermark = progressCursor.get();
+        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, failedDocumentStreamWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                workItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * Flush any buffered failed document stream records to S3 before marking the current work item complete.
+     * Returns {@code true} if it's safe to proceed with the mark-complete call. A
+     * {@code false} return means the flush failed and the caller must NOT mark the work
+     * item complete — letting the lease expire naturally lets a successor worker pick
+     * up the partition and re-emit terminal failures to the failed document stream.
+     *
+     * <p>A null {@code failedDocumentStreamSink} (failed document stream disabled) returns {@code true} immediately. The 5-min
+     * timeout mirrors {@link DocumentMigrationBootstrap}'s flush deadline.
+     */
+    static boolean flushFailedDocumentStreamBeforeComplete(FailedDocumentStreamSink failedDocumentStreamSink, String workItemId) {
+        if (failedDocumentStreamSink == null) {
+            return true;
+        }
+        try {
+            failedDocumentStreamSink.flush().block(Duration.ofMinutes(5));
+            return true;
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("failed document stream flush failed before checkmarking work item {} complete; "
+                    + "skipping mark-complete so the lease expires and a successor retries — "
+                    + "any unflushed failed document stream records will be re-emitted by the successor")
+                .addArgument(workItemId)
+                .log();
+            return false;
+        }
     }
 
     /**
@@ -972,7 +1180,8 @@ public class RfsMigrateDocuments {
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier) {
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            FailedDocumentStreamSink failedDocumentStreamSink) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -1000,6 +1209,18 @@ public class RfsMigrateDocuments {
                     log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
                             .log();
                     var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+
+                    // Don't checkmark the work item as done until the failed document stream stuff is flushed.
+                    // On flush failure, skip the mark-complete and let the lease expire so a
+                    // successor reprocesses the partition and re-emits its terminal failures.
+                    if (!flushFailedDocumentStreamBeforeComplete(failedDocumentStreamSink, workItemId)) {
+                        return;
+                    }
+
+                    // The flush succeeded, so everything through progressCursor is durable in the
+                    // failed document stream — that cursor is the failed document stream watermark, and successorWorkItemIds (computed
+                    // from it above) checkpoints the successor to exactly that point, never past
+                    // what we've persisted.
                     coordinator.createSuccessorWorkItemsAndMarkComplete(
                             workItemId,
                             successorWorkItemIds,
@@ -1093,7 +1314,7 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
@@ -1133,6 +1354,15 @@ public class RfsMigrateDocuments {
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
             DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
 
+            // Check the coordinator for pending work before any S3 setup so a pod restart
+            // after the migration finishes doesn't redo the bucket-list + S3 client setup.
+            // The first run throws here because the coordination index doesn't exist yet;
+            // we swallow that and fall through to the normal flow, which creates the index
+            // via ShardWorkPreparer.
+            if (isCoordinatorWorkAlreadyDone(workCoordinator, context)) {
+                throw new NoWorkLeftException("All work items already complete; skipping Solr metadata download.");
+            }
+
             Path backupDir;
             S3Repo s3Repo = null;
             var parsedUri = RepoUri.parse(arguments.repoUri);
@@ -1157,81 +1387,7 @@ public class RfsMigrateDocuments {
                 );
             }
 
-            var schemas = new LinkedHashMap<String, JsonNode>();
-            final List<String> collections;
-            if (s3Repo != null) {
-                collections = new ArrayList<>(s3Repo.listTopLevelDirectories());
-            } else {
-                collections = new ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
-            }
-            if (!arguments.indexAllowlist.isEmpty()) {
-                collections.retainAll(arguments.indexAllowlist);
-            }
-            for (var collection : collections) {
-                schemas.put(collection, null);
-            }
-
-            final S3Repo finalS3Repo = s3Repo;
-            final Path finalBackupDir = backupDir;
-            final Map<String, String> dataPrefixByCollection = new ConcurrentHashMap<>();
-            Consumer<String> collectionPreparer = collection -> {
-                if (finalS3Repo != null) {
-                    var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
-                        collection, finalS3Repo::listSubDirectories);
-                    if (resolved != null) {
-                        dataPrefixByCollection.put(collection, resolved.dataPrefix());
-                        var dataRoot = resolved.joinWith(collection);
-                        finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
-                        log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                        finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
-                        // Solr 6: create local stub dirs for snapshot.shardN/ so shard
-                        // discovery can count them before index files are downloaded.
-                        finalS3Repo.listSubDirectories(dataRoot).stream()
-                            .filter(name -> name.startsWith("snapshot."))
-                            .forEach(snapshotDirName -> {
-                                try {
-                                    Files.createDirectories(finalBackupDir.resolve(dataRoot).resolve(snapshotDirName));
-                                } catch (IOException e) {
-                                    log.warn("Failed to create snapshot stub dir {}/{}", dataRoot, snapshotDirName, e);
-                                }
-                            });
-                    } else {
-                        log.warn("No zk_backup directories found for collection '{}' in S3", collection);
-                    }
-                }
-                var collectionRoot = finalBackupDir.resolve(collection);
-                var dataPrefix = dataPrefixByCollection.getOrDefault(collection, "");
-                var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
-                schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
-            };
-            // Only S3 needs lazy per-shard downloads; filesystem backups are already local
-            Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
-                var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
-                var collectionDataPrefix = dataPrefix.isEmpty()
-                    ? partition.collection()
-                    : partition.collection() + "/" + dataPrefix;
-                var mapping = partition.fileNameMapping();
-                if (mapping != null) {
-                    log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
-                        .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    for (var uuid : mapping.values()) {
-                        finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
-                    }
-                } else {
-                    // Non-UUID layout: Solr 6 uses snapshot.shardN/ dirs at the collection
-                    // root; Solr 8 non-incremental uses a single index/ dir.
-                    log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
-                        .addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    var shardPath = partition.shard().startsWith("snapshot.")
-                        ? collectionDataPrefix + "/" + partition.shard()
-                        : collectionDataPrefix + "/index";
-                    finalS3Repo.downloadPrefix(shardPath);
-                }
-            } : null;
-
-            var solrMajor = arguments.sourceVersion.getMajor();
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
+            var documentSource = buildSolrDocumentSource(arguments, backupDir, s3Repo);
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
@@ -1240,6 +1396,21 @@ public class RfsMigrateDocuments {
         };
     }
 
+    static SolrMultiCollectionSource buildSolrDocumentSource(Args arguments, Path backupDir, S3Repo s3Repo)
+        throws IOException {
+        var discovery = SolrBackupDiscovery.discover(
+            s3Repo, backupDir, arguments.indexAllowlist);
+        var schemas = discovery.schemas();
+        var dataDirByCollection = discovery.dataDirByCollection();
+
+        Consumer<String> collectionPreparer = discovery::prepareCollection;
+        Consumer<SolrShardPartition> shardPreparer = discovery.shardPreparationNeeded()
+            ? discovery::prepareShard : null;
+
+        var solrMajor = arguments.sourceVersion.getMajor();
+        return new SolrMultiCollectionSource(
+            backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
+    }
 
     /**
      * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep

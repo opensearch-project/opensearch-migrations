@@ -120,52 +120,55 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized key 'rogueInUnion' at: sourceClusters\.source1\.authConfig\.basic\.rogueInUnion/);
     });
 
-    it('should honor per-proxy skipApproval without global skipApprovals', async () => {
-        const config = cloneBaseConfig();
-        config.skipApprovals = false;
-        config.traffic.proxies.proxy1.skipApproval = true;
+    it.each([
+        { globalValue: undefined, innerValue: undefined, expectedValue: false, expectedBeginValue: false },
+        { globalValue: undefined, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: undefined, innerValue: true, expectedValue: true, expectedBeginValue: true },
+        { globalValue: false, innerValue: undefined, expectedValue: false, expectedBeginValue: false },
+        { globalValue: false, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: false, innerValue: true, expectedValue: true, expectedBeginValue: true },
+        { globalValue: true, innerValue: undefined, expectedValue: true, expectedBeginValue: false },
+        { globalValue: true, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: true, innerValue: true, expectedValue: true, expectedBeginValue: true },
+    ])(
+        'should resolve global=$globalValue and inner=$innerValue to skip=$expectedValue and begin=$expectedBeginValue',
+        async ({ globalValue, innerValue, expectedValue, expectedBeginValue }) => {
+            const config = cloneBaseConfig();
 
-        const result = await transformer.processFromObject(config);
+            if (globalValue === undefined) {
+                delete config.skipApprovals;
+            } else {
+                config.skipApprovals = globalValue;
+            }
+            if (innerValue === undefined) {
+                delete config.requireBeginApproval;
+                delete config.traffic.proxies.proxy1.skipApproval;
+            } else {
+                config.requireBeginApproval = innerValue;
+                config.traffic.proxies.proxy1.skipApproval = innerValue;
+            }
 
-        expect(result.proxies?.[0]?.skipApproval).toBe(true);
-    });
+            delete config.snapshotMigrationConfigs[0].skipApprovals;
+            config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+                metadataMigrationConfig: innerValue === undefined ? {} : {
+                    skipEvaluateApproval: innerValue,
+                    skipMigrateApproval: innerValue
+                },
+                documentBackfillConfig: innerValue === undefined ? {} : {
+                    skipApproval: innerValue
+                }
+            };
 
-    it('should let per-proxy skipApproval false override global skipApprovals true', async () => {
-        const config = cloneBaseConfig();
-        config.skipApprovals = true;
-        config.traffic.proxies.proxy1.skipApproval = false;
+            const result = await transformer.processFromObject(config);
+            const migration = result.snapshotMigrations?.[0] as any;
 
-        const result = await transformer.processFromObject(config);
-
-        expect(result.proxies?.[0]?.skipApproval).toBe(false);
-    });
-
-    it('should inherit global skipApprovals when per-proxy skipApproval is omitted', async () => {
-        const config = cloneBaseConfig();
-        config.skipApprovals = true;
-        delete config.traffic.proxies.proxy1.skipApproval;
-
-        const result = await transformer.processFromObject(config);
-
-        expect(result.proxies?.[0]?.skipApproval).toBe(true);
-    });
-
-    it('should resolve global skipApprovals into snapshot migration gate flags', async () => {
-        const config = cloneBaseConfig();
-        config.skipApprovals = true;
-        delete config.snapshotMigrationConfigs[0].skipApprovals;
-        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
-            metadataMigrationConfig: {},
-            documentBackfillConfig: {}
-        };
-
-        const result = await transformer.processFromObject(config);
-        const migration = result.snapshotMigrations?.[0] as any;
-
-        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(true);
-        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
-        expect(migration?.documentBackfillConfig?.skipApproval).toBe(true);
-    });
+            expect(result.requireBeginApproval).toBe(expectedBeginValue);
+            expect(result.proxies?.[0]?.skipApproval).toBe(expectedValue);
+            expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(expectedValue);
+            expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(expectedValue);
+            expect(migration?.documentBackfillConfig?.skipApproval).toBe(expectedValue);
+        }
+    );
 
     it('should let per-migration skipApprovals override global skipApprovals for snapshot gates', async () => {
         const config = cloneBaseConfig();
@@ -277,6 +280,18 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(configWithSolrCollections);
         }).toThrow(/Unrecognized key.*solrCollections/);
+    });
+
+    it('should reject solrContextPath on a user-facing ES/OS createSnapshotConfig', () => {
+        // Solr-only as well: ES/OS snapshots have no context path to configure.
+        const configWithContextPath = cloneBaseConfig();
+        configWithContextPath.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrContextPath: "/tenant-a/solr"
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithContextPath);
+        }).toThrow(/Unrecognized key.*solrContextPath/);
     });
 
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
@@ -901,6 +916,25 @@ describe('MigrationConfigTransformer validation', () => {
         expect(changedMigration.targetConfig.label).toBe(baselineMigration.targetConfig.label);
         expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
         expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should produce distinct checksums when a migration stage config is added or removed', async () => {
+        const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
+
+        const withBoth = cloneBaseConfig();
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const withBackfillOnly = cloneBaseConfig();
+        delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
+        const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
+        const backfillOnly = (await transformer.processFromObject(withBackfillOnly)).snapshotMigrations[0];
+
+        expect(metadataOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(backfillOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(metadataOnly.configChecksum).not.toEqual(backfillOnly.configChecksum);
     });
 
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {

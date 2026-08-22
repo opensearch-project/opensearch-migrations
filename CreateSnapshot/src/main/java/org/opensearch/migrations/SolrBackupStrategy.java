@@ -3,6 +3,7 @@ package org.opensearch.migrations;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.function.BooleanSupplier;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
@@ -51,6 +53,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private final SnapshotMode mode;
     private final RepoUri repoUri;
     private final boolean isCloud;
+    private final String contextPath;
 
     public SolrBackupStrategy(CreateSnapshot.Args args) {
         this.args = args;
@@ -59,7 +62,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         this.connectionContext = args.sourceArgs.toConnectionContext();
         this.httpClient = new SolrHttpClient(connectionContext);
         this.mode = CreateSnapshot.getSnapshotMode(args);
-        this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient);
+        this.contextPath = SolrContextPath.normalize(args.solrContextPath);
+        this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient, contextPath);
     }
 
     private static final String COLLECTION_LABEL = "collection";
@@ -94,6 +98,21 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         public SolrImportSchemaUnavailable(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Thrown when IMPORT mode cannot confirm snapshot data exists at the configured location. IMPORT
+     * imports an existing snapshot rather than creating one, so an empty or unlistable location is
+     * fatal — continuing would migrate nothing or fail later with a more confusing error.
+     */
+    public static class SolrImportSnapshotUnavailable extends RuntimeException {
+        public SolrImportSnapshotUnavailable(String message) {
+            super(message);
+        }
+
+        public SolrImportSnapshotUnavailable(String message, Throwable cause) {
             super(message, cause);
         }
     }
@@ -353,7 +372,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             : List.of(configFile);
 
         for (var fileName : variants) {
-            var url = solrUrl + "/solr/" + collection + "/admin/file?file=" + fileName + "&contentType=text/xml";
+            var url = solrUrl + contextPath + "/" + collection
+                + "/admin/file?file=" + fileName + "&contentType=text/xml";
             try {
                 var body = httpClient.getString(url, Duration.ofSeconds(30));
                 if (body != null && !body.isBlank()) {
@@ -370,7 +390,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     private String fetchViaSchemaApi(String solrUrl, String collection) {
-        var schemaUrl = solrUrl + "/solr/" + collection + "/schema?wt=schema.xml";
+        var schemaUrl = solrUrl + contextPath + "/" + collection + "/schema?wt=schema.xml";
         try {
             var body = httpClient.getString(schemaUrl, Duration.ofSeconds(30));
             if (body != null && !body.isBlank()) {
@@ -439,41 +459,57 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         log.info("IMPORT mode complete: config files ensured, snapshot location verified at {}", backupLocation);
     }
 
-    /**
-     * Validates that the S3 snapshot location is accessible (bucket exists, prefix is listable).
-     */
+    /** Fails fatally in IMPORT mode if the S3 snapshot location is empty or cannot be listed. */
     private void validateS3SnapshotAccessible(S3Uri repoUri) {
         var snapshotPrefix = computeParentPrefix(repoUri.key) + args.snapshotName + "/";
-
         try (var s3Client = buildS3Client(args.s3Region, args.endpoint)) {
-            var response = s3Client.listObjectsV2(
-                software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
-                    .bucket(repoUri.bucketName)
-                    .prefix(snapshotPrefix)
-                    .maxKeys(1)
-                    .build());
-            if (response.contents().isEmpty()) {
-                log.warn("No objects found at s3://{}/{} — downstream pipeline may fail if snapshot data "
-                    + "has not been uploaded yet", repoUri.bucketName, snapshotPrefix);
-            } else {
-                log.info("Snapshot data confirmed at s3://{}/{}", repoUri.bucketName, snapshotPrefix);
-            }
-        } catch (Exception e) {
-            log.warn("Could not verify S3 snapshot location s3://{}/{}: {} — proceeding anyway",
-                repoUri.bucketName, snapshotPrefix, e.getMessage());
+            var empty = isS3SnapshotEmpty(s3Client, repoUri.bucketName, snapshotPrefix);
+            requireNonEmptyS3Snapshot(repoUri.bucketName, snapshotPrefix, empty);
         }
     }
 
-    /**
-     * Validates that the filesystem snapshot location exists and is readable.
-     */
+    /** Lists the snapshot prefix and reports whether it is empty; wraps listing failures fatally. */
+    static boolean isS3SnapshotEmpty(S3Client s3Client, String bucketName, String snapshotPrefix) {
+        try {
+            var response = s3Client.listObjectsV2(
+                software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+                    .bucket(bucketName)
+                    .prefix(snapshotPrefix)
+                    .maxKeys(1)
+                    .build());
+            return response.contents().isEmpty();
+        } catch (Exception e) {
+            throw new SolrImportSnapshotUnavailable(String.format(
+                "IMPORT mode could not verify the snapshot location s3://%s/%s: %s. "
+                    + "The snapshot data must already exist at this location before import.",
+                bucketName, snapshotPrefix, e.getMessage()), e);
+        }
+    }
+
+    /** Throws if the listed S3 snapshot prefix is empty; the IO/listing is done by the caller. */
+    static void requireNonEmptyS3Snapshot(String bucketName, String snapshotPrefix, boolean empty) {
+        if (empty) {
+            throw new SolrImportSnapshotUnavailable(String.format(
+                "IMPORT mode found no snapshot data at s3://%s/%s. "
+                    + "The snapshot must be created/uploaded to this location before import.",
+                bucketName, snapshotPrefix));
+        }
+        log.info("Snapshot data confirmed at s3://{}/{}", bucketName, snapshotPrefix);
+    }
+
+    /** Fails fatally in IMPORT mode if the filesystem snapshot directory is missing. */
     private void validateFileSystemSnapshotAccessible(String repoPath) {
-        var snapshotDir = Paths.get(repoPath, args.snapshotName);
+        requireFilesystemSnapshotPresent(Paths.get(repoPath, args.snapshotName));
+    }
+
+    /** Throws if the filesystem snapshot directory does not exist. */
+    static void requireFilesystemSnapshotPresent(Path snapshotDir) {
         if (Files.exists(snapshotDir) && Files.isDirectory(snapshotDir)) {
             log.info("Snapshot directory confirmed at {}", snapshotDir);
         } else {
-            log.warn("Snapshot directory not found at {} — downstream pipeline may fail if snapshot data "
-                + "has not been placed there yet", snapshotDir);
+            throw new SolrImportSnapshotUnavailable(String.format(
+                "IMPORT mode found no snapshot directory at %s. "
+                    + "The snapshot must be placed at this location before import.", snapshotDir));
         }
     }
 
@@ -482,7 +518,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private void resolveCollections(String solrUrl) {
         if (args.solrCollections.isEmpty()) {
             try {
-                args.solrCollections = discoverCollections(solrUrl, httpClient);
+                args.solrCollections = discoverCollections(solrUrl, httpClient, contextPath);
                 log.info("Auto-discovered {} Solr {}: {}",
                     args.solrCollections.size(),
                     isCloud ? "collection(s)" : "core(s)",
@@ -502,10 +538,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient, String contextPath) {
         try {
             var response = httpClient.getRaw(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
+                solrUrl + contextPath + "/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
             return response.statusCode() == 200;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -519,11 +555,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Collection / core discovery ----
 
-    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient) throws IOException {
+    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient, String contextPath)
+            throws IOException {
         // Try SolrCloud Collections API first
         try {
             var json = httpClient.getString(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
+                solrUrl + contextPath + "/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
             var node = MAPPER.readTree(json).path("collections");
             var collections = new ArrayList<String>();
             if (node.isArray()) {
@@ -535,7 +572,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         // Fall back to Core Admin API (standalone)
         var json = httpClient.getString(
-            solrUrl + "/solr/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
+            solrUrl + contextPath + "/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
         return objectFieldKeys(MAPPER.readTree(json), "status");
     }
 
@@ -569,7 +606,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, args.snapshotRepoName
+            args.solrCollections, connectionContext, args.snapshotRepoName, contextPath
         );
         creator.registerRepo();
         creator.createSnapshot();
@@ -597,7 +634,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, repositoryName
+            args.solrCollections, connectionContext, repositoryName, contextPath
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);

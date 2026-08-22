@@ -161,6 +161,8 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     version: z.string(),
     endpoint: z.string(),
     allowInsecure: z.boolean(),
+    // Solr sources only; "" elsewhere.
+    solrContextPath: z.string(),
     authType: z.string(),
     authBasicSecretName: z.string(),
     authSigv4Region: z.string(),
@@ -215,7 +217,11 @@ export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_METADATA_OPTIONS).omit({
         metadataTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipEvaluateApproval: z.boolean(),
+        skipMigrateApproval: z.boolean(),
+    })
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
@@ -229,7 +235,10 @@ export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
         documentTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipApproval: z.boolean(),
+    })
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "podReplicas",
@@ -396,7 +405,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     // When true, the proxy-setup approval gate is auto-skipped. The config
     // processor resolves this from proxy-level skipApproval first, then global
     // skipApprovals, then false.
-    skipApproval: z.boolean().default(false),
+    skipApproval: z.boolean(),
     resourceUid: z.string(),
 });
 
@@ -484,6 +493,7 @@ function makeResourceUidOptional<
 }
 
 export const ARGO_MIGRATION_CONFIG = z.object({
+    requireBeginApproval: z.boolean(),
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),

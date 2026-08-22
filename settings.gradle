@@ -14,17 +14,17 @@ plugins {
 }
 
 void addSubProjects(String path, File dir) {
-    if (dir.isDirectory() == false) {
-        return;
+    if (!dir.isDirectory()) {
+        return
     }
     if (dir.name == 'buildSrc') {
-        return;
+        return
     }
-    if (new File(dir, 'build.gradle').exists() == false) {
-        return;
+    if (!new File(dir, 'build.gradle').exists()) {
+        return
     }
     if (findProject(dir) != null) {
-        return;
+        return
     }
 
     final String projectName = "${path}:${dir.name}"
@@ -40,6 +40,7 @@ void addSubProjects(String path, File dir) {
 rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'coreUtilities'
+include 's3Common'
 include 'deployment:migration-assistant-solution'
 include 'libraries:kafkaCommandLineFormatter'
 include 'libraries:kafkaUtils'

@@ -474,6 +474,7 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
     const repo = item.repo;
     return {
         ...connectionIdentityParameters("source", sourceIdentity, {includeVersion: true}),
+        sourceSolrContextPath: sourceIdentity.solrContextPath ?? "",
         snapshotLabel: item.label,
         repoName: repo.repoName,
         repoPathUri: repo.repoPathUri,

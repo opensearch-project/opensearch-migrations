@@ -107,7 +107,8 @@ def buildKitProjects = [
                 imageName:  "migration_console_base",
                 buildArgs: [
                         BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "migrations", "elasticsearch_test_console", internalImageTag("latest"))
+                                intermediateRegistry, "migrations", "elasticsearch_test_console", internalImageTag("latest")),
+                        KAFKA_IMAGE: ptc.rewrite("docker.io/apache/kafka:3.9.2")
                 ],
                 requiredDependencies: [
                         ":migrationConsole:syncDockerBuildContext",

@@ -1438,7 +1438,7 @@
                 "template": "approvebackfill",
                 "name": "document-bulk-load"
               },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(sprig.dig('skipApproval', false, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(fromJSON(inputs.parameters.documentBackfillConfig)['skipApproval'])}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1678,7 +1678,7 @@
                   },
                   {
                     "name": "sourceConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"solrContextPath\", sprig.dig('sourceConnectionIdentity', 'solrContextPath', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -1690,11 +1690,11 @@
                   },
                   {
                     "name": "metadataMigrationConfig",
-                    "value": "{{=toJSON(sprig.dig('metadataMigrationConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                    "value": "{{=(('metadataMigrationConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['metadataMigrationConfig'])) : (''))}}"
                   },
                   {
                     "name": "documentBackfillConfig",
-                    "value": "{{=toJSON(sprig.dig('documentBackfillConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                    "value": "{{=(('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['documentBackfillConfig'])) : (''))}}"
                   },
                   {
                     "name": "crdName",
@@ -2203,6 +2203,24 @@
           ]
         },
         "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=fromJSON(inputs.parameters.config)['requireBeginApproval']}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "begin"
+                  }
+                ]
+              },
+              "name": "approveBegin"
+            }
+          ],
           [
             {
               "template": "initializerunmetadata",

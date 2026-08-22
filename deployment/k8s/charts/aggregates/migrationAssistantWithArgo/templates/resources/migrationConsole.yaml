@@ -289,6 +289,20 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             {{- end }}
+            # Present only under LocalStack; on real AWS the Secret is absent and the pod's
+            # own credentials apply.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: migrations-default-s3-creds
+                  key: accessKey
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: migrations-default-s3-creds
+                  key: secretKey
+                  optional: true
             {{- else if eq .Values.cloudProvider "gcp" }}
             {{- if .Values.gcsBucketConfiguration.create }}
             {{- $useLocalGcs := .Values.gcsBucketConfiguration.useLocalGcs }}

@@ -89,7 +89,10 @@ describe('Solutions stack', () => {
         template.resourceCountIs('AWS::EC2::VPCEndpoint', props.vpcEndpointCount);
         template.resourceCountIs('AWS::EC2::Subnet', props.subnetCount);
         template.resourceCountIs('AWS::EC2::NatGateway', props.natGatewayCount);
-        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::ResourceAssociation', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::AttributeGroup', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation', 0);
         template.resourceCountIs('AWS::EKS::Cluster', 1);
         template.resourceCountIs('AWS::IAM::Role', 4);
     }

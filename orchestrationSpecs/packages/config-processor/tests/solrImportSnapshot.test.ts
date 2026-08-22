@@ -15,6 +15,7 @@ function snapshotMigrationConfig(opts: {
     externalSolrBackupName?: string;
     externalElasticsearchSnapshotName?: string;
     collectionAllowlist?: string[];
+    solrContextPath?: string;
     snapshotPrefix?: string;
     withDocumentBackfill?: boolean;
 }): Record<string, unknown> {
@@ -77,6 +78,7 @@ function snapshotMigrationConfig(opts: {
                 endpoint: "https://solr.example.com:8983",
                 allowInsecure: true,
                 version: opts.version ?? "SOLR 9.7.0",
+                ...(opts.solrContextPath !== undefined ? {solrContextPath: opts.solrContextPath} : {}),
                 snapshotInfo,
             },
         },
@@ -357,5 +359,63 @@ describe("Solr backup snapshotInfo paths", () => {
         expect(threw).toBeInstanceOf(Error);
         expect(String((threw as Error).message ?? threw))
             .toMatch(/Unrecognized key 'mode'/);
+    });
+});
+
+describe("Solr context path", () => {
+    it("defaults to /solr when unset", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({shape: "solrCreateBackups"}));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/solr");
+    });
+
+    it("reaches the source config from an external backup", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrExternalBackups",
+                solrContextPath: "/tenant-a/solr",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/tenant-a/solr");
+    });
+
+    it("reaches the source config from a created backup", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                solrContextPath: "/tenant-a/solr",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/tenant-a/solr");
+    });
+
+    it("carries an empty context path through for root-mounted Solr", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                solrContextPath: "",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("");
+    });
+
+    it("is rejected on a non-Solr source", async () => {
+        await expect(new MigrationConfigTransformer().processFromObject(snapshotMigrationConfig({
+            shape: "elasticsearchSnapshots",
+            version: "ES 7.10.2",
+            solrContextPath: "/tenant-a/solr",
+        }))).rejects.toThrow(/solrContextPath is only supported for Solr sources/);
+    });
+
+    it.each([
+        "https://solr.example.com:8983/solr",
+        "/solr?wt=json",
+        "/solr#fragment",
+    ])("rejects %s, matching the Java and console normalizers", async (bad) => {
+        await expect(new MigrationConfigTransformer().processFromObject(snapshotMigrationConfig({
+            shape: "solrCreateBackups",
+            solrContextPath: bad,
+        }))).rejects.toThrow(/not a URL or query string/);
     });
 });

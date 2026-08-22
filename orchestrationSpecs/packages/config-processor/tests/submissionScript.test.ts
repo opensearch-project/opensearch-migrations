@@ -13,6 +13,11 @@ import * as path from "path";
 
 
 const tempDirectories: string[] = [];
+const deploymentDefaultLookups = [
+    "kubectl get cm migrations-default-s3-config -o jsonpath={.data.BUCKET_NAME}",
+    "kubectl get cm migrations-default-s3-config -o jsonpath={.data.AWS_REGION}",
+    "kubectl get cm migrations-default-s3-config -o jsonpath={.data.ENDPOINT_HTTP}",
+];
 
 afterEach(() => {
     for (const directory of tempDirectories.splice(0)) {
@@ -42,6 +47,7 @@ function runSubmission(
     const operations = path.join(directory, "operations.txt");
     const preflightArgs = path.join(directory, "preflight-args.txt");
     const preflightReport = path.join(directory, "preflight-report.json");
+    const deploymentDefaults = path.join(directory, "deployment-defaults.json");
     const initializerCount = path.join(directory, "initializer-count.txt");
     const preparedDir = path.join(directory, "prepared");
     require("fs").mkdirSync(bin);
@@ -56,6 +62,9 @@ output_dir=""
 while [[ $# -gt 0 ]]; do
     if [[ "$1" == "--output-dir" ]]; then
         output_dir="$2"
+        shift 2
+    elif [[ "$1" == "--deployment-defaults" ]]; then
+        cp "$2" "$CAPTURED_DEPLOYMENT_DEFAULTS_FILE"
         shift 2
     else
         shift
@@ -82,6 +91,11 @@ cp "$PREFLIGHT_REPORT_FILE" "$report_path"
     executable(path.join(bin, "kubectl"), `#!/bin/bash
 set -euo pipefail
 printf 'kubectl %s\\n' "$*" >> "$OPERATIONS_FILE"
+case "$*" in
+    *"jsonpath={.data.BUCKET_NAME}"*) printf 'deployment-bucket'; exit 0 ;;
+    *"jsonpath={.data.AWS_REGION}"*) printf 'us-east-2'; exit 0 ;;
+    *"jsonpath={.data.ENDPOINT_HTTP}"*) printf 'http://s3.local'; exit 0 ;;
+esac
 cat > "$KUBECTL_MANIFEST_FILE"
 name="$(awk '/^  name: / {print $2; exit}' "$KUBECTL_MANIFEST_FILE")"
 echo "workflow.argoproj.io/$name created"
@@ -110,6 +124,7 @@ echo "workflow.argoproj.io/$name created"
         INITIALIZE_CMD: initializer,
         INITIALIZER_ARGS_FILE: initializerArgs,
         INITIALIZER_COUNT_FILE: initializerCount,
+        CAPTURED_DEPLOYMENT_DEFAULTS_FILE: deploymentDefaults,
         KUBECTL_MANIFEST_FILE: manifest,
         OPERATIONS_FILE: operations,
         PREFLIGHT_CMD: path.join(bin, "preflight"),
@@ -136,6 +151,7 @@ echo "workflow.argoproj.io/$name created"
         preflightArgs: existsSync(preflightArgs)
             ? readFileSync(preflightArgs, "utf8").trim().split("\n")
             : [],
+        deploymentDefaults,
         initializerCount,
         preparedDir,
         config,
@@ -166,8 +182,24 @@ describe("workflow submission script", () => {
             .filter(index => index >= 0);
         expect(workflowNameIndexes).toHaveLength(1);
         expect(output.initializerArgs[workflowNameIndexes[0] + 1]).toBe(expected);
-        expect(output.operations[0]).toBe("preflight");
-        expect(output.operations[1]).toContain("kubectl create");
+        const deploymentDefaultsIndex =
+            output.initializerArgs.indexOf("--deployment-defaults");
+        expect(deploymentDefaultsIndex).toBeGreaterThanOrEqual(0);
+        expect(output.initializerArgs[deploymentDefaultsIndex + 1])
+            .toContain("deployment-defaults.json");
+        expect(JSON.parse(readFileSync(
+            output.deploymentDefaults,
+            "utf8",
+        ))).toEqual({
+            defaultS3Bucket: "deployment-bucket",
+            defaultS3Region: "us-east-2",
+            defaultS3Endpoint: "http://s3.local",
+        });
+        expect(output.operations).toEqual([
+            ...deploymentDefaultLookups,
+            "preflight",
+            "kubectl create -f -",
+        ]);
     });
 
     it("does not mutate Kubernetes when preflight blocks submission", () => {
@@ -188,7 +220,15 @@ describe("workflow submission script", () => {
         });
 
         expect(output.result.status).toBe(2);
-        expect(output.operations).toEqual(["preflight"]);
+        expect(output.operations).toEqual([
+            ...deploymentDefaultLookups,
+            "preflight",
+        ]);
+        expect(output.operations).not.toEqual(expect.arrayContaining([
+            expect.stringMatching(
+                /^kubectl (?:--namespace \S+ )?(create|apply|delete|patch|replace)( |$)/,
+            ),
+        ]));
         expect(output.manifest).toBe("");
     });
 
@@ -196,7 +236,10 @@ describe("workflow submission script", () => {
         const prepared = runSubmission(undefined, {prepareOnly: true});
 
         expect(prepared.result.status).toBe(0);
-        expect(prepared.operations).toEqual(["preflight"]);
+        expect(prepared.operations).toEqual([
+            ...deploymentDefaultLookups,
+            "preflight",
+        ]);
         const committed = spawnSync(
             prepared.script,
             [
@@ -217,6 +260,7 @@ describe("workflow submission script", () => {
             prepared.environment.OPERATIONS_FILE,
             "utf8",
         ).trim().split("\n")).toEqual([
+            ...deploymentDefaultLookups,
             "preflight",
             "kubectl create -f -",
         ]);
@@ -232,6 +276,7 @@ describe("workflow submission script", () => {
         expect(namespaceIndex).toBeGreaterThanOrEqual(0);
         expect(output.preflightArgs[namespaceIndex + 1]).toBe("migration-team");
         expect(output.operations).toEqual([
+            ...deploymentDefaultLookups,
             "preflight",
             "kubectl --namespace migration-team create -f -",
         ]);

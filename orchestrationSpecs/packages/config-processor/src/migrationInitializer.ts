@@ -482,7 +482,18 @@ export class MigrationInitializer {
             }
             return merged;
         };
-        const items: any[] = [{
+        const items: any[] = [];
+        if (workflows.requireBeginApproval) {
+            items.push(this.makeApprovalGateResource(
+                ['begin'],
+                gateLabels({
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'MigrationRun',
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: migrationRun.name,
+                })
+            ));
+        }
+
+        items.push({
             apiVersion: CRD_API_VERSION,
             kind: 'MigrationRun',
             metadata: {
@@ -498,7 +509,7 @@ export class MigrationInitializer {
                 timestamp: migrationRun.timestamp.toISOString(),
                 resolvedConfig: resolvedMigrationResources,
             },
-        }];
+        });
         const resourcesByKey = new Map(
             resolvedMigrationResources.resources
                 .map(resource => [`${resource.kind}:${resource.name}`, resource])

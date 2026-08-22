@@ -547,6 +547,36 @@ get_cfn_export() {
   fi
 }
 
+# Dump diagnostics when the Migration Assistant helm install fails. The install fails via
+# a hook Job (pre-install ma-dependency-installer, post-install create-s3-bucket-ma, etc.)
+# whose pod holds the only record of why it failed -- and the observability stack
+# (fluent-bit, migration-console) may not exist on a hook failure, so grab it directly.
+dump_helm_debug_info() {
+  local release_namespace="$1"
+  local kctx=()
+  [[ -n "${KUBE_CONTEXT:-}" ]] && kctx=("--context=${KUBE_CONTEXT}")
+
+  echo "=== BEGIN HELM INSTALL DEBUG INFO ===" >&2
+  kubectl "${kctx[@]}" get pods -n "$release_namespace" -o wide >&2 2>&1 || true
+  echo "--- Jobs in $release_namespace ---" >&2
+  kubectl "${kctx[@]}" get jobs -n "$release_namespace" -o wide >&2 2>&1 || true
+  echo "--- Recent events ---" >&2
+  kubectl "${kctx[@]}" get events -n "$release_namespace" --sort-by=.lastTimestamp >&2 2>&1 || true
+
+  # Logs + describe for every non-succeeded pod in the namespace (the failed hook pod is here).
+  local pods
+  pods=$(kubectl "${kctx[@]}" get pods -n "$release_namespace" \
+    --field-selector=status.phase!=Running,status.phase!=Succeeded \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null) || true
+  for p in $pods; do
+    echo "--- Logs for $p (--tail=200, all containers) ---" >&2
+    kubectl "${kctx[@]}" logs -n "$release_namespace" "$p" --all-containers --tail=200 >&2 2>&1 || true
+    echo "--- Describe $p ---" >&2
+    kubectl "${kctx[@]}" describe pod "$p" -n "$release_namespace" >&2 2>&1 || true
+  done
+  echo "=== END HELM INSTALL DEBUG INFO ===" >&2
+}
+
 check_existing_ma_release() {
   local release_name="$1"
   local release_namespace="$2"
@@ -592,7 +622,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
     # The stack name is controlled by --stack-name, not by CDK stack IDs.
     # Other CDK env vars (CODE_BUCKET, SOLUTION_NAME, CODE_VERSION) are left
-    # intact — they affect template content (AppRegistry names, S3 paths) and
+    # intact — they affect template content (such as S3 paths) and
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified -x test
@@ -1270,7 +1300,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
   $NODEPOOL_HELM_FLAGS \
-  || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+  || { echo "Installing Migration Assistant chart failed..."; dump_helm_debug_info "$namespace"; exit 1; }
 set -x
 
 kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
