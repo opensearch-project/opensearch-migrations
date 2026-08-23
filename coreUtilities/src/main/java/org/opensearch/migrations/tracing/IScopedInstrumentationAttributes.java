@@ -12,7 +12,8 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.semconv.SemanticAttributes;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.semconv.ErrorAttributes;
 import lombok.NonNull;
 
 public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttributes, AutoCloseable {
@@ -85,11 +86,23 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
     default void addTraceException(Throwable e, boolean isPropagating) {
         IWithStartTimeAndAttributes.super.addTraceException(e, isPropagating);
         final var span = getCurrentSpan();
+        span.recordException(e);
         if (isPropagating) {
-            span.recordException(e, Attributes.of(SemanticAttributes.EXCEPTION_ESCAPED, true));
-        } else {
-            span.recordException(e);
+            // An exception that escapes this scope means the operation failed, which the semantic
+            // conventions model as span status ERROR plus error.type -- the removed exception.escaped
+            // attribute recorded the same thing in a form no backend consumes.
+            span.setStatus(StatusCode.ERROR, describeThrowable(e));
+            span.setAttribute(ErrorAttributes.ERROR_TYPE, e.getClass().getCanonicalName());
         }
+    }
+
+    /**
+     * Span status descriptions are free-form, but an empty one loses the only human-readable
+     * signal on the span, so fall back to the exception type when there is no message.
+     */
+    private static String describeThrowable(Throwable e) {
+        var message = e.getMessage();
+        return (message == null || message.isEmpty()) ? e.getClass().getSimpleName() : message;
     }
 
     @Override
